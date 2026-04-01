@@ -6,6 +6,7 @@
     "start": "bun run src/index.ts"
   },
   "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.64.0",
     "openai": "^4.77.0"
   },
   "devDependencies": {

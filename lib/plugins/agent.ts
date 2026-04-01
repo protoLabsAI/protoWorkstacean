@@ -1,6 +1,12 @@
-import OpenAI from "openai";
-import { spawn } from "bun";
-import { readFile, writeFile } from "node:fs/promises";
+import {
+  createAgentSession,
+  SessionManager,
+  ModelRegistry,
+  AuthStorage,
+  createCodingTools,
+} from "@mariozechner/pi-coding-agent";
+import { existsSync, mkdirSync } from "node:fs";
+import { resolve, join } from "node:path";
 import type { Plugin, EventBus, BusMessage } from "../types";
 
 const DEBUG = process.env.DEBUG === "1" || process.env.DEBUG === "true";
@@ -11,126 +17,42 @@ function debug(...args: unknown[]): void {
   }
 }
 
-interface Message {
-  role: "user" | "assistant" | "system";
-  content: string;
-  reasoning_content?: string;
-}
-
-interface ToolCall {
-  id: string;
-  name: string;
-  arguments: Record<string, unknown>;
-}
-
-interface ToolDefinition {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-}
-
-const BASE_URL = process.env.OPENAI_BASE_URL || "http://localhost:8080/v1";
-const API_KEY = process.env.OPENAI_API_KEY || "sk-dummy";
-
-const openai = new OpenAI({
-  baseURL: BASE_URL,
-  apiKey: API_KEY,
-});
-
-const tools: ToolDefinition[] = [
-  {
-    type: "function",
-    function: {
-      name: "bash",
-      description: "Execute a bash command and return the output",
-      parameters: {
-        type: "object",
-        properties: {
-          command: { type: "string", description: "The command to execute" },
-        },
-        required: ["command"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "read",
-      description: "Read a file from the filesystem",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "The file path to read" },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "write",
-      description: "Write content to a file",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "The file path to write to" },
-          content: { type: "string", description: "The content to write" },
-        },
-        required: ["path", "content"],
-      },
-    },
-  },
-];
-
-async function executeTool(toolCall: ToolCall): Promise<string> {
-  const args = toolCall.arguments as { command?: string; path?: string; content?: string };
-
-  switch (toolCall.name) {
-    case "bash": {
-      const proc = spawn({
-        cmd: ["bash", "-c", args.command!],
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const [stdout, stderr] = await Promise.all([proc.stdout?.text(), proc.stderr?.text()]);
-      return stdout + stderr;
-    }
-    case "read": {
-      try {
-        const content = await readFile(args.path!, "utf-8");
-        return content;
-      } catch (e) {
-        return `Error reading file: ${e}`;
-      }
-    }
-    case "write": {
-      try {
-        await writeFile(args.path!, args.content!);
-        return `File written to ${args.path}`;
-      } catch (e) {
-        return `Error writing file: ${e}`;
-      }
-    }
-    default:
-      return `Unknown tool: ${toolCall.name}`;
-  }
+interface SessionInfo {
+  session: Awaited<ReturnType<typeof createAgentSession>>["session"];
+  manager: SessionManager;
 }
 
 export class AgentPlugin implements Plugin {
   name = "agent";
-  description = "LLM agent - processes inbound messages and replies";
+  description = "Pi SDK agent - processes inbound messages and replies";
   capabilities: string[] = ["reason", "execute", "reply"];
 
   private bus: EventBus | null = null;
-  private sessions = new Map<string, Message[]>();
+  private sessions = new Map<string, SessionInfo>();
+  private modelRegistry: ModelRegistry | null = null;
+  private authStorage: AuthStorage | null = null;
+  private sessionsDir = resolve(process.cwd(), "data", "sessions");
 
   install(bus: EventBus): void {
     this.bus = bus;
-    
+
+    // Ensure sessions directory exists
+    if (!existsSync(this.sessionsDir)) {
+      mkdirSync(this.sessionsDir, { recursive: true });
+    }
+
+    // Set up auth storage with API key for local models
+    this.authStorage = AuthStorage.inMemory({
+      "local-llm": { type: "api_key", key: process.env.OPENAI_API_KEY || "sk-dummy" }
+    });
+
+    // Set up model registry with local models.json if it exists
+    const modelsPath = resolve(process.cwd(), "models.json");
+    if (existsSync(modelsPath)) {
+      debug("Loading models from", modelsPath);
+      this.modelRegistry = ModelRegistry.create(this.authStorage, modelsPath);
+    }
+
     bus.subscribe("message.inbound.#", this.name, (msg: BusMessage) => {
       this.handleInbound(bus, msg);
     });
@@ -142,15 +64,34 @@ export class AgentPlugin implements Plugin {
 
   uninstall(): void {}
 
-  private getSession(channelId: string): Message[] {
+  private async getSession(channelId: string): Promise<SessionInfo> {
     if (!this.sessions.has(channelId)) {
-      this.sessions.set(channelId, []);
+      const cwd = process.cwd();
+      const tools = createCodingTools(cwd);
+
+      // Per-channel session directory (sanitize channelId for filesystem)
+      const safeChannelId = channelId.replace(/[^a-zA-Z0-9_\-+]/g, "_");
+      const channelDir = join(this.sessionsDir, safeChannelId);
+      if (!existsSync(channelDir)) {
+        mkdirSync(channelDir, { recursive: true });
+      }
+
+      // Continue recent session if exists, otherwise create new
+      const { session } = await createAgentSession({
+        tools,
+        sessionManager: SessionManager.continueRecent(cwd, channelDir),
+        modelRegistry: this.modelRegistry ?? undefined,
+        authStorage: this.authStorage ?? undefined,
+      });
+
+      this.sessions.set(channelId, { session, manager: session.sessionManager });
+      debug("Session for", channelId, "->", channelDir);
     }
     return this.sessions.get(channelId)!;
   }
 
   private resetSession(channelId: string): void {
-    this.sessions.set(channelId, []);
+    this.sessions.delete(channelId);
   }
 
   private async handleInbound(bus: EventBus, msg: BusMessage): Promise<void> {
@@ -159,7 +100,6 @@ export class AgentPlugin implements Plugin {
 
     if (!sender || !content) return;
 
-    // /new resets session
     if (content === "/new") {
       this.resetSession(`signal:${sender}`);
       const replyTopic = msg.topic.replace("inbound", "outbound");
@@ -174,8 +114,7 @@ export class AgentPlugin implements Plugin {
       return;
     }
 
-    console.log(`[Agent] Processing from ${sender}: ${content}`);
-    debug("Message:", msg);
+    debug("Processing from", sender, content);
 
     const response = await this.runAgent(`signal:${sender}`, content);
 
@@ -190,13 +129,13 @@ export class AgentPlugin implements Plugin {
       reply: response,
     };
 
-    console.log(`[Agent] Replying to ${sender}: ${response}`);
+    debug("Replying to", sender);
     bus.publish(reply.topic, reply);
   }
 
   private handleCommand(bus: EventBus, msg: BusMessage): void {
     const action = (msg.payload as { action?: string })?.action;
-    
+
     if (action === "reset") {
       const channel = (msg.payload as { channel?: string })?.channel;
       if (channel) {
@@ -207,71 +146,37 @@ export class AgentPlugin implements Plugin {
   }
 
   private async runAgent(channelId: string, userMessage: string): Promise<string | null> {
-    const messages = this.getSession(channelId);
-    messages.push({ role: "user", content: userMessage });
+    const { session } = await this.getSession(channelId);
 
-    const model = "default";
+    let responseText = "";
 
-    while (true) {
-      const chatMessages = [...messages];
-
-      const payload: OpenAI.Chat.ChatCompletionCreateParams = {
-        model,
-        messages: chatMessages,
-        stream: false,
-        tools: tools,
-      };
-
-      const completion = await openai.chat.completions.create(payload);
-
-      const msg = completion.choices[0]?.message;
-      if (!msg) {
-        return "No response";
-      }
-
-      const assistantMessage: Message = {
-        role: "assistant",
-        content: msg.content || "",
-      };
-
-      // @ts-ignore - reasoning_content is not in the official types but supported by llama.cpp
-      if ((msg as Record<string, unknown>).reasoning_content) {
-        // @ts-ignore
-        assistantMessage.reasoning_content = msg.reasoning_content;
-        debug("Thinking:", assistantMessage.reasoning_content);
-      }
-
-      messages.push(assistantMessage);
-
-      if (msg.tool_calls && msg.tool_calls.length > 0) {
-        for (const tc of msg.tool_calls) {
-          const toolArgs = typeof tc.function.arguments === "string" 
-            ? JSON.parse(tc.function.arguments) 
-            : tc.function.arguments;
-          
-          debug("Tool call:", tc.function.name, JSON.stringify(toolArgs));
-
-          const result = await executeTool({
-            id: tc.id || `call_${Math.random().toString(36).slice(2)}`,
-            name: tc.function.name,
-            arguments: toolArgs,
-          });
-
-          debug("Tool result:", tc.function.name, result.slice(0, 200) + (result.length > 200 ? "..." : ""));
-
-          messages.push({
-            role: "user",
-            content: `Tool ${tc.function.name} returned: ${result}`,
-          });
+    return new Promise<string | null>((resolve) => {
+      const unsubscribe =       session.subscribe((event) => {
+        switch (event.type) {
+          case "message_update":
+            if (event.assistantMessageEvent.type === "text_delta") {
+              responseText += event.assistantMessageEvent.delta;
+            }
+            break;
+          case "tool_execution_start":
+            debug("Tool call:", event.toolName, JSON.stringify(event.args));
+            break;
+          case "tool_execution_end":
+            debug("Tool result:", event.toolName, event.isError ? "error" : "success");
+            break;
+          case "agent_end":
+            unsubscribe();
+            debug("Response:", responseText.slice(0, 200));
+            resolve(responseText || null);
+            break;
         }
+      });
 
-        // Continue the loop to process tool results
-        continue;
-      }
-
-      // No more tool calls, return the final response
-      debug("Final response:", assistantMessage.content);
-      return assistantMessage.content;
-    }
+      session.prompt(userMessage).catch((e) => {
+        unsubscribe();
+        debug("Prompt error:", e);
+        resolve(null);
+      });
+    });
   }
 }

@@ -19,5 +19,5 @@
     "esModuleInterop": true,
     "types": ["bun-types"]
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "lib/**/*"]
 }

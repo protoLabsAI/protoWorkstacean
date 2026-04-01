@@ -42,3 +42,7 @@ console.log("WorkStacean started.");
 console.log(`Plugins: ${allPlugins.map(p => p.name).join(", ")}`);
 console.log(`Topics: ${bus.topics().map(t => t.pattern).join(", ")}`);
 console.log(`Type 'help' for commands.`);
+
+// Show CLI prompt after startup
+const cli = corePlugins.find(p => p.name === "cli") as CLIPlugin;
+cli?.showPrompt();

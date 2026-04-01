@@ -9,19 +9,29 @@ export class CLIPlugin implements Plugin {
 
   private bus: EventBus | null = null;
   private rl: readline.Interface | null = null;
+  private pendingChat = new Map<string, { resolve: (msg: BusMessage) => void }>();
 
   install(bus: EventBus): void {
     this.bus = bus;
+
+    // Subscribe to outbound replies for chat
+    bus.subscribe("message.outbound.cli", this.name, (msg: BusMessage) => {
+      this.handleReply(msg);
+    });
+
     this.rl = readline.createInterface({
       input: Readable.from(process.stdin),
       output: process.stdout,
     });
 
-    process.stdout.write("> ");
-    
     this.rl.on("line", (line) => {
       this.handleInput(line.trim());
     });
+  }
+
+  /** Call after startup messages to show prompt */
+  showPrompt(): void {
+    process.stdout.write("> ");
   }
 
   uninstall(): void {
@@ -29,6 +39,15 @@ export class CLIPlugin implements Plugin {
       this.rl.close();
       this.rl = null;
     }
+  }
+
+  private handleReply(msg: BusMessage): void {
+    // Clear thinking indicator
+    process.stdout.write("\r\x1b[K");
+
+    const reply = msg.reply || JSON.stringify(msg.payload);
+    console.log(reply);
+    process.stdout.write("> ");
   }
 
   private handleInput(input: string): void {
@@ -39,6 +58,9 @@ export class CLIPlugin implements Plugin {
       return;
     }
 
+    // Clear the echoed line from readline
+    process.stdout.write("\x1b[1A\x1b[K");
+
     // Parse command
     const parts = input.split(/\s+/);
     const command = parts[0].toLowerCase();
@@ -46,26 +68,33 @@ export class CLIPlugin implements Plugin {
     switch (command) {
       case "help":
         this.showHelp();
+        process.stdout.write("> ");
         break;
       case "topics":
         this.showTopics();
+        process.stdout.write("> ");
         break;
       case "consumers":
         this.showConsumers();
+        process.stdout.write("> ");
         break;
       case "signal":
         this.handleSignalCommand(parts.slice(1));
+        process.stdout.write("> ");
+        break;
+      case "chat":
+        this.handleChatCommand(parts.slice(1).join(" "));
         break;
       default:
-        // Try to parse as JSON for raw publishing
-        this.handleRawInput(input);
+        // Treat bare input as chat
+        this.handleChatCommand(input);
+        break;
     }
-
-    process.stdout.write("> ");
   }
 
   private showHelp(): void {
     console.log("\nCommands:");
+    console.log("  chat hello            - Chat with agent (or just type message)");
     console.log("  signal +1234 hello    - Send message to signal number");
     console.log("  topics                - Show available topics");
     console.log("  consumers             - Show active consumers");
@@ -124,6 +153,28 @@ export class CLIPlugin implements Plugin {
 
     this.bus.publish(busMessage.topic, busMessage);
     console.log(`Published to ${busMessage.topic}`);
+  }
+
+  private handleChatCommand(message: string): void {
+    if (!this.bus) return;
+    if (!message) {
+      process.stdout.write("> ");
+      return;
+    }
+
+    const id = crypto.randomUUID();
+    const msg: BusMessage = {
+      id,
+      topic: "message.inbound.cli",
+      timestamp: Date.now(),
+      payload: { sender: "cli", content: message },
+      reply: message,
+    };
+
+    // Show thinking indicator
+    process.stdout.write("\x1b[90m[thinking...]\x1b[0m ");
+
+    this.bus.publish(msg.topic, msg);
   }
 
   private handleRawInput(input: string): void {

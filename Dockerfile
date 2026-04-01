@@ -30,6 +30,7 @@ FROM base AS release
 COPY --from=install /temp/prod/node_modules node_modules
 COPY --from=prerelease /usr/src/app/src ./src
 COPY --from=prerelease /usr/src/app/lib ./lib
+COPY --from=prerelease /usr/src/app/models.json .
 COPY --from=prerelease /usr/src/app/package.json .
 
 # create data directory for SQLite
