@@ -33,7 +33,7 @@ COPY --from=prerelease /usr/src/app/lib ./lib
 COPY --from=prerelease /usr/src/app/models.json .
 COPY --from=prerelease /usr/src/app/package.json .
 
-# create data directory for SQLite
+# data directory (legacy, sessions now live in workspace/)
 RUN mkdir -p data
 
 CMD ["bun", "run", "src/index.ts"]

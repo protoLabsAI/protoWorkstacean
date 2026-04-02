@@ -1,0 +1,12 @@
+services:
+  workstacean:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - WORKSPACE_DIR=/workspace
+    volumes:
+      - workspace:/workspace
+
+volumes:
+  workspace:
