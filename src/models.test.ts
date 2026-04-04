@@ -16,43 +16,37 @@ describe("models.json", () => {
     expect(config).toHaveProperty("providers");
   });
 
-  test("protolabs provider configured", () => {
+  test("local-llm provider configured", () => {
     const raw = readFileSync(modelsPath, "utf-8");
     const parsed = JSON.parse(raw);
-    expect(parsed.providers).toHaveProperty("protolabs");
+    expect(parsed.providers).toHaveProperty("local-llm");
   });
 
-  test("protolabs has correct base_url", () => {
+  test("local-llm has correct base_url", () => {
     const raw = readFileSync(modelsPath, "utf-8");
     const parsed = JSON.parse(raw);
-    expect(parsed.providers.protolabs.baseUrl).toBe("https://ai.proto-labs.ai/v1");
+    expect(parsed.providers["local-llm"].baseUrl).toBe("https://bios-pc.cloud.bios.dev:8443/v1");
   });
 
-  test("protolabs has api key", () => {
+  test("local-llm uses openai-completions api", () => {
     const raw = readFileSync(modelsPath, "utf-8");
     const parsed = JSON.parse(raw);
-    expect(parsed.providers.protolabs.apiKey).toBe("sk-dzCaTKg0S9Gq09lyOBBtwQ");
+    expect(parsed.providers["local-llm"].api).toBe("openai-completions");
   });
 
-  test("protolabs uses openai-completions api", () => {
+  test("local-llm model configured", () => {
     const raw = readFileSync(modelsPath, "utf-8");
     const parsed = JSON.parse(raw);
-    expect(parsed.providers.protolabs.api).toBe("openai-completions");
-  });
-
-  test("protolabs/local model configured", () => {
-    const raw = readFileSync(modelsPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    const models = parsed.providers.protolabs.models;
+    const models = parsed.providers["local-llm"].models;
     expect(models).toBeArray();
     expect(models.length).toBeGreaterThan(0);
-    expect(models[0].id).toBe("protolabs/local");
+    expect(models[0].id).toBe("default");
   });
 
   test("model has required fields", () => {
     const raw = readFileSync(modelsPath, "utf-8");
     const parsed = JSON.parse(raw);
-    const model = parsed.providers.protolabs.models[0];
+    const model = parsed.providers["local-llm"].models[0];
     expect(model).toHaveProperty("name");
     expect(model).toHaveProperty("reasoning");
     expect(model).toHaveProperty("input");
@@ -64,7 +58,7 @@ describe("models.json", () => {
   test("compat settings present", () => {
     const raw = readFileSync(modelsPath, "utf-8");
     const parsed = JSON.parse(raw);
-    const compat = parsed.providers.protolabs.compat;
+    const compat = parsed.providers["local-llm"].compat;
     expect(compat).toHaveProperty("supportsUsageInStreaming");
     expect(compat).toHaveProperty("maxTokensField");
     expect(compat.maxTokensField).toBe("max_tokens");

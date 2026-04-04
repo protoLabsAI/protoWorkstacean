@@ -2,7 +2,14 @@ import { describe, test, expect } from "bun:test";
 import OpenAI from "openai";
 
 describe("Local LLM endpoint", () => {
+  const runLive = process.env.RUN_LIVE_TESTS === "1";
+
   test("tell me a tiny joke — gets a real LLM response", async () => {
+    if (!runLive) {
+      console.log("Skipping live LLM test (set RUN_LIVE_TESTS=1 to enable)");
+      return;
+    }
+
     const client = new OpenAI({
       baseURL: "https://bios-pc.cloud.bios.dev:8443/v1",
       apiKey: "sk-dummy",
