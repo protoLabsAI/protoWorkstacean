@@ -4,19 +4,23 @@
  * Inbound:
  *   @mentions, DMs → message.inbound.discord.{channelId}
  *   📋 reactions   → message.inbound.discord.{channelId}  (skill hint: bug_triage)
- *   /quinn *       → message.inbound.discord.slash.{interactionId}
+ *   slash commands → message.inbound.discord.slash.{interactionId}
  *
  * Outbound:
  *   message.outbound.discord.#  → reply to originating message/interaction
  *   message.outbound.discord.push.{channelId} → unprompted post (cron, etc.)
  *
+ * Config: workspace/discord.yaml (channels, moderation, commands)
+ *
  * Env vars:
  *   DISCORD_BOT_TOKEN       (required)
  *   DISCORD_GUILD_ID        (required for slash command registration)
- *   DISCORD_DIGEST_CHANNEL  channel ID for cron-triggered posts
- *   DISCORD_WELCOME_CHANNEL channel ID for member welcome messages
+ *   DISCORD_DIGEST_CHANNEL  fallback channel ID for cron-triggered posts
  */
 
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
   Client,
   GatewayIntentBits,
@@ -28,38 +32,82 @@ import {
 } from "discord.js";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 
-// Pending reply handles: correlationId → Discord context
+// ── Config types ──────────────────────────────────────────────────────────────
+
+interface CommandOption {
+  name: string;
+  description: string;
+  type: "string" | "integer" | "boolean";
+  required?: boolean;
+}
+
+interface Subcommand {
+  name: string;
+  description: string;
+  content: string;
+  skillHint?: string;
+  options?: CommandOption[];
+}
+
+interface CommandConfig {
+  name: string;
+  description: string;
+  subcommands: Subcommand[];
+}
+
+interface DiscordConfig {
+  channels: {
+    digest?: string;
+    welcome?: string;
+    modLog?: string;
+  };
+  moderation: {
+    rateLimit: {
+      maxMessages: number;
+      windowSeconds: number;
+    };
+    spamPatterns: string[];
+  };
+  commands: CommandConfig[];
+}
+
+function loadConfig(workspaceDir: string): DiscordConfig {
+  const configPath = join(workspaceDir, "discord.yaml");
+  if (!existsSync(configPath)) {
+    console.log("[discord] No discord.yaml found — using defaults");
+    return {
+      channels: {},
+      moderation: {
+        rateLimit: { maxMessages: 5, windowSeconds: 10 },
+        spamPatterns: [],
+      },
+      commands: [],
+    };
+  }
+  return parseYaml(readFileSync(configPath, "utf8")) as DiscordConfig;
+}
+
+// ── Discord option type codes ─────────────────────────────────────────────────
+
+const OPTION_TYPE_CODES: Record<string, number> = {
+  string: 3,
+  integer: 4,
+  boolean: 5,
+};
+
+// ── Pending reply handles ─────────────────────────────────────────────────────
 // Kept outside the bus payload so the SQLite logger never tries to serialize them.
+
 const pendingReplies = new Map<
   string,
   { message?: Message; interaction?: ChatInputCommandInteraction }
 >();
 
-// Simple rate-limit: max 5 messages per 10s per user
-const rateLimits = new Map<string, number[]>();
-function isRateLimited(userId: string): boolean {
-  const now = Date.now();
-  const window = 10_000;
-  const hits = (rateLimits.get(userId) ?? []).filter(t => now - t < window);
-  hits.push(now);
-  rateLimits.set(userId, hits);
-  return hits.length > 5;
-}
-
-// Spam patterns (same as Quinn's bot)
-const SPAM_PATTERNS = [
-  /free\s*nitro/i,
-  /discord\.gift\//i,
-  /@everyone.*https?:\/\//i,
-  /steamcommunity\.com\/gift/i,
-];
-function isSpam(content: string): boolean {
-  return SPAM_PATTERNS.some(p => p.test(content));
-}
-
 function makeId(): string {
   return crypto.randomUUID();
 }
+
+// ── Plugin ────────────────────────────────────────────────────────────────────
 
 export class DiscordPlugin implements Plugin {
   readonly name = "discord";
@@ -68,6 +116,18 @@ export class DiscordPlugin implements Plugin {
 
   private client!: Client;
   private busRef!: EventBus;
+  private config!: DiscordConfig;
+  private workspaceDir: string;
+
+  // Runtime rate-limit state (built from config on install)
+  private rateLimits = new Map<string, number[]>();
+  private rateMaxMessages = 5;
+  private rateWindowMs = 10_000;
+  private spamPatterns: RegExp[] = [];
+
+  constructor(workspaceDir: string) {
+    this.workspaceDir = workspaceDir;
+  }
 
   install(bus: EventBus): void {
     if (!process.env.DISCORD_BOT_TOKEN) {
@@ -76,6 +136,13 @@ export class DiscordPlugin implements Plugin {
     }
 
     this.busRef = bus;
+    this.config = loadConfig(this.workspaceDir);
+
+    // Apply moderation config
+    const { rateLimit, spamPatterns } = this.config.moderation;
+    this.rateMaxMessages = rateLimit.maxMessages;
+    this.rateWindowMs = rateLimit.windowSeconds * 1_000;
+    this.spamPatterns = spamPatterns.map(p => new RegExp(p, "i"));
 
     this.client = new Client({
       intents: [
@@ -89,13 +156,13 @@ export class DiscordPlugin implements Plugin {
       partials: [Partials.Channel, Partials.Message, Partials.Reaction],
     });
 
-    // ── Ready ──────────────────────────────────────────────────────────────
+    // ── Ready ────────────────────────────────────────────────────────────────
     this.client.once(Events.ClientReady, async client => {
       console.log(`[discord] Logged in as ${client.user.tag}`);
       await this._registerSlashCommands();
     });
 
-    // ── Message create ──────────────────────────────────────────────────────
+    // ── Message create ───────────────────────────────────────────────────────
     this.client.on(Events.MessageCreate, async message => {
       if (message.author.bot) return;
 
@@ -105,11 +172,11 @@ export class DiscordPlugin implements Plugin {
 
       const userId = message.author.id;
 
-      if (isSpam(message.content)) {
+      if (this._isSpam(message.content)) {
         await message.delete().catch(() => {});
         return;
       }
-      if (isRateLimited(userId)) {
+      if (this._isRateLimited(userId)) {
         await message.reply("Easy there — you're sending messages too quickly.").catch(() => {});
         return;
       }
@@ -139,7 +206,7 @@ export class DiscordPlugin implements Plugin {
       });
     });
 
-    // ── Clipboard 📋 reaction → bug triage ────────────────────────────────
+    // ── 📋 reaction → bug triage ─────────────────────────────────────────────
     this.client.on(Events.MessageReactionAdd, async (reaction, user) => {
       if (user.bot) return;
       if (reaction.emoji.name !== "📋") return;
@@ -169,23 +236,27 @@ export class DiscordPlugin implements Plugin {
       });
     });
 
-    // ── Slash commands ──────────────────────────────────────────────────────
+    // ── Slash commands ───────────────────────────────────────────────────────
     this.client.on(Events.InteractionCreate, async interaction => {
       if (!interaction.isChatInputCommand()) return;
-      if (interaction.commandName !== "quinn") return;
+
+      const cmdConfig = this.config.commands.find(c => c.name === interaction.commandName);
+      if (!cmdConfig) return;
 
       await interaction.deferReply();
 
-      const subcommand = interaction.options.getSubcommand(false) ?? "status";
-      const version = interaction.options.getString("version") ?? "";
+      const subName = interaction.options.getSubcommand(false) ?? cmdConfig.subcommands[0]?.name;
+      const subConfig = cmdConfig.subcommands.find(s => s.name === subName)
+        ?? cmdConfig.subcommands[0];
 
-      const cmdMap: Record<string, { content: string; skillHint: string }> = {
-        status:  { content: "/status",                skillHint: "qa_report"   },
-        bugs:    { content: "/bugs",                  skillHint: "bug_triage"  },
-        release: { content: `/release ${version}`.trim(), skillHint: "qa_report" },
-      };
+      if (!subConfig) {
+        await interaction.editReply("Unknown subcommand.").catch(console.error);
+        return;
+      }
 
-      const cmd = cmdMap[subcommand] ?? cmdMap.status;
+      // Interpolate {optionName} placeholders from config content template
+      const content = this._interpolateContent(subConfig.content, subConfig.options ?? [], interaction);
+
       const correlationId = makeId();
       pendingReplies.set(correlationId, { interaction });
 
@@ -198,22 +269,22 @@ export class DiscordPlugin implements Plugin {
         payload: {
           sender: interaction.user.id,
           channel: interaction.channelId,
-          content: cmd.content,
-          skillHint: cmd.skillHint,
+          content,
+          skillHint: subConfig.skillHint,
         },
         reply: { topic: `message.outbound.discord.${topicSuffix}` },
       });
     });
 
-    // ── Welcome new members ────────────────────────────────────────────────
+    // ── Welcome new members ──────────────────────────────────────────────────
     this.client.on(Events.GuildMemberAdd, async member => {
-      const channelId = process.env.DISCORD_WELCOME_CHANNEL;
+      const channelId = this.config.channels.welcome || process.env.DISCORD_WELCOME_CHANNEL;
       if (!channelId) return;
       const ch = member.guild.channels.cache.get(channelId) as TextChannel | undefined;
       await ch?.send(`Welcome to the protoLabs community, <@${member.id}>! 👋`).catch(() => {});
     });
 
-    // ── Outbound: reply to pending messages / interactions ─────────────────
+    // ── Outbound: reply to pending messages / interactions ───────────────────
     bus.subscribe("message.outbound.discord.#", "discord-outbound", async (msg: BusMessage) => {
       const payload = msg.payload as Record<string, unknown>;
       const content = String(payload.content ?? "").slice(0, 2000) || "(no response)";
@@ -234,7 +305,7 @@ export class DiscordPlugin implements Plugin {
             const reply = await pending.message.reply({ content }).catch(console.error);
             // Start a thread on first response if not already in one
             if (reply && !pending.message.channel.isThread()) {
-              await reply.startThread({ name: content.slice(0, 50) || "Quinn response" }).catch(() => {});
+              await reply.startThread({ name: content.slice(0, 50) || "Response" }).catch(() => {});
             }
             // Update reactions: 👀 → ✅
             await pending.message.reactions.resolve("👀")?.users.remove(this.client.user!).catch(() => {});
@@ -245,7 +316,12 @@ export class DiscordPlugin implements Plugin {
       }
 
       // 2. Unprompted push (cron, proactive notification)
-      const channelId = String(payload.channel ?? payload.recipient ?? "");
+      const channelId = String(
+        payload.channel ?? payload.recipient
+          ?? this.config.channels.digest
+          ?? process.env.DISCORD_DIGEST_CHANNEL
+          ?? ""
+      );
       if (channelId) {
         const ch = this.client.channels.cache.get(channelId) as TextChannel | undefined;
         await ch?.send({ content }).catch(console.error);
@@ -257,6 +333,44 @@ export class DiscordPlugin implements Plugin {
 
   uninstall(_bus: EventBus): void {
     this.client?.destroy();
+  }
+
+  // ── Private helpers ─────────────────────────────────────────────────────────
+
+  private _isRateLimited(userId: string): boolean {
+    const now = Date.now();
+    const hits = (this.rateLimits.get(userId) ?? []).filter(t => now - t < this.rateWindowMs);
+    hits.push(now);
+    this.rateLimits.set(userId, hits);
+    return hits.length > this.rateMaxMessages;
+  }
+
+  private _isSpam(content: string): boolean {
+    return this.spamPatterns.some(p => p.test(content));
+  }
+
+  /** Replace {optionName} tokens in a content template with actual interaction values. */
+  private _interpolateContent(
+    template: string,
+    options: CommandOption[],
+    interaction: ChatInputCommandInteraction,
+  ): string {
+    let result = template;
+    for (const opt of options) {
+      const placeholder = `{${opt.name}}`;
+      if (!result.includes(placeholder)) continue;
+
+      let value = "";
+      if (opt.type === "string") {
+        value = interaction.options.getString(opt.name) ?? "";
+      } else if (opt.type === "integer") {
+        value = String(interaction.options.getInteger(opt.name) ?? "");
+      } else if (opt.type === "boolean") {
+        value = String(interaction.options.getBoolean(opt.name) ?? "");
+      }
+      result = result.replaceAll(placeholder, value);
+    }
+    return result.trim();
   }
 
   private async _registerSlashCommands(): Promise<void> {
@@ -272,23 +386,30 @@ export class DiscordPlugin implements Plugin {
       return;
     }
 
-    await guild.commands.set([
-      {
-        name: "quinn",
-        description: "Quinn QA commands",
-        options: [
-          { name: "status",  type: 1, description: "QA status report" },
-          { name: "bugs",    type: 1, description: "Active bugs across apps" },
-          {
-            name: "release",
-            type: 1,
-            description: "Generate release notes",
-            options: [{ name: "version", type: 3, description: "Version tag (e.g. v1.2.0)", required: false }],
-          },
-        ],
-      },
-    ]);
+    if (!this.config.commands.length) {
+      console.log("[discord] No commands configured in discord.yaml");
+      return;
+    }
 
-    console.log("[discord] Slash commands registered");
+    const commandData = this.config.commands.map(cmd => ({
+      name: cmd.name,
+      description: cmd.description,
+      options: cmd.subcommands.map(sub => ({
+        name: sub.name,
+        type: 1, // SUB_COMMAND
+        description: sub.description,
+        options: (sub.options ?? []).map(opt => ({
+          name: opt.name,
+          description: opt.description,
+          type: OPTION_TYPE_CODES[opt.type] ?? 3,
+          required: opt.required ?? false,
+        })),
+      })),
+    }));
+
+    await guild.commands.set(commandData);
+    console.log(
+      `[discord] Registered ${commandData.length} command(s): ${commandData.map(c => `/${c.name}`).join(", ")}`
+    );
   }
 }

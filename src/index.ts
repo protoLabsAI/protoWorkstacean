@@ -46,7 +46,7 @@ if (!process.env.DISABLE_AGENT_PLUGIN) {
 
 // DiscordPlugin — enabled when DISCORD_BOT_TOKEN is set
 if (process.env.DISCORD_BOT_TOKEN) {
-  corePlugins.push(new DiscordPlugin());
+  corePlugins.push(new DiscordPlugin(workspaceDir));
 }
 
 if (!process.env.DISABLE_EVENT_VIEWER) {
