@@ -24,6 +24,8 @@ import { join } from "node:path";
 import { createSign } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
+import { sanitizeIssueBody } from "../sanitize.ts";
+import type { SanitizationConfig } from "../sanitize.ts";
 
 // ── GitHub App auth ───────────────────────────────────────────────────────────
 
@@ -95,10 +97,20 @@ function makeGitHubAuth(): ((owner: string, repo: string) => Promise<string>) | 
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
+interface AutoTriageConfig {
+  enabled: boolean;
+  orgName: string;
+  events: string[];
+  skillHint: string;
+  monitoredRepos: string[];
+  sanitization: SanitizationConfig;
+}
+
 interface GitHubConfig {
   mentionHandle: string;
   skillHints: Record<string, string>;
   admins?: string[];
+  autoTriage?: AutoTriageConfig;
 }
 
 function loadConfig(workspaceDir: string): GitHubConfig {
@@ -172,7 +184,7 @@ function extractContext(event: string, payload: Record<string, unknown>): GitHub
     };
   }
 
-  if (event === "issues" && payload.action === "opened") {
+  if (event === "issues" && (payload.action === "opened" || payload.action === "reopened")) {
     const issue = payload.issue as Record<string, unknown>;
     return {
       owner, repo: repoName,
@@ -314,6 +326,23 @@ export class GitHubPlugin implements Plugin {
     const ctx = extractContext(event, payload);
     if (!ctx) return;
 
+    // ── Auto-triage path: issues.opened/reopened in monitored repos ───────────
+    // Fires when autoTriage is enabled and the issue body does NOT contain an
+    // @mention (issues with @mention from admins continue via the mention path).
+    if (
+      config.autoTriage?.enabled &&
+      event === "issues" &&
+      (payload.action === "opened" || payload.action === "reopened") &&
+      !ctx.body.toLowerCase().includes(config.mentionHandle.toLowerCase())
+    ) {
+      const repoSlug = `${ctx.owner}/${ctx.repo}`;
+      if (config.autoTriage.monitoredRepos?.includes(repoSlug)) {
+        this._handleAutoTriage(event, payload, ctx, config.autoTriage, bus, getToken);
+        return;
+      }
+    }
+
+    // ── @mention path (existing, unchanged) ──────────────────────────────────
     if (!ctx.body.toLowerCase().includes(config.mentionHandle.toLowerCase())) return;
 
     if (config.admins?.length && !config.admins.some(a => a.toLowerCase() === ctx.author.toLowerCase())) {
@@ -378,6 +407,151 @@ export class GitHubPlugin implements Plugin {
     });
 
     console.log(`[github] ${event} on ${ctx.owner}/${ctx.repo}#${ctx.number} → ${skillHint ?? "default"}`);
+  }
+
+  private _handleAutoTriage(
+    event: string,
+    payload: Record<string, unknown>,
+    ctx: GitHubEventContext,
+    autoTriage: AutoTriageConfig,
+    bus: EventBus,
+    getToken: (owner: string, repo: string) => Promise<string>,
+  ): void {
+    (async () => {
+      try {
+        const token = await getToken(ctx.owner, ctx.repo);
+        const action = payload.action as string;
+
+        // Check org membership → assign trust tier
+        const isMember = await this._checkOrgMembership(autoTriage.orgName, ctx.author, token);
+        const trustTier = isMember ? 3 : 1;
+
+        let body = ctx.body;
+        let quarantine: { sanitized: boolean; patternsFound: string[] } = {
+          sanitized: false,
+          patternsFound: [],
+        };
+
+        if (trustTier < 3) {
+          const result = sanitizeIssueBody(body, autoTriage.sanitization);
+          body = result.body;
+          quarantine = {
+            sanitized: result.patternsFound.length > 0,
+            patternsFound: result.patternsFound,
+          };
+
+          // Close as spam if injection pattern count meets threshold
+          if (result.patternsFound.length >= autoTriage.sanitization.spamThreshold) {
+            console.log(
+              `[github] Auto-triage: ${ctx.owner}/${ctx.repo}#${ctx.number} flagged as spam ` +
+              `(${result.patternsFound.length} patterns) — closing`,
+            );
+            await this._closeIssueAsSpam(ctx.owner, ctx.repo, ctx.number, token);
+            return;
+          }
+        }
+
+        // Route to agent via bus
+        const correlationId = crypto.randomUUID();
+        pendingComments.set(correlationId, { owner: ctx.owner, repo: ctx.repo, number: ctx.number });
+
+        const content = [
+          `Auto-triage — ${event}.${action} on ${ctx.owner}/${ctx.repo}#${ctx.number}`,
+          `Title: ${ctx.title}`,
+          `Author: @${ctx.author} (trust tier: ${trustTier})`,
+          `URL: ${ctx.url}`,
+          ``,
+          body,
+        ].join("\n");
+
+        const topic = `message.inbound.github.${ctx.owner}.${ctx.repo}.${event}.${ctx.number}`;
+        const replyTopic = `message.outbound.github.${ctx.owner}.${ctx.repo}.${ctx.number}`;
+
+        bus.publish(topic, {
+          id: `${event}-${action}-${ctx.owner}-${ctx.repo}-${ctx.number}-${correlationId.slice(0, 8)}`,
+          correlationId,
+          topic,
+          timestamp: Date.now(),
+          payload: {
+            sender: ctx.author,
+            channel: `${ctx.owner}/${ctx.repo}#${ctx.number}`,
+            content,
+            skillHint: autoTriage.skillHint,
+            trustTier,
+            quarantine,
+            github: {
+              event,
+              action,
+              owner: ctx.owner,
+              repo: ctx.repo,
+              number: ctx.number,
+              title: ctx.title,
+              url: ctx.url,
+            },
+          },
+          replyTo: replyTopic,
+        });
+
+        console.log(
+          `[github] Auto-triage: ${event}.${action} on ${ctx.owner}/${ctx.repo}#${ctx.number} ` +
+          `→ ${autoTriage.skillHint} (tier ${trustTier})`,
+        );
+      } catch (err) {
+        console.error("[github] Auto-triage error:", err);
+      }
+    })();
+  }
+
+  private async _checkOrgMembership(
+    orgName: string,
+    username: string,
+    token: string,
+  ): Promise<boolean> {
+    try {
+      const res = await fetch(
+        `https://api.github.com/orgs/${orgName}/members/${username}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        },
+      );
+      // 204 = member, 302/404 = not a member or org is private
+      return res.status === 204;
+    } catch {
+      return false;
+    }
+  }
+
+  private async _closeIssueAsSpam(
+    owner: string,
+    repo: string,
+    number: number,
+    token: string,
+  ): Promise<void> {
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "User-Agent": "protoWorkstacean/1.0",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
+
+    const commentBody =
+      "This issue has been automatically closed because it appears to contain content " +
+      "that violates our submission guidelines. If you believe this is an error, please " +
+      "open a new issue without the flagged content.";
+
+    await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments`,
+      { method: "POST", headers, body: JSON.stringify({ body: commentBody }) },
+    );
+
+    await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${number}`,
+      { method: "PATCH", headers, body: JSON.stringify({ state: "closed", state_reason: "not_planned" }) },
+    );
   }
 
   private async _postComment(
