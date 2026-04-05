@@ -9,6 +9,7 @@ import { DiscordPlugin } from "../lib/plugins/discord";
 import { GitHubPlugin } from "../lib/plugins/github";
 import { EchoPlugin } from "../lib/plugins/echo";
 import { AgentPlugin } from "../lib/plugins/agent";
+import { A2APlugin } from "../lib/plugins/a2a";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { EventViewerPlugin } from "../lib/plugins/event-viewer";
 import type { Plugin } from "../lib/types";
@@ -54,6 +55,9 @@ if (process.env.DISCORD_BOT_TOKEN) {
 if (process.env.GITHUB_TOKEN) {
   corePlugins.push(new GitHubPlugin(workspaceDir));
 }
+
+// A2APlugin — always enabled; loads projects.yaml (no-op if file absent)
+corePlugins.push(new A2APlugin(workspaceDir));
 
 if (!process.env.DISABLE_EVENT_VIEWER) {
   corePlugins.push(new EventViewerPlugin());
