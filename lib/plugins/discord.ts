@@ -69,6 +69,7 @@ interface DiscordConfig {
     spamPatterns: string[];
   };
   commands: CommandConfig[];
+  admins?: string[];
 }
 
 function loadConfig(workspaceDir: string): DiscordConfig {
@@ -172,6 +173,11 @@ export class DiscordPlugin implements Plugin {
 
       const userId = message.author.id;
 
+      if (!this._isAdmin(userId)) {
+        console.log(`[discord] message from ${userId} ignored — not in admins list`);
+        return;
+      }
+
       if (this._isSpam(message.content)) {
         await message.delete().catch(() => {});
         return;
@@ -210,6 +216,10 @@ export class DiscordPlugin implements Plugin {
     this.client.on(Events.MessageReactionAdd, async (reaction, user) => {
       if (user.bot) return;
       if (reaction.emoji.name !== "📋") return;
+      if (!this._isAdmin(user.id)) {
+        console.log(`[discord] reaction from ${user.id} ignored — not in admins list`);
+        return;
+      }
 
       const message = reaction.partial
         ? await reaction.message.fetch()
@@ -242,6 +252,12 @@ export class DiscordPlugin implements Plugin {
 
       const cmdConfig = this.config.commands.find(c => c.name === interaction.commandName);
       if (!cmdConfig) return;
+
+      if (!this._isAdmin(interaction.user.id)) {
+        console.log(`[discord] slash command from ${interaction.user.id} ignored — not in admins list`);
+        await interaction.reply({ content: "Not authorised.", ephemeral: true }).catch(() => {});
+        return;
+      }
 
       await interaction.deferReply();
 
@@ -336,6 +352,11 @@ export class DiscordPlugin implements Plugin {
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
+
+  private _isAdmin(userId: string): boolean {
+    if (!this.config.admins?.length) return true; // open if no list configured
+    return this.config.admins.includes(userId);
+  }
 
   private _isRateLimited(userId: string): boolean {
     const now = Date.now();

@@ -98,6 +98,7 @@ function makeGitHubAuth(): ((owner: string, repo: string) => Promise<string>) | 
 interface GitHubConfig {
   mentionHandle: string;
   skillHints: Record<string, string>;
+  admins?: string[];
 }
 
 function loadConfig(workspaceDir: string): GitHubConfig {
@@ -314,6 +315,11 @@ export class GitHubPlugin implements Plugin {
     if (!ctx) return;
 
     if (!ctx.body.toLowerCase().includes(config.mentionHandle.toLowerCase())) return;
+
+    if (config.admins?.length && !config.admins.some(a => a.toLowerCase() === ctx.author.toLowerCase())) {
+      console.log(`[github] ${event} from @${ctx.author} ignored — not in admins list`);
+      return;
+    }
 
     // Acknowledge receipt — eyes reaction, fire-and-forget
     (async () => {
