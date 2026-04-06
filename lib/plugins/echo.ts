@@ -15,23 +15,23 @@ export class EchoPlugin implements Plugin {
 
   private handleInbound(bus: EventBus, msg: BusMessage): void {
     const sender = (msg.payload as { sender?: string })?.sender;
-    const content = msg.reply || (msg.payload as { content?: string })?.content;
+    const content = (msg.payload as { content?: string })?.content;
 
     if (!sender || !content) return;
 
     // Build reply topic by replacing inbound with outbound
-    const replyTopic = msg.topic.replace("inbound", "outbound");
-    
+    const replyTopic = msg.reply?.topic ?? msg.topic.replace("inbound", "outbound");
+
+    const echoText = `Echo: ${content}`;
     const reply: BusMessage = {
       id: crypto.randomUUID(),
       correlationId: msg.correlationId,
       topic: replyTopic,
       timestamp: Date.now(),
-      payload: { content: `Echo: ${content}` },
-      reply: `Echo: ${content}`,
+      payload: { content: echoText },
     };
 
-    console.log(`[Echo] Replying to ${sender}: ${reply.reply}`);
+    console.log(`[Echo] Replying to ${sender}: ${echoText}`);
     bus.publish(reply.topic, reply);
   }
 }

@@ -96,7 +96,8 @@ export class SignalPlugin implements Plugin {
           topic: `message.inbound.signal.${sender}`,
           timestamp: Date.now(),
           payload: { sender, content: text },
-          reply: text,
+          source: { interface: "signal", userId: sender },
+          reply: { topic: `message.outbound.signal.${sender}` },
         };
 
         this.bus!.publish(msg.topic, msg);
@@ -112,7 +113,7 @@ export class SignalPlugin implements Plugin {
     // Extract recipient from topic: message.outbound.signal.+1234
     const topicParts = msg.topic.split(".");
     const recipient = topicParts[3]; // +1234 or similar
-    const content = msg.reply || (msg.payload as { content?: string })?.content;
+    const content = (msg.payload as { content?: string })?.content;
 
     if (!recipient || !content) {
       console.error("Invalid outbound signal message:", msg);

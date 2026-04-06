@@ -45,8 +45,8 @@ export class CLIPlugin implements Plugin {
     // Clear thinking indicator
     process.stdout.write("\r\x1b[K");
 
-    const reply = msg.reply || JSON.stringify(msg.payload);
-    console.log(reply);
+    const content = (msg.payload as { content?: string })?.content ?? JSON.stringify(msg.payload);
+    console.log(content);
     process.stdout.write("> ");
   }
 
@@ -150,7 +150,6 @@ export class CLIPlugin implements Plugin {
       topic: `message.outbound.signal.${number}`,
       timestamp: Date.now(),
       payload: { content: message },
-      reply: message,
     };
 
     this.bus.publish(busMessage.topic, busMessage);
@@ -171,7 +170,8 @@ export class CLIPlugin implements Plugin {
       topic: "message.inbound.cli",
       timestamp: Date.now(),
       payload: { sender: "cli", content: message },
-      reply: message,
+      source: { interface: "api" },
+      reply: { topic: "message.outbound.cli" },
     };
 
     // Show thinking indicator
@@ -193,7 +193,9 @@ export class CLIPlugin implements Plugin {
           topic: parsed.topic,
           timestamp: Date.now(),
           payload: parsed.payload ?? parsed,
-          reply: parsed.reply,
+          reply: typeof parsed.reply === "string"
+            ? { topic: parsed.reply }
+            : parsed.reply,
           replyTo: parsed.replyTo,
         };
         this.bus.publish(msg.topic, msg);

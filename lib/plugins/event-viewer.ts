@@ -1,5 +1,7 @@
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, join } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 import type { Plugin, EventBus, BusMessage } from "../types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -15,10 +17,12 @@ export class EventViewerPlugin implements Plugin {
   private subscriptionId: string | null = null;
   private port: number;
   private viewerDir: string;
+  private workspaceDir: string;
 
   constructor(port: number = 8080) {
     this.port = port;
     this.viewerDir = resolve(__dirname, "../../src/viewer");
+    this.workspaceDir = resolve(process.env.WORKSPACE_DIR || join(process.cwd(), "workspace"));
   }
 
   install(bus: EventBus): void {
@@ -44,6 +48,8 @@ export class EventViewerPlugin implements Plugin {
         if (url.pathname === "/api/events") return this.handleApiEvents(req);
         if (url.pathname === "/api/topics") return this.handleApiTopics();
         if (url.pathname === "/api/consumers") return this.handleApiConsumers();
+        if (url.pathname === "/api/projects") return this.handleApiProjects();
+        if (url.pathname === "/api/agents") return this.handleApiAgents();
 
         return this.serveStatic(url.pathname);
       },
@@ -106,6 +112,28 @@ export class EventViewerPlugin implements Plugin {
 
   private handleApiConsumers(): Response {
     return Response.json(this.bus?.consumers() ?? []);
+  }
+
+  private handleApiProjects(): Response {
+    return this._serveYaml("projects.yaml", "projects");
+  }
+
+  private handleApiAgents(): Response {
+    return this._serveYaml("agents.yaml", "agents");
+  }
+
+  private _serveYaml(filename: string, key: string): Response {
+    const filePath = join(this.workspaceDir, filename);
+    if (!existsSync(filePath)) {
+      return Response.json({ success: false, error: `${filename} not found` }, { status: 404 });
+    }
+    try {
+      const raw = readFileSync(filePath, "utf8");
+      const parsed = parseYaml(raw) as Record<string, unknown>;
+      return Response.json({ success: true, data: parsed[key] ?? [] });
+    } catch (err) {
+      return Response.json({ success: false, error: `Failed to parse ${filename}` }, { status: 500 });
+    }
   }
 
   private async serveStatic(pathname: string): Promise<Response> {

@@ -115,7 +115,6 @@ async function runTests(): Promise<void> {
       topic: "message.inbound.test",
       timestamp: Date.now(),
       payload: { sender: "test", content: test.message },
-      reply: test.message,
     };
 
     bus.publish(message.topic, message);
@@ -123,7 +122,8 @@ async function runTests(): Promise<void> {
     const reply = await waitForReply(logger, "message.outbound.test", correlationId, 30000);
 
     if (reply) {
-      console.log(`Agent response: ${reply.reply}`);
+      const replyContent = (reply.payload as { content?: string })?.content ?? JSON.stringify(reply.payload);
+      console.log(`Agent response: ${replyContent}`);
       console.log(`Cron YAML should be created in: ${join(workspaceDir, "crons/")}`);
     } else {
       console.log(`[TIMEOUT - no agent reply received]`);
@@ -139,7 +139,7 @@ async function runTests(): Promise<void> {
     if (cronEvents.length > 0) {
       console.log(`Cron events detected: ${cronEvents.map((e) => e.topic).join(", ")}`);
       for (const cronEvent of cronEvents) {
-        console.log(`  - ${cronEvent.topic}: ${cronEvent.reply || JSON.stringify(cronEvent.payload)}`);
+        console.log(`  - ${cronEvent.topic}: ${(cronEvent.payload as { content?: string })?.content || JSON.stringify(cronEvent.payload)}`);
       }
     } else {
       console.log("No cron events fired yet (may still be pending)");
@@ -150,7 +150,8 @@ async function runTests(): Promise<void> {
     if (outboundEvents.length > 0) {
       console.log("\nOutbound agent responses:");
       for (const evt of outboundEvents) {
-        console.log(`  - ${evt.topic}: ${evt.reply?.slice(0, 200) || JSON.stringify(evt.payload).slice(0, 200)}...`);
+        const evtContent = (evt.payload as { content?: string })?.content ?? JSON.stringify(evt.payload);
+        console.log(`  - ${evt.topic}: ${evtContent.slice(0, 200)}...`);
       }
     }
 
@@ -179,7 +180,6 @@ async function runTests(): Promise<void> {
       sender: "cron",
       channel: "test",
     },
-    reply: "This is a manual cron test. Please respond naturally.",
   };
 
   bus.publish(manualCronMsg.topic, manualCronMsg);
@@ -188,7 +188,7 @@ async function runTests(): Promise<void> {
   const manualCronReply = await waitForReply(logger, "message.outbound.test", manualCronId, 30000);
 
   if (manualCronReply) {
-    console.log(`Agent response: ${manualCronReply.reply}`);
+    console.log(`Agent response: ${(manualCronReply.payload as { content?: string })?.content ?? JSON.stringify(manualCronReply.payload)}`);
   } else {
     console.log(`[TIMEOUT - no agent reply to manual cron]`);
   }

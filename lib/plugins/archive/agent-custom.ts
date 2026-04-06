@@ -155,20 +155,20 @@ export class AgentPlugin implements Plugin {
 
   private async handleInbound(bus: EventBus, msg: BusMessage): Promise<void> {
     const sender = (msg.payload as { sender?: string })?.sender;
-    const content = msg.reply || (msg.payload as { content?: string })?.content;
+    const content = (msg.payload as { content?: string })?.content;
 
     if (!sender || !content) return;
 
     // /new resets session
     if (content === "/new") {
       this.resetSession(`signal:${sender}`);
-      const replyTopic = msg.topic.replace("inbound", "outbound");
+      const replyTopic = msg.reply?.topic ?? msg.topic.replace("inbound", "outbound");
       const reply: BusMessage = {
         id: msg.id,
+        correlationId: msg.correlationId,
         topic: replyTopic,
         timestamp: Date.now(),
         payload: { content: "Session reset. How can I help you?" },
-        reply: "Session reset. How can I help you?",
       };
       bus.publish(reply.topic, reply);
       return;
@@ -181,13 +181,13 @@ export class AgentPlugin implements Plugin {
 
     if (!response) return;
 
-    const replyTopic = msg.topic.replace("inbound", "outbound");
+    const replyTopic = msg.reply?.topic ?? msg.topic.replace("inbound", "outbound");
     const reply: BusMessage = {
       id: msg.id,
+      correlationId: msg.correlationId,
       topic: replyTopic,
       timestamp: Date.now(),
       payload: { content: response },
-      reply: response,
     };
 
     console.log(`[Agent] Replying to ${sender}: ${response}`);

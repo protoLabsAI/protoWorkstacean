@@ -37,7 +37,7 @@ async function waitForReply(
     const events = logger.getEventsByTopic(topic);
     const replyEvent = events.find((e) => e.correlationId === correlationId);
     if (replyEvent) {
-      return (replyEvent.reply as string) || JSON.stringify(replyEvent.payload);
+      return (replyEvent.payload as { content?: string })?.content ?? JSON.stringify(replyEvent.payload);
     }
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -83,7 +83,6 @@ async function runTests(): Promise<void> {
       topic: "message.inbound.test",
       timestamp: Date.now(),
       payload: { sender: "test", content: test.message },
-      reply: test.message,
     };
 
     bus.publish(message.topic, message);

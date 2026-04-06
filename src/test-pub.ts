@@ -12,7 +12,7 @@ import type { BusMessage } from "../lib/types";
 const bus = new InMemoryEventBus();
 
 // Install plugins
-const logger = new LoggerPlugin();
+const logger = new LoggerPlugin(process.env.DATA_DIR || "./data");
 const signal = new SignalPlugin();
 
 logger.install(bus);
@@ -42,7 +42,9 @@ if (input.startsWith("{")) {
         topic: parsed.topic,
         timestamp: Date.now(),
         payload: parsed.payload ?? parsed,
-        reply: parsed.reply,
+        reply: typeof parsed.reply === "string"
+          ? { topic: parsed.reply }
+          : parsed.reply,
         replyTo: parsed.replyTo,
       };
       bus.publish(msg.topic, msg);
@@ -69,7 +71,6 @@ if (input.startsWith("{")) {
       topic: `message.outbound.signal.${number}`,
       timestamp: Date.now(),
       payload: { content: message },
-      reply: message,
     };
     
     bus.publish(msg.topic, msg);

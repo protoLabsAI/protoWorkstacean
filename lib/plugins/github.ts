@@ -312,7 +312,7 @@ export class GitHubPlugin implements Plugin {
     console.log(`[github] Webhook receiver on :${port}/webhook/github`);
   }
 
-  uninstall(_bus: EventBus): void {
+  uninstall(): void {
     this.server?.stop();
   }
 
@@ -403,6 +403,7 @@ export class GitHubPlugin implements Plugin {
         skillHint,
         github: { event, owner: ctx.owner, repo: ctx.repo, number: ctx.number, title: ctx.title, url: ctx.url },
       },
+      source: { interface: "github" as const },
       reply: { topic: replyTopic },
     });
 

@@ -10,6 +10,7 @@ import { GitHubPlugin } from "../lib/plugins/github";
 import { EchoPlugin } from "../lib/plugins/echo";
 import { AgentPlugin } from "../lib/plugins/agent";
 import { A2APlugin } from "../lib/plugins/a2a";
+import { HITLPlugin } from "../lib/plugins/hitl";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { EventViewerPlugin } from "../lib/plugins/event-viewer";
 import type { Plugin } from "../lib/types";
@@ -58,6 +59,9 @@ if (process.env.GITHUB_TOKEN) {
 
 // A2APlugin — always enabled; loads projects.yaml (no-op if file absent)
 corePlugins.push(new A2APlugin(workspaceDir));
+
+// HITLPlugin — routes HITL requests/responses between interface plugins and Ava
+corePlugins.push(new HITLPlugin(workspaceDir));
 
 if (!process.env.DISABLE_EVENT_VIEWER) {
   corePlugins.push(new EventViewerPlugin());

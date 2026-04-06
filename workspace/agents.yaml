@@ -1,0 +1,64 @@
+# protoLabs A2A Agent Registry
+# Authoritative source for the agent fleet.
+# Skills are refreshed live from /.well-known/agent.json on startup.
+# apiKeyEnv: name of env var holding the API key for this agent's /a2a endpoint.
+
+agents:
+  - name: ava
+    url: http://automaker-server:3008/a2a
+    apiKeyEnv: AVA_API_KEY
+    skills:
+      - plan
+      - plan_resume
+      - sitrep
+      - manage_feature
+      - auto_mode
+      - board_health
+      - onboard_project
+
+  - name: quinn
+    url: http://quinn:7870/a2a
+    apiKeyEnv: QUINN_API_KEY
+    skills:
+      - qa_report
+      - board_audit
+      - bug_triage
+      - pr_review
+    chain:
+      bug_triage:
+        agent: ava
+        prompt: >-
+          If this is an actionable bug Quinn filed on the board, use auto_mode to kick off
+          work on it immediately. If stale, duplicate, or already fixed, recommend closing
+          the GitHub issue and explain why.
+
+  - name: jon
+    url: http://jon:3010/a2a
+    apiKeyEnv: JON_API_KEY
+    skills:
+      - content_strategy
+      - gtm_review
+      - competitive_research
+
+  - name: cindi
+    url: http://cindi:3011/a2a
+    apiKeyEnv: CINDI_API_KEY
+    skills:
+      - write_content
+      - blog_post
+      - social_post
+
+  - name: researcher
+    url: http://researcher:3012/a2a
+    apiKeyEnv: RESEARCHER_API_KEY
+    skills:
+      - deep_research
+      - summarize
+
+  - name: frank
+    url: http://frank:3013/a2a
+    apiKeyEnv: FRANK_API_KEY
+    skills:
+      - deploy
+      - infra_health
+      - ci_debug

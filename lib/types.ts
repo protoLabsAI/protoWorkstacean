@@ -5,8 +5,42 @@ export interface BusMessage {
   topic: string;
   timestamp: number;
   payload: unknown;
-  reply?: string;
+  // source: where this message originated
+  source?: {
+    interface: "discord" | "slack" | "voice" | "github" | "plane" | "api" | string;
+    channelId?: string;
+    userId?: string;
+  };
+  // reply: where responses (including HITLRequest) should be published
+  reply?: {
+    topic: string;
+    format?: "markdown" | "plain" | "voice" | "structured";
+  };
+  /** @deprecated Use payload.content for text and reply.topic for routing. */
   replyTo?: string;
+}
+
+// ── HITL (human-in-the-loop) gate types ──────────────────────────────────────
+
+export interface HITLRequest {
+  type: "hitl_request";
+  correlationId: string;
+  title: string;
+  summary: string;
+  avaVerdict?: { score: number; concerns: string[]; verdict: string };
+  jonVerdict?: { score: number; concerns: string[]; verdict: string };
+  options: string[];      // ["approve", "reject", "modify"]
+  expiresAt: string;      // ISO timestamp
+  replyTopic: string;     // where to publish HITLResponse
+  sourceMeta?: BusMessage["source"]; // carry source through so HITL plugin knows how to render
+}
+
+export interface HITLResponse {
+  type: "hitl_response";
+  correlationId: string;
+  decision: "approve" | "reject" | "modify";
+  feedback?: string;
+  decidedBy: string;
 }
 
 export interface Plugin {

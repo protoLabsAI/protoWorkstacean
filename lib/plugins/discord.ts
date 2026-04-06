@@ -208,6 +208,7 @@ export class DiscordPlugin implements Plugin {
           isThread: message.channel.isThread(),
           guildId: message.guildId,
         },
+        source: { interface: "discord" as const, channelId: message.channelId, userId },
         reply: { topic: `message.outbound.discord.${message.channelId}` },
       });
     });
@@ -242,6 +243,7 @@ export class DiscordPlugin implements Plugin {
           skillHint: "bug_triage",
           isReaction: true,
         },
+        source: { interface: "discord" as const, channelId: message.channelId, userId: user.id },
         reply: { topic: `message.outbound.discord.${message.channelId}` },
       });
     });
@@ -288,6 +290,7 @@ export class DiscordPlugin implements Plugin {
           content,
           skillHint: subConfig.skillHint,
         },
+        source: { interface: "discord" as const, channelId: interaction.channelId, userId: interaction.user.id },
         reply: { topic: `message.outbound.discord.${topicSuffix}` },
       });
     });
@@ -347,7 +350,7 @@ export class DiscordPlugin implements Plugin {
     this.client.login(process.env.DISCORD_BOT_TOKEN);
   }
 
-  uninstall(_bus: EventBus): void {
+  uninstall(): void {
     this.client?.destroy();
   }
 

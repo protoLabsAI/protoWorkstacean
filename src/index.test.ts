@@ -360,7 +360,6 @@ describe("Integration: CLI → Signal flow", () => {
       topic: "message.outbound.signal.+1234",
       timestamp: Date.now(),
       payload: { content: "hello from CLI" },
-      reply: "hello from CLI",
     };
 
     bus.publish(msg.topic, msg);
@@ -369,7 +368,6 @@ describe("Integration: CLI → Signal flow", () => {
     expect(signalReceived!.id).toBe(msg.id);
     expect(signalReceived!.topic).toBe(msg.topic);
     expect(signalReceived!.payload).toEqual(msg.payload);
-    expect(signalReceived!.reply).toBe("hello from CLI");
   });
 
   test("Signal inbound reaches agent subscriber", () => {
@@ -387,7 +385,8 @@ describe("Integration: CLI → Signal flow", () => {
       topic: "message.inbound.signal.+5678",
       timestamp: Date.now(),
       payload: { sender: "+5678", content: "hello" },
-      reply: "hello",
+      source: { interface: "signal", userId: "+5678" },
+      reply: { topic: "message.outbound.signal.+5678" },
     };
 
     bus.publish(msg.topic, msg);
@@ -396,6 +395,6 @@ describe("Integration: CLI → Signal flow", () => {
     expect(agentReceived!.id).toBe(msg.id);
     expect(agentReceived!.topic).toBe(msg.topic);
     expect(agentReceived!.payload).toEqual(msg.payload);
-    expect(agentReceived!.reply).toBe("hello");
+    expect(agentReceived!.reply).toEqual({ topic: "message.outbound.signal.+5678" });
   });
 });

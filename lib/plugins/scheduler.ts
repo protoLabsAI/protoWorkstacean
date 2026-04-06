@@ -217,7 +217,6 @@ export class SchedulerPlugin implements Plugin {
       topic: def.topic,
       timestamp: Date.now(),
       payload: { ...def.payload },
-      reply: def.payload.content,
     };
 
     console.log(`[Scheduler] Firing: ${def.id} → ${def.topic}`);
@@ -330,7 +329,6 @@ export class SchedulerPlugin implements Plugin {
       topic: "schedule.list",
       timestamp: Date.now(),
       payload: { schedules: list },
-      reply: JSON.stringify(list, null, 2),
     };
 
     this.bus!.publish(reply.topic, reply);

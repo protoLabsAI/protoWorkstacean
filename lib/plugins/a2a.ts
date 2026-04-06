@@ -37,6 +37,8 @@ import type { EventBus, BusMessage, Plugin } from "../types.ts";
 // ── Config types ──────────────────────────────────────────────────────────────
 
 interface ProjectDiscordChannels {
+  general?: string;
+  updates?: string;
   dev?: string;
   alerts?: string;
   releases?: string;
@@ -49,6 +51,8 @@ interface ProjectEntry {
   defaultBranch?: string;
   status?: string;
   onboardedAt?: string;
+  team?: string;
+  agents?: string[];
   discord?: ProjectDiscordChannels;
 }
 
@@ -83,12 +87,17 @@ function buildIndex(projectsPath: string): Map<string, ProjectIndex> {
     if (!project.github || !project.slug) continue;
     if (project.status === "archived" || project.status === "suspended") continue;
 
+    // Support both flat discord shape (discord.dev) and nested (discord.channels.dev)
+    const disc = project.discord as Record<string, unknown> | undefined;
+    const channels = (disc?.channels as Record<string, string> | undefined) ?? disc;
     index.set(project.github, {
       projectSlug: project.slug,
       discordChannels: {
-        dev: project.discord?.dev,
-        alerts: project.discord?.alerts,
-        releases: project.discord?.releases,
+        general: channels?.general as string | undefined,
+        updates: channels?.updates as string | undefined,
+        dev: channels?.dev as string | undefined,
+        alerts: channels?.alerts as string | undefined,
+        releases: channels?.releases as string | undefined,
       },
     });
   }

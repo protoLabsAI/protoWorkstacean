@@ -28,7 +28,6 @@ describe("EchoPlugin", () => {
       topic: "message.inbound.signal.+1234",
       timestamp: Date.now(),
       payload: { sender: "+1234", content: "hello" },
-      reply: "hello",
     };
 
     bus.publish(inboundMsg.topic, inboundMsg);
@@ -36,7 +35,7 @@ describe("EchoPlugin", () => {
     expect(replyReceived).not.toBeNull();
     expect(replyReceived!.correlationId).toBe("test-123");
     expect(replyReceived!.topic).toBe("message.outbound.signal.+1234");
-    expect(replyReceived!.reply).toBe("Echo: hello");
+    expect((replyReceived!.payload as { content: string }).content).toBe("Echo: hello");
   });
 
   test("echo preserves correlation id", () => {

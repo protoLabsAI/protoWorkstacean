@@ -1,0 +1,61 @@
+# protoLabs Project Registry — source of truth for the full fleet
+# Consumed by: Workstacean (routing), Quinn (portfolio monitoring), protoMaker (project registration)
+# Served via GET /api/projects
+
+projects:
+  - slug: protolabsai-protomaker
+    title: protoMaker
+    team: dev
+    github: protoLabsAI/protoMaker
+    defaultBranch: main
+    status: active
+    agents: [ava, quinn, frank]
+    discord:
+      general: ""
+      updates: ""
+      dev: ""
+
+  - slug: protolabsai-quinn
+    title: Quinn
+    team: dev
+    github: protoLabsAI/quinn
+    defaultBranch: main
+    status: active
+    agents: [ava, quinn]
+    discord:
+      general: ""
+      dev: ""
+
+  - slug: protolabsai-protoui
+    title: protoUI
+    team: dev
+    github: protoLabsAI/protoUI
+    defaultBranch: main
+    status: active
+    agents: [ava, quinn]
+    discord:
+      general: "1490601617567912050"
+      updates: "1490601619300286525"
+      dev: "1490601620927418428"
+
+  - slug: protolabsai-protocontent
+    title: protoContent
+    team: gtm
+    github: protoLabsAI/protoContent
+    defaultBranch: main
+    status: active
+    agents: [jon, cindi]
+    discord:
+      general: ""
+      dev: ""
+
+  - slug: protolabsai-protoworkstacean
+    title: protoWorkstacean
+    team: dev
+    github: protoLabsAI/protoWorkstacean
+    defaultBranch: main
+    status: active
+    agents: [ava, quinn, frank]
+    discord:
+      general: ""
+      dev: ""
