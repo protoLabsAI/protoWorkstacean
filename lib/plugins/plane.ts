@@ -243,6 +243,9 @@ export class PlanePlugin implements Plugin {
 
   private server: ReturnType<typeof Bun.serve> | null = null;
   private workspaceDir: string;
+  // Maps correlationId → {planeIssueId, planeProjectId} so outbound handler can
+  // resolve Plane context even when the A2A reply payload doesn't carry it.
+  private pendingIssues = new Map<string, { planeIssueId: string; planeProjectId: string }>();
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
@@ -268,14 +271,23 @@ export class PlanePlugin implements Plugin {
       // ── Outbound: update Plane issues on reply ────────────────────────────
       bus.subscribe("plane.reply.#", "plane-outbound", async (msg: BusMessage) => {
         const payload = msg.payload as Record<string, unknown>;
-        const planeIssueId = String(payload.planeIssueId ?? "");
-        const planeProjectId = String(payload.planeProjectId ?? "");
         const status = String(payload.status ?? "");
         const summary = String(payload.summary ?? payload.content ?? "");
 
+        // Resolve Plane context: prefer explicit payload fields, fall back to
+        // the pending map keyed by correlationId (set when the inbound was published).
+        const pending = msg.correlationId ? this.pendingIssues.get(msg.correlationId) : undefined;
+        const planeIssueId = String(payload.planeIssueId ?? pending?.planeIssueId ?? "");
+        const planeProjectId = String(payload.planeProjectId ?? pending?.planeProjectId ?? "");
+
         if (!planeIssueId || !planeProjectId) {
-          console.warn("[plane] outbound reply missing planeIssueId or planeProjectId");
+          console.warn("[plane] outbound reply missing planeIssueId or planeProjectId — skipping Plane sync");
           return;
+        }
+
+        // Clean up pending entry on final status
+        if (status === "completed" || status === "done" || status === "rejected") {
+          this.pendingIssues.delete(msg.correlationId ?? "");
         }
 
         // Resolve state UUIDs for this project
@@ -392,9 +404,12 @@ export class PlanePlugin implements Plugin {
       return;
     }
 
+    const correlationId = `plane-${issue.id}`;
+    this.pendingIssues.set(correlationId, { planeIssueId: issue.id, planeProjectId: issue.project });
+
     bus.publish(topic, {
       id: crypto.randomUUID(),
-      correlationId: `plane-${issue.id}`,
+      correlationId,
       topic,
       timestamp: Date.now(),
       payload: {
