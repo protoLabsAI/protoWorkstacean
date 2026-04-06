@@ -9,10 +9,13 @@
  *   hitl.request.#  — emitted by Ava after SPARC PRD + antagonistic review
  *   hitl.response.# — emitted by interface plugins after user decision
  *
- * Outbound routing (extensible via registerInterface):
+ * Outbound routing (extensible via registerInterface / registerHITLRenderer):
  *   discord → message.outbound.discord.push.{channelId}
- *   api     → logged only (caller gets response inline via A2A)
- *   unknown → hitl.unrouted.{correlationId}
+ *   api     → hitl.pending.{correlationId} (callers poll this)
+ *   unknown → hitl.pending.{correlationId}
+ *
+ * Pending requests are tracked in-memory with expiry. On a 60s interval,
+ * expired entries are removed and hitl.expired.{correlationId} is published.
  *
  * Config: workspace/agents.yaml (to find Ava's A2A endpoint for plan_resume)
  */
@@ -50,15 +53,34 @@ interfaceRouters.set("discord", (req: HITLRequest) => {
   return `message.outbound.discord.push.${channelId}`;
 });
 
-interfaceRouters.set("api", (_req: HITLRequest) => {
-  // API callers get the response inline via A2A — no bus routing needed
-  return null;
+interfaceRouters.set("api", (req: HITLRequest) => {
+  return `hitl.pending.${req.correlationId}`;
 });
 
 /** Register a custom interface router. Plugins call this to extend HITL routing. */
 export function registerInterface(name: string, router: InterfaceRouter): void {
   interfaceRouters.set(name, router);
 }
+
+/**
+ * Register a custom HITL renderer for an interface.
+ * Alias for registerInterface — allows future plugins to register their own
+ * rendering logic without modifying the HITL plugin directly.
+ */
+export function registerHITLRenderer(
+  interfaceName: string,
+  handler: (req: HITLRequest) => void,
+): void {
+  // Wrap the handler as an InterfaceRouter that returns null (handler does its own publishing)
+  interfaceRouters.set(interfaceName, (req: HITLRequest) => {
+    handler(req);
+    return null; // handler is responsible for publishing
+  });
+}
+
+// ── Pending request store ───────────────────────────────────────────────────
+
+const pendingRequests = new Map<string, HITLRequest>();
 
 // ── A2A call to Ava for plan_resume ──────────────────────────────────────────
 
@@ -107,29 +129,53 @@ export class HITLPlugin implements Plugin {
 
   private workspaceDir: string;
   private agents: AgentDef[] = [];
+  private expiryTimer: ReturnType<typeof setInterval> | null = null;
+  private busRef: EventBus | null = null;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
   }
 
   install(bus: EventBus): void {
+    this.busRef = bus;
     this.agents = this._loadAgents();
     console.log(`[hitl] Loaded ${this.agents.length} agent(s) for plan_resume routing`);
+
+    // ── Expiry sweep: every 60s, remove expired pending requests ─────────
+    this.expiryTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [correlationId, req] of pendingRequests) {
+        if (new Date(req.expiresAt).getTime() <= now) {
+          pendingRequests.delete(correlationId);
+          console.log(`[hitl] Expired HITLRequest (${correlationId})`);
+          bus.publish(`hitl.expired.${correlationId}`, {
+            id: crypto.randomUUID(),
+            correlationId,
+            topic: `hitl.expired.${correlationId}`,
+            timestamp: Date.now(),
+            payload: { type: "hitl_expired", correlationId, originalRequest: req },
+          });
+        }
+      }
+    }, 60_000);
 
     // ── Route HITLRequest to the correct interface ───────────────────────
     bus.subscribe("hitl.request.#", this.name, (msg: BusMessage) => {
       const req = msg.payload as HITLRequest;
       if (req?.type !== "hitl_request") return;
 
+      // Store in pending map
+      pendingRequests.set(req.correlationId, req);
+
       const iface = req.sourceMeta?.interface ?? "unknown";
       const router = interfaceRouters.get(iface);
 
       if (!router) {
-        console.warn(`[hitl] No router for interface "${iface}" — publishing to hitl.unrouted`);
-        bus.publish(`hitl.unrouted.${req.correlationId}`, {
+        console.warn(`[hitl] No router for interface "${iface}" — publishing to hitl.pending`);
+        bus.publish(`hitl.pending.${req.correlationId}`, {
           id: crypto.randomUUID(),
           correlationId: req.correlationId,
-          topic: `hitl.unrouted.${req.correlationId}`,
+          topic: `hitl.pending.${req.correlationId}`,
           timestamp: Date.now(),
           payload: req,
         });
@@ -157,6 +203,14 @@ export class HITLPlugin implements Plugin {
       const resp = msg.payload as HITLResponse;
       if (resp?.type !== "hitl_response") return;
 
+      // Remove from pending map
+      const pending = pendingRequests.get(resp.correlationId);
+      if (pending) {
+        pendingRequests.delete(resp.correlationId);
+      } else {
+        console.warn(`[hitl] No pending request for correlationId ${resp.correlationId} — processing anyway`);
+      }
+
       // Find agent with plan_resume skill (should be Ava)
       const planAgent = this.agents.find(a => a.skills.includes("plan_resume"));
       if (!planAgent) {
@@ -175,7 +229,13 @@ export class HITLPlugin implements Plugin {
     });
   }
 
-  uninstall(): void {}
+  uninstall(): void {
+    if (this.expiryTimer) {
+      clearInterval(this.expiryTimer);
+      this.expiryTimer = null;
+    }
+    this.busRef = null;
+  }
 
   private _loadAgents(): AgentDef[] {
     const agentsPath = join(this.workspaceDir, "agents.yaml");

@@ -6,6 +6,7 @@
     "start": "bun run src/index.ts"
   },
   "dependencies": {
+    "@makeplane/plane-node-sdk": "^0.2.9",
     "@mariozechner/pi-coding-agent": "^0.64.0",
     "cron-parser": "^5.5.0",
     "discord.js": "^14.0.0",

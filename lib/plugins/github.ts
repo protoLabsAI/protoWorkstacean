@@ -490,7 +490,7 @@ export class GitHubPlugin implements Plugin {
               url: ctx.url,
             },
           },
-          replyTo: replyTopic,
+          reply: { topic: replyTopic },
         });
 
         console.log(

@@ -1,5 +1,6 @@
-import { existsSync, readdirSync, mkdirSync } from "node:fs";
+import { existsSync, readdirSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve, join, extname } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { InMemoryEventBus } from "../lib/bus";
 import { DebugPlugin } from "../lib/plugins/debug";
 import { LoggerPlugin } from "../lib/plugins/logger";
@@ -7,6 +8,7 @@ import { CLIPlugin } from "../lib/plugins/cli";
 import { SignalPlugin } from "../lib/plugins/signal";
 import { DiscordPlugin } from "../lib/plugins/discord";
 import { GitHubPlugin } from "../lib/plugins/github";
+import { PlanePlugin } from "../lib/plugins/plane";
 import { EchoPlugin } from "../lib/plugins/echo";
 import { AgentPlugin } from "../lib/plugins/agent";
 import { A2APlugin } from "../lib/plugins/a2a";
@@ -56,6 +58,10 @@ if (process.env.DISCORD_BOT_TOKEN) {
 if (process.env.GITHUB_TOKEN) {
   corePlugins.push(new GitHubPlugin(workspaceDir));
 }
+
+// PlanePlugin — enabled when PLANE_WEBHOOK_SECRET or PLANE_API_KEY is set
+// (works in dev mode without secret — just skips signature verification)
+corePlugins.push(new PlanePlugin(workspaceDir));
 
 // A2APlugin — always enabled; loads projects.yaml (no-op if file absent)
 corePlugins.push(new A2APlugin(workspaceDir));
@@ -215,6 +221,42 @@ Bun.serve({
       bus.publish(body.topic, message);
 
       return Response.json({ success: true, id: message.id });
+    }
+
+    // --- GET /api/projects ---
+    if (req.method === "GET" && url.pathname === "/api/projects") {
+      try {
+        const projectsPath = join(workspaceDir, "projects.yaml");
+        if (!existsSync(projectsPath)) {
+          return Response.json({ success: true, data: [] });
+        }
+        const raw = readFileSync(projectsPath, "utf8");
+        const parsed = parseYaml(raw) as { projects?: unknown[] };
+        return Response.json({ success: true, data: parsed.projects ?? [] });
+      } catch (err) {
+        return Response.json(
+          { success: false, error: `Failed to parse projects.yaml: ${err}` },
+          { status: 500 }
+        );
+      }
+    }
+
+    // --- GET /api/agents ---
+    if (req.method === "GET" && url.pathname === "/api/agents") {
+      try {
+        const agentsPath = join(workspaceDir, "agents.yaml");
+        if (!existsSync(agentsPath)) {
+          return Response.json({ success: true, data: [] });
+        }
+        const raw = readFileSync(agentsPath, "utf8");
+        const parsed = parseYaml(raw) as { agents?: unknown[] };
+        return Response.json({ success: true, data: parsed.agents ?? [] });
+      } catch (err) {
+        return Response.json(
+          { success: false, error: `Failed to parse agents.yaml: ${err}` },
+          { status: 500 }
+        );
+      }
     }
 
     // --- Fallback ---
