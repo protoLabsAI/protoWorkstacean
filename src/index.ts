@@ -6,15 +6,7 @@ import { DebugPlugin } from "../lib/plugins/debug";
 import { LoggerPlugin } from "../lib/plugins/logger";
 import { CLIPlugin } from "../lib/plugins/cli";
 import { SignalPlugin } from "../lib/plugins/signal";
-import { DiscordPlugin } from "../lib/plugins/discord";
-import { GitHubPlugin } from "../lib/plugins/github";
-import { PlanePlugin } from "../lib/plugins/plane";
-import { EchoPlugin } from "../lib/plugins/echo";
-import { AgentPlugin } from "../lib/plugins/agent";
-import { A2APlugin } from "../lib/plugins/a2a";
-import { HITLPlugin } from "../lib/plugins/hitl";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
-import { EventViewerPlugin } from "../lib/plugins/event-viewer";
 import type { Plugin, BusMessage } from "../lib/types";
 
 // --- Workspace config ---
@@ -31,8 +23,7 @@ const dataDir = resolve(
 
 const bus = new InMemoryEventBus();
 
-// Core plugins (always loaded)
-// Debug plugin first so it captures all subsequent console output
+// Core plugins — always loaded, statically imported (no dynamic overhead needed)
 const debugPlugin = new DebugPlugin();
 debugPlugin.install(bus);
 
@@ -44,52 +35,103 @@ const corePlugins: Plugin[] = [
   new SchedulerPlugin(dataDir),
 ];
 
-// AgentPlugin (Pi SDK) — disabled when A2APlugin workspace plugin is active
-if (!process.env.DISABLE_AGENT_PLUGIN) {
-  corePlugins.push(new AgentPlugin(workspaceDir, dataDir));
-}
-
-// DiscordPlugin — enabled when DISCORD_BOT_TOKEN is set
-if (process.env.DISCORD_BOT_TOKEN) {
-  corePlugins.push(new DiscordPlugin(workspaceDir));
-}
-
-// GitHubPlugin — enabled when GITHUB_TOKEN is set
-if (process.env.GITHUB_TOKEN) {
-  corePlugins.push(new GitHubPlugin(workspaceDir));
-}
-
-// PlanePlugin — enabled when PLANE_WEBHOOK_SECRET or PLANE_API_KEY is set
-// (works in dev mode without secret — just skips signature verification)
-corePlugins.push(new PlanePlugin(workspaceDir));
-
-// A2APlugin — always enabled; loads projects.yaml (no-op if file absent)
-corePlugins.push(new A2APlugin(workspaceDir));
-
-// HITLPlugin — routes HITL requests/responses between interface plugins and Ava
-corePlugins.push(new HITLPlugin(workspaceDir));
-
-if (!process.env.DISABLE_EVENT_VIEWER) {
-  corePlugins.push(new EventViewerPlugin());
-}
-
-// Built-in plugins (disabled by default, can be enabled via env)
-const builtInPlugins: Record<string, Plugin> = {
-  echo: new EchoPlugin(),
-};
-
-// Install core plugins
 for (const plugin of corePlugins) {
   plugin.install(bus);
 }
 
-// Install enabled built-in plugins
-const enabledPlugins = process.env.ENABLED_PLUGINS?.split(",") || [];
-for (const name of enabledPlugins) {
-  const plugin = builtInPlugins[name.trim()];
-  if (plugin) {
+// --- Plugin registry ---
+// Each entry declares when to load and how to construct the plugin via dynamic
+// import. This keeps startup cost proportional to what's actually enabled and
+// makes the list of available integrations self-documenting.
+//
+// Future direction (per upstream feedback): each integration could become an
+// independent microservice communicating via HTTP/WS — the condition/factory
+// shape already supports swapping in an HTTP-client adapter per entry without
+// changing the loading loop.
+
+interface PluginRegistryEntry {
+  name: string;
+  condition: () => boolean;
+  factory: () => Promise<Plugin>;
+}
+
+const enabledBuiltins = (process.env.ENABLED_PLUGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+
+const pluginRegistry: PluginRegistryEntry[] = [
+  {
+    name: "agent",
+    condition: () => !process.env.DISABLE_AGENT_PLUGIN,
+    factory: async () => {
+      const { AgentPlugin } = await import("../lib/plugins/agent");
+      return new AgentPlugin(workspaceDir, dataDir);
+    },
+  },
+  {
+    name: "discord",
+    condition: () => !!process.env.DISCORD_BOT_TOKEN,
+    factory: async () => {
+      const { DiscordPlugin } = await import("../lib/plugins/discord");
+      return new DiscordPlugin(workspaceDir);
+    },
+  },
+  {
+    name: "github",
+    condition: () => !!(process.env.GITHUB_TOKEN || process.env.GITHUB_APP_ID),
+    factory: async () => {
+      const { GitHubPlugin } = await import("../lib/plugins/github");
+      return new GitHubPlugin(workspaceDir);
+    },
+  },
+  {
+    name: "plane",
+    // Always register — degrades gracefully without credentials
+    condition: () => true,
+    factory: async () => {
+      const { PlanePlugin } = await import("../lib/plugins/plane");
+      return new PlanePlugin(workspaceDir);
+    },
+  },
+  {
+    name: "a2a",
+    condition: () => true,
+    factory: async () => {
+      const { A2APlugin } = await import("../lib/plugins/a2a");
+      return new A2APlugin(workspaceDir);
+    },
+  },
+  {
+    name: "hitl",
+    condition: () => true,
+    factory: async () => {
+      const { HITLPlugin } = await import("../lib/plugins/hitl");
+      return new HITLPlugin(workspaceDir);
+    },
+  },
+  {
+    name: "event-viewer",
+    condition: () => !process.env.DISABLE_EVENT_VIEWER,
+    factory: async () => {
+      const { EventViewerPlugin } = await import("../lib/plugins/event-viewer");
+      return new EventViewerPlugin();
+    },
+  },
+  // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
+  {
+    name: "echo",
+    condition: () => enabledBuiltins.includes("echo"),
+    factory: async () => {
+      const { EchoPlugin } = await import("../lib/plugins/echo");
+      return new EchoPlugin();
+    },
+  },
+];
+
+const registeredPlugins: Plugin[] = [];
+for (const entry of pluginRegistry) {
+  if (entry.condition()) {
+    const plugin = await entry.factory();
     plugin.install(bus);
-    console.log(`Enabled built-in plugin: ${name}`);
+    registeredPlugins.push(plugin);
   }
 }
 
@@ -143,11 +185,7 @@ async function loadWorkspacePlugins(): Promise<Plugin[]> {
 
 const workspacePlugins = await loadWorkspacePlugins();
 
-const allPlugins = [
-  ...corePlugins,
-  ...enabledPlugins.map((n) => builtInPlugins[n]).filter(Boolean),
-  ...workspacePlugins,
-];
+const allPlugins = [...corePlugins, ...registeredPlugins, ...workspacePlugins];
 
 console.log("WorkStacean started.");
 console.log(`Workspace: ${workspaceDir}`);
@@ -159,7 +197,7 @@ console.log(`Type 'help' for commands.`);
 const cli = corePlugins.find((p) => p.name === "cli") as CLIPlugin;
 cli?.showPrompt();
 
-// --- HTTP API server (POST /publish, GET /health) ---
+// --- HTTP API server (POST /publish, GET /health, GET /api/*) ---
 const HTTP_PORT = parseInt(process.env.WORKSTACEAN_HTTP_PORT || "3000", 10);
 const API_KEY = process.env.WORKSTACEAN_API_KEY;
 
