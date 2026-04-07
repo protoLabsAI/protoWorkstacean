@@ -150,7 +150,7 @@ export class PlaneClient {
 
   async addIssueComment(projectId: string, issueId: string, comment: string): Promise<boolean> {
     try {
-      const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/issues/${issueId}/comments/`;
+      const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/work-items/${issueId}/comments/`;
       const resp = await fetch(url, {
         method: "POST",
         headers: this.headers(),
