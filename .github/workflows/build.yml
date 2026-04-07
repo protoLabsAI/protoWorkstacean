@@ -1,8 +1,10 @@
-name: Build and Push
+name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
 
 env:
   REGISTRY: ghcr.io
@@ -30,6 +32,7 @@ jobs:
 
   build-and-push:
     needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
