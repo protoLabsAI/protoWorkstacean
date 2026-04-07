@@ -71,7 +71,7 @@ flowchart TD
         A["Ava :3008 · plan / plan_resume / sitrep / manage_feature / auto_mode / board_health / onboard_project"]
         JN["Jon :3010 · content_strategy / gtm_review / competitive_research"]
         CIN["Cindi :3011 · write_content / blog_post / social_post"]
-        RSH["Researcher :3012 · deep_research / summarize"]
+        RSH["Researcher :7870 · deep_research / summarize"]
         FK["Frank :3013 · deploy / infra_health / ci_debug"]
         SKILLLOAD["load skill file · fallback /slash parsing"]
     end
