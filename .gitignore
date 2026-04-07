@@ -5,4 +5,4 @@ models.json
 
 # Agent workspace — registry files are tracked; runtime state is ignored
 workspace/crons/
-workspace/*.log
+workspace/*.log.automaker-lock

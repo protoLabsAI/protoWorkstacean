@@ -36,6 +36,18 @@ export interface PlaneWebhook {
   [key: string]: unknown;
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+/** Escape HTML entities to prevent XSS when embedding text in comment_html. */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 // ── PlaneClient ───────────────────────────────────────────────────────────────
 
 export class PlaneClient {
@@ -95,8 +107,11 @@ export class PlaneClient {
       if (resp.ok) {
         const data = (await resp.json()) as { results?: PlaneState[] };
         for (const state of data.results ?? []) {
-          map.set(state.group, state.id);
-          map.set(state.name.toLowerCase(), state.id);
+          // Namespace keys to prevent collisions between group names and state names
+          // (e.g. a group called "started" vs a state named "started" in another group).
+          // Callers must use the same prefixes: "group:<group>" or "name:<lowercase-name>".
+          map.set(`group:${state.group}`, state.id);
+          map.set(`name:${state.name.toLowerCase()}`, state.id);
         }
       } else {
         console.warn(`[plane-client] Failed to fetch states for project ${projectId}: ${resp.status}`);
@@ -139,7 +154,7 @@ export class PlaneClient {
       const resp = await fetch(url, {
         method: "POST",
         headers: this.headers(),
-        body: JSON.stringify({ comment_html: `<p>${comment}</p>` }),
+        body: JSON.stringify({ comment_html: `<p>${escapeHtml(comment)}</p>` }),
         signal: AbortSignal.timeout(10_000),
       });
       if (!resp.ok) {

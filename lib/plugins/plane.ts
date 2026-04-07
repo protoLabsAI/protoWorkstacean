@@ -158,13 +158,13 @@ export class PlanePlugin implements Plugin {
         const states = await apiCache!.fetchStates(planeProjectId);
 
         if (status === "created" || status === "in_progress") {
-          const inProgressState = states.get("started") ?? states.get("in progress");
+          const inProgressState = states.get("group:started") ?? states.get("name:in progress");
           if (inProgressState) {
             await apiCache!.patchIssueState(planeProjectId, planeIssueId, inProgressState);
             console.log(`[plane] Issue ${planeIssueId} → In Progress`);
           }
         } else if (status === "completed" || status === "done") {
-          const doneState = states.get("completed") ?? states.get("done");
+          const doneState = states.get("group:completed") ?? states.get("name:done");
           if (doneState) {
             await apiCache!.patchIssueState(planeProjectId, planeIssueId, doneState);
             console.log(`[plane] Issue ${planeIssueId} → Done`);

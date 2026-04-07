@@ -28,11 +28,23 @@
  */
 
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
-import { createSign } from "node:crypto";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { PlaneClient } from "../plane-client.ts";
+import { makeGitHubAuth } from "../github-auth.ts";
+
+// ── In-process write lock for projects.yaml ───────────────────────────────────
+// Serialises concurrent onboarding writes to prevent TOCTOU races when two
+// different slugs are onboarded simultaneously in the same Bun process.
+
+let _projectsYamlLockChain: Promise<void> = Promise.resolve();
+
+function withProjectsYamlLock(fn: () => void): Promise<void> {
+  const next = _projectsYamlLockChain.then(fn);
+  _projectsYamlLockChain = next.catch(() => {});
+  return next;
+}
 
 // ── Request / response types ──────────────────────────────────────────────────
 
@@ -63,74 +75,6 @@ interface OnboardSteps {
   planeWebhook?: StepResult;
   githubWebhook?: StepResult;
   projectsYaml?: StepResult;
-}
-
-// ── GitHub App auth (for webhook registration) ────────────────────────────────
-
-class GitHubAppAuth {
-  private cache = new Map<string, { token: string; exp: number }>();
-
-  constructor(private appId: string, private privateKey: string) {}
-
-  async getToken(owner: string, repo: string): Promise<string> {
-    const key = `${owner}/${repo}`;
-    const cached = this.cache.get(key);
-    if (cached && cached.exp > Date.now() + 60_000) return cached.token;
-
-    const jwt = this.makeJWT();
-    const headers = this.appHeaders(jwt);
-
-    const installResp = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/installation`,
-      { headers },
-    );
-    if (!installResp.ok) {
-      throw new Error(`App not installed on ${owner}/${repo}: ${installResp.status}`);
-    }
-    const { id: installId } = await installResp.json() as { id: number };
-
-    const tokenResp = await fetch(
-      `https://api.github.com/app/installations/${installId}/access_tokens`,
-      { method: "POST", headers },
-    );
-    if (!tokenResp.ok) {
-      throw new Error(`Token fetch failed: ${tokenResp.status} ${await tokenResp.text()}`);
-    }
-    const { token, expires_at } = await tokenResp.json() as { token: string; expires_at: string };
-
-    this.cache.set(key, { token, exp: new Date(expires_at).getTime() });
-    return token;
-  }
-
-  private makeJWT(): string {
-    const now = Math.floor(Date.now() / 1000);
-    const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
-    const payload = Buffer.from(JSON.stringify({ iat: now - 60, exp: now + 600, iss: this.appId })).toString("base64url");
-    const data = `${header}.${payload}`;
-    const sig = createSign("RSA-SHA256").update(data).sign(this.privateKey, "base64url");
-    return `${data}.${sig}`;
-  }
-
-  private appHeaders(jwt: string): Record<string, string> {
-    return {
-      Authorization: `Bearer ${jwt}`,
-      Accept: "application/vnd.github+json",
-      "User-Agent": "protoWorkstacean/1.0",
-      "X-GitHub-Api-Version": "2022-11-28",
-    };
-  }
-}
-
-function makeGitHubGetToken(): ((owner: string, repo: string) => Promise<string>) | null {
-  const appId = process.env.QUINN_APP_ID;
-  const privateKey = process.env.QUINN_APP_PRIVATE_KEY;
-  if (appId && privateKey) {
-    const app = new GitHubAppAuth(appId, privateKey);
-    return (owner, repo) => app.getToken(owner, repo);
-  }
-  const pat = process.env.GITHUB_TOKEN;
-  if (pat) return () => Promise.resolve(pat);
-  return null;
 }
 
 // ── GitHub webhook helpers ────────────────────────────────────────────────────
@@ -316,15 +260,18 @@ export class OnboardingPlugin implements Plugin {
     steps.githubWebhook = await this._stepGitHubWebhook(req);
     console.log(`[onboarding] Step 5 github_webhook: ${steps.githubWebhook.status} — ${steps.githubWebhook.detail ?? ""}`);
 
-    // ── Step 6: Update projects.yaml ─────────────────────────────────────────
-    steps.projectsYaml = this._stepUpdateProjectsYaml(req, projectsPath, steps.planeProject.data?.projectId as string | undefined);
-    console.log(`[onboarding] Step 6 projects_yaml: ${steps.projectsYaml.status} — ${steps.projectsYaml.detail ?? ""}`);
+    // ── Step 6: Update projects.yaml (serialised to prevent TOCTOU races) ────
+    const planeProjectId = steps.planeProject?.data?.projectId as string | undefined;
+    await withProjectsYamlLock(() => {
+      steps.projectsYaml = this._stepUpdateProjectsYaml(req, projectsPath, planeProjectId);
+    });
+    console.log(`[onboarding] Step 6 projects_yaml: ${steps.projectsYaml!.status} — ${steps.projectsYaml!.detail ?? ""}`);
 
-    if (steps.projectsYaml.status === "error") {
+    if (steps.projectsYaml!.status === "error") {
       this._reply(bus, msg, {
         success: false,
         step: "projects_yaml",
-        error: steps.projectsYaml.detail ?? "Failed to write projects.yaml",
+        error: steps.projectsYaml!.detail ?? "Failed to write projects.yaml",
       });
       return;
     }
@@ -344,10 +291,10 @@ export class OnboardingPlugin implements Plugin {
       github: req.github,
       summary,
       steps: {
-        planeProject: steps.planeProject.status,
-        planeWebhook: steps.planeWebhook.status,
-        githubWebhook: steps.githubWebhook.status,
-        projectsYaml: steps.projectsYaml.status,
+        planeProject: steps.planeProject?.status,
+        planeWebhook: steps.planeWebhook?.status,
+        githubWebhook: steps.githubWebhook?.status,
+        projectsYaml: steps.projectsYaml?.status,
       },
     });
   }
@@ -425,7 +372,7 @@ export class OnboardingPlugin implements Plugin {
 
   /** Step 5: Register GitHub webhook. */
   private async _stepGitHubWebhook(req: OnboardRequest): Promise<StepResult> {
-    const getToken = makeGitHubGetToken();
+    const getToken = makeGitHubAuth();
     if (!getToken) {
       return { status: "skip", detail: "No GitHub auth configured (QUINN_APP_ID or GITHUB_TOKEN required)" };
     }
