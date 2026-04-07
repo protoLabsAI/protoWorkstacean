@@ -96,6 +96,29 @@ const OPTION_TYPE_CODES: Record<string, number> = {
   boolean: 5,
 };
 
+// ── Spam pattern compilation ──────────────────────────────────────────────────
+
+/**
+ * Compile spam pattern strings to RegExp objects.
+ * Invalid or catastrophically-backtracking patterns are skipped with a warning
+ * rather than crashing the plugin.
+ */
+function compileSpamPatterns(patterns: string[]): RegExp[] {
+  return patterns.flatMap(p => {
+    try {
+      // Basic ReDoS guard: reject patterns with nested quantifiers like (a+)+
+      if (/(\([^)]*[+*][^)]*\))[+*?]/.test(p)) {
+        console.warn(`[discord] Skipping potentially unsafe spam pattern (nested quantifiers): "${p}"`);
+        return [];
+      }
+      return [new RegExp(p, "i")];
+    } catch (err) {
+      console.warn(`[discord] Skipping invalid spam pattern "${p}":`, err);
+      return [];
+    }
+  });
+}
+
 // ── Pending reply handles ─────────────────────────────────────────────────────
 // Kept outside the bus payload so the SQLite logger never tries to serialize them.
 
@@ -170,7 +193,7 @@ export class DiscordPlugin implements Plugin {
     const { rateLimit, spamPatterns } = this.config.moderation;
     this.rateMaxMessages = rateLimit.maxMessages;
     this.rateWindowMs = rateLimit.windowSeconds * 1_000;
-    this.spamPatterns = spamPatterns.map(p => new RegExp(p, "i"));
+    this.spamPatterns = compileSpamPatterns(spamPatterns);
 
     this.client = new Client({
       intents: [
@@ -399,6 +422,30 @@ export class DiscordPlugin implements Plugin {
       }
     });
 
+    // ── Hot-reload discord.yaml ───────────────────────────────────────────────
+    // watchFile works even if the file doesn't exist yet (detects creation too).
+    const configPath = join(this.workspaceDir, "discord.yaml");
+    watchFile(configPath, { interval: 5_000 }, async () => {
+      const prev = this.config;
+      this.config = loadConfig(this.workspaceDir);
+
+      // Apply updated moderation config
+      const { rateLimit, spamPatterns } = this.config.moderation;
+      this.rateMaxMessages = rateLimit.maxMessages;
+      this.rateWindowMs = rateLimit.windowSeconds * 1_000;
+      this.spamPatterns = compileSpamPatterns(spamPatterns);
+
+      // Re-register slash commands if command list changed
+      const prevCmds = JSON.stringify(prev.commands ?? []);
+      const newCmds = JSON.stringify(this.config.commands ?? []);
+      if (prevCmds !== newCmds && this.client?.isReady()) {
+        console.log("[discord] discord.yaml changed — re-registering slash commands");
+        await this._registerSlashCommands().catch(console.error);
+      } else {
+        console.log("[discord] discord.yaml reloaded");
+      }
+    });
+
     // ── Bus client login ────────────────────────────────────────────────────
     this.client.login(process.env.DISCORD_BOT_TOKEN);
 
@@ -423,9 +470,9 @@ export class DiscordPlugin implements Plugin {
     }
     this.agentClients.clear();
 
-    // Stop watching agents.yaml
-    const agentsPath = join(this.workspaceDir, "agents.yaml");
-    unwatchFile(agentsPath);
+    // Stop watching config files
+    unwatchFile(join(this.workspaceDir, "discord.yaml"));
+    unwatchFile(join(this.workspaceDir, "agents.yaml"));
 
     this.client?.destroy();
   }

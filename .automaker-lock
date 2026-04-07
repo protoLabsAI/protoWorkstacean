@@ -1,5 +1,10 @@
 {
   "pid": 7,
+<<<<<<< HEAD
+  "featureId": "feature-1775548716277-5dj6q1qw3",
+  "startedAt": "2026-04-07T07:59:09.935Z"
+=======
   "featureId": "feature-1775553242924-ztpmkoq9i",
   "startedAt": "2026-04-07T09:14:38.656Z"
+>>>>>>> origin/dev
 }

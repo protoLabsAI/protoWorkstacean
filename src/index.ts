@@ -100,6 +100,14 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    name: "onboarding",
+    condition: () => true,
+    factory: async () => {
+      const { OnboardingPlugin } = await import("../lib/plugins/onboarding");
+      return new OnboardingPlugin(workspaceDir);
+    },
+  },
+  {
     name: "hitl",
     condition: () => true,
     factory: async () => {
@@ -245,11 +253,70 @@ async function handlePublish(req: Request): Promise<Response> {
   return Response.json({ success: true, id: message.id });
 }
 
+async function handleOnboard(req: Request): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return Response.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!body.slug || !body.title || !body.github) {
+    return Response.json(
+      { success: false, error: "Missing required fields: slug, title, github (owner/repo)" },
+      { status: 400 },
+    );
+  }
+
+  const correlationId = crypto.randomUUID();
+  const topic = "message.inbound.onboard";
+
+  // Wait up to 30s for the pipeline to complete and reply
+  const result = await new Promise<Record<string, unknown>>((resolve) => {
+    const replyTopic = `onboard.result.${correlationId}`;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const subId = bus.subscribe(replyTopic, "onboard-http", (msg: BusMessage) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      bus.unsubscribe(subId);
+      resolve(msg.payload as Record<string, unknown>);
+    });
+
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      bus.unsubscribe(subId);
+      resolve({ success: true, status: "accepted", correlationId, message: "Onboarding started (no response within 30s)" });
+    }, 30_000);
+
+    bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic,
+      timestamp: Date.now(),
+      payload: body,
+      source: { interface: "api" as const },
+      reply: { topic: replyTopic },
+    });
+  });
+
+  const statusCode = result.success ? 200 : 422;
+  return Response.json(result, { status: statusCode });
+}
+
 type RouteHandler = (req: Request) => Response | Promise<Response>;
 
 const routes = new Map<string, RouteHandler>([
   ["GET /health",        () => Response.json({ status: "ok", timestamp: Date.now() })],
   ["POST /publish",      handlePublish],
+  ["POST /api/onboard",  handleOnboard],
   ["GET /api/projects",  () => serveWorkspaceYaml("projects.yaml", "projects")],
   ["GET /api/agents",    () => serveWorkspaceYaml("agents.yaml", "agents")],
 ]);
