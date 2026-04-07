@@ -209,7 +209,7 @@ class PlaneAPICache {
 
   async addIssueComment(projectId: string, issueId: string, comment: string): Promise<boolean> {
     try {
-      const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/work-items/${issueId}/activities/`;
+      const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/issues/${issueId}/comments/`;
       const resp = await fetch(url, {
         method: "POST",
         headers: this.headers(),
@@ -308,8 +308,8 @@ export class PlanePlugin implements Plugin {
         }
 
         if (summary) {
-          await apiCache!.addIssueComment(planeProjectId, planeIssueId, summary);
-          console.log(`[plane] Comment added to issue ${planeIssueId}`);
+          const commented = await apiCache!.addIssueComment(planeProjectId, planeIssueId, summary);
+          if (commented) console.log(`[plane] Comment added to issue ${planeIssueId}`);
         }
       });
     } else {
