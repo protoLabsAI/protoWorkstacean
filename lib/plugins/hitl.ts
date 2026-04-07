@@ -164,6 +164,21 @@ export class HITLPlugin implements Plugin {
       const req = msg.payload as HITLRequest;
       if (req?.type !== "hitl_request") return;
 
+      // Log cost escalation context if present
+      if (req.escalation_reason) {
+        console.log(
+          `[hitl] Cost escalation (${req.correlationId}): ${req.escalation_reason}`,
+        );
+      }
+      if (req.escalationContext) {
+        const ctx = req.escalationContext;
+        console.log(
+          `[hitl] Cost context: tier=${ctx.tier}, est=$${ctx.estimatedCost.toFixed(4)}, max=$${ctx.maxCost.toFixed(4)}, ` +
+          `remaining_project=$${ctx.budgetState.remainingProjectBudget.toFixed(4)}, ` +
+          `remaining_daily=$${ctx.budgetState.remainingDailyBudget.toFixed(4)}`,
+        );
+      }
+
       // Store in pending map
       pendingRequests.set(req.correlationId, req);
 
