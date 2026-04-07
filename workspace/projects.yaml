@@ -13,7 +13,8 @@ projects:
     discord:
       general: ""
       updates: ""
-      dev: ""
+      dev: "1469080556720623699"
+      devWebhook: "${DISCORD_WEBHOOK_DEV_PROTOMAKER}"
 
   - slug: protolabsai-quinn
     title: Quinn
@@ -24,7 +25,8 @@ projects:
     agents: [ava, quinn]
     discord:
       general: ""
-      dev: ""
+      dev: "1490974550169485413"
+      devWebhook: "${DISCORD_WEBHOOK_DEV_QUINN}"
 
   - slug: protolabsai-protoui
     title: protoUI
@@ -37,6 +39,7 @@ projects:
       general: "1490601617567912050"
       updates: "1490601619300286525"
       dev: "1490601620927418428"
+      devWebhook: "${DISCORD_WEBHOOK_DEV_PROTOUI}"
 
   - slug: protolabsai-protocontent
     title: protoContent
@@ -48,6 +51,7 @@ projects:
     discord:
       general: ""
       dev: ""
+      devWebhook: ""
 
   - slug: protolabsai-protoworkstacean
     title: protoWorkstacean
@@ -58,4 +62,5 @@ projects:
     agents: [ava, quinn, frank, kai]
     discord:
       general: ""
-      dev: ""
+      dev: "1490978896911405208"
+      devWebhook: "${DISCORD_WEBHOOK_DEV_WORKSTACEAN}"

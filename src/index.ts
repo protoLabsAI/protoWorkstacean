@@ -212,6 +212,134 @@ function serveWorkspaceYaml(filename: string, key: string): Response {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Operational state enrichment for GET /api/projects?includeState=true
+// ---------------------------------------------------------------------------
+
+interface RegistryProject {
+  slug: string;
+  projectPath?: string;
+  studioUrl?: string;
+  agents?: string[];
+  status?: string;
+  [key: string]: unknown;
+}
+
+interface RegistryAgent {
+  name: string;
+  url?: string;
+  automakerPort?: number;
+  [key: string]: unknown;
+}
+
+type ProjectOperationalState =
+  | {
+      board: { backlog: number; inProgress: number; blocked: number };
+      autoMode: { running: boolean };
+      activeAgents: number;
+    }
+  | { state: "unreachable" };
+
+function loadAgentPortMap(): Record<string, number> {
+  const filePath = join(workspaceDir, "agents.yaml");
+  if (!existsSync(filePath)) return {};
+  try {
+    const parsed = parseYaml(readFileSync(filePath, "utf8")) as Record<string, unknown>;
+    const agents = (parsed["agents"] ?? []) as RegistryAgent[];
+    const map: Record<string, number> = {};
+    for (const agent of agents) {
+      if (typeof agent.automakerPort === "number") {
+        map[agent.name] = agent.automakerPort;
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function resolveAutomakerUrl(
+  project: RegistryProject,
+  agentPortMap: Record<string, number>
+): string | null {
+  // 1. Resolve port from agents.yaml via project's agents list
+  for (const agentName of (project.agents ?? [])) {
+    const port = agentPortMap[agentName];
+    if (port) return `http://localhost:${port}`;
+  }
+  // 2. Fall back to studioUrl if present
+  if (project.studioUrl) return project.studioUrl;
+  return null;
+}
+
+async function fetchProjectOperationalState(
+  project: RegistryProject,
+  agentPortMap: Record<string, number>
+): Promise<ProjectOperationalState> {
+  const automakerUrl = resolveAutomakerUrl(project, agentPortMap);
+  if (!automakerUrl || !project.projectPath) return { state: "unreachable" };
+
+  try {
+    const res = await fetch(`${automakerUrl}/api/sitrep`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath: project.projectPath }),
+      signal: AbortSignal.timeout(4_000),
+    });
+
+    if (!res.ok) return { state: "unreachable" };
+
+    const sitrep = (await res.json()) as {
+      board?: { backlog?: number; inProgress?: number; blocked?: number };
+      autoMode?: { running?: boolean; runningCount?: number };
+    };
+
+    return {
+      board: {
+        backlog: sitrep.board?.backlog ?? 0,
+        inProgress: sitrep.board?.inProgress ?? 0,
+        blocked: sitrep.board?.blocked ?? 0,
+      },
+      autoMode: { running: sitrep.autoMode?.running ?? false },
+      activeAgents: sitrep.autoMode?.runningCount ?? 0,
+    };
+  } catch {
+    return { state: "unreachable" };
+  }
+}
+
+async function serveProjectsWithStatus(): Promise<Response> {
+  const filePath = join(workspaceDir, "projects.yaml");
+  if (!existsSync(filePath)) {
+    return Response.json({ success: true, data: [] });
+  }
+
+  let projects: RegistryProject[];
+  try {
+    const parsed = parseYaml(readFileSync(filePath, "utf8")) as Record<string, unknown>;
+    projects = (parsed["projects"] ?? []) as RegistryProject[];
+  } catch {
+    return Response.json(
+      { success: false, error: "Failed to parse projects.yaml" },
+      { status: 500 }
+    );
+  }
+
+  const agentPortMap = loadAgentPortMap();
+
+  // Fetch operational state for all projects in parallel
+  const statusResults = await Promise.all(
+    projects.map((p) => fetchProjectOperationalState(p, agentPortMap))
+  );
+
+  const enriched = projects.map((p, i) => ({
+    ...p,
+    operationalState: statusResults[i],
+  }));
+
+  return Response.json({ success: true, data: enriched });
+}
+
 async function handlePublish(req: Request): Promise<Response> {
   if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
     return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
@@ -250,7 +378,12 @@ type RouteHandler = (req: Request) => Response | Promise<Response>;
 const routes = new Map<string, RouteHandler>([
   ["GET /health",        () => Response.json({ status: "ok", timestamp: Date.now() })],
   ["POST /publish",      handlePublish],
-  ["GET /api/projects",  () => serveWorkspaceYaml("projects.yaml", "projects")],
+  ["GET /api/projects",  (req: Request) => {
+    const { searchParams } = new URL(req.url);
+    return searchParams.get("includeState") === "true"
+      ? serveProjectsWithStatus()
+      : serveWorkspaceYaml("projects.yaml", "projects");
+  }],
   ["GET /api/agents",    () => serveWorkspaceYaml("agents.yaml", "agents")],
 ]);
 

@@ -514,6 +514,14 @@ export default {
         const response = await callA2A(agent, content, contextId, skill ?? undefined, msg.source, outboundTopic, planeExtra);
         publishResponse(bus, outboundTopic, msg.correlationId, response, p.channel, agent.name);
 
+        // If the inbound message carries a devChannelId (e.g. from a /report-bug slash
+        // command), also push the full response to that channel so it lands in #dev
+        // regardless of where the command was invoked. Same correlationId for e2e tracing.
+        const devChannelId = p.devChannelId as string | undefined;
+        if (devChannelId) {
+          publishResponse(bus, `message.outbound.discord.push.${devChannelId}`, msg.correlationId, response, devChannelId);
+        }
+
         if (skill && agent.chain?.[skill]) {
           await runChain(bus, agents, agent, skill, content, response, outboundTopic, p.channel, p.github as GitHubContext | undefined);
         }

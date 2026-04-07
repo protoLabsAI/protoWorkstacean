@@ -44,6 +44,25 @@ interface ProjectDiscordChannels {
   releases?: string;
 }
 
+interface ProjectInfisical {
+  projectId?: string;
+}
+
+interface ProjectObservability {
+  langfuseProjectId?: string;
+}
+
+interface ProjectGoogleWorkspace {
+  driveFolderId?: string;
+  sharedDocId?: string;
+}
+
+interface ProjectCapacity {
+  priorityWeight?: number;
+  minConcurrency?: number;
+  maxConcurrency?: number;
+}
+
 interface ProjectEntry {
   slug: string;
   title?: string;
@@ -53,7 +72,15 @@ interface ProjectEntry {
   onboardedAt?: string;
   team?: string;
   agents?: string[];
+  planeProjectId?: string;
+  planeIdentifier?: string;
+  projectPath?: string;
   discord?: ProjectDiscordChannels;
+  webhooks?: Record<string, string>;
+  infisical?: ProjectInfisical;
+  observability?: ProjectObservability;
+  googleWorkspace?: ProjectGoogleWorkspace;
+  capacity?: ProjectCapacity;
 }
 
 interface ProjectsYaml {
