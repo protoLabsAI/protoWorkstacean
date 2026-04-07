@@ -68,7 +68,7 @@ describe("auto_mode_running end-to-end with orchestrator", () => {
     expect(dispatched.length).toBeGreaterThanOrEqual(1);
     const goalDispatch = dispatched.find((d) => d.goalId === GOAL_ID);
     expect(goalDispatch).toBeDefined();
-    expect(goalDispatch?.tier).toBe("tier_0");
+    expect(goalDispatch?.action.tier).toBe("tier_0");
 
     // Goal should have succeeded
     expect(outcomes.length).toBeGreaterThanOrEqual(1);
