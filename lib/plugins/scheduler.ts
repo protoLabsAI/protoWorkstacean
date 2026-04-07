@@ -108,32 +108,28 @@ export class SchedulerPlugin implements Plugin {
   }
 
   private watchForNewFiles(): void {
-    const existing = new Set(readdirSync(this.cronsDir).filter(f => f.endsWith(".yaml") || f.endsWith(".yml")));
+    const isCronFile = (f: string) => f.endsWith(".yaml") || f.endsWith(".yml");
+    const existing = new Set(readdirSync(this.cronsDir).filter(isCronFile));
 
-    const interval = setInterval(() => {
-      try {
-        const current = new Set(readdirSync(this.cronsDir).filter(f => f.endsWith(".yaml") || f.endsWith(".yml")));
-        for (const file of current) {
-          if (!existing.has(file)) {
-            console.log(`[Scheduler] New cron file detected: ${file}`);
-            const filePath = join(this.cronsDir, file);
-            try {
-              const raw = readFileSync(filePath, "utf-8");
-              const def = YAML.parse(raw) as ScheduleDefinition;
-              this.validate(def);
-              this.schedule(def, filePath);
-              existing.add(file);
-            } catch (err) {
-              console.error(`[Scheduler] Failed to load ${file}:`, err);
-            }
-          }
+    this.watchInterval = setInterval(() => {
+      let current: string[];
+      try { current = readdirSync(this.cronsDir).filter(isCronFile); }
+      catch { return; } // directory may not exist yet
+
+      for (const file of current) {
+        if (existing.has(file)) continue;
+        const filePath = join(this.cronsDir, file);
+        try {
+          const def = YAML.parse(readFileSync(filePath, "utf-8")) as ScheduleDefinition;
+          this.validate(def);
+          this.schedule(def, filePath);
+          existing.add(file);
+          console.log(`[Scheduler] Hot-loaded new cron: ${file}`);
+        } catch (err) {
+          console.error(`[Scheduler] Failed to load ${file}:`, err);
         }
-      } catch {
-        // Directory may not exist yet
       }
     }, 5000);
-
-    this.watchInterval = interval;
   }
 
   private saveYaml(def: ScheduleDefinition, filePath: string): void {
