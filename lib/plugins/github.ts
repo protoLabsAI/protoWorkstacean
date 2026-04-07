@@ -19,7 +19,7 @@
  *   GITHUB_WEBHOOK_PORT     webhook HTTP server port (default: 8082)
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import { createSign } from "node:crypto";
 import { parse as parseYaml } from "yaml";
@@ -102,6 +102,7 @@ interface AutoTriageConfig {
   orgName: string;
   events: string[];
   skillHint: string;
+  /** Derived at runtime from projects.yaml — not read from github.yaml. */
   monitoredRepos: string[];
   sanitization: SanitizationConfig;
 }
@@ -113,10 +114,30 @@ interface GitHubConfig {
   autoTriage?: AutoTriageConfig;
 }
 
+/**
+ * Derive monitoredRepos from projects.yaml (all active projects with a github field).
+ * Called each time config is loaded so hot-reloads of projects.yaml are reflected.
+ */
+function deriveMonitoredRepos(workspaceDir: string): string[] {
+  const projectsPath = join(workspaceDir, "projects.yaml");
+  if (!existsSync(projectsPath)) return [];
+  try {
+    const raw = readFileSync(projectsPath, "utf8");
+    const data = parseYaml(raw) as { projects?: { github?: string; status?: string }[] };
+    return (data.projects ?? [])
+      .filter(p => p.github && p.status !== "archived" && p.status !== "suspended")
+      .map(p => p.github as string);
+  } catch {
+    return [];
+  }
+}
+
 function loadConfig(workspaceDir: string): GitHubConfig {
   const configPath = join(workspaceDir, "github.yaml");
+  let config: GitHubConfig;
+
   if (!existsSync(configPath)) {
-    return {
+    config = {
       mentionHandle: "@quinn",
       skillHints: {
         issue_comment: "bug_triage",
@@ -125,8 +146,17 @@ function loadConfig(workspaceDir: string): GitHubConfig {
         pull_request: "pr_review",
       },
     };
+  } else {
+    config = parseYaml(readFileSync(configPath, "utf8")) as GitHubConfig;
   }
-  return parseYaml(readFileSync(configPath, "utf8")) as GitHubConfig;
+
+  // monitoredRepos is always derived from projects.yaml at runtime
+  // (never read from github.yaml) so that onboarding new projects takes effect immediately.
+  if (config.autoTriage) {
+    config.autoTriage.monitoredRepos = deriveMonitoredRepos(workspaceDir);
+  }
+
+  return config;
 }
 
 // ── Pending comment context ───────────────────────────────────────────────────
@@ -244,6 +274,7 @@ export class GitHubPlugin implements Plugin {
 
   private server: ReturnType<typeof Bun.serve> | null = null;
   private workspaceDir: string;
+  private config!: GitHubConfig;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
@@ -259,9 +290,27 @@ export class GitHubPlugin implements Plugin {
     const usingApp = !!(process.env.QUINN_APP_ID && process.env.QUINN_APP_PRIVATE_KEY);
     console.log(`[github] Auth: ${usingApp ? "GitHub App (quinn[bot])" : "PAT (GITHUB_TOKEN)"}`);
 
-    const config = loadConfig(this.workspaceDir);
+    this.config = loadConfig(this.workspaceDir);
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? "";
     const port = parseInt(process.env.GITHUB_WEBHOOK_PORT ?? "8082", 10);
+
+    // ── Hot-reload github.yaml and projects.yaml ──────────────────────────────
+    const configPath = join(this.workspaceDir, "github.yaml");
+    const projectsPath = join(this.workspaceDir, "projects.yaml");
+
+    const reloadConfig = () => {
+      this.config = loadConfig(this.workspaceDir);
+      const repoCount = this.config.autoTriage?.monitoredRepos?.length ?? 0;
+      console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
+    };
+
+    if (existsSync(configPath)) {
+      watchFile(configPath, { interval: 5_000 }, reloadConfig);
+    }
+    // Also watch projects.yaml so monitoredRepos updates when projects are onboarded
+    if (existsSync(projectsPath)) {
+      watchFile(projectsPath, { interval: 5_000 }, reloadConfig);
+    }
 
     // ── Outbound: post comment back to GitHub ────────────────────────────────
     bus.subscribe("message.outbound.github.#", "github-outbound", async (msg: BusMessage) => {
@@ -304,7 +353,7 @@ export class GitHubPlugin implements Plugin {
           return new Response("Bad request", { status: 400 });
         }
 
-        this._handleEvent(event, payload, config, bus, getToken);
+        this._handleEvent(event, payload, this.config, bus, getToken);
         return new Response("OK", { status: 200 });
       },
     });
@@ -314,6 +363,8 @@ export class GitHubPlugin implements Plugin {
 
   uninstall(): void {
     this.server?.stop();
+    unwatchFile(join(this.workspaceDir, "github.yaml"));
+    unwatchFile(join(this.workspaceDir, "projects.yaml"));
   }
 
   private _handleEvent(

@@ -13,7 +13,7 @@
  *   GITHUB_TOKEN   posts chained agent responses as GitHub comments
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, watchFile, unwatchFile } from "node:fs";
 import { createSign } from "node:crypto";
 import { parse } from "yaml";
 
@@ -404,6 +404,10 @@ async function runChain(
   }
 }
 
+// ── Skills handled locally (never forwarded to an external agent) ────────────
+
+const LOCAL_SKILLS = new Set(["memory_recall", "memory_store", "onboard_project"]);
+
 // ── Plugin ──────────────────────────────────────────────────────────────────
 
 export default {
@@ -412,7 +416,7 @@ export default {
   capabilities: ["a2a-routing"],
 
   install(bus: EventBus) {
-    const agents = loadAgents();
+    let agents = loadAgents();
 
     if (!agents.length) {
       console.error("[a2a] No agents loaded — check workspace/agents.yaml");
@@ -421,6 +425,18 @@ export default {
 
     console.log(`[a2a] Loaded ${agents.length} agents: ${agents.map(a => a.name).join(", ")}`);
     refreshSkills(agents).catch(console.error);
+
+    // ── Hot-reload agents.yaml ─────────────────────────────────────────────
+    watchFile(AGENTS_YAML, { interval: 5_000 }, () => {
+      const updated = loadAgents();
+      if (updated.length) {
+        agents = updated;
+        console.log(`[a2a] agents.yaml reloaded — ${agents.length} agent(s): ${agents.map(a => a.name).join(", ")}`);
+        refreshSkills(agents).catch(console.error);
+      } else {
+        console.warn("[a2a] agents.yaml reload produced no agents — keeping previous registry");
+      }
+    });
 
     // ── Inbound messages ──────────────────────────────────────────────────
     bus.subscribe("message.inbound.#", "a2a", async (msg: BusMessage) => {
@@ -438,6 +454,18 @@ export default {
       if (skill && MEMORY_SKILLS.has(skill)) {
         console.log(`[a2a] "${content.slice(0, 60)}" → memory (local, skill: ${skill})`);
         await handleMemorySkill(bus, skill, content, msg, outboundTopic, p);
+        return;
+      }
+
+      // onboard_project: route to OnboardingPlugin via message.inbound.onboard
+      if (skill === "onboard_project") {
+        console.log(`[a2a] "${content.slice(0, 60)}" → onboarding (local, skill: onboard_project)`);
+        const onboardTopic = "message.inbound.onboard";
+        bus.publish(onboardTopic, {
+          ...msg,
+          id: crypto.randomUUID(),
+          topic: onboardTopic,
+        });
         return;
       }
 
@@ -493,5 +521,7 @@ export default {
     });
   },
 
-  uninstall(_bus: EventBus) {},
+  uninstall(_bus: EventBus) {
+    unwatchFile(AGENTS_YAML);
+  },
 };

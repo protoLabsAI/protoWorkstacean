@@ -18,7 +18,7 @@
  *   DISCORD_DIGEST_CHANNEL  fallback channel ID for cron-triggered posts
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
@@ -347,11 +347,37 @@ export class DiscordPlugin implements Plugin {
       }
     });
 
+    // ── Hot-reload discord.yaml ───────────────────────────────────────────────
+    const configPath = join(this.workspaceDir, "discord.yaml");
+    if (existsSync(configPath)) {
+      watchFile(configPath, { interval: 5_000 }, async () => {
+        const prev = this.config;
+        this.config = loadConfig(this.workspaceDir);
+
+        // Apply updated moderation config
+        const { rateLimit, spamPatterns } = this.config.moderation;
+        this.rateMaxMessages = rateLimit.maxMessages;
+        this.rateWindowMs = rateLimit.windowSeconds * 1_000;
+        this.spamPatterns = spamPatterns.map(p => new RegExp(p, "i"));
+
+        // Re-register slash commands if command list changed
+        const prevCmds = JSON.stringify(prev.commands ?? []);
+        const newCmds = JSON.stringify(this.config.commands ?? []);
+        if (prevCmds !== newCmds && this.client?.isReady()) {
+          console.log("[discord] discord.yaml changed — re-registering slash commands");
+          await this._registerSlashCommands().catch(console.error);
+        } else {
+          console.log("[discord] discord.yaml reloaded");
+        }
+      });
+    }
+
     this.client.login(process.env.DISCORD_BOT_TOKEN);
   }
 
   uninstall(): void {
     this.client?.destroy();
+    unwatchFile(join(this.workspaceDir, "discord.yaml"));
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
