@@ -245,19 +245,23 @@ async function handlePublish(req: Request): Promise<Response> {
   return Response.json({ success: true, id: message.id });
 }
 
+type RouteHandler = (req: Request) => Response | Promise<Response>;
+
+const routes = new Map<string, RouteHandler>([
+  ["GET /health",        () => Response.json({ status: "ok", timestamp: Date.now() })],
+  ["POST /publish",      handlePublish],
+  ["GET /api/projects",  () => serveWorkspaceYaml("projects.yaml", "projects")],
+  ["GET /api/agents",    () => serveWorkspaceYaml("agents.yaml", "agents")],
+]);
+
 Bun.serve({
   port: HTTP_PORT,
   fetch: async (req) => {
-    const { method } = req;
     const { pathname } = new URL(req.url);
-
-    if (method === "GET" && pathname === "/health")
-      return Response.json({ status: "ok", timestamp: Date.now() });
-    if (method === "POST" && pathname === "/publish") return handlePublish(req);
-    if (method === "GET" && pathname === "/api/projects") return serveWorkspaceYaml("projects.yaml", "projects");
-    if (method === "GET" && pathname === "/api/agents") return serveWorkspaceYaml("agents.yaml", "agents");
-
-    return Response.json({ success: false, error: "Not found" }, { status: 404 });
+    const handler = routes.get(`${req.method} ${pathname}`);
+    return handler
+      ? handler(req)
+      : Response.json({ success: false, error: "Not found" }, { status: 404 });
   },
 });
 
