@@ -3,8 +3,28 @@ import type { BusMessage, MessageHandler, Subscription, TopicInfo, ConsumerInfo 
 export class InMemoryEventBus {
   private subscriptions = new Map<string, Subscription[]>();
   private consumerInfo = new Map<string, ConsumerInfo>();
+  private publishing = false;
+  private deferred: { topic: string; message: BusMessage }[] = [];
 
   publish(topic: string, message: BusMessage): void {
+    if (this.publishing) {
+      this.deferred.push({ topic, message });
+      return;
+    }
+
+    this.publishing = true;
+    try {
+      this.deliver(topic, message);
+      while (this.deferred.length > 0) {
+        const next = this.deferred.shift()!;
+        this.deliver(next.topic, next.message);
+      }
+    } finally {
+      this.publishing = false;
+    }
+  }
+
+  private deliver(topic: string, message: BusMessage): void {
     for (const [pattern, subs] of this.subscriptions) {
       if (this.topicMatches(pattern, topic)) {
         for (const sub of subs) {

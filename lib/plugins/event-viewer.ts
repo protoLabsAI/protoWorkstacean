@@ -82,12 +82,12 @@ export class EventViewerPlugin implements Plugin {
     }
   }
 
-  private handleApiEvents(req: Request): Response {
+  private async handleApiEvents(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const topic = url.searchParams.get("topic");
     const limit = parseInt(url.searchParams.get("limit") || "100", 10);
     const dataDir = process.env.DATA_DIR || resolve(process.cwd(), "data");
-    const { Database } = require("bun:sqlite");
+    const { Database } = await import("bun:sqlite");
     const db = new Database(`${dataDir}/events.db`, { readonly: true });
 
     let rows: { payload: string }[];
@@ -154,7 +154,12 @@ export class EventViewerPlugin implements Plugin {
 
   private async serveFile(path: string, contentType: string): Promise<Response> {
     try {
-      const file = Bun.file(resolve(this.viewerDir, path));
+      const resolved = resolve(this.viewerDir, path);
+      // Path traversal guard: resolved path must stay within viewerDir
+      if (!resolved.startsWith(resolve(this.viewerDir))) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const file = Bun.file(resolved);
       if (await file.exists())
         return new Response(file, { headers: { "Content-Type": contentType } });
     } catch {}

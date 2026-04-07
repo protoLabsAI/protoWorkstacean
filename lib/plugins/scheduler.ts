@@ -101,6 +101,37 @@ export class SchedulerPlugin implements Plugin {
     if (files.length > 0) {
       console.log(`[Scheduler] Loaded ${files.length} schedule(s) from ${this.cronsDir}`);
     }
+
+    this.watchForNewFiles();
+  }
+
+  private watchForNewFiles(): void {
+    const existing = new Set(readdirSync(this.cronsDir).filter(f => f.endsWith(".yaml") || f.endsWith(".yml")));
+
+    const interval = setInterval(() => {
+      try {
+        const current = new Set(readdirSync(this.cronsDir).filter(f => f.endsWith(".yaml") || f.endsWith(".yml")));
+        for (const file of current) {
+          if (!existing.has(file)) {
+            console.log(`[Scheduler] New cron file detected: ${file}`);
+            const filePath = join(this.cronsDir, file);
+            try {
+              const raw = readFileSync(filePath, "utf-8");
+              const def = YAML.parse(raw) as ScheduleDefinition;
+              this.validate(def);
+              this.schedule(def, filePath);
+              existing.add(file);
+            } catch (err) {
+              console.error(`[Scheduler] Failed to load ${file}:`, err);
+            }
+          }
+        }
+      } catch {
+        // Directory may not exist yet
+      }
+    }, 5000);
+
+    (this as { _watchInterval?: ReturnType<typeof setInterval> })._watchInterval = interval;
   }
 
   private saveYaml(def: ScheduleDefinition, filePath: string): void {
@@ -141,7 +172,16 @@ export class SchedulerPlugin implements Plugin {
       let nextDate: Date;
 
       if (def.type === "once") {
-        nextDate = new Date(def.schedule);
+        const hasTimezone = /[+-]\d{2}:\d{2}|Z$/.test(def.schedule);
+        if (!hasTimezone) {
+          // No timezone suffix — interpret in the configured timezone
+          const asUtc = new Date(def.schedule);
+          const tzDate = new Date(asUtc.toLocaleString('en-US', { timeZone: tz }));
+          const offset = tzDate.getTime() - asUtc.getTime();
+          nextDate = new Date(asUtc.getTime() - offset);
+        } else {
+          nextDate = new Date(def.schedule);
+        }
       } else {
         const interval = CronExpressionParser.parse(def.schedule, {
           currentDate: now,
