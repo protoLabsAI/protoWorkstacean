@@ -1,0 +1,24 @@
+{
+  "providers": {
+    "local-llm": {
+      "baseUrl": "http://gateway:4000/v1",
+      "api": "openai-completions",
+      "apiKey": "OPENAI_API_KEY",
+      "compat": {
+        "supportsUsageInStreaming": true,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "default",
+          "name": "Gateway Default",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 131072,
+          "maxTokens": 16384,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
