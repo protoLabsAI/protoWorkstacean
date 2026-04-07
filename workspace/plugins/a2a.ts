@@ -258,13 +258,13 @@ async function callA2A(
 
 // ── Output helpers ──────────────────────────────────────────────────────────
 
-function publishResponse(bus: EventBus, topic: string, correlationId: string, content: string, channel: unknown): void {
+function publishResponse(bus: EventBus, topic: string, correlationId: string, content: string, channel: unknown, agentId?: string): void {
   bus.publish(topic, {
     id: crypto.randomUUID(),
     correlationId,
     topic,
     timestamp: Date.now(),
-    payload: { content, channel },
+    payload: { content, channel, ...(agentId ? { agentId } : {}) },
   });
 }
 
@@ -400,7 +400,7 @@ async function runChain(
     await postGitHubComment(gh, response);
     console.log(`[a2a] chain: ${nextAgent.name} comment posted to ${gh.owner}/${gh.repo}#${gh.number}`);
   } else {
-    publishResponse(bus, outboundTopic, crypto.randomUUID(), response, channel);
+    publishResponse(bus, outboundTopic, crypto.randomUUID(), response, channel, nextAgent.name);
   }
 }
 
@@ -454,7 +454,7 @@ export default {
 
       try {
         const response = await callA2A(agent, content, contextId, skill ?? undefined, msg.source, outboundTopic, planeExtra);
-        publishResponse(bus, outboundTopic, msg.correlationId, response, p.channel);
+        publishResponse(bus, outboundTopic, msg.correlationId, response, p.channel, agent.name);
 
         if (skill && agent.chain?.[skill]) {
           await runChain(bus, agents, agent, skill, content, response, outboundTopic, p.channel, p.github as GitHubContext | undefined);
@@ -485,7 +485,7 @@ export default {
         const response = await callA2A(agent, content, `workstacean-cron-${cronId}`);
         const channel = String(p.channel ?? "");
         if (channel) {
-          publishResponse(bus, `message.outbound.discord.push.${channel}`, msg.correlationId, response, channel);
+          publishResponse(bus, `message.outbound.discord.push.${channel}`, msg.correlationId, response, channel, agent.name);
         }
       } catch (err) {
         console.error(`[a2a-cron] ${cronId} error:`, err);
