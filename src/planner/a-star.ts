@@ -150,6 +150,23 @@ export function aStarSearch(
       bestFrontierNode = current;
     }
 
+    // Check goal on pop (not on generation) — guarantees optimality
+    if (goal(current.state)) {
+      if (bestGoalNode === null || current.gScore < bestGoalNode.gScore) {
+        bestGoalNode = current;
+      }
+      if (weight <= 1.0) {
+        return {
+          plan: reconstructPlan(current),
+          nodesExpanded,
+          nodesGenerated,
+          elapsedMs: Date.now() - startTime,
+          exhaustive: true,
+        };
+      }
+      continue;
+    }
+
     // Expand successors
     const successors = graph.getSuccessors(current.state);
 
@@ -174,25 +191,6 @@ export function aStarSearch(
         gScore: tentativeG,
         fScore: tentativeG + weight * h,
       };
-
-      // Check goal
-      if (goal(resultState)) {
-        if (bestGoalNode === null || tentativeG < bestGoalNode.gScore) {
-          bestGoalNode = node;
-        }
-        // For standard A* (weight=1), first goal found is optimal
-        if (weight <= 1.0) {
-          return {
-            plan: reconstructPlan(node),
-            nodesExpanded,
-            nodesGenerated,
-            elapsedMs: Date.now() - startTime,
-            exhaustive: true,
-          };
-        }
-        // For weighted A*, continue searching for better solution
-        continue;
-      }
 
       openSet.push(node);
     }
