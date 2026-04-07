@@ -212,12 +212,13 @@ async function callA2A(
   skillHint?: string,
   source?: BusMessageSource,
   replyTopic?: string,
+  extraMeta?: Record<string, unknown>,
 ): Promise<string> {
   const apiKey = agent.apiKeyEnv ? (process.env[agent.apiKeyEnv] ?? "") : "";
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["X-API-Key"] = apiKey;
 
-  const metadata: Record<string, unknown> = {};
+  const metadata: Record<string, unknown> = { ...(extraMeta ?? {}) };
   if (skillHint) metadata.skillHint = skillHint;
   if (source) metadata.source = source;
   if (replyTopic) metadata.replyTopic = replyTopic;
@@ -371,8 +372,17 @@ export default {
 
       console.log(`[a2a] "${content.slice(0, 60)}" → ${agent.name} (skill: ${skill ?? "default"})`);
 
+      // Use the bus message's correlationId when present so Plane reply matching works
+      // end-to-end (plane plugin stores pendingIssues keyed by "plane-{issueId}").
+      const contextId = msg.correlationId || `workstacean-${channelKey}`;
+
+      // Forward Plane context so the plan skill can update the originating issue
+      const planeExtra: Record<string, unknown> = {};
+      if (p.planeIssueId) planeExtra.planeIssueId = p.planeIssueId;
+      if (p.planeProjectId) planeExtra.planeProjectId = p.planeProjectId;
+
       try {
-        const response = await callA2A(agent, content, `workstacean-${channelKey}`, skill ?? undefined, msg.source, outboundTopic);
+        const response = await callA2A(agent, content, contextId, skill ?? undefined, msg.source, outboundTopic, planeExtra);
         publishResponse(bus, outboundTopic, msg.correlationId, response, p.channel);
 
         if (skill && agent.chain?.[skill]) {
