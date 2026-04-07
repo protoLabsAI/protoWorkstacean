@@ -183,6 +183,9 @@ const SKILL_KEYWORDS: Record<string, string[]> = {
   manage_feature: ["unblock", "assign", "move to", "add to board"],
   board_health:   ["blocked", "stalled", "stuck", "health", "unhealthy"],
   auto_mode:      ["auto mode", "start auto", "stop auto", "pause auto"],
+  // Memory (handled locally by workstacean — never forwarded to an agent)
+  memory_recall:  ["remember", "recall", "what do you know about", "memory search", "/recall"],
+  memory_store:   ["memorize", "save this", "remember this", "store this", "/memorize"],
 };
 
 function matchSkill(content: string, hint?: string): string | null {
@@ -293,6 +296,67 @@ function reactToGitHubIssue(gh: GitHubContext, reaction: string): void {
     .catch(err => console.error("[a2a] reaction error:", err));
 }
 
+// ── Local memory skill handler ───────────────────────────────────────────────
+
+const MEMORY_SKILLS = new Set(["memory_recall", "memory_store"]);
+
+async function handleMemorySkill(
+  bus: EventBus,
+  skill: string,
+  content: string,
+  msg: BusMessage,
+  outboundTopic: string,
+  p: Record<string, unknown>,
+): Promise<void> {
+  const userId = (p.userId as string | undefined) ?? msg.source?.userId ?? "default";
+
+  if (skill === "memory_store") {
+    bus.publish("memory.add", {
+      id: crypto.randomUUID(),
+      correlationId: msg.correlationId,
+      topic: "memory.add",
+      timestamp: Date.now(),
+      payload: {
+        userId,
+        messages: [{ role: "user", content }],
+      },
+    });
+    publishResponse(bus, outboundTopic, msg.correlationId, "✓ Stored in memory.", p.channel);
+    return;
+  }
+
+  // memory_recall — query and await result via one-shot reply subscription
+  const replyTopic = `memory.result.${crypto.randomUUID()}`;
+
+  const result = await new Promise<string>((resolve) => {
+    const subId = bus.subscribe(replyTopic, "a2a-memory", (reply: BusMessage) => {
+      bus.unsubscribe(subId);
+      const r = reply.payload as { memories?: { memory: string; score?: number }[]; error?: string };
+      if (r.error) { resolve(`⚠️ Memory error: ${r.error}`); return; }
+      const items = r.memories ?? [];
+      if (!items.length) { resolve("(no relevant memories found)"); return; }
+      resolve(items.map((m, i) => `${i + 1}. ${m.memory}`).join("\n"));
+    });
+
+    bus.publish("memory.search", {
+      id: crypto.randomUUID(),
+      correlationId: msg.correlationId,
+      topic: "memory.search",
+      timestamp: Date.now(),
+      payload: { userId, query: content, limit: 5 },
+      reply: { topic: replyTopic },
+    });
+
+    // Timeout after 10s
+    setTimeout(() => {
+      bus.unsubscribe(subId);
+      resolve("(memory search timed out)");
+    }, 10_000);
+  });
+
+  publishResponse(bus, outboundTopic, msg.correlationId, result, p.channel);
+}
+
 // ── Chain execution ─────────────────────────────────────────────────────────
 
 async function runChain(
@@ -369,6 +433,13 @@ export default {
       const agent = routeToAgent(skill, agents);
       const outboundTopic = msg.reply?.topic
         ?? `message.outbound.${msg.topic.split(".").slice(1).join(".")}`;
+
+      // Memory skills are handled locally — never forwarded to an external agent
+      if (skill && MEMORY_SKILLS.has(skill)) {
+        console.log(`[a2a] "${content.slice(0, 60)}" → memory (local, skill: ${skill})`);
+        await handleMemorySkill(bus, skill, content, msg, outboundTopic, p);
+        return;
+      }
 
       console.log(`[a2a] "${content.slice(0, 60)}" → ${agent.name} (skill: ${skill ?? "default"})`);
 
