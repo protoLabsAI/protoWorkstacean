@@ -463,8 +463,8 @@ export default {
         console.error(`[a2a] ${agent.name} error:`, err);
         const isTimeout = err instanceof Error && err.name === "TimeoutError";
         const errMsg = isTimeout
-          ? `⏱️ ${agent.name} is still working on that — it's taking longer than expected. Check back in a moment or try again.`
-          : `⚠️ ${agent.name} encountered an error: ${err instanceof Error ? err.message : String(err)}`;
+          ? "I'm still working on that — it's taking longer than expected. Check back in a moment or try again."
+          : "I'm having trouble connecting right now. Give me a sec.";
         publishResponse(bus, outboundTopic, msg.correlationId, errMsg, p.channel);
       }
     });
