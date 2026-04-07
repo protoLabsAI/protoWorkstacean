@@ -56,7 +56,7 @@ interface PlaneModule {
 
 interface PlaneWebhookPayload {
   event: "issue" | "project" | "cycle" | "module" | "issue_comment";
-  action: "create" | "update" | "delete";
+  action: "created" | "updated" | "deleted";
   webhook_id: string;
   workspace_id: string;
   data: PlaneIssue | PlaneProject | PlaneCycle | PlaneModule;
@@ -381,7 +381,7 @@ export class PlanePlugin implements Plugin {
     let shouldRoute = false;
     let autoApprove = false;
 
-    if (action === "create") {
+    if (action === "created") {
       // Check for plan/auto labels
       if (apiCache && issue.labels.length > 0) {
         const hasPlanLabel = await apiCache.hasLabel(issue.project, issue.labels, "plan");
