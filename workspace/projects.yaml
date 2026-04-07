@@ -9,7 +9,7 @@ projects:
     github: protoLabsAI/protoMaker
     defaultBranch: main
     status: active
-    agents: [ava, quinn, frank]
+    agents: [ava, quinn, frank, matt, kai]
     discord:
       general: ""
       updates: ""
@@ -32,7 +32,7 @@ projects:
     github: protoLabsAI/protoUI
     defaultBranch: main
     status: active
-    agents: [ava, quinn]
+    agents: [ava, quinn, matt]
     discord:
       general: "1490601617567912050"
       updates: "1490601619300286525"
@@ -55,7 +55,7 @@ projects:
     github: protoLabsAI/protoWorkstacean
     defaultBranch: main
     status: active
-    agents: [ava, quinn, frank]
+    agents: [ava, quinn, frank, kai]
     discord:
       general: ""
       dev: ""
