@@ -2,6 +2,7 @@ import { resolve, dirname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import type { ServerWebSocket } from "bun";
 import type { Plugin, EventBus, BusMessage } from "../types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -38,7 +39,7 @@ export class EventViewerPlugin implements Plugin {
         const url = new URL(req.url);
 
         if (url.pathname === "/ws") {
-          const upgraded = server.upgrade<{ id: string }>(req, {
+          const upgraded = server.upgrade(req, {
             data: { id: crypto.randomUUID() },
           });
           if (upgraded) return undefined;
