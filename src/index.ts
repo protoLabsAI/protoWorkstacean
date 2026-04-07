@@ -201,107 +201,63 @@ cli?.showPrompt();
 const HTTP_PORT = parseInt(process.env.WORKSTACEAN_HTTP_PORT || "3000", 10);
 const API_KEY = process.env.WORKSTACEAN_API_KEY;
 
+function serveWorkspaceYaml(filename: string, key: string): Response {
+  const filePath = join(workspaceDir, filename);
+  if (!existsSync(filePath)) return Response.json({ success: true, data: [] });
+  try {
+    const parsed = parseYaml(readFileSync(filePath, "utf8")) as Record<string, unknown>;
+    return Response.json({ success: true, data: parsed[key] ?? [] });
+  } catch {
+    return Response.json({ success: false, error: `Failed to parse ${filename}` }, { status: 500 });
+  }
+}
+
+async function handlePublish(req: Request): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return Response.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!body.topic || typeof body.topic !== "string") {
+    return Response.json(
+      { success: false, error: "Missing or invalid 'topic' (must be a string)" },
+      { status: 400 }
+    );
+  }
+
+  const message: BusMessage = {
+    id: crypto.randomUUID(),
+    correlationId: typeof body.correlationId === "string" ? body.correlationId : crypto.randomUUID(),
+    topic: body.topic,
+    timestamp: Date.now(),
+    payload: body.payload,
+    ...(body.source ? { source: body.source as BusMessage["source"] } : {}),
+    ...(body.reply ? { reply: body.reply as BusMessage["reply"] } : {}),
+  };
+
+  bus.publish(body.topic, message);
+  return Response.json({ success: true, id: message.id });
+}
+
 Bun.serve({
   port: HTTP_PORT,
   fetch: async (req) => {
-    const url = new URL(req.url);
+    const { method } = req;
+    const { pathname } = new URL(req.url);
 
-    // --- GET /health ---
-    if (req.method === "GET" && url.pathname === "/health") {
+    if (method === "GET" && pathname === "/health")
       return Response.json({ status: "ok", timestamp: Date.now() });
-    }
+    if (method === "POST" && pathname === "/publish") return handlePublish(req);
+    if (method === "GET" && pathname === "/api/projects") return serveWorkspaceYaml("projects.yaml", "projects");
+    if (method === "GET" && pathname === "/api/agents") return serveWorkspaceYaml("agents.yaml", "agents");
 
-    // --- POST /publish ---
-    if (req.method === "POST" && url.pathname === "/publish") {
-      // Auth check: if WORKSTACEAN_API_KEY is set, require X-API-Key header
-      if (API_KEY) {
-        const provided = req.headers.get("X-API-Key");
-        if (provided !== API_KEY) {
-          return Response.json(
-            { success: false, error: "Unauthorized" },
-            { status: 401 }
-          );
-        }
-      }
-
-      let body: Record<string, unknown>;
-      try {
-        body = (await req.json()) as Record<string, unknown>;
-      } catch {
-        return Response.json(
-          { success: false, error: "Invalid JSON body" },
-          { status: 400 }
-        );
-      }
-
-      // Validate topic
-      if (!body.topic || typeof body.topic !== "string") {
-        return Response.json(
-          { success: false, error: "Missing or invalid 'topic' (must be a string)" },
-          { status: 400 }
-        );
-      }
-
-      // Build BusMessage
-      const message: BusMessage = {
-        id: crypto.randomUUID(),
-        correlationId:
-          typeof body.correlationId === "string"
-            ? body.correlationId
-            : crypto.randomUUID(),
-        topic: body.topic,
-        timestamp: Date.now(),
-        payload: body.payload,
-        ...(body.source ? { source: body.source as BusMessage["source"] } : {}),
-        ...(body.reply ? { reply: body.reply as BusMessage["reply"] } : {}),
-      };
-
-      bus.publish(body.topic, message);
-
-      return Response.json({ success: true, id: message.id });
-    }
-
-    // --- GET /api/projects ---
-    if (req.method === "GET" && url.pathname === "/api/projects") {
-      try {
-        const projectsPath = join(workspaceDir, "projects.yaml");
-        if (!existsSync(projectsPath)) {
-          return Response.json({ success: true, data: [] });
-        }
-        const raw = readFileSync(projectsPath, "utf8");
-        const parsed = parseYaml(raw) as { projects?: unknown[] };
-        return Response.json({ success: true, data: parsed.projects ?? [] });
-      } catch (err) {
-        return Response.json(
-          { success: false, error: `Failed to parse projects.yaml: ${err}` },
-          { status: 500 }
-        );
-      }
-    }
-
-    // --- GET /api/agents ---
-    if (req.method === "GET" && url.pathname === "/api/agents") {
-      try {
-        const agentsPath = join(workspaceDir, "agents.yaml");
-        if (!existsSync(agentsPath)) {
-          return Response.json({ success: true, data: [] });
-        }
-        const raw = readFileSync(agentsPath, "utf8");
-        const parsed = parseYaml(raw) as { agents?: unknown[] };
-        return Response.json({ success: true, data: parsed.agents ?? [] });
-      } catch (err) {
-        return Response.json(
-          { success: false, error: `Failed to parse agents.yaml: ${err}` },
-          { status: 500 }
-        );
-      }
-    }
-
-    // --- Fallback ---
-    return Response.json(
-      { success: false, error: "Not found" },
-      { status: 404 }
-    );
+    return Response.json({ success: false, error: "Not found" }, { status: 404 });
   },
 });
 
