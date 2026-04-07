@@ -402,8 +402,9 @@ export class FlowMonitorPlugin implements Plugin {
       const periodEnd = now - i * periodMs;
       const periodStart = periodEnd - periodMs;
 
+      // Use <= for the current period (i === 0) so items completed at exactly "now" are included
       const inPeriod = completedItems.filter(
-        (item) => item.completedAt! >= periodStart && item.completedAt! < periodEnd,
+        (item) => item.completedAt! >= periodStart && item.completedAt! <= periodEnd,
       );
 
       const byType: Partial<Record<FlowItemType, number>> = {};
