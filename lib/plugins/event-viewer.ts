@@ -14,7 +14,7 @@ export class EventViewerPlugin implements Plugin {
 
   private bus: EventBus | null = null;
   private server: ReturnType<typeof Bun.serve> | null = null;
-  private wsClients: Set<ServerWebSocket<{ id: string }>> = new Set();
+  private wsClients: Set<ServerWebSocket<unknown>> = new Set();
   private subscriptionId: string | null = null;
   private port: number;
   private viewerDir: string;
