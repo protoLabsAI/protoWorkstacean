@@ -5,3 +5,6 @@ data/
 # Agent workspace — registry files are tracked; runtime state is ignored
 workspace/crons/
 workspace/*.log.automaker-lock
+.automaker-lock
+.automaker/
+.worktrees/
