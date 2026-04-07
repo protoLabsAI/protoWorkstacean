@@ -218,6 +218,18 @@ const FIRE_AND_FORGET_SKILLS = new Set([
   "deep_research",    // web + knowledge store traversal
 ]);
 
+// In-flight guard: tracks currently-running fire-and-forget operations.
+// Key: `{agentName}:{skill}:{contentHash}` — prevents duplicate concurrent runs
+// when the same trigger fires multiple times (Discord retries, slash command re-click).
+// TTL of 10 min covers the longest expected operation.
+const inFlightFAF = new Map<string, number>();
+const FAF_TTL_MS = 10 * 60 * 1000;
+
+function fafKey(agentName: string, skill: string, content: string): string {
+  // Simple hash: agent + skill + first 120 chars of content (enough to distinguish)
+  return `${agentName}:${skill}:${content.slice(0, 120)}`;
+}
+
 async function callA2A(
   agent: AgentDef,
   content: string,
@@ -466,17 +478,31 @@ export default {
       // Fire-and-forget for long-running skills: ack immediately, agent posts
       // back to the reply topic when done. No workstacean-side timeout.
       if (skill && FIRE_AND_FORGET_SKILLS.has(skill)) {
+        const key = fafKey(agent.name, skill, content);
+        const startedAt = inFlightFAF.get(key);
+        const isInFlight = startedAt && (Date.now() - startedAt < FAF_TTL_MS);
+
+        if (isInFlight) {
+          console.log(`[a2a] "${skill}" already in-flight — skipping duplicate`);
+          publishResponse(bus, outboundTopic, msg.correlationId,
+            `⏳ Already working on that — I'll post back when done.`, p.channel);
+          return;
+        }
+
         console.log(`[a2a] "${skill}" is fire-and-forget — acking immediately`);
+        inFlightFAF.set(key, Date.now());
         publishResponse(bus, outboundTopic, msg.correlationId,
           `⏳ On it — this may take a few minutes. I'll post back when done.`, p.channel);
         callA2A(agent, content, contextId, skill, msg.source, outboundTopic, planeExtra, undefined)
           .then(response => {
+            inFlightFAF.delete(key);
             publishResponse(bus, outboundTopic, msg.correlationId, response, p.channel);
             if (agent.chain?.[skill]) {
               runChain(bus, agents, agent, skill, content, response, outboundTopic, p.channel, p.github as GitHubContext | undefined).catch(console.error);
             }
           })
           .catch(err => {
+            inFlightFAF.delete(key);
             console.error(`[a2a] ${agent.name} async error:`, err);
             publishResponse(bus, outboundTopic, msg.correlationId,
               `⚠️ ${agent.name} hit an error: ${err instanceof Error ? err.message : String(err)}`, p.channel);

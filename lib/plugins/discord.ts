@@ -31,6 +31,7 @@ import {
   type TextChannel,
 } from "discord.js";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
+import { TTLCache } from "../ttl-cache.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -153,6 +154,10 @@ export class DiscordPlugin implements Plugin {
   private rateWindowMs = 10_000;
   private spamPatterns: RegExp[] = [];
 
+  // Dedup: drop duplicate Discord events (retries, double-clicks) within 5 min.
+  // Key: message ID or `${messageId}-${emoji}` for reactions.
+  private seenEvents = new TTLCache<true>(300);
+
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
   }
@@ -197,6 +202,10 @@ export class DiscordPlugin implements Plugin {
       const isMentioned = message.mentions.has(this.client.user!);
       const isDM = !message.guild;
       if (!isMentioned && !isDM) return;
+
+      // Dedup: same message ID can arrive twice on Discord retries
+      if (this.seenEvents.has(message.id)) return;
+      this.seenEvents.set(message.id, true);
 
       const userId = message.author.id;
 
@@ -248,6 +257,11 @@ export class DiscordPlugin implements Plugin {
         console.log(`[discord] reaction from ${user.id} ignored — not in admins list`);
         return;
       }
+
+      // Dedup: same reaction from same user on same message
+      const reactionKey = `${reaction.message.id}-📋-${user.id}`;
+      if (this.seenEvents.has(reactionKey)) return;
+      this.seenEvents.set(reactionKey, true);
 
       const message = reaction.partial
         ? await reaction.message.fetch()
