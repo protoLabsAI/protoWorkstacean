@@ -50,6 +50,7 @@ export class SchedulerPlugin implements Plugin {
   private cronsDir = "";
   private timers = new Map<string, ActiveTimer>();
   private defaultTimezone: string;
+  private watchInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(dataDir: string) {
     this.cronsDir = join(resolve(dataDir), "crons");
@@ -75,6 +76,7 @@ export class SchedulerPlugin implements Plugin {
   }
 
   uninstall(): void {
+    if (this.watchInterval) clearInterval(this.watchInterval);
     for (const [, active] of this.timers) {
       clearTimeout(active.timer);
     }
@@ -131,7 +133,7 @@ export class SchedulerPlugin implements Plugin {
       }
     }, 5000);
 
-    (this as { _watchInterval?: ReturnType<typeof setInterval> })._watchInterval = interval;
+    this.watchInterval = interval;
   }
 
   private saveYaml(def: ScheduleDefinition, filePath: string): void {
