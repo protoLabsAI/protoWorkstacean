@@ -116,7 +116,7 @@ describe("pre_flight_estimate", () => {
     });
     expect(result.promptTokens).toBe(100);
     expect(result.completionTokens).toBe(200);
-    expect(result.fallbackUsed).toBe(true); // completion was provided but prompt was not from text
+    expect(result.fallbackUsed).toBe(false); // explicit token counts provided — no heuristic fallback needed
   });
 
   test("falls back to heuristics from promptText", () => {
