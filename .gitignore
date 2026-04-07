@@ -1,8 +1,11 @@
 node_modules
 .env
 data/
-models.json
 
 # Agent workspace — registry files are tracked; runtime state is ignored
 workspace/crons/
 workspace/*.log
+# Worktree directories (managed by protoLabs Studio)
+.automaker/
+.claude/worktrees/
+.worktrees/
