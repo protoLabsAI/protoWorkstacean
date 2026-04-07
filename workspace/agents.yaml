@@ -7,6 +7,7 @@ agents:
   - name: ava
     url: http://automaker-server:3008/a2a
     apiKeyEnv: AVA_API_KEY
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_AVA
     skills:
       - plan
       - plan_resume
@@ -21,6 +22,7 @@ agents:
   - name: quinn
     url: http://quinn:7870/a2a
     apiKeyEnv: QUINN_API_KEY
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_QUINN
     skills:
       - qa_report
       - board_audit
@@ -39,6 +41,7 @@ agents:
   - name: jon
     url: http://jon:3010/a2a
     apiKeyEnv: JON_API_KEY
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_JON
     skills:
       - content_strategy
       - gtm_review
@@ -49,6 +52,7 @@ agents:
   - name: cindi
     url: http://cindi:3011/a2a
     apiKeyEnv: CINDI_API_KEY
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_CINDI
     skills:
       - write_content
       - blog_post
@@ -57,6 +61,7 @@ agents:
   - name: researcher
     url: http://researcher:3012/a2a
     apiKeyEnv: RESEARCHER_API_KEY
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_RESEARCHER
     skills:
       - deep_research
       - summarize
@@ -64,6 +69,7 @@ agents:
   - name: frank
     url: http://frank:3013/a2a
     apiKeyEnv: FRANK_API_KEY
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_FRANK
     skills:
       - deploy
       - infra_health
