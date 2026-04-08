@@ -1,0 +1,20 @@
+name: Release Notes
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  post-release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for git log
+
+      - name: Post release notes to Discord
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: node scripts/post-release-notes.mjs
