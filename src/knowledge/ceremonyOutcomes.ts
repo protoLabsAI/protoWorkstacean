@@ -29,6 +29,8 @@ export class CeremonyOutcomesRepository {
       }
 
       this.db = new Database(this.dbPath);
+      this.db.exec("PRAGMA journal_mode=WAL;");
+      this.db.exec("PRAGMA synchronous=NORMAL;");
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS ceremony_outcomes (
           id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,39 +67,42 @@ export class CeremonyOutcomesRepository {
     }
 
     try {
-      this.db
-        .query(`
-          INSERT INTO ceremony_outcomes
-            (run_id, ceremony_id, skill, status, duration_ms, targets, started_at, completed_at, result, error)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `)
-        .run(
-          outcome.runId,
-          outcome.ceremonyId,
-          outcome.skill,
-          outcome.status,
-          outcome.duration,
-          JSON.stringify(outcome.targets),
-          outcome.startedAt,
-          outcome.completedAt,
-          outcome.result ?? null,
-          outcome.error ?? null,
-        );
+      const insertAndPrune = this.db.transaction(() => {
+        this.db!
+          .query(`
+            INSERT INTO ceremony_outcomes
+              (run_id, ceremony_id, skill, status, duration_ms, targets, started_at, completed_at, result, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `)
+          .run(
+            outcome.runId,
+            outcome.ceremonyId,
+            outcome.skill,
+            outcome.status,
+            outcome.duration,
+            JSON.stringify(outcome.targets),
+            outcome.startedAt,
+            outcome.completedAt,
+            outcome.result ?? null,
+            outcome.error ?? null,
+          );
 
-      // Prune old outcomes for this ceremony
-      this.db
-        .query(`
-          DELETE FROM ceremony_outcomes
-          WHERE ceremony_id = ?
-            AND id NOT IN (
-              SELECT id FROM ceremony_outcomes
-              WHERE ceremony_id = ?
-              ORDER BY started_at DESC
-              LIMIT ?
-            )
-        `)
-        .run(outcome.ceremonyId, outcome.ceremonyId, MAX_OUTCOMES_PER_CEREMONY);
+        // Prune old outcomes for this ceremony
+        this.db!
+          .query(`
+            DELETE FROM ceremony_outcomes
+            WHERE ceremony_id = ?
+              AND id NOT IN (
+                SELECT id FROM ceremony_outcomes
+                WHERE ceremony_id = ?
+                ORDER BY started_at DESC
+                LIMIT ?
+              )
+          `)
+          .run(outcome.ceremonyId, outcome.ceremonyId, MAX_OUTCOMES_PER_CEREMONY);
+      });
 
+      insertAndPrune();
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
