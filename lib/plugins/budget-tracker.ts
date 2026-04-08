@@ -283,7 +283,7 @@ export class BudgetTracker {
                 tier, estimated_cost, actual_cost, was_escalated, was_autonomous
          FROM budget_ledger
          WHERE agent_id = ? AND project_id = ?
-         ORDER BY timestamp DESC LIMIT ?`,
+         ORDER BY timestamp DESC, rowid DESC LIMIT ?`,
       )
       .all(agentId, projectId, limit);
 
