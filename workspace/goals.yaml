@@ -24,3 +24,17 @@ goals:
     selector: "domains.services.metadata.failed"
     operator: falsy
     description: "No service collection failures"
+
+  - id: agents.all_reachable
+    type: Invariant
+    severity: high
+    selector: "domains.agent_health.data.totalUnreachable"
+    operator: falsy
+    description: "All A2A agents must be reachable"
+
+  - id: ci.success_rate_healthy
+    type: Threshold
+    severity: high
+    selector: "domains.ci.data.successRate"
+    min: 0.70
+    description: "CI success rate must stay >= 70%"

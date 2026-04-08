@@ -432,24 +432,121 @@ async function handleOnboard(req: Request): Promise<Response> {
   return Response.json(result, { status: statusCode });
 }
 
-type RouteHandler = (req: Request) => Response | Promise<Response>;
+// ── World-state API helpers ────────────────────────────────────────────────────
 
-const routes = new Map<string, RouteHandler>([
-  ["GET /health",        () => Response.json({ status: "ok", timestamp: Date.now() })],
-  ["POST /publish",      handlePublish],
-  ["POST /api/onboard",  handleOnboard],
-  ["GET /api/projects",  () => serveWorkspaceYaml("projects.yaml", "projects")],
-  ["GET /api/agents",    () => serveWorkspaceYaml("agents.yaml", "agents")],
-]);
+// Minimal interface so we can call getWorldState() without importing the full type
+interface WorldStateAPI {
+  getWorldState(opts?: { domain?: string; maxAgeMs?: number }): unknown;
+}
+
+// Resolved after plugins are loaded
+const worldStateCollector = registeredPlugins.find(p => p.name === "world-state-collector") as (WorldStateAPI & { name: string }) | undefined;
+
+function handleGetWorldState(domain?: string): Response {
+  if (!worldStateCollector) {
+    return Response.json({ success: false, error: "world-state-collector not available" }, { status: 503 });
+  }
+  const data = worldStateCollector.getWorldState(domain ? { domain, maxAgeMs: 120_000 } : { maxAgeMs: 120_000 });
+  return Response.json({ success: true, data });
+}
+
+function handleGetCeremonies(): Response {
+  const ceremoniesDir = join(workspaceDir, "ceremonies");
+  if (!existsSync(ceremoniesDir)) return Response.json({ success: true, data: [] });
+  const files = readdirSync(ceremoniesDir).filter(f => f.endsWith(".yaml") || f.endsWith(".yml"));
+  const ceremonies: unknown[] = [];
+  for (const file of files) {
+    try {
+      const parsed = parseYaml(readFileSync(join(ceremoniesDir, file), "utf8")) as Record<string, unknown>;
+      ceremonies.push(parsed);
+    } catch { /* skip malformed files */ }
+  }
+  return Response.json({ success: true, data: ceremonies });
+}
+
+async function handleRunCeremony(req: Request, ceremonyId: string): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+  // Sanitize ceremonyId — only allow alphanumeric, dash, dot, underscore
+  if (!/^[\w.\-]+$/.test(ceremonyId)) {
+    return Response.json({ success: false, error: "Invalid ceremony id" }, { status: 400 });
+  }
+  const topic = `ceremony.${ceremonyId}.execute`;
+  bus.publish(topic, {
+    id: crypto.randomUUID(),
+    correlationId: crypto.randomUUID(),
+    topic,
+    timestamp: Date.now(),
+    payload: { type: "manual.execute", triggeredBy: "api" },
+  });
+  return Response.json({ success: true, message: `Ceremony "${ceremonyId}" triggered` });
+}
+
+function handleGetAgentSkills(agentName: string): Response {
+  const agentsPath = join(workspaceDir, "agents.yaml");
+  if (!existsSync(agentsPath)) {
+    return Response.json({ success: false, error: "agents.yaml not found" }, { status: 404 });
+  }
+  try {
+    const parsed = parseYaml(readFileSync(agentsPath, "utf8")) as {
+      agents?: Array<{ name: string; skills?: unknown[] }>;
+    };
+    const agent = (parsed.agents ?? []).find(a => a.name === agentName);
+    if (!agent) {
+      return Response.json({ success: false, error: `Agent "${agentName}" not found` }, { status: 404 });
+    }
+    return Response.json({ success: true, data: { name: agent.name, skills: agent.skills ?? [] } });
+  } catch {
+    return Response.json({ success: false, error: "Failed to parse agents.yaml" }, { status: 500 });
+  }
+}
+
+// ── HTTP router ───────────────────────────────────────────────────────────────
+
+type Params = Record<string, string>;
+type RouteHandler = (req: Request, params: Params) => Response | Promise<Response>;
+
+/** Match a path against a pattern like "/api/foo/:id/run". Returns params or null. */
+function matchPath(pattern: string, path: string): Params | null {
+  const pp = pattern.split("/");
+  const sp = path.split("/");
+  if (pp.length !== sp.length) return null;
+  const params: Params = {};
+  for (let i = 0; i < pp.length; i++) {
+    if (pp[i].startsWith(":")) {
+      params[pp[i].slice(1)] = sp[i];
+    } else if (pp[i] !== sp[i]) {
+      return null;
+    }
+  }
+  return params;
+}
+
+const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
+  { method: "GET",  path: "/health",                    handler: () => Response.json({ status: "ok", timestamp: Date.now() }) },
+  { method: "POST", path: "/publish",                   handler: handlePublish },
+  { method: "POST", path: "/api/onboard",               handler: handleOnboard },
+  { method: "GET",  path: "/api/projects",              handler: () => serveWorkspaceYaml("projects.yaml", "projects") },
+  { method: "GET",  path: "/api/agents",                handler: () => serveWorkspaceYaml("agents.yaml", "agents") },
+  { method: "GET",  path: "/api/goals",                 handler: () => serveWorkspaceYaml("goals.yaml", "goals") },
+  { method: "GET",  path: "/api/world-state",           handler: () => handleGetWorldState() },
+  { method: "GET",  path: "/api/world-state/:domain",   handler: (_, p) => handleGetWorldState(p.domain) },
+  { method: "GET",  path: "/api/ceremonies",            handler: () => handleGetCeremonies() },
+  { method: "POST", path: "/api/ceremonies/:id/run",    handler: (req, p) => handleRunCeremony(req, p.id) },
+  { method: "GET",  path: "/api/skills/:agentName",     handler: (_, p) => handleGetAgentSkills(p.agentName) },
+];
 
 Bun.serve({
   port: HTTP_PORT,
   fetch: async (req) => {
     const { pathname } = new URL(req.url);
-    const handler = routes.get(`${req.method} ${pathname}`);
-    return handler
-      ? handler(req)
-      : Response.json({ success: false, error: "Not found" }, { status: 404 });
+    for (const route of routes) {
+      if (route.method !== req.method) continue;
+      const params = matchPath(route.path, pathname);
+      if (params) return route.handler(req, params);
+    }
+    return Response.json({ success: false, error: "Not found" }, { status: 404 });
   },
 });
 

@@ -1,7 +1,7 @@
 id: board.pr-audit
 name: PR Audit
 schedule: "0 */3 * * *"
-skill: pr_audit
+skill: pr_review
 targets:
   - all
 notifyChannel: ""

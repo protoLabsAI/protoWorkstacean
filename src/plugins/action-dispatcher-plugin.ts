@@ -158,6 +158,24 @@ export class ActionDispatcherPlugin implements Plugin {
         return;
       }
 
+      // For fire-and-forget actions: publish to topic then immediately succeed.
+      // Use meta.fireAndForget for alerts, ceremony triggers, and other side-effect-only dispatches.
+      if (action.meta.fireAndForget) {
+        this.bus.publish(action.meta.topic, {
+          id: crypto.randomUUID(),
+          correlationId,
+          topic: action.meta.topic,
+          timestamp: Date.now(),
+          payload: {
+            actionId: action.id,
+            goalId: action.goalId,
+            meta: action.meta,
+          },
+        });
+        await this.completeAction(action, correlationId, parentCorrelationId, startedAt, true);
+        return;
+      }
+
       // For actions with a dispatch topic, publish and wait for outcome via timeout
       const timeoutMs = action.meta.timeout ?? this.config.defaultTimeoutMs ?? 30_000;
 
