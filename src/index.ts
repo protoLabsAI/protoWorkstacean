@@ -209,7 +209,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { WorldStateCollectorPlugin } = await import("../lib/plugins/world-state-collector.js");
-      return new WorldStateCollectorPlugin({ knowledgeDbPath: `${dataDir}/knowledge.db` });
+      return new WorldStateCollectorPlugin({ knowledgeDbPath: `${dataDir}/knowledge.db`, workspaceDir });
     },
   },
   {
@@ -218,6 +218,14 @@ const pluginRegistry: PluginRegistryEntry[] = [
     factory: async () => {
       const { ActionDispatcherPlugin } = await import("./plugins/action-dispatcher-plugin.js");
       return new ActionDispatcherPlugin({ wipLimit: 5 });
+    },
+  },
+  {
+    name: "world-engine-alert",
+    condition: () => true,
+    factory: async () => {
+      const { WorldEngineAlertPlugin } = await import("../lib/plugins/world-engine-alert.js");
+      return new WorldEngineAlertPlugin();
     },
   },
   {

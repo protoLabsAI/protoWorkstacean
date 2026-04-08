@@ -36,6 +36,19 @@ export interface PlaneWebhook {
   [key: string]: unknown;
 }
 
+export interface PlaneIssue {
+  id: string;
+  name: string;
+  state: string;           // state UUID
+  state__group?: string;   // populated by some endpoints: "backlog" | "unstarted" | "started" | "completed" | "cancelled"
+  priority?: string;
+  label_ids: string[];
+  assignees?: string[];
+  updated_at?: string;
+  created_at?: string;
+  completed_at?: string | null;
+}
+
 import { withCircuitBreaker } from "./plugins/circuit-breaker.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -176,6 +189,68 @@ export class PlaneClient {
       console.error("[plane-client] Error adding issue comment:", err);
       return false;
     }
+  }
+
+  /**
+   * Fetch state metadata for a project, returning Map<stateId, stateGroup>.
+   * Groups: "backlog" | "unstarted" | "started" | "completed" | "cancelled"
+   */
+  async fetchStateGroups(projectId: string): Promise<Map<string, string>> {
+    const groupMap = new Map<string, string>();
+    try {
+      const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/states/`;
+      const resp = await withCircuitBreaker("plane-api", () =>
+        fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) }),
+      );
+      if (resp.ok) {
+        const data = (await resp.json()) as { results?: PlaneState[] };
+        for (const state of data.results ?? []) {
+          groupMap.set(state.id, state.group);
+        }
+      }
+    } catch (err) {
+      console.error("[plane-client] Error fetching state groups:", err);
+    }
+    return groupMap;
+  }
+
+  /**
+   * List work items for a project. Paginates automatically up to `maxIssues`.
+   */
+  async listIssues(
+    projectId: string,
+    options?: { pageSize?: number; maxIssues?: number },
+  ): Promise<PlaneIssue[]> {
+    const pageSize = options?.pageSize ?? 100;
+    const maxIssues = options?.maxIssues ?? 500;
+    const issues: PlaneIssue[] = [];
+
+    let cursor: string | null =
+      `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/work-items/?page_size=${pageSize}`;
+
+    while (cursor && issues.length < maxIssues) {
+      try {
+        const resp = await withCircuitBreaker("plane-api", () =>
+          fetch(cursor!, { headers: this.headers(), signal: AbortSignal.timeout(15_000) }),
+        );
+        if (!resp.ok) {
+          console.warn(`[plane-client] listIssues HTTP ${resp.status} for project ${projectId}`);
+          break;
+        }
+        const data = (await resp.json()) as {
+          results?: PlaneIssue[];
+          next?: string | null;
+        };
+        const batch = data.results ?? [];
+        issues.push(...batch);
+        cursor = data.next ?? null;
+      } catch (err) {
+        console.error("[plane-client] Error listing issues:", err);
+        break;
+      }
+    }
+
+    return issues;
   }
 
   /** Invalidate cached labels/states for a project so they're re-fetched next time. */

@@ -1,0 +1,9 @@
+id: health_check
+name: "Service Health Check"
+description: "Triggered by world engine when a service domain collection fails. Investigates and reports the health status of fleet infrastructure dependencies."
+schedule: "0 */6 * * *"
+skill: board_audit
+targets:
+  - ava
+notifyChannel: ""
+enabled: true

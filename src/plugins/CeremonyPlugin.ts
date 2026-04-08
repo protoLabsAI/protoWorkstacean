@@ -104,12 +104,32 @@ export class CeremonyPlugin implements Plugin {
     // Install state extension (listens for completed events)
     this.stateExtension.install(bus);
 
-    // Subscribe to ceremony.# to handle completed events for persistence/notification
+    // Subscribe to ceremony.# to handle completed events for persistence/notification,
+    // and to handle external execute triggers from the world engine / ActionDispatcher.
     const subId = bus.subscribe("ceremony.#", this.name, (msg: BusMessage) => {
       if (msg.topic.endsWith(".completed")) {
         this._onCeremonyCompleted(msg).catch((err) => {
           console.error("[ceremony] Error handling completed event:", err);
         });
+      } else if (msg.topic.endsWith(".execute")) {
+        // External trigger (e.g. from ActionDispatcher via world engine).
+        // Internal cron fires set payload.type = "ceremony.execute" — skip those
+        // to avoid double-firing.
+        const payload = msg.payload as Record<string, unknown> | null;
+        if (payload?.type === "ceremony.execute") return;
+
+        // Extract ceremony ID from topic: ceremony.{id}.execute
+        const parts = msg.topic.split(".");
+        if (parts.length >= 3) {
+          const ceremonyId = parts.slice(1, -1).join(".");
+          const ceremony = this.ceremonies.get(ceremonyId);
+          if (ceremony) {
+            console.log(`[ceremony] External trigger received for: ${ceremonyId}`);
+            this._fireCeremony(ceremony);
+          } else {
+            console.warn(`[ceremony] External trigger for unknown ceremony: ${ceremonyId}`);
+          }
+        }
       }
     });
     this.subscriptionIds.push(subId);
