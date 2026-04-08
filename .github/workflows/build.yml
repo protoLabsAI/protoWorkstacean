@@ -70,3 +70,35 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Notify Discord — what shipped
+        run: |
+          node - <<'EOF'
+          import { readFileSync } from "fs";
+          import { parse } from "yaml";
+
+          const projects = parse(readFileSync("workspace/projects.yaml", "utf8")).projects ?? [];
+          const project = projects.find(p => p.slug === "protolabsai-protoworkstacean");
+          const webhook = project?.discord?.dev?.webhook;
+          if (!webhook) { console.log("No dev webhook configured — skipping"); process.exit(0); }
+
+          const subject = process.env.COMMIT_SUBJECT;
+          const body    = process.env.COMMIT_BODY;
+          const sha     = process.env.SHORT_SHA;
+          const url     = process.env.COMMIT_URL;
+
+          const description = body ? `${subject}\n\n${body}` : subject;
+
+          const resp = await fetch(webhook, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ embeds: [{ title: `Shipped to main — ${sha}`, description, url, color: 5763719, footer: { text: "protoWorkstacean CI" } }] }),
+          });
+          if (!resp.ok) console.error(`Discord post failed: ${resp.status}`);
+          else console.log("Posted to dev channel.");
+          EOF
+        env:
+          COMMIT_SUBJECT: ${{ github.event.head_commit.message }}
+          COMMIT_BODY:    ${{ github.event.head_commit.message }}
+          SHORT_SHA:      ${{ github.sha }}
+          COMMIT_URL:     ${{ github.event.head_commit.url }}
