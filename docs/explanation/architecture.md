@@ -14,23 +14,27 @@ The key architectural decision is that **the bus is the only communication chann
 
 ## The event bus
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                     EventBus (in-process)                │
-│           topic-based hierarchical pub/sub              │
-└───────────┬────────────────────────────────┬────────────┘
-            │                                │
-   ┌────────▼────────┐              ┌────────▼────────┐
-   │  Plugin Layer   │              │  Agent Layer    │
-   │  (lib/plugins/) │              │  (workspace/)   │
-   │                 │              │                 │
-   │ • GitHubPlugin  │              │ • Quinn (PR     │
-   │ • DiscordPlugin │              │   review, triage│
-   │ • PlanePlugin   │              │ • Ava (features)│
-   │ • A2APlugin     │              │ • Frank, Jon... │
-   │ • CeremonyPlugin│              └─────────────────┘
-   │ • GooglePlugin  │
-   └─────────────────┘
+```mermaid
+flowchart LR
+    subgraph In["Inbound"]
+        GH[GitHub]
+        DC[Discord]
+        PL[Plane]
+        GG[Google]
+        HTTP[HTTP API\n+ MCP Server]
+    end
+
+    BUS[("Event Bus\npub/sub · hierarchical topics")]
+
+    subgraph Out["Processing"]
+        A2A[A2APlugin\n→ agent fleet]
+        WE[World Engine\nGOAP pipeline]
+        CER[CeremonyPlugin\n→ scheduled skills]
+    end
+
+    In --> BUS
+    BUS --> Out
+    Out --> BUS
 ```
 
 The bus is an in-process pub/sub system with MQTT-style hierarchical topic matching. `#` matches any number of path segments:
@@ -121,6 +125,48 @@ PR merged
 ```
 
 Developer dismissals are tracked in `quinn-review-learnings` and used to suppress low-signal comment patterns over time.
+
+---
+
+## The World Engine
+
+The World Engine is a second major system alongside the A2A routing pipeline. Where A2A is reactive (respond to an event), the World Engine is **homeostatic** — it continuously measures system state against declared goals and autonomously acts to close deviations.
+
+Four plugins compose the pipeline:
+
+1. **WorldStateCollector** — six independent tickers collect domain state: `services` (30s), `board` (60s), `CI` (5min), `portfolio` (15min), `security` (30s), `agent_health` (60s). Results are merged into a single `WorldState` snapshot.
+2. **GoalEvaluatorPlugin** — evaluates every goal in `goals.yaml` against the current snapshot. When a goal is violated, publishes `world.goal.violated`.
+3. **PlannerPluginL0** — on `world.goal.violated`, scans `actions.yaml` for applicable tier_0 actions (matching goal + preconditions), selects the highest-priority set, and publishes `world.action.plan`.
+4. **ActionDispatcherPlugin** — executes the plan. For `fireAndForget: true` actions (alerts, ceremonies), it publishes to the action's topic immediately and marks complete. WIP limit: 5 concurrent non-fire-and-forget actions.
+
+```mermaid
+flowchart LR
+    WSC["WorldStateCollector\n6 domains · independent ticks"]
+    GEP["GoalEvaluatorPlugin\ngoals.yaml"]
+    PL0["PlannerPluginL0\nactions.yaml"]
+    ADP["ActionDispatcherPlugin"]
+
+    subgraph Outcomes["Action outcomes"]
+        DISC["Discord alert"]
+        CER["ceremony.*.execute\n→ CeremonyPlugin → SkillBroker → A2A"]
+        SKILL["agent.skill.request\n→ SkillBroker → A2A"]
+    end
+
+    WSC --> GEP
+    GEP -- "world.goal.violated" --> PL0
+    PL0 -- "world.action.plan" --> ADP
+    ADP --> DISC & CER & SKILL
+```
+
+Goals and actions are **declarative YAML** — adding a new monitored condition requires only an entry in `goals.yaml` and a matching action in `actions.yaml`. No code change needed.
+
+---
+
+## The MCP server
+
+`mcp/server.ts` is a stdio MCP server that exposes the bus to Claude Code agents. It wraps the HTTP API and provides typed tools: `report_incident`, `report_bug`, `get_world_state`, `publish`, `run_ceremony`, and others. All tools accept a `projectSlug` parameter that flows through the event payload to route downstream work to the correct project's agents and board.
+
+This closes the loop: a Claude Code session can report an incident → the incident enters `incidents.yaml` → the security domain surfaces it in world state → GOAP fires the alert and triage ceremony → Quinn triages it and files a board issue.
 
 ---
 
