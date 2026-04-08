@@ -1,157 +1,120 @@
-# How to Create a Ceremony (Scheduled Recurring Task)
+# How to Create a Ceremony
 
-_This is a how-to guide. It covers creating cron schedules via YAML, the bus, and the Pi SDK tool._
+Ceremonies are recurring scheduled rituals defined in YAML and powered by CeremonyPlugin. This guide walks through adding one to your workspace.
 
----
+## Step 1: Create a YAML file in `workspace/ceremonies/`
 
-A "ceremony" is a scheduled recurring event — a daily digest, a weekly board audit, a nightly cleanup. In Workstacean, ceremonies are YAML files in `workspace/crons/` that publish to the message bus on a schedule.
+Each ceremony lives in its own `.yaml` file. The filename doesn't matter — the `id` field is the identifier.
 
----
+```bash
+touch workspace/ceremonies/my-ceremony.yaml
+```
 
-## Option A — Write the YAML directly
+## Step 2: Define the ceremony
 
-Create a file in `workspace/crons/`:
+Open the file and add the required fields:
 
 ```yaml
-# workspace/crons/daily-digest.yaml
-id: daily-digest
-schedule: "0 14 * * *"         # 2pm UTC daily
-timezone: "America/New_York"
-topic: "cron.daily-digest"
-payload:
-  content: "Generate the daily QA digest"
-  skillHint: qa_report
-  channel: "1234567890123456789"  # Discord channel ID for push
-  sender: "cron"
-enabled: true
+id: my-ceremony             # unique identifier
+name: My Ceremony           # human-readable label
+schedule: "0 9 * * 1-5"    # cron expression (UTC)
+skill: my-skill             # agent skill to invoke
+targets:
+  - projects/my-project     # project path, or 'all' for all projects
 ```
 
-The SchedulerPlugin picks up the file on the next container start. No restart needed if you publish `command.schedule` (see Option B).
+That's the minimum. CeremonyPlugin polls for changes every 5 seconds — no restart needed.
 
-### YAML fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `id` | Yes | Unique identifier (kebab-case). Used as filename. |
-| `type` | No | `cron` or `once`. Auto-detected from schedule format. |
-| `schedule` | Yes | Cron expression for recurring, ISO datetime for one-shot. |
-| `timezone` | No | IANA timezone. Defaults to system TZ. |
-| `topic` | Yes | Bus topic to publish when the schedule fires. |
-| `payload.content` | Yes | Message the agent receives when this fires. |
-| `payload.sender` | No | Sender identifier. Default: `cron`. |
-| `payload.channel` | No | Reply channel (`signal`, `cli`, or Discord channel ID). |
-| `payload.skillHint` | No | Routes to a specific skill (e.g., `qa_report`, `board_audit`). |
-| `enabled` | No | Whether active. Default: `true`. |
-| `lastFired` | Auto | ISO timestamp updated by the scheduler on each fire. |
-
----
-
-## Option B — Add via bus command at runtime
-
-No restart needed — publish `command.schedule` to register a schedule immediately:
-
-```bash
-curl -s -X POST http://workstacean:3000/publish \
-  -H "Content-Type: application/json" \
-  -d '{
-    "topic": "command.schedule",
-    "payload": {
-      "action": "add",
-      "id": "daily-digest",
-      "schedule": "0 14 * * *",
-      "timezone": "America/New_York",
-      "topic": "cron.daily-digest",
-      "payload": {
-        "content": "Generate the daily QA digest",
-        "skillHint": "qa_report",
-        "channel": "1234567890123456789",
-        "sender": "cron"
-      }
-    }
-  }'
-```
-
-The SchedulerPlugin creates the YAML file in `data/crons/` and activates the timer immediately.
-
----
-
-## Option C — Ask the agent in natural language (Pi SDK tool)
-
-If the `schedule_task` Pi SDK tool is registered:
-
-```
-Schedule a daily QA digest at 2pm New York time to the #dev-alerts channel
-```
-
-The agent calls the tool with the right cron expression, writes the YAML, and publishes `command.schedule`. No manual YAML editing needed.
-
----
-
-## Managing schedules
-
-### Pause a schedule
-
-```bash
-curl -s -X POST http://workstacean:3000/publish \
-  -H "Content-Type: application/json" \
-  -d '{"topic": "command.schedule", "payload": {"action": "pause", "id": "daily-digest"}}'
-```
-
-### Resume a schedule
-
-```bash
-curl -s -X POST http://workstacean:3000/publish \
-  -H "Content-Type: application/json" \
-  -d '{"topic": "command.schedule", "payload": {"action": "resume", "id": "daily-digest"}}'
-```
-
-### Remove a schedule
-
-```bash
-curl -s -X POST http://workstacean:3000/publish \
-  -H "Content-Type: application/json" \
-  -d '{"topic": "command.schedule", "payload": {"action": "remove", "id": "daily-digest"}}'
-```
-
-### List all schedules
-
-```bash
-curl -s -X POST http://workstacean:3000/publish \
-  -H "Content-Type: application/json" \
-  -d '{"topic": "command.schedule", "payload": {"action": "list"}}'
-```
-
-Response published to `schedule.list`.
-
----
-
-## Create a one-shot ceremony
-
-Use an ISO datetime in `schedule` to fire once and self-delete:
+## Example: Daily Board Health Check at 9am
 
 ```yaml
-id: q1-kickoff-reminder
-schedule: "2026-04-01T09:00:00"
-timezone: "America/New_York"
-topic: "cron.q1-kickoff-reminder"
-payload:
-  content: "Remind the team about the Q1 kickoff meeting at 10am"
-  sender: "cron"
-  channel: "signal"
+id: board.health-check
+name: Daily Board Health Check
+schedule: "0 9 * * 1-5"
+skill: board-health-check
+targets:
+  - all
+notifyChannel: eng-standup
 ```
 
-One-shot schedules are automatically deleted after firing.
+- Runs at 9:00 AM UTC, Monday through Friday
+- Invokes the `board-health-check` skill across all projects
+- Posts a summary to the `#eng-standup` Discord channel
 
----
+## Example: Weekly Sprint Review on Fridays
 
-## Missed fire behavior
+```yaml
+id: sprint.weekly-review
+name: Weekly Sprint Review
+schedule: "0 17 * * 5"
+skill: sprint-review
+targets:
+  - projects/alpha
+  - projects/beta
+notifyChannel: sprint-reviews
+```
 
-If the container was down when a schedule was due, it fires immediately on restart — once only. If the missed window is more than 24 hours, it is skipped entirely and the next scheduled time applies.
+- Runs at 5:00 PM UTC every Friday
+- Invokes `sprint-review` for `projects/alpha` and `projects/beta`
+- Posts results to `#sprint-reviews`
 
----
+## Optional Fields
 
-## Related docs
+```yaml
+notifyChannel: my-channel   # Discord channel slug — omit to skip notifications
+enabled: false              # set to false to temporarily pause without deleting
+```
 
-- [reference/config-files.md](../reference/config-files.md) — full cron YAML schema
-- [reference/bus-topics.md](../reference/bus-topics.md) — cron and schedule command topics
-- [explanation/plugin-lifecycle.md](../explanation/plugin-lifecycle.md) — how SchedulerPlugin loads and manages timers
+## Project-Scoped Overrides
+
+To override a global ceremony for a specific project, create a file with the same `id` at:
+
+```
+.automaker/projects/{project-slug}/ceremonies/my-ceremony.yaml
+```
+
+The project-level definition takes precedence over the global one. All other global ceremonies are inherited unchanged.
+
+## How to Test a Ceremony Manually
+
+To trigger a ceremony immediately without waiting for its cron schedule, publish a `ceremony.{id}.execute` event directly on the EventBus:
+
+```typescript
+const runId = crypto.randomUUID();
+const ceremonyId = "board.health-check";
+
+bus.publish(`ceremony.${ceremonyId}.execute`, {
+  id: crypto.randomUUID(),
+  correlationId: runId,
+  topic: `ceremony.${ceremonyId}.execute`,
+  timestamp: Date.now(),
+  payload: {
+    type: "ceremony.execute",
+    context: {
+      runId,
+      ceremonyId,
+      projectPaths: ["projects/my-project"],
+      startedAt: Date.now(),
+    },
+    skill: "board-health-check",
+    ceremonyName: "Daily Board Health Check",
+  },
+});
+```
+
+Listen on `ceremony.{id}.completed` to see the outcome:
+
+```typescript
+bus.subscribe(`ceremony.${ceremonyId}.completed`, "test", (msg) => {
+  const { outcome } = msg.payload;
+  console.log(`Status: ${outcome.status}, duration: ${outcome.duration}ms`);
+  if (outcome.result) console.log("Result:", outcome.result);
+  if (outcome.error) console.log("Error:", outcome.error);
+});
+```
+
+The plugin dispatches the skill via `agent.skill.request` and waits up to 120 seconds for a response on `agent.skill.response.{runId}`. If no response arrives, the run is marked `timeout`.
+
+## Related Docs
+
+- [reference/ceremony-plugin.md](../reference/ceremony-plugin.md) — full schema, bus topics, and internals
