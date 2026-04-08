@@ -165,6 +165,14 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    name: "plane-hitl",
+    condition: () => true,
+    factory: async () => {
+      const { PlaneHITLPlugin } = await import("../lib/plugins/plane-hitl");
+      return new PlaneHITLPlugin(workspaceDir);
+    },
+  },
+  {
     name: "event-viewer",
     condition: () => !process.env.DISABLE_EVENT_VIEWER,
     factory: async () => {
