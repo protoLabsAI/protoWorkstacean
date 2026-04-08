@@ -432,6 +432,78 @@ async function handleOnboard(req: Request): Promise<Response> {
   return Response.json(result, { status: statusCode });
 }
 
+// ── World-state API helpers ────────────────────────────────────────────────────
+
+// Minimal interface so we can call getWorldState() without importing the full type
+interface WorldStateAPI {
+  getWorldState(opts?: { domain?: string; maxAgeMs?: number }): unknown;
+}
+
+// Resolved after plugins are loaded
+const worldStateCollector = registeredPlugins.find(p => p.name === "world-state-collector") as (WorldStateAPI & { name: string }) | undefined;
+
+function handleGetWorldState(domain?: string): Response {
+  if (!worldStateCollector) {
+    return Response.json({ success: false, error: "world-state-collector not available" }, { status: 503 });
+  }
+  const data = worldStateCollector.getWorldState(domain ? { domain, maxAgeMs: 120_000 } : { maxAgeMs: 120_000 });
+  return Response.json({ success: true, data });
+}
+
+function handleGetCeremonies(): Response {
+  const ceremoniesDir = join(workspaceDir, "ceremonies");
+  if (!existsSync(ceremoniesDir)) return Response.json({ success: true, data: [] });
+  const files = readdirSync(ceremoniesDir).filter(f => f.endsWith(".yaml") || f.endsWith(".yml"));
+  const ceremonies: unknown[] = [];
+  for (const file of files) {
+    try {
+      const parsed = parseYaml(readFileSync(join(ceremoniesDir, file), "utf8")) as Record<string, unknown>;
+      ceremonies.push(parsed);
+    } catch { /* skip malformed files */ }
+  }
+  return Response.json({ success: true, data: ceremonies });
+}
+
+async function handleRunCeremony(req: Request, ceremonyId: string): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+  // Sanitize ceremonyId — only allow alphanumeric, dash, dot, underscore
+  if (!/^[\w.\-]+$/.test(ceremonyId)) {
+    return Response.json({ success: false, error: "Invalid ceremony id" }, { status: 400 });
+  }
+  const topic = `ceremony.${ceremonyId}.execute`;
+  bus.publish(topic, {
+    id: crypto.randomUUID(),
+    correlationId: crypto.randomUUID(),
+    topic,
+    timestamp: Date.now(),
+    payload: { type: "manual.execute", triggeredBy: "api" },
+  });
+  return Response.json({ success: true, message: `Ceremony "${ceremonyId}" triggered` });
+}
+
+function handleGetAgentSkills(agentName: string): Response {
+  const agentsPath = join(workspaceDir, "agents.yaml");
+  if (!existsSync(agentsPath)) {
+    return Response.json({ success: false, error: "agents.yaml not found" }, { status: 404 });
+  }
+  try {
+    const parsed = parseYaml(readFileSync(agentsPath, "utf8")) as {
+      agents?: Array<{ name: string; skills?: unknown[] }>;
+    };
+    const agent = (parsed.agents ?? []).find(a => a.name === agentName);
+    if (!agent) {
+      return Response.json({ success: false, error: `Agent "${agentName}" not found` }, { status: 404 });
+    }
+    return Response.json({ success: true, data: { name: agent.name, skills: agent.skills ?? [] } });
+  } catch {
+    return Response.json({ success: false, error: "Failed to parse agents.yaml" }, { status: 500 });
+  }
+}
+
+// ── HTTP server ───────────────────────────────────────────────────────────────
+
 type RouteHandler = (req: Request) => Response | Promise<Response>;
 
 const routes = new Map<string, RouteHandler>([
@@ -446,10 +518,36 @@ Bun.serve({
   port: HTTP_PORT,
   fetch: async (req) => {
     const { pathname } = new URL(req.url);
-    const handler = routes.get(`${req.method} ${pathname}`);
-    return handler
-      ? handler(req)
-      : Response.json({ success: false, error: "Not found" }, { status: 404 });
+    const key = `${req.method} ${pathname}`;
+
+    // Static routes (exact match)
+    const handler = routes.get(key);
+    if (handler) return handler(req);
+
+    // Dynamic routes
+    if (req.method === "GET" && pathname === "/api/world-state") {
+      return handleGetWorldState();
+    }
+    if (req.method === "GET" && pathname.startsWith("/api/world-state/")) {
+      const domain = pathname.slice("/api/world-state/".length);
+      return handleGetWorldState(domain);
+    }
+    if (req.method === "GET" && pathname === "/api/ceremonies") {
+      return handleGetCeremonies();
+    }
+    if (req.method === "POST" && pathname.startsWith("/api/ceremonies/") && pathname.endsWith("/run")) {
+      const ceremonyId = pathname.slice("/api/ceremonies/".length, -"/run".length);
+      return handleRunCeremony(req, ceremonyId);
+    }
+    if (req.method === "GET" && pathname === "/api/goals") {
+      return serveWorkspaceYaml("goals.yaml", "goals");
+    }
+    if (req.method === "GET" && pathname.startsWith("/api/skills/")) {
+      const agentName = pathname.slice("/api/skills/".length);
+      return handleGetAgentSkills(agentName);
+    }
+
+    return Response.json({ success: false, error: "Not found" }, { status: 404 });
   },
 });
 

@@ -91,6 +91,24 @@ export interface PortfolioState {
   projects: PortfolioProject[];
 }
 
+// ── Agent health state ────────────────────────────────────────────────────────
+
+export interface AgentHealthEntry {
+  name: string;
+  url: string;
+  reachable: boolean;
+  latencyMs?: number;
+  lastChecked: number;    // Unix timestamp ms
+  error?: string;
+}
+
+export interface AgentHealthState {
+  entries: AgentHealthEntry[];
+  totalReachable: number;
+  totalUnreachable: number;
+  unreachableAgents: string[];
+}
+
 // ── Generic extension mechanism ───────────────────────────────────────────────
 
 /** Arbitrary domain-specific extensions keyed by domain name or feature slug. */
@@ -118,6 +136,7 @@ export interface WorldState {
     board?: WorldStateDomain<BoardState>;
     ci?: WorldStateDomain<CIState>;
     portfolio?: WorldStateDomain<PortfolioState>;
+    agent_health?: WorldStateDomain<AgentHealthState>;
   };
   /** Generic extension mechanism for future domains or domain-specific data. */
   extensions: WorldStateExtensions;

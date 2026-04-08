@@ -133,21 +133,40 @@ export class SkillBrokerPlugin implements Plugin {
   }
 
   private async _handleSkillRequest(msg: BusMessage): Promise<void> {
+    // Handles two payload shapes:
+    //   CeremonyPlugin:       { skill, ceremonyId, ceremonyName, targets, runId }
+    //   ActionDispatcherPlugin: { actionId, goalId, meta: { skillHint, agentId } }
     const payload = msg.payload as {
-      skill: string;
-      ceremonyId: string;
-      ceremonyName: string;
-      targets: string[];
-      runId: string;
+      // CeremonyPlugin fields
+      skill?: string;
+      ceremonyId?: string;
+      ceremonyName?: string;
+      targets?: string[];
+      runId?: string;
       projectPaths?: string[];
+      // ActionDispatcher fields
+      actionId?: string;
+      goalId?: string;
+      meta?: { skillHint?: string; agentId?: string; topic?: string };
     };
 
-    const { skill, ceremonyId, ceremonyName, targets = [], runId } = payload;
+    const skill = payload.skill ?? payload.meta?.skillHint ?? "";
+    const targets = payload.targets ?? (payload.meta?.agentId ? [payload.meta.agentId] : []);
+    const runId = payload.runId ?? msg.correlationId;
+    const ceremonyId = payload.ceremonyId ?? payload.actionId ?? "action";
+    const ceremonyName = payload.ceremonyName ?? payload.goalId ?? "World Engine Action";
+
     const replyTopic = (msg as BusMessage & { reply?: { topic?: string } }).reply?.topic
       ?? `agent.skill.response.${runId}`;
 
     // Resolution: targets first (explicit agent names), then skill → registry lookup
     const agent = this._resolveAgent(skill, targets);
+
+    if (!skill) {
+      console.warn(`[skill-broker] Received skill request with no skill — dropping`);
+      this._publishResponse(replyTopic, runId, undefined, "No skill specified in request");
+      return;
+    }
 
     if (!agent) {
       const searched = targets.length > 0

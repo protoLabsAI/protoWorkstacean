@@ -32,6 +32,37 @@ actions:
       topic: "message.outbound.discord.alert"
       agentId: ava
 
+  - id: alert.agent_unreachable
+    goalId: agents.all_reachable
+    tier: tier_0
+    priority: 10
+    cost: 1
+    name: "Alert when agents are unreachable"
+    preconditions:
+      - path: "domains.agent_health.data.totalUnreachable"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      agentId: ava
+
+  - id: ci.debug_failures
+    goalId: ci.success_rate_healthy
+    tier: tier_0
+    priority: 8
+    cost: 1
+    name: "Trigger CI debug when success rate drops"
+    preconditions:
+      - path: "domains.ci.data.successRate"
+        operator: lt
+        value: 0.70
+    effects: []
+    meta:
+      topic: "agent.skill.request"
+      skillHint: "ci_debug"
+      agentId: frank
+
   - id: ceremony.service_health_check
     goalId: services.all_healthy
     tier: tier_0

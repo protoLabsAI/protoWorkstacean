@@ -1,7 +1,7 @@
 id: board.retro
 name: Weekly Retrospective
 schedule: "0 9 * * 1"
-skill: pattern_mining
+skill: pattern_analysis
 targets:
   - all
 notifyChannel: ""

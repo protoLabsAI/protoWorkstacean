@@ -1,7 +1,7 @@
 id: board.cleanup
 name: Board Cleanup
 schedule: "0 8 * * *"
-skill: board_janitor
+skill: board_audit
 targets:
   - all
 notifyChannel: ""

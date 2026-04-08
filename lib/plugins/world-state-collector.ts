@@ -34,16 +34,19 @@ import type {
   PortfolioState,
   PortfolioProject,
   WorldStateSnapshot,
+  AgentHealthState,
+  AgentHealthEntry,
 } from "../types/world-state.ts";
 
 // ── Tick rates (ms) ───────────────────────────────────────────────────────────
 // Per-domain tick rates: services=30s, board=60s, CI=300s (5min), portfolio=900s (15min)
 
 const TICK_RATES = {
-  services: 30_000,    // 30s
-  board: 60_000,       // 60s
-  ci: 300_000,         // 5min (CI=300s)
-  portfolio: 900_000,  // 15min (portfolio=900s)
+  services: 30_000,      // 30s
+  board: 60_000,         // 60s
+  ci: 300_000,           // 5min (CI=300s)
+  portfolio: 900_000,    // 15min (portfolio=900s)
+  agent_health: 60_000,  // 60s
 } as const;
 
 type DomainName = keyof typeof TICK_RATES;
@@ -178,11 +181,12 @@ export class WorldStateCollectorPlugin implements Plugin {
     this.subscriptionIds.push(mcpSubId);
 
     // Start per-domain tick schedulers
-    // Per-domain tick rates: services=30s, board=60s, CI=300s (5min), portfolio=900s (15min)
+    // Per-domain tick rates: services=30s, board=60s, CI=300s (5min), portfolio=900s (15min), agent_health=60s
     this._startDomainTicker("services", TICK_RATES.services);
     this._startDomainTicker("board", TICK_RATES.board);
     this._startDomainTicker("ci", TICK_RATES.ci);
     this._startDomainTicker("portfolio", TICK_RATES.portfolio);
+    this._startDomainTicker("agent_health", TICK_RATES.agent_health);
 
     // Periodic knowledge.db snapshot
     this.snapshotTimer = setInterval(() => {
@@ -196,10 +200,11 @@ export class WorldStateCollectorPlugin implements Plugin {
     void this._collectDomain("board");
     void this._collectDomain("ci");
     void this._collectDomain("portfolio");
+    void this._collectDomain("agent_health");
 
     console.log(
       "[world-state-collector] Plugin installed — " +
-      "tickers: services=30s, board=60s, CI=300s, portfolio=900s",
+      "tickers: services=30s, board=60s, CI=300s, portfolio=900s, agent_health=60s",
     );
   }
 
@@ -430,6 +435,9 @@ export class WorldStateCollectorPlugin implements Plugin {
           break;
         case "portfolio":
           domainData = await this._collectPortfolio(tickNum);
+          break;
+        case "agent_health":
+          domainData = await this._collectAgentHealth(tickNum);
           break;
         default:
           throw new Error(`Unknown domain: ${String(domain)}`);
@@ -709,6 +717,61 @@ export class WorldStateCollectorPlugin implements Plugin {
       data,
       metadata: { collectedAt: Date.now(), domain: "portfolio", tickNumber: tickNum },
     });
+  }
+
+  private async _collectAgentHealth(tickNum: number): Promise<WorldStateDomain<AgentHealthState>> {
+    const agentsPath = join(this.workspaceDir, "agents.yaml");
+    const agentDefs: Array<{ name: string; url: string }> = [];
+
+    if (existsSync(agentsPath)) {
+      try {
+        const raw = readFileSync(agentsPath, "utf8");
+        const parsed = parseYaml(raw) as { agents?: Array<{ name: string; url: string }> };
+        for (const a of parsed.agents ?? []) {
+          if (a.name && a.url) agentDefs.push({ name: a.name, url: a.url });
+        }
+      } catch (err) {
+        console.warn("[world-state-collector] Failed to read agents.yaml for agent_health:", err);
+      }
+    }
+
+    const entries: AgentHealthEntry[] = await Promise.all(
+      agentDefs.map(async ({ name, url }): Promise<AgentHealthEntry> => {
+        const start = Date.now();
+        try {
+          // Probe /health on the agent's base URL (strip /a2a suffix if present)
+          const baseUrl = url.replace(/\/a2a$/, "");
+          const resp = await fetch(`${baseUrl}/health`, {
+            method: "GET",
+            signal: AbortSignal.timeout(5_000),
+          });
+          const latencyMs = Date.now() - start;
+          const reachable = resp.ok || resp.status === 401 || resp.status === 403;
+          return { name, url, reachable, latencyMs, lastChecked: Date.now() };
+        } catch (err) {
+          return {
+            name,
+            url,
+            reachable: false,
+            lastChecked: Date.now(),
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }),
+    );
+
+    const unreachableAgents = entries.filter(e => !e.reachable).map(e => e.name);
+    const data: AgentHealthState = {
+      entries,
+      totalReachable: entries.filter(e => e.reachable).length,
+      totalUnreachable: unreachableAgents.length,
+      unreachableAgents,
+    };
+
+    return {
+      data,
+      metadata: { collectedAt: Date.now(), domain: "agent_health", tickNumber: tickNum },
+    };
   }
 
   // ── Service health checks ─────────────────────────────────────────────────
