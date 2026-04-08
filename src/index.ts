@@ -197,6 +197,14 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    name: "skill-broker",
+    condition: () => true,
+    factory: async () => {
+      const { SkillBrokerPlugin } = await import("./plugins/skill-broker-plugin.js");
+      return new SkillBrokerPlugin(workspaceDir);
+    },
+  },
+  {
     name: "ceremony",
     condition: () => true,
     factory: async () => {
