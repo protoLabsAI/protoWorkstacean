@@ -1,0 +1,22 @@
+{
+  "prNumber": 142,
+  "repo": "protolabsai/protomaker",
+  "owner": "protolabsai",
+  "title": "feat: add JWT token validation middleware",
+  "prUrl": "https://github.com/protolabsai/protomaker/pull/142",
+  "mergedAt": "2026-04-01T12:00:00Z",
+  "baseBranch": "main",
+  "headSha": "abc123def456",
+  "decision": "APPROVE",
+  "reviewIssues": "Token expiry not checked; consider adding clock skew tolerance",
+  "diff": "diff --git a/src/middleware/auth.ts b/src/middleware/auth.ts\nindex 0000000..1234567 100644\n--- /dev/null\n+++ b/src/middleware/auth.ts\n@@ -0,0 +1,45 @@\n+import { verify } from 'jsonwebtoken';\n+\n+export interface AuthToken {\n+  userId: string;\n+  role: string;\n+  exp: number;\n+}\n+\n+export function validateToken(token: string): AuthToken | null {\n+  try {\n+    const secret = process.env.JWT_SECRET;\n+    if (!secret) {\n+      console.error('JWT_SECRET not configured');\n+      return null;\n+    }\n+    const decoded = verify(token, secret) as AuthToken;\n+    return decoded;\n+  } catch {\n+    return null;\n+  }\n+}\n+\n+export class AuthMiddleware {\n+  private secret: string;\n+\n+  constructor(secret: string) {\n+    this.secret = secret;\n+  }\n+\n+  handle(req: Request): AuthToken | null {\n+    const authHeader = req.headers.get('Authorization');\n+    if (!authHeader?.startsWith('Bearer ')) return null;\n+    const token = authHeader.slice(7);\n+    return validateToken(token);\n+  }\n+}\ndiff --git a/src/routes/api.ts b/src/routes/api.ts\nindex 1111111..2222222 100644\n--- a/src/routes/api.ts\n+++ b/src/routes/api.ts\n@@ -1,5 +1,12 @@\n import { Router } from './router';\n+import { AuthMiddleware } from '../middleware/auth';\n+\n+const auth = new AuthMiddleware(process.env.JWT_SECRET ?? '');\n \n export function createRouter(): Router {\n   const router = new Router();\n+\n+  router.use((req) => {\n+    const token = auth.handle(req);\n+    if (!token) throw new Error('Unauthorized');\n+  });\n+\n   return router;\n }",
+  "reviewComments": [
+    {
+      "body": "Token expiry not checked — consider verifying the `exp` field explicitly and adding clock skew tolerance (e.g., 30s leeway).",
+      "path": "src/middleware/auth.ts",
+      "line": 18,
+      "author": "protoquinn[bot]",
+      "isQuinn": true
+    }
+  ]
+}
