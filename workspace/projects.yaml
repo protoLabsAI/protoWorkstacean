@@ -1,6 +1,9 @@
 # protoLabs Project Registry — source of truth for the full fleet
 # Consumed by: Workstacean (routing), Quinn (portfolio monitoring), protoMaker (project registration)
 # Served via GET /api/projects
+#
+# discord.dev.webhookEnv / discord.release.webhookEnv — name of the env var that holds the
+# webhook URL. Never commit webhook URLs directly; rotate any that were previously committed.
 
 projects:
   - slug: protolabsai-protomaker
@@ -14,10 +17,10 @@ projects:
     discord:
       dev:
         channelId: "1469080556720623699"
-        webhook: "https://discord.com/api/webhooks/1491330030536491011/bvMRTUuSjEwdESR61dpPf51UGqzk8nk4DVApd89Csj0-9Hsx3nljQpoiM5r9TaaRpYBK"
+        webhookEnv: DISCORD_WEBHOOK_PROTOMAKER_DEV
       release:
         channelId: "1490893509337550859"
-        webhook: "https://discord.com/api/webhooks/1491330034361696277/b03iV5EAJdhj3m0_OlM1mCr5I20FDQ_2-4WYy7zMqHwT4ACQmqqwSq_SJLUpRLh8zjqb"
+        webhookEnv: DISCORD_WEBHOOK_PROTOMAKER_RELEASE
 
   - slug: protolabsai-quinn
     title: Quinn
@@ -30,10 +33,10 @@ projects:
     discord:
       dev:
         channelId: "1490974550169485413"
-        webhook: "https://discord.com/api/webhooks/1491330039483076720/sKLq-s2vGGaJe_zuDsniroo-Lg5Jclrp8WjkwsIwl1akH8bMlBd4QAQBnLTV_yDUJ9_N"
+        webhookEnv: DISCORD_WEBHOOK_QUINN_DEV
       release:
         channelId: "1490974552161783828"
-        webhook: "https://discord.com/api/webhooks/1491330041152405524/Ymmu2XDalam4Ynh5YimDvIxAA2XMBovfXLSvWhZ4dTlxQLcBS_Kd1zeiYcqt5oSIvfru"
+        webhookEnv: DISCORD_WEBHOOK_QUINN_RELEASE
 
   - slug: protolabsai-protoui
     title: protoUI
@@ -46,10 +49,10 @@ projects:
     discord:
       dev:
         channelId: "1490601620927418428"
-        webhook: "https://discord.com/api/webhooks/1491330063830876231/nlwSd20_invzQAYHt8jikmncpDVnTqw4qCTuCISA_0h632DzA-1Bmt_BYFEiuWJf4KR3"
+        webhookEnv: DISCORD_WEBHOOK_PROTOUI_DEV
       release:
         channelId: "1490895075759095910"
-        webhook: "https://discord.com/api/webhooks/1491330066259644416/5x15zi_cif-WIR_R1bnH0r1P3xAsvCHnLF2aiWG01eZ0J0GZQk-SuRAbQjCJqu3YUH4t"
+        webhookEnv: DISCORD_WEBHOOK_PROTOUI_RELEASE
 
   - slug: protolabsai-protocontent
     title: protoContent
@@ -62,10 +65,10 @@ projects:
     discord:
       dev:
         channelId: ""
-        webhook: ""
+        webhookEnv: DISCORD_WEBHOOK_PROTOCONTENT_DEV
       release:
         channelId: ""
-        webhook: ""
+        webhookEnv: DISCORD_WEBHOOK_PROTOCONTENT_RELEASE
 
   - slug: protolabsai-protoworkstacean
     title: protoWorkstacean
@@ -78,7 +81,7 @@ projects:
     discord:
       dev:
         channelId: "1490978896911405208"
-        webhook: "https://discord.com/api/webhooks/1491330067756875848/yWZXujCFJUfzz4t97MpLZJ9mMXsTdXmQNlqIAVHXkO6sufNbFugZ4PDG3pmk6KyXOi-c"
+        webhookEnv: DISCORD_WEBHOOK_PROTOWORKSTACEAN_DEV
       release:
         channelId: "1490978898568286329"
-        webhook: "https://discord.com/api/webhooks/1491330070298492990/nj70huK2hButyWpfyzTnMC8eUdaHmbi-5Ms7_3oX4yO8n_xkLKsifJeo-Udk0d_sqpVx"
+        webhookEnv: DISCORD_WEBHOOK_PROTOWORKSTACEAN_RELEASE

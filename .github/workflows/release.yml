@@ -13,8 +13,13 @@ jobs:
         with:
           fetch-depth: 0  # full history for git log
 
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Post release notes to Discord
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          DISCORD_WEBHOOK_PROTOWORKSTACEAN_RELEASE: ${{ secrets.DISCORD_WEBHOOK_PROTOWORKSTACEAN_RELEASE }}
         run: node scripts/post-release-notes.mjs
