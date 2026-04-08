@@ -198,8 +198,24 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // AgentRuntimePlugin handles in-process agents (workspace/agents/*.yaml).
+    // SkillBrokerPlugin handles external A2A agents (workspace/agents.yaml).
+    // Both can run simultaneously — AgentRuntime short-circuits for agents it
+    // owns; unknown agents fall through to SkillBroker.
+    name: "agent-runtime",
+    condition: () => !process.env.DISABLE_AGENT_RUNTIME,
+    factory: async () => {
+      const { AgentRuntimePlugin } = await import("./agent-runtime/agent-runtime-plugin.js");
+      return new AgentRuntimePlugin({
+        workspaceDir,
+        apiBaseUrl: `http://localhost:${process.env.WORKSTACEAN_HTTP_PORT ?? "3000"}`,
+        apiKey: process.env.WORKSTACEAN_API_KEY,
+      });
+    },
+  },
+  {
     name: "skill-broker",
-    condition: () => true,
+    condition: () => !process.env.DISABLE_SKILL_BROKER,
     factory: async () => {
       const { SkillBrokerPlugin } = await import("./plugins/skill-broker-plugin.js");
       return new SkillBrokerPlugin(workspaceDir);

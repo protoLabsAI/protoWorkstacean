@@ -10,6 +10,7 @@
     "@makeplane/plane-node-sdk": "^0.2.9",
     "@mariozechner/pi-coding-agent": "^0.64.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@protolabsai/sdk": "^0.2.0",
     "cron-parser": "^5.5.0",
     "discord.js": "^14.0.0",
     "openai": "^4.77.0",
