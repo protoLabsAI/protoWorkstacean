@@ -3,18 +3,26 @@
  * post-release-notes.mjs — Rewrite commits with Claude and post to Discord.
  *
  * Usage:
- *   node scripts/post-release-notes.mjs [--from <ref>] [--to <ref>] [--title <string>]
+ *   node scripts/post-release-notes.mjs [--from <ref>] [--to <ref>] [--title <string>] [--slug <project-slug>]
+ *
+ * Webhook resolution:
+ *   Reads workspace/projects.yaml, finds the matching slug, reads discord.release.webhookEnv,
+ *   then resolves process.env[webhookEnv] for the actual URL.
+ *   Never reads webhook URLs from the YAML directly.
  *
  * Env vars:
- *   ANTHROPIC_API_KEY        — required (Claude Haiku for rewrite)
- *   DISCORD_RELEASE_WEBHOOK  — required (Discord webhook URL)
- *
- * If --from is omitted, auto-detects the previous git tag.
- * If no tags exist, falls back to the last 30 commits.
+ *   ANTHROPIC_API_KEY  — required (Claude Haiku for rewrite)
+ *   <webhookEnv value> — e.g. DISCORD_WEBHOOK_PROTOWORKSTACEAN_RELEASE
  */
 
 import { execSync } from "node:child_process";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve, join, dirname } from "node:path";
 import { parseArgs } from "node:util";
+import { parse as parseYaml } from "yaml";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // ── Args ──────────────────────────────────────────────────────────────────────
 
@@ -23,25 +31,43 @@ const { values } = parseArgs({
     from:  { type: "string" },
     to:    { type: "string", default: "HEAD" },
     title: { type: "string" },
+    slug:  { type: "string", default: "protolabsai-protoworkstacean" },
   },
 });
 
 const to = values.to || "HEAD";
 
-let from = values.from;
-if (!from) {
+// ── Webhook resolution ────────────────────────────────────────────────────────
+
+function resolveWebhook(slug) {
+  const projectsPath = join(REPO_ROOT, "workspace", "projects.yaml");
+  if (!existsSync(projectsPath)) return null;
   try {
-    // Previous tag (one before HEAD so we don't include the tag commit itself)
-    from = execSync("git describe --tags --abbrev=0 HEAD^", { encoding: "utf8" }).trim();
-    console.log(`Auto-detected range: ${from}..${to}`);
-  } catch {
-    // No previous tag — grab last 30 commits
-    from = execSync("git rev-list --max-count=30 HEAD | tail -1", { encoding: "utf8" }).trim();
-    console.log(`No previous tag found — using last 30 commits`);
+    const parsed = parseYaml(readFileSync(projectsPath, "utf8"));
+    const project = (parsed.projects ?? []).find(p => p.slug === slug);
+    const envVar = project?.discord?.release?.webhookEnv;
+    if (!envVar) { console.warn(`No webhookEnv configured for ${slug}`); return null; }
+    const url = process.env[envVar];
+    if (!url) { console.warn(`${envVar} is not set`); return null; }
+    return url;
+  } catch (err) {
+    console.error("Failed to read projects.yaml:", err.message);
+    return null;
   }
 }
 
 // ── Commits ───────────────────────────────────────────────────────────────────
+
+let from = values.from;
+if (!from) {
+  try {
+    from = execSync("git describe --tags --abbrev=0 HEAD^", { encoding: "utf8" }).trim();
+    console.log(`Auto-detected range: ${from}..${to}`);
+  } catch {
+    from = execSync("git rev-list --max-count=30 HEAD | tail -1", { encoding: "utf8" }).trim();
+    console.log("No previous tag found — using last 30 commits");
+  }
+}
 
 const rawLog = execSync(
   `git log ${from}..${to} --pretty=format:"%s" --no-merges`,
@@ -116,22 +142,20 @@ if (!resp.ok) {
 
 const data = await resp.json();
 let notes = data.content?.[0]?.text ?? commits.map(c => `• ${c}`).join("\n");
-
-// Discord embed description limit
 if (notes.length > 3900) notes = notes.slice(0, 3897) + "…";
 
 // ── Discord post ──────────────────────────────────────────────────────────────
 
-const webhookUrl = process.env.DISCORD_RELEASE_WEBHOOK;
+const webhookUrl = resolveWebhook(values.slug);
 if (!webhookUrl) {
-  console.log("DISCORD_RELEASE_WEBHOOK not set — release notes preview:\n\n" + notes);
+  console.log("No webhook resolved — release notes preview:\n\n" + notes);
   process.exit(0);
 }
 
 const embed = {
   title: `protoWorkstacean ${version}`,
   description: notes,
-  color: 0x7c3aed,  // protoLabs purple
+  color: 0x7c3aed,
   timestamp: new Date().toISOString(),
   footer: { text: "protoWorkstacean" },
 };
@@ -143,8 +167,7 @@ const discordResp = await fetch(webhookUrl, {
 });
 
 if (!discordResp.ok) {
-  const body = await discordResp.text();
-  console.error(`Discord post failed (${discordResp.status}): ${body}`);
+  console.error(`Discord post failed (${discordResp.status}): ${await discordResp.text()}`);
   process.exit(1);
 }
 

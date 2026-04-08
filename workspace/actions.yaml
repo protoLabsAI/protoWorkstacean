@@ -34,6 +34,36 @@ actions:
       agentId: ava
       fireAndForget: true
 
+  - id: alert.security_incident
+    goalId: security.no_open_incidents
+    tier: tier_0
+    priority: 100
+    cost: 0
+    name: "Alert on open security incidents"
+    preconditions:
+      - path: "domains.security.data.openIncidents"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: ceremony.security_triage
+    goalId: security.no_open_incidents
+    tier: tier_0
+    priority: 90
+    cost: 1
+    name: "Trigger security triage ceremony"
+    preconditions:
+      - path: "domains.security.data.openIncidents"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "ceremony.security-triage.execute"
+      fireAndForget: true
+
   - id: alert.agent_unreachable
     goalId: agents.all_reachable
     tier: tier_0

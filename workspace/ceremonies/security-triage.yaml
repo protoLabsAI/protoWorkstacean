@@ -1,0 +1,7 @@
+id: security-triage
+name: "Security Incident Triage"
+schedule: "0 * * * *"
+skill: bug_triage
+targets: []
+notifyChannel: ""
+enabled: true

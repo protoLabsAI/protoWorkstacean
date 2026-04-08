@@ -72,25 +72,32 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Notify Discord — what shipped
-        if: env.DISCORD_DEV_WEBHOOK != ''
         env:
-          DISCORD_DEV_WEBHOOK: ${{ secrets.DISCORD_DEV_WEBHOOK }}
+          DISCORD_WEBHOOK_PROTOWORKSTACEAN_DEV: ${{ secrets.DISCORD_WEBHOOK_PROTOWORKSTACEAN_DEV }}
+          COMMIT_SUBJECT: ${{ github.event.head_commit.message }}
+          SHORT_SHA: ${{ github.sha }}
+          COMMIT_URL: ${{ github.event.head_commit.url }}
         run: |
-          SUBJECT=$(git log -1 --pretty=format:"%s")
-          BODY=$(git log -1 --pretty=format:"%b" | head -5)
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          REPO="${{ github.repository }}"
-          RUN_URL="https://github.com/${REPO}/commit/${{ github.sha }}"
+          node -e "
+          import { readFileSync } from 'fs';
+          import { parse } from 'yaml';
 
-          DESCRIPTION="${SUBJECT}"
-          if [ -n "${BODY}" ]; then
-            DESCRIPTION="${SUBJECT}\n\n${BODY}"
-          fi
+          const projects = parse(readFileSync('workspace/projects.yaml', 'utf8')).projects ?? [];
+          const project  = projects.find(p => p.slug === 'protolabsai-protoworkstacean');
+          const envVar   = project?.discord?.dev?.webhookEnv;
+          const webhook  = envVar ? process.env[envVar] : null;
 
-          curl -s -X POST "$DISCORD_DEV_WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n \
-              --arg title "Shipped to main — ${SHORT_SHA}" \
-              --arg desc "${DESCRIPTION}" \
-              --arg url "${RUN_URL}" \
-              '{embeds:[{title:$title,description:$desc,url:$url,color:5763719,footer:{text:"protoWorkstacean CI"}}]}')"
+          if (!webhook) { console.log('No dev webhook configured — skipping'); process.exit(0); }
+
+          const subject = (process.env.COMMIT_SUBJECT ?? '').split('\n')[0];
+          const sha     = (process.env.SHORT_SHA ?? '').slice(0, 7);
+          const url     = process.env.COMMIT_URL ?? '';
+
+          const resp = await fetch(webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ embeds: [{ title: \`Shipped — \${sha}\`, description: subject, url, color: 5763719, footer: { text: 'protoWorkstacean' } }] }),
+          });
+          if (!resp.ok) { console.error('Discord post failed:', resp.status); process.exit(1); }
+          console.log('Posted to dev channel.');
+          " --input-type=module
