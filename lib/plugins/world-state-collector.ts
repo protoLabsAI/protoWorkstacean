@@ -19,16 +19,20 @@
  */
 
 import { Database } from "bun:sqlite";
-import { mkdirSync, existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { dirname, resolve, join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { PlaneClient } from "../plane-client.ts";
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import type {
   WorldState,
   WorldStateDomain,
   ServiceState,
+  ServiceInstance,
   BoardState,
   CIState,
   PortfolioState,
+  PortfolioProject,
   WorldStateSnapshot,
 } from "../types/world-state.ts";
 
@@ -100,6 +104,23 @@ export interface MCPTool {
   handler: (input: Record<string, unknown>) => Promise<unknown>;
 }
 
+// ── Issue type classification helper ─────────────────────────────────────────
+
+/**
+ * Classify a Plane work item as feature/defect/risk/debt based on its label names.
+ * Defaults to "feature" when no labels match.
+ */
+function _classifyIssueType(
+  labelIds: string[],
+  labelMap: Map<string, string>,
+): "feature" | "defect" | "risk" | "debt" {
+  const names = labelIds.map(id => labelMap.get(id)?.toLowerCase() ?? "").filter(Boolean);
+  if (names.some(n => /bug|defect|fix/.test(n))) return "defect";
+  if (names.some(n => /risk|security|vuln/.test(n))) return "risk";
+  if (names.some(n => /debt|tech.?debt|refactor|cleanup/.test(n))) return "debt";
+  return "feature";
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 export class WorldStateCollectorPlugin implements Plugin {
@@ -127,11 +148,13 @@ export class WorldStateCollectorPlugin implements Plugin {
 
   private readonly knowledgeDbPath: string;
   private readonly snapshotIntervalMs: number;
+  private readonly workspaceDir: string;
   private snapshotTimer?: ReturnType<typeof setInterval>;
 
-  constructor(options?: { knowledgeDbPath?: string; snapshotIntervalMs?: number }) {
+  constructor(options?: { knowledgeDbPath?: string; snapshotIntervalMs?: number; workspaceDir?: string }) {
     this.knowledgeDbPath = resolve(options?.knowledgeDbPath ?? "data/knowledge.db");
     this.snapshotIntervalMs = options?.snapshotIntervalMs ?? 300_000; // default 5min
+    this.workspaceDir = resolve(options?.workspaceDir ?? process.env.WORKSPACE_DIR ?? "workspace");
   }
 
   install(bus: EventBus): void {
@@ -489,47 +512,273 @@ export class WorldStateCollectorPlugin implements Plugin {
   }
 
   private async _collectBoard(tickNum: number): Promise<WorldStateDomain<BoardState>> {
+    const workspaceSlug = process.env.PLANE_WORKSPACE_SLUG ?? "protolabsai";
+    const apiKey = process.env.PLANE_API_KEY ?? "";
+    const baseUrl = process.env.PLANE_BASE_URL ?? "http://ava:3002";
+
+    // Without an API key we can't fetch — return zeroed state without throwing
+    if (!apiKey) {
+      console.warn("[world-state-collector] PLANE_API_KEY not set — board domain will be empty");
+      const data: BoardState = {
+        projectSlug: workspaceSlug,
+        openIssues: 0, inProgress: 0, done: 0, issues: [],
+        efficiency: 0,
+        distribution: { feature: 0, defect: 0, risk: 0, debt: 0 },
+      };
+      return { data, metadata: { collectedAt: Date.now(), domain: "board", tickNumber: tickNum } };
+    }
+
+    const client = new PlaneClient(baseUrl, workspaceSlug, apiKey);
+    const projects = await client.listProjects();
+
+    let totalOpen = 0, totalInProgress = 0, totalDone = 0;
+    let totalFeature = 0, totalDefect = 0, totalRisk = 0, totalDebt = 0;
+    const allIssues: BoardState["issues"] = [];
+
+    for (const project of projects) {
+      const [stateGroups, labelMap, issues] = await Promise.all([
+        client.fetchStateGroups(project.id),
+        client.fetchLabels(project.id),
+        client.listIssues(project.id, { pageSize: 100, maxIssues: 500 }),
+      ]);
+
+      for (const issue of issues) {
+        const group = stateGroups.get(issue.state) ?? "unstarted";
+
+        if (group === "started") {
+          totalInProgress++;
+        } else if (group === "completed") {
+          totalDone++;
+        } else if (group !== "cancelled") {
+          totalOpen++; // backlog + unstarted
+        }
+
+        const issueType = _classifyIssueType(issue.label_ids, labelMap);
+        if (issueType === "defect") totalDefect++;
+        else if (issueType === "risk") totalRisk++;
+        else if (issueType === "debt") totalDebt++;
+        else totalFeature++;
+
+        allIssues.push({
+          id: issue.id,
+          title: issue.name,
+          status: group,
+          priority: issue.priority,
+          assignee: issue.assignees?.[0],
+          updatedAt: issue.updated_at,
+        });
+      }
+    }
+
+    const waitingCount = totalOpen + totalInProgress;
+    const efficiency = waitingCount > 0 ? totalInProgress / waitingCount : 0;
+
+    const typeTotal = totalFeature + totalDefect + totalRisk + totalDebt || 1;
+    const distribution = {
+      feature: totalFeature / typeTotal,
+      defect: totalDefect / typeTotal,
+      risk: totalRisk / typeTotal,
+      debt: totalDebt / typeTotal,
+    };
+
     const data: BoardState = {
-      projectSlug: process.env.PLANE_WORKSPACE_SLUG ?? "protolabsai",
-      openIssues: 0,
-      inProgress: 0,
-      done: 0,
-      issues: [],
+      projectSlug: workspaceSlug,
+      openIssues: totalOpen,
+      inProgress: totalInProgress,
+      done: totalDone,
+      issues: allIssues.slice(0, 100),
+      efficiency,
+      distribution,
     };
-    return {
-      data,
-      metadata: { collectedAt: Date.now(), domain: "board", tickNumber: tickNum },
-    };
+
+    return { data, metadata: { collectedAt: Date.now(), domain: "board", tickNumber: tickNum } };
   }
 
   private async _collectCI(tickNum: number): Promise<WorldStateDomain<CIState>> {
+    const token = process.env.GITHUB_TOKEN;
+
+    // Derive repo list from projects.yaml
+    const repos = this._readReposFromPortfolio();
+    if (repos.length === 0 && process.env.GITHUB_REPOSITORY) {
+      repos.push(process.env.GITHUB_REPOSITORY);
+    }
+
+    if (!token || repos.length === 0) {
+      const data: CIState = { repository: repos[0] ?? "", runs: [], successRate: undefined };
+      return { data, metadata: { collectedAt: Date.now(), domain: "ci", tickNumber: tickNum } };
+    }
+
+    const allRuns: CIState["runs"] = [];
+
+    for (const repo of repos.slice(0, 5)) {
+      try {
+        const resp = await fetch(
+          `https://api.github.com/repos/${repo}/actions/runs?per_page=10`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github+json",
+              "User-Agent": "protoWorkstacean",
+            },
+            signal: AbortSignal.timeout(8_000),
+          },
+        );
+        if (!resp.ok) continue;
+
+        const body = (await resp.json()) as {
+          workflow_runs?: Array<{
+            id: number;
+            name: string;
+            status: string;
+            conclusion: string | null;
+            head_branch: string;
+            run_started_at?: string;
+            updated_at?: string;
+            html_url: string;
+          }>;
+        };
+
+        for (const run of body.workflow_runs ?? []) {
+          allRuns.push({
+            id: String(run.id),
+            name: `${repo} / ${run.name}`,
+            status: run.conclusion ?? run.status,
+            branch: run.head_branch,
+            startedAt: run.run_started_at,
+            finishedAt: run.updated_at,
+            url: run.html_url,
+          });
+        }
+      } catch {
+        // Skip this repo; continue with others
+      }
+    }
+
+    const completed = allRuns.filter(r => r.status === "success" || r.status === "failure");
+    const successRate = completed.length > 0
+      ? completed.filter(r => r.status === "success").length / completed.length
+      : undefined;
+
     const data: CIState = {
-      repository: process.env.GITHUB_REPOSITORY ?? "",
-      runs: [],
-      successRate: undefined,
+      repository: repos.join(", "),
+      runs: allRuns.slice(0, 50),
+      successRate,
     };
-    return {
-      data,
-      metadata: { collectedAt: Date.now(), domain: "ci", tickNumber: tickNum },
-    };
+    return { data, metadata: { collectedAt: Date.now(), domain: "ci", tickNumber: tickNum } };
   }
 
-  private async _collectPortfolio(tickNum: number): Promise<WorldStateDomain<PortfolioState>> {
+  private _collectPortfolio(tickNum: number): Promise<WorldStateDomain<PortfolioState>> {
+    const projectsPath = join(this.workspaceDir, "projects.yaml");
+    const projects: PortfolioProject[] = [];
+
+    if (existsSync(projectsPath)) {
+      try {
+        const raw = readFileSync(projectsPath, "utf8");
+        const parsed = parseYaml(raw) as {
+          projects?: Array<{
+            slug?: string;
+            title?: string;
+            github?: string;
+            status?: string;
+            agents?: string[];
+          }>;
+        };
+
+        for (const p of parsed.projects ?? []) {
+          if (!p.slug) continue;
+          projects.push({
+            slug: p.slug,
+            title: p.title ?? p.slug,
+            github: p.github ?? "",
+            status: (p.status ?? "active") as PortfolioProject["status"],
+            agents: p.agents ?? [],
+          });
+        }
+      } catch (err) {
+        console.warn("[world-state-collector] Failed to read projects.yaml for portfolio:", err);
+      }
+    }
+
     const data: PortfolioState = {
-      totalProjects: 0,
-      activeProjects: 0,
-      projects: [],
+      totalProjects: projects.length,
+      activeProjects: projects.filter(p => p.status === "active").length,
+      projects,
     };
-    return {
+
+    return Promise.resolve({
       data,
       metadata: { collectedAt: Date.now(), domain: "portfolio", tickNumber: tickNum },
-    };
+    });
   }
 
-  // ── Service health stub (replace with real health checks in production) ────
+  // ── Service health checks ─────────────────────────────────────────────────
 
-  private async _fetchServiceHealth(): Promise<ServiceState["instances"]> {
-    return [];
+  private async _fetchServiceHealth(): Promise<ServiceInstance[]> {
+    type ServiceCheck = { name: string; url: string; headers?: Record<string, string> };
+
+    const planeKey = process.env.PLANE_API_KEY;
+    const ghToken = process.env.GITHUB_TOKEN;
+
+    const checks: ServiceCheck[] = [
+      {
+        name: "plane",
+        url: `${process.env.PLANE_BASE_URL ?? "http://ava:3002"}/api/v1/workspaces/${process.env.PLANE_WORKSPACE_SLUG ?? "protolabsai"}/projects/`,
+        headers: planeKey ? { "X-Api-Key": planeKey } : undefined,
+      },
+      {
+        name: "github",
+        url: "https://api.github.com/rate_limit",
+        headers: ghToken ? { Authorization: `Bearer ${ghToken}` } : undefined,
+      },
+      {
+        name: "discord",
+        url: "https://discord.com/api/v10/gateway",
+      },
+    ];
+
+    return Promise.all(
+      checks.map(async ({ name, url, headers }): Promise<ServiceInstance> => {
+        const start = Date.now();
+        try {
+          const resp = await fetch(url, {
+            method: "GET",
+            headers,
+            signal: AbortSignal.timeout(5_000),
+          });
+          const latencyMs = Date.now() - start;
+          // 401/403 counts as reachable (auth issues, not outages)
+          const reachable = resp.ok || resp.status === 401 || resp.status === 403;
+          return {
+            name,
+            status: reachable ? "healthy" : "degraded",
+            lastChecked: Date.now(),
+            meta: { statusCode: resp.status, latencyMs },
+          };
+        } catch (err) {
+          return {
+            name,
+            status: "down",
+            lastChecked: Date.now(),
+            meta: { error: err instanceof Error ? err.message : String(err) },
+          };
+        }
+      }),
+    );
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /** Read github repo slugs from projects.yaml for CI collection. */
+  private _readReposFromPortfolio(): string[] {
+    const projectsPath = join(this.workspaceDir, "projects.yaml");
+    if (!existsSync(projectsPath)) return [];
+    try {
+      const raw = readFileSync(projectsPath, "utf8");
+      const parsed = parseYaml(raw) as { projects?: Array<{ github?: string }> };
+      return (parsed.projects ?? []).map(p => p.github).filter((g): g is string => !!g);
+    } catch {
+      return [];
+    }
   }
 
   // ── Redis fast-path write ──────────────────────────────────────────────────

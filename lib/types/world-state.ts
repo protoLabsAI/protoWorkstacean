@@ -45,6 +45,15 @@ export interface BoardState {
   inProgress: number;
   done: number;
   issues: BoardIssue[];
+  /** Flow efficiency: in-progress / (in-progress + open-backlog). Target >= 0.35. */
+  efficiency: number;
+  /** Distribution of work by type across all active issues. */
+  distribution: {
+    feature: number;  // 0.0 – 1.0
+    defect: number;
+    risk: number;
+    debt: number;
+  };
 }
 
 // ── CI state ──────────────────────────────────────────────────────────────────

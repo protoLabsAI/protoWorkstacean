@@ -115,6 +115,8 @@ describe("PlannerPluginL0", () => {
             inProgress: 1,
             done: 0,
             issues: [],
+            efficiency: 0.5,
+            distribution: { feature: 1, defect: 0, risk: 0, debt: 0 },
           },
           metadata: {
             collectedAt: Date.now(),
