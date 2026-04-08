@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, join, extname } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { InMemoryEventBus } from "../lib/bus";
 import { DebugPlugin } from "../lib/plugins/debug";
 import { LoggerPlugin } from "../lib/plugins/logger";
@@ -10,6 +10,7 @@ import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { ActionRegistry } from "./planner/action-registry";
 import type { Plugin, BusMessage } from "../lib/types";
 import type { Action } from "./planner/types/action";
+import type { SecurityIncident } from "../lib/types/world-state.ts";
 
 // --- Workspace config ---
 const workspaceDir = resolve(
@@ -483,6 +484,103 @@ async function handleRunCeremony(req: Request, ceremonyId: string): Promise<Resp
   return Response.json({ success: true, message: `Ceremony "${ceremonyId}" triggered` });
 }
 
+// ── Incidents API ─────────────────────────────────────────────────────────────
+
+function handleGetIncidents(): Response {
+  return serveWorkspaceYaml("incidents.yaml", "incidents");
+}
+
+async function handleReportIncident(req: Request): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return Response.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!body.title || !body.severity) {
+    return Response.json(
+      { success: false, error: "Missing required fields: title, severity" },
+      { status: 400 }
+    );
+  }
+
+  const incidentsPath = join(workspaceDir, "incidents.yaml");
+  let existing: SecurityIncident[] = [];
+  if (existsSync(incidentsPath)) {
+    try {
+      const parsed = parseYaml(readFileSync(incidentsPath, "utf8")) as { incidents?: SecurityIncident[] };
+      existing = parsed.incidents ?? [];
+    } catch { /* start fresh */ }
+  }
+
+  const incident: SecurityIncident = {
+    id: `INC-${String(existing.length + 1).padStart(3, "0")}`,
+    title: body.title as string,
+    severity: body.severity as SecurityIncident["severity"],
+    status: (body.status as SecurityIncident["status"]) ?? "open",
+    reportedAt: new Date().toISOString(),
+    ...(body.description ? { description: body.description as string } : {}),
+    ...(Array.isArray(body.affectedProjects) ? { affectedProjects: body.affectedProjects as string[] } : {}),
+    ...(body.assignee ? { assignee: body.assignee as string } : {}),
+  };
+
+  existing.push(incident);
+  writeFileSync(incidentsPath, stringifyYaml({ incidents: existing }), "utf8");
+
+  // Notify bus — world-state-collector re-collects security domain immediately
+  bus.publish("security.incident.reported", {
+    id: crypto.randomUUID(),
+    correlationId: crypto.randomUUID(),
+    topic: "security.incident.reported",
+    timestamp: Date.now(),
+    payload: { incident },
+  });
+
+  return Response.json({ success: true, data: incident }, { status: 201 });
+}
+
+async function handleResolveIncident(req: Request, incidentId: string): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const incidentsPath = join(workspaceDir, "incidents.yaml");
+  if (!existsSync(incidentsPath)) {
+    return Response.json({ success: false, error: "No incidents file found" }, { status: 404 });
+  }
+
+  let incidents: SecurityIncident[];
+  try {
+    const parsed = parseYaml(readFileSync(incidentsPath, "utf8")) as { incidents?: SecurityIncident[] };
+    incidents = parsed.incidents ?? [];
+  } catch {
+    return Response.json({ success: false, error: "Failed to parse incidents.yaml" }, { status: 500 });
+  }
+
+  const idx = incidents.findIndex(i => i.id === incidentId);
+  if (idx === -1) {
+    return Response.json({ success: false, error: `Incident "${incidentId}" not found` }, { status: 404 });
+  }
+
+  incidents[idx] = { ...incidents[idx], status: "resolved" };
+  writeFileSync(incidentsPath, stringifyYaml({ incidents }), "utf8");
+
+  bus.publish("security.incident.reported", {
+    id: crypto.randomUUID(),
+    correlationId: crypto.randomUUID(),
+    topic: "security.incident.reported",
+    timestamp: Date.now(),
+    payload: { incident: incidents[idx] },
+  });
+
+  return Response.json({ success: true, data: incidents[idx] });
+}
+
 function handleGetAgentSkills(agentName: string): Response {
   const agentsPath = join(workspaceDir, "agents.yaml");
   if (!existsSync(agentsPath)) {
@@ -535,6 +633,9 @@ const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
   { method: "GET",  path: "/api/ceremonies",            handler: () => handleGetCeremonies() },
   { method: "POST", path: "/api/ceremonies/:id/run",    handler: (req, p) => handleRunCeremony(req, p.id) },
   { method: "GET",  path: "/api/skills/:agentName",     handler: (_, p) => handleGetAgentSkills(p.agentName) },
+  { method: "GET",  path: "/api/incidents",            handler: () => handleGetIncidents() },
+  { method: "POST", path: "/api/incidents",            handler: (req) => handleReportIncident(req) },
+  { method: "POST", path: "/api/incidents/:id/resolve", handler: (req, p) => handleResolveIncident(req, p.id) },
 ];
 
 Bun.serve({

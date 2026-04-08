@@ -36,6 +36,8 @@ import type {
   WorldStateSnapshot,
   AgentHealthState,
   AgentHealthEntry,
+  SecurityState,
+  SecurityIncident,
 } from "../types/world-state.ts";
 
 // ── Tick rates (ms) ───────────────────────────────────────────────────────────
@@ -47,6 +49,7 @@ const TICK_RATES = {
   ci: 300_000,           // 5min (CI=300s)
   portfolio: 900_000,    // 15min (portfolio=900s)
   agent_health: 60_000,  // 60s
+  security: 30_000,      // 30s — incidents must surface fast
 } as const;
 
 type DomainName = keyof typeof TICK_RATES;
@@ -187,6 +190,7 @@ export class WorldStateCollectorPlugin implements Plugin {
     this._startDomainTicker("ci", TICK_RATES.ci);
     this._startDomainTicker("portfolio", TICK_RATES.portfolio);
     this._startDomainTicker("agent_health", TICK_RATES.agent_health);
+    this._startDomainTicker("security", TICK_RATES.security);
 
     // Periodic knowledge.db snapshot
     this.snapshotTimer = setInterval(() => {
@@ -201,10 +205,17 @@ export class WorldStateCollectorPlugin implements Plugin {
     void this._collectDomain("ci");
     void this._collectDomain("portfolio");
     void this._collectDomain("agent_health");
+    void this._collectDomain("security");
+
+    // Re-collect security immediately when an incident is reported via the bus
+    const secSubId = bus.subscribe("security.incident.reported", this.name, () => {
+      void this._collectDomain("security");
+    });
+    this.subscriptionIds.push(secSubId);
 
     console.log(
       "[world-state-collector] Plugin installed — " +
-      "tickers: services=30s, board=60s, CI=300s, portfolio=900s, agent_health=60s",
+      "tickers: services=30s, board=60s, CI=300s, portfolio=900s, agent_health=60s, security=30s",
     );
   }
 
@@ -438,6 +449,9 @@ export class WorldStateCollectorPlugin implements Plugin {
           break;
         case "agent_health":
           domainData = await this._collectAgentHealth(tickNum);
+          break;
+        case "security":
+          domainData = await this._collectSecurity(tickNum);
           break;
         default:
           throw new Error(`Unknown domain: ${String(domain)}`);
@@ -771,6 +785,33 @@ export class WorldStateCollectorPlugin implements Plugin {
     return {
       data,
       metadata: { collectedAt: Date.now(), domain: "agent_health", tickNumber: tickNum },
+    };
+  }
+
+  private async _collectSecurity(tickNum: number): Promise<WorldStateDomain<SecurityState>> {
+    const incidentsPath = join(this.workspaceDir, "incidents.yaml");
+    let incidents: SecurityIncident[] = [];
+
+    if (existsSync(incidentsPath)) {
+      try {
+        const raw = readFileSync(incidentsPath, "utf8");
+        const parsed = parseYaml(raw) as { incidents?: SecurityIncident[] };
+        incidents = parsed.incidents ?? [];
+      } catch (err) {
+        console.warn("[world-state-collector] Failed to read incidents.yaml:", err);
+      }
+    }
+
+    const open = incidents.filter(i => i.status !== "resolved");
+    const data: SecurityState = {
+      incidents,
+      openIncidents: open.length,
+      criticalIncidents: open.filter(i => i.severity === "critical").length,
+    };
+
+    return {
+      data,
+      metadata: { collectedAt: Date.now(), domain: "security", tickNumber: tickNum },
     };
   }
 

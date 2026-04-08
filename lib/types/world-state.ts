@@ -91,6 +91,25 @@ export interface PortfolioState {
   projects: PortfolioProject[];
 }
 
+// ── Security state ────────────────────────────────────────────────────────────
+
+export interface SecurityIncident {
+  id: string;
+  title: string;
+  severity: "critical" | "high" | "medium" | "low";
+  status: "open" | "investigating" | "resolved";
+  reportedAt: string;
+  description?: string;
+  affectedProjects?: string[];
+  assignee?: string;
+}
+
+export interface SecurityState {
+  incidents: SecurityIncident[];
+  openIncidents: number;
+  criticalIncidents: number;
+}
+
 // ── Agent health state ────────────────────────────────────────────────────────
 
 export interface AgentHealthEntry {
@@ -137,6 +156,7 @@ export interface WorldState {
     ci?: WorldStateDomain<CIState>;
     portfolio?: WorldStateDomain<PortfolioState>;
     agent_health?: WorldStateDomain<AgentHealthState>;
+    security?: WorldStateDomain<SecurityState>;
   };
   /** Generic extension mechanism for future domains or domain-specific data. */
   extensions: WorldStateExtensions;

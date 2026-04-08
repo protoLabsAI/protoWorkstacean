@@ -25,6 +25,13 @@ goals:
     operator: falsy
     description: "No service collection failures"
 
+  - id: security.no_open_incidents
+    type: Invariant
+    severity: critical
+    selector: "domains.security.data.openIncidents"
+    operator: falsy
+    description: "No open security incidents — all known issues must be resolved"
+
   - id: agents.all_reachable
     type: Invariant
     severity: high
