@@ -205,6 +205,22 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    name: "world-state-collector",
+    condition: () => true,
+    factory: async () => {
+      const { WorldStateCollectorPlugin } = await import("../lib/plugins/world-state-collector.js");
+      return new WorldStateCollectorPlugin({ knowledgeDbPath: `${dataDir}/knowledge.db` });
+    },
+  },
+  {
+    name: "action-dispatcher",
+    condition: () => true,
+    factory: async () => {
+      const { ActionDispatcherPlugin } = await import("./plugins/action-dispatcher-plugin.js");
+      return new ActionDispatcherPlugin({ wipLimit: 5 });
+    },
+  },
+  {
     name: "flow-monitor",
     condition: () => true,
     factory: async () => {
