@@ -502,51 +502,50 @@ function handleGetAgentSkills(agentName: string): Response {
   }
 }
 
-// ── HTTP server ───────────────────────────────────────────────────────────────
+// ── HTTP router ───────────────────────────────────────────────────────────────
 
-type RouteHandler = (req: Request) => Response | Promise<Response>;
+type Params = Record<string, string>;
+type RouteHandler = (req: Request, params: Params) => Response | Promise<Response>;
 
-const routes = new Map<string, RouteHandler>([
-  ["GET /health",        () => Response.json({ status: "ok", timestamp: Date.now() })],
-  ["POST /publish",      handlePublish],
-  ["POST /api/onboard",  handleOnboard],
-  ["GET /api/projects",  () => serveWorkspaceYaml("projects.yaml", "projects")],
-  ["GET /api/agents",    () => serveWorkspaceYaml("agents.yaml", "agents")],
-]);
+/** Match a path against a pattern like "/api/foo/:id/run". Returns params or null. */
+function matchPath(pattern: string, path: string): Params | null {
+  const pp = pattern.split("/");
+  const sp = path.split("/");
+  if (pp.length !== sp.length) return null;
+  const params: Params = {};
+  for (let i = 0; i < pp.length; i++) {
+    if (pp[i].startsWith(":")) {
+      params[pp[i].slice(1)] = sp[i];
+    } else if (pp[i] !== sp[i]) {
+      return null;
+    }
+  }
+  return params;
+}
+
+const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
+  { method: "GET",  path: "/health",                    handler: () => Response.json({ status: "ok", timestamp: Date.now() }) },
+  { method: "POST", path: "/publish",                   handler: handlePublish },
+  { method: "POST", path: "/api/onboard",               handler: handleOnboard },
+  { method: "GET",  path: "/api/projects",              handler: () => serveWorkspaceYaml("projects.yaml", "projects") },
+  { method: "GET",  path: "/api/agents",                handler: () => serveWorkspaceYaml("agents.yaml", "agents") },
+  { method: "GET",  path: "/api/goals",                 handler: () => serveWorkspaceYaml("goals.yaml", "goals") },
+  { method: "GET",  path: "/api/world-state",           handler: () => handleGetWorldState() },
+  { method: "GET",  path: "/api/world-state/:domain",   handler: (_, p) => handleGetWorldState(p.domain) },
+  { method: "GET",  path: "/api/ceremonies",            handler: () => handleGetCeremonies() },
+  { method: "POST", path: "/api/ceremonies/:id/run",    handler: (req, p) => handleRunCeremony(req, p.id) },
+  { method: "GET",  path: "/api/skills/:agentName",     handler: (_, p) => handleGetAgentSkills(p.agentName) },
+];
 
 Bun.serve({
   port: HTTP_PORT,
   fetch: async (req) => {
     const { pathname } = new URL(req.url);
-    const key = `${req.method} ${pathname}`;
-
-    // Static routes (exact match)
-    const handler = routes.get(key);
-    if (handler) return handler(req);
-
-    // Dynamic routes
-    if (req.method === "GET" && pathname === "/api/world-state") {
-      return handleGetWorldState();
+    for (const route of routes) {
+      if (route.method !== req.method) continue;
+      const params = matchPath(route.path, pathname);
+      if (params) return route.handler(req, params);
     }
-    if (req.method === "GET" && pathname.startsWith("/api/world-state/")) {
-      const domain = pathname.slice("/api/world-state/".length);
-      return handleGetWorldState(domain);
-    }
-    if (req.method === "GET" && pathname === "/api/ceremonies") {
-      return handleGetCeremonies();
-    }
-    if (req.method === "POST" && pathname.startsWith("/api/ceremonies/") && pathname.endsWith("/run")) {
-      const ceremonyId = pathname.slice("/api/ceremonies/".length, -"/run".length);
-      return handleRunCeremony(req, ceremonyId);
-    }
-    if (req.method === "GET" && pathname === "/api/goals") {
-      return serveWorkspaceYaml("goals.yaml", "goals");
-    }
-    if (req.method === "GET" && pathname.startsWith("/api/skills/")) {
-      const agentName = pathname.slice("/api/skills/".length);
-      return handleGetAgentSkills(agentName);
-    }
-
     return Response.json({ success: false, error: "Not found" }, { status: 404 });
   },
 });
