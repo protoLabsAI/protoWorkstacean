@@ -11,9 +11,12 @@ projects:
     status: active
     agents: [ava, quinn, frank, matt, kai]
     discord:
-      general: ""
-      updates: ""
-      dev: ""
+      dev:
+        channelId: ""
+        webhook: ""
+      release:
+        channelId: ""
+        webhook: ""
 
   - slug: protolabsai-quinn
     title: Quinn
@@ -23,8 +26,12 @@ projects:
     status: active
     agents: [ava, quinn]
     discord:
-      general: ""
-      dev: ""
+      dev:
+        channelId: ""
+        webhook: ""
+      release:
+        channelId: ""
+        webhook: ""
 
   - slug: protolabsai-protoui
     title: protoUI
@@ -34,9 +41,12 @@ projects:
     status: active
     agents: [ava, quinn, matt]
     discord:
-      general: "1490601617567912050"
-      updates: "1490601619300286525"
-      dev: "1490601620927418428"
+      dev:
+        channelId: "1490601620927418428"
+        webhook: ""
+      release:
+        channelId: "1490601619300286525"
+        webhook: ""
 
   - slug: protolabsai-protocontent
     title: protoContent
@@ -46,8 +56,12 @@ projects:
     status: active
     agents: [jon, cindi]
     discord:
-      general: ""
-      dev: ""
+      dev:
+        channelId: ""
+        webhook: ""
+      release:
+        channelId: ""
+        webhook: ""
 
   - slug: protolabsai-protoworkstacean
     title: protoWorkstacean
@@ -57,5 +71,9 @@ projects:
     status: active
     agents: [ava, quinn, frank, kai]
     discord:
-      general: ""
-      dev: ""
+      dev:
+        channelId: ""
+        webhook: ""
+      release:
+        channelId: ""
+        webhook: ""
