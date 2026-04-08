@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "mcp": "bun run mcp/server.ts"
   },
   "dependencies": {
     "@makeplane/plane-node-sdk": "^0.2.9",
     "@mariozechner/pi-coding-agent": "^0.64.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "cron-parser": "^5.5.0",
     "discord.js": "^14.0.0",
     "openai": "^4.77.0",
