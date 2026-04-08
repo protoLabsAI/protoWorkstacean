@@ -1,0 +1,12 @@
+incidents:
+  - id: INC-001
+    title: "Example: credential exposed in git history"
+    severity: critical   # critical | high | medium | low
+    status: open         # open | investigating | resolved
+    reportedAt: "2026-01-01T00:00:00Z"
+    description: >
+      Brief description of what happened, what was exposed, and what mitigation
+      has been applied.
+    affectedProjects:
+      - your-project-slug
+    assignee: quinn

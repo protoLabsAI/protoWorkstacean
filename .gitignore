@@ -2,9 +2,15 @@ node_modules
 .env
 data/
 
-# Agent workspace — registry files are tracked; runtime state is ignored
+# Agent workspace — schema/behavior files are tracked; deployment identity and
+# operational state are gitignored. Copy the .example files to get started.
 workspace/crons/
 workspace/*.log.automaker-lock
+workspace/incidents.yaml
+workspace/projects.yaml
+workspace/agents.yaml
+workspace/discord.yaml
+workspace/google.yaml
 .automaker-lock
 .automaker/
 .worktrees/
