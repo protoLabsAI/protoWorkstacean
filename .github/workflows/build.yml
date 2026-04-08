@@ -70,3 +70,27 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Notify Discord — what shipped
+        if: env.DISCORD_DEV_WEBHOOK != ''
+        env:
+          DISCORD_DEV_WEBHOOK: ${{ secrets.DISCORD_DEV_WEBHOOK }}
+        run: |
+          SUBJECT=$(git log -1 --pretty=format:"%s")
+          BODY=$(git log -1 --pretty=format:"%b" | head -5)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          REPO="${{ github.repository }}"
+          RUN_URL="https://github.com/${REPO}/commit/${{ github.sha }}"
+
+          DESCRIPTION="${SUBJECT}"
+          if [ -n "${BODY}" ]; then
+            DESCRIPTION="${SUBJECT}\n\n${BODY}"
+          fi
+
+          curl -s -X POST "$DISCORD_DEV_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg title "Shipped to main — ${SHORT_SHA}" \
+              --arg desc "${DESCRIPTION}" \
+              --arg url "${RUN_URL}" \
+              '{embeds:[{title:$title,description:$desc,url:$url,color:5763719,footer:{text:"protoWorkstacean CI"}}]}')"
