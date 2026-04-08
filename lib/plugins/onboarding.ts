@@ -34,6 +34,7 @@ import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { PlaneClient } from "../plane-client.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
 import { validateProjectEntry } from "../project-schema.ts";
+import { createDriveFolder } from "./google.ts";
 
 // ── In-process write lock for projects.yaml ───────────────────────────────────
 // Serialises concurrent onboarding writes to prevent TOCTOU races when two
@@ -75,6 +76,7 @@ interface OnboardSteps {
   planeProject?: StepResult & { projectId?: string };
   planeWebhook?: StepResult;
   githubWebhook?: StepResult;
+  driveFolder?: StepResult & { folderId?: string };
   projectsYaml?: StepResult;
 }
 
@@ -261,12 +263,17 @@ export class OnboardingPlugin implements Plugin {
     steps.githubWebhook = await this._stepGitHubWebhook(req);
     console.log(`[onboarding] Step 5 github_webhook: ${steps.githubWebhook.status} — ${steps.githubWebhook.detail ?? ""}`);
 
-    // ── Step 6: Update projects.yaml (serialised to prevent TOCTOU races) ────
+    // ── Step 6: Drive folder creation ────────────────────────────────────────
+    steps.driveFolder = await this._stepDriveFolder(req);
+    console.log(`[onboarding] Step 6 drive_folder: ${steps.driveFolder.status} — ${steps.driveFolder.detail ?? ""}`);
+
+    // ── Step 7: Update projects.yaml (serialised to prevent TOCTOU races) ────
     const planeProjectId = steps.planeProject?.data?.projectId as string | undefined;
+    const driveFolderId = steps.driveFolder?.data?.folderId as string | undefined;
     await withProjectsYamlLock(() => {
-      steps.projectsYaml = this._stepUpdateProjectsYaml(req, projectsPath, planeProjectId);
+      steps.projectsYaml = this._stepUpdateProjectsYaml(req, projectsPath, planeProjectId, driveFolderId);
     });
-    console.log(`[onboarding] Step 6 projects_yaml: ${steps.projectsYaml!.status} — ${steps.projectsYaml!.detail ?? ""}`);
+    console.log(`[onboarding] Step 7 projects_yaml: ${steps.projectsYaml!.status} — ${steps.projectsYaml!.detail ?? ""}`);
 
     if (steps.projectsYaml!.status === "error") {
       this._reply(bus, msg, {
@@ -277,13 +284,13 @@ export class OnboardingPlugin implements Plugin {
       return;
     }
 
-    // ── Step 7: Bus notify ───────────────────────────────────────────────────
+    // ── Step 8: Bus notify ───────────────────────────────────────────────────
     this._stepBusNotify(bus, req, steps, msg.correlationId);
-    console.log(`[onboarding] Step 7 bus_notify: ok — published message.inbound.onboard.complete`);
+    console.log(`[onboarding] Step 8 bus_notify: ok — published message.inbound.onboard.complete`);
 
-    // ── Step 8: Reply ────────────────────────────────────────────────────────
+    // ── Step 9: Reply ────────────────────────────────────────────────────────
     const summary = this._buildSummary(req, steps);
-    console.log(`[onboarding] Step 8 reply: ok — ${req.slug} onboarded`);
+    console.log(`[onboarding] Step 9 reply: ok — ${req.slug} onboarded`);
     this._reply(bus, msg, {
       success: true,
       step: "complete",
@@ -295,6 +302,7 @@ export class OnboardingPlugin implements Plugin {
         planeProject: steps.planeProject?.status,
         planeWebhook: steps.planeWebhook?.status,
         githubWebhook: steps.githubWebhook?.status,
+        driveFolder: steps.driveFolder?.status,
         projectsYaml: steps.projectsYaml?.status,
       },
     });
@@ -409,11 +417,59 @@ export class OnboardingPlugin implements Plugin {
     }
   }
 
-  /** Step 6: Upsert project entry into workspace/projects.yaml. */
+  /** Step 6: Create Drive folder for this project under the org root. */
+  private async _stepDriveFolder(req: OnboardRequest): Promise<StepResult & { folderId?: string }> {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REFRESH_TOKEN) {
+      return { status: "skip", detail: "Google credentials not set — skipping Drive folder creation" };
+    }
+
+    // Load org folder ID from google.yaml
+    const googleYamlPath = join(this.workspaceDir, "google.yaml");
+    if (!existsSync(googleYamlPath)) {
+      return { status: "skip", detail: "workspace/google.yaml not found — skipping Drive folder creation" };
+    }
+
+    let orgFolderId = "";
+    try {
+      const raw = readFileSync(googleYamlPath, "utf8");
+      const cfg = parseYaml(raw) as { drive?: { orgFolderId?: string } };
+      orgFolderId = cfg.drive?.orgFolderId ?? "";
+    } catch (err) {
+      return {
+        status: "error",
+        detail: `Failed to read google.yaml: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
+    if (!orgFolderId) {
+      return { status: "skip", detail: "drive.orgFolderId not set in google.yaml — skipping Drive folder creation" };
+    }
+
+    try {
+      const folder = await createDriveFolder(req.title, orgFolderId);
+      if (!folder) {
+        return { status: "error", detail: `Drive folder creation failed for project "${req.slug}"` };
+      }
+      return {
+        status: "ok",
+        detail: `Created Drive folder "${folder.name}" (${folder.id})`,
+        data: { folderId: folder.id },
+        folderId: folder.id,
+      };
+    } catch (err) {
+      return {
+        status: "error",
+        detail: `Drive folder creation error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  /** Step 7: Upsert project entry into workspace/projects.yaml. */
   private _stepUpdateProjectsYaml(
     req: OnboardRequest,
     projectsPath: string,
     planeProjectId?: string,
+    driveFolderId?: string,
   ): StepResult {
     try {
       // Double-check idempotency (guard against race between two concurrent runs)
@@ -442,6 +498,13 @@ export class OnboardingPlugin implements Plugin {
       if (planeProjectId) {
         entry.planeProjectId = planeProjectId;
       }
+
+      // Add Google Workspace metadata (folder ID populated if Drive step succeeded)
+      entry.googleWorkspace = {
+        driveFolderId: driveFolderId ?? "",
+        sharedDocId: "",
+        calendarId: "",
+      };
 
       // Validate the entry against the project schema before writing
       const validation = validateProjectEntry(entry);
@@ -496,10 +559,12 @@ export class OnboardingPlugin implements Plugin {
         agents: req.agents ?? ["ava", "quinn"],
         discord: req.discord ?? {},
         planeProjectId: steps.planeProject?.data?.projectId,
+        driveFolderId: steps.driveFolder?.data?.folderId,
         steps: {
           planeProject: steps.planeProject?.status,
           planeWebhook: steps.planeWebhook?.status,
           githubWebhook: steps.githubWebhook?.status,
+          driveFolder: steps.driveFolder?.status,
         },
       },
     });
@@ -551,6 +616,7 @@ export class OnboardingPlugin implements Plugin {
       `  • Plane project: ${this._statusEmoji(steps.planeProject?.status)} ${steps.planeProject?.detail ?? ""}`,
       `  • Plane webhook: ${this._statusEmoji(steps.planeWebhook?.status)} ${steps.planeWebhook?.detail ?? ""}`,
       `  • GitHub webhook: ${this._statusEmoji(steps.githubWebhook?.status)} ${steps.githubWebhook?.detail ?? ""}`,
+      `  • Drive folder: ${this._statusEmoji(steps.driveFolder?.status)} ${steps.driveFolder?.detail ?? ""}`,
       `  • projects.yaml: ${this._statusEmoji(steps.projectsYaml?.status)} ${steps.projectsYaml?.detail ?? ""}`,
     ];
     return lines.join("\n");
