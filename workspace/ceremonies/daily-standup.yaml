@@ -1,0 +1,9 @@
+id: daily-standup
+name: "Daily Fleet Standup"
+description: "Morning ceremony: board summary, active ceremonies, open PRs"
+cron: "0 9 * * 1-5"   # 9am Mon-Fri
+skill: board_audit
+targets:
+  - ava
+discord:
+  channel: "1469195643590541353"  # #ava channel

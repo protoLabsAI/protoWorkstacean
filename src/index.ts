@@ -7,7 +7,9 @@ import { LoggerPlugin } from "../lib/plugins/logger";
 import { CLIPlugin } from "../lib/plugins/cli";
 import { SignalPlugin } from "../lib/plugins/signal";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
+import { ActionRegistry } from "./planner/action-registry";
 import type { Plugin, BusMessage } from "../lib/types";
+import type { Action } from "./planner/types/action";
 
 // --- Workspace config ---
 const workspaceDir = resolve(
@@ -22,6 +24,53 @@ const dataDir = resolve(
 );
 
 const bus = new InMemoryEventBus();
+
+// --- Shared ActionRegistry — populated from workspace/actions.yaml ---
+const actionRegistry = new ActionRegistry();
+
+function loadActionsYaml(): void {
+  const actionsPath = join(workspaceDir, "actions.yaml");
+  if (!existsSync(actionsPath)) return;
+  try {
+    const raw = parseYaml(readFileSync(actionsPath, "utf8")) as { actions?: Record<string, unknown>[] };
+    const actionsData = raw?.actions ?? [];
+    for (const a of actionsData) {
+      try {
+        const action: Action = {
+          id: a.id as string,
+          name: a.name as string,
+          description: (a.description as string) ?? "",
+          goalId: a.goalId as string,
+          tier: a.tier as Action["tier"],
+          priority: typeof a.priority === "number" ? a.priority : 0,
+          cost: typeof a.cost === "number" ? a.cost : 0,
+          preconditions: Array.isArray(a.preconditions)
+            ? (a.preconditions as Array<{ path: string; operator: string; value?: unknown }>).map((p) => ({
+                path: p.path,
+                operator: p.operator as Action["preconditions"][number]["operator"],
+                value: p.value,
+              }))
+            : [],
+          effects: Array.isArray(a.effects)
+            ? (a.effects as Array<{ path: string; op?: string; operation?: string; value?: unknown }>).map((e) => ({
+                path: e.path,
+                operation: ((e.operation ?? e.op) as Action["effects"][number]["operation"]),
+                value: e.value,
+              }))
+            : [],
+          meta: typeof a.meta === "object" && a.meta !== null ? (a.meta as Action["meta"]) : {},
+        };
+        actionRegistry.upsert(action);
+      } catch (err) {
+        console.warn(`[actions-loader] Skipping invalid action '${a.id}':`, err);
+      }
+    }
+    console.info(`[actions-loader] Loaded ${actionRegistry.size} action(s) from workspace/actions.yaml`);
+  } catch (err) {
+    console.error("[actions-loader] Failed to parse workspace/actions.yaml:", err);
+  }
+}
+loadActionsYaml();
 
 // Core plugins — always loaded, statically imported (no dynamic overhead needed)
 const debugPlugin = new DebugPlugin();
@@ -121,6 +170,38 @@ const pluginRegistry: PluginRegistryEntry[] = [
     factory: async () => {
       const { EventViewerPlugin } = await import("../lib/plugins/event-viewer");
       return new EventViewerPlugin();
+    },
+  },
+  {
+    name: "goal-evaluator",
+    condition: () => true,
+    factory: async () => {
+      const { GoalEvaluatorPlugin } = await import("./plugins/goal_evaluator_plugin.js");
+      return new GoalEvaluatorPlugin({ workspaceDir });
+    },
+  },
+  {
+    name: "planner-l0",
+    condition: () => true,
+    factory: async () => {
+      const { PlannerPluginL0 } = await import("./plugins/planner-plugin-l0.js");
+      return new PlannerPluginL0(actionRegistry);
+    },
+  },
+  {
+    name: "ceremony",
+    condition: () => true,
+    factory: async () => {
+      const { CeremonyPlugin } = await import("./plugins/CeremonyPlugin.js");
+      return new CeremonyPlugin({ workspaceDir });
+    },
+  },
+  {
+    name: "flow-monitor",
+    condition: () => true,
+    factory: async () => {
+      const { FlowMonitorPlugin } = await import("../lib/plugins/flow-monitor.js");
+      return new FlowMonitorPlugin();
     },
   },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...

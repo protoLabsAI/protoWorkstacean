@@ -1,0 +1,26 @@
+# World Engine Goals — Global
+# Per-project overrides: .automaker/projects/{slug}/goals.yaml
+
+goals:
+  - id: flow.efficiency_healthy
+    type: Threshold
+    severity: medium
+    selector: "domains.board.data.efficiency"
+    min: 0.35
+    description: "Flow efficiency must stay >= 35%"
+
+  - id: flow.distribution_balanced
+    type: Distribution
+    severity: medium
+    description: "Board must have >= 40% features, <= 30% defects"
+    distribution:
+      feature: 0.40
+      defect: 0.30
+    tolerance: 0.10
+
+  - id: services.all_healthy
+    type: Invariant
+    severity: high
+    selector: "domains.services.metadata.failed"
+    operator: falsy
+    description: "No service collection failures"
