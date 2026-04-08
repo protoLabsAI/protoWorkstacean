@@ -18,9 +18,10 @@
  *   DISCORD_DIGEST_CHANNEL  fallback channel ID for cron-triggered posts
  */
 
-import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, watchFile, unwatchFile, mkdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { Database } from "bun:sqlite";
 import {
   Client,
   GatewayIntentBits,
@@ -213,8 +214,13 @@ export class DiscordPlugin implements Plugin {
   private rateWindowMs = 10_000;
   private spamPatterns: RegExp[] = [];
 
-  constructor(workspaceDir: string) {
+  // Persistent rate-limit DB
+  private rlDb: Database | null = null;
+  private dataDir: string | null = null;
+
+  constructor(workspaceDir: string, dataDir?: string) {
     this.workspaceDir = workspaceDir;
+    this.dataDir = dataDir ? resolve(dataDir) : null;
   }
 
   install(bus: EventBus): void {
@@ -231,6 +237,9 @@ export class DiscordPlugin implements Plugin {
     this.rateMaxMessages = rateLimit.maxMessages;
     this.rateWindowMs = rateLimit.windowSeconds * 1_000;
     this.spamPatterns = compileSpamPatterns(spamPatterns);
+
+    // Open persistent rate-limit store
+    this._openRateLimitDb();
 
     this.client = new Client({
       intents: [
@@ -580,6 +589,11 @@ export class DiscordPlugin implements Plugin {
     unwatchFile(join(this.workspaceDir, "agents.yaml"));
 
     this.client?.destroy();
+
+    if (this.rlDb) {
+      this.rlDb.close();
+      this.rlDb = null;
+    }
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
@@ -589,11 +603,60 @@ export class DiscordPlugin implements Plugin {
     return this.config.admins.includes(userId);
   }
 
+  private _openRateLimitDb(): void {
+    if (!this.dataDir) return;
+
+    try {
+      if (!existsSync(this.dataDir)) {
+        mkdirSync(this.dataDir, { recursive: true });
+      }
+
+      this.rlDb = new Database(join(this.dataDir, "events.db"));
+      this.rlDb.exec("PRAGMA journal_mode=WAL");
+      this.rlDb.exec(`
+        CREATE TABLE IF NOT EXISTS rate_limits (
+          user_id TEXT NOT NULL,
+          ts INTEGER NOT NULL
+        )
+      `);
+      this.rlDb.exec("CREATE INDEX IF NOT EXISTS idx_rate_limits_user_ts ON rate_limits(user_id, ts)");
+
+      // Load persisted windows into memory
+      const cutoff = Date.now() - this.rateWindowMs;
+      const rows = this.rlDb
+        .query("SELECT user_id, ts FROM rate_limits WHERE ts > ?")
+        .all(cutoff) as { user_id: string; ts: number }[];
+
+      for (const row of rows) {
+        const hits = this.rateLimits.get(row.user_id) ?? [];
+        hits.push(row.ts);
+        this.rateLimits.set(row.user_id, hits);
+      }
+
+      console.log(`[discord] Rate-limit DB opened (${rows.length} persisted hit(s) loaded)`);
+    } catch (err) {
+      console.warn("[discord] Could not open rate-limit DB — falling back to in-memory only:", err);
+      this.rlDb = null;
+    }
+  }
+
   private _isRateLimited(userId: string): boolean {
     const now = Date.now();
     const hits = (this.rateLimits.get(userId) ?? []).filter(t => now - t < this.rateWindowMs);
     hits.push(now);
     this.rateLimits.set(userId, hits);
+
+    // Persist new hit to DB (fire-and-forget; errors are non-fatal)
+    if (this.rlDb) {
+      try {
+        this.rlDb.run("INSERT INTO rate_limits (user_id, ts) VALUES (?, ?)", [userId, now]);
+        // Prune expired rows for this user to keep the table tidy
+        this.rlDb.run("DELETE FROM rate_limits WHERE user_id = ? AND ts <= ?", [userId, now - this.rateWindowMs]);
+      } catch (err) {
+        console.warn("[discord] Failed to persist rate-limit hit:", err);
+      }
+    }
+
     return hits.length > this.rateMaxMessages;
   }
 
