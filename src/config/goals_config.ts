@@ -10,7 +10,7 @@ export interface GoalsConfig {
 }
 
 export const DEFAULT_GOALS_CONFIG: GoalsConfig = {
-  observeOnly: true,
+  observeOnly: false,
   workspaceDir: "workspace",
   evaluationIntervalMs: 0,
 };
