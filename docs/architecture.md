@@ -42,7 +42,12 @@ flowchart TD
         SKB["SkillBrokerPlugin"]
     end
 
-    subgraph Agents["Agent Fleet (A2A / JSON-RPC 2.0)"]
+    subgraph Runtime["Agent Runtime (in-process)"]
+        ART["AgentRuntimePlugin\nworkspace/agents/*.yaml"]
+        TRG["ToolRegistry\npublish_event · get_world_state\nget_incidents · report_incident"]
+    end
+
+    subgraph Agents["External Agents (A2A / JSON-RPC 2.0)"]
         AVA[Ava]
         QNN[Quinn]
         FRK[Frank]
@@ -72,7 +77,9 @@ flowchart TD
 
     BUS -- "ceremony.*.execute" --> CRP
     CRP -- "agent.skill.request" --> BUS
-    BUS -- "agent.skill.request" --> SKB
+    BUS -- "agent.skill.request" --> ART
+    ART -- "proto CLI subprocess\n@protolabsai/sdk" --> TRG
+    ART -- "fallthrough\n(unknown agents)" --> SKB
     SKB --> A2A
 
     A2A --> AVA & QNN & FRK & JON & RSR
@@ -172,7 +179,8 @@ security.incident.reported                               — immediate security 
 | `workspace/actions.yaml` | GOAP action rules | tracked |
 | `workspace/goals.yaml` | GOAP goal definitions | tracked |
 | `workspace/ceremonies/*.yaml` | ceremony schedules + skill routing | tracked |
-| `workspace/agents.yaml` | agent fleet URLs, skills, chains | **gitignored** |
+| `workspace/agents/*.yaml` | in-process agent definitions (model, tools, skills) | **gitignored** |
+| `workspace/agents.yaml` | external A2A agent registry (URLs, chains) | **gitignored** |
 | `workspace/projects.yaml` | project registry, Discord channels | **gitignored** |
 | `workspace/discord.yaml` | bot config, slash commands | **gitignored** |
 | `workspace/google.yaml` | Google Workspace config | **gitignored** |
@@ -186,6 +194,7 @@ Copy `*.example` counterparts to bootstrap a new deployment.
 
 | Service | Default URL | Purpose |
 |---------|------------|---------|
+| LiteLLM Gateway | `LLM_GATEWAY_URL` (default: `http://gateway:4000/v1`) | One-stop LLM routing for all in-process agents |
 | Qdrant | `http://qdrant:6333` | Vector search (Quinn PR review) |
 | Ollama | `http://ollama:11434` | Local embeddings |
 | GitHub API | `https://api.github.com` | PRs, diffs, comments |

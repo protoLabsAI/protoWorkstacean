@@ -4,7 +4,7 @@ _This is a reference doc. It lists all skills in the agent registry, their routi
 
 ---
 
-Skills are declared in `workspace/agents.yaml`. On startup, the A2APlugin fetches each agent's `/.well-known/agent.json` and overwrites with live skills if available. The table below reflects the static registry.
+Skills are declared in `workspace/agents/<name>.yaml` (in-process agents) or `workspace/agents.yaml` (external A2A agents). The `AgentRuntimePlugin` resolves skills from the per-agent YAML files first; unknown skills fall through to `SkillBrokerPlugin` for external dispatch.
 
 ---
 
@@ -91,6 +91,31 @@ After Quinn completes `bug_triage`, A2APlugin automatically calls Ava's `manage_
 
 ## Adding a new agent
 
+### In-process agent (recommended)
+
+Create `workspace/agents/<name>.yaml` (copy from the `.example` template):
+
+```yaml
+name: my-agent
+role: general                   # orchestrator | qa | devops | content | research | general
+model: claude-sonnet-4-6        # gateway model alias
+systemPrompt: |
+  You are MyAgent. Your job is...
+tools:
+  - publish_event
+  - get_world_state
+maxTurns: 10
+skills:
+  - name: my_skill
+    description: Does the thing
+```
+
+That's it. `AgentRuntimePlugin` picks up the file on next restart and registers `my_skill` for routing.
+
+Available tools whitelist: `publish_event`, `get_world_state`, `get_incidents`, `report_incident`, `get_ceremonies`, `run_ceremony`. The agent also has access to all proto CLI built-in tools (file read/write, bash, search) regardless of the `tools` whitelist.
+
+### External A2A agent (legacy / remote)
+
 1. Add the agent to `workspace/agents.yaml`:
 
 ```yaml
@@ -103,17 +128,27 @@ agents:
       - my_skill
 ```
 
-2. Add keyword entries to `SKILL_KEYWORDS` in `src/plugins/a2a.ts` for keyword routing.
-3. Optionally add `chain` entries for follow-up chains.
-4. Restart: `docker restart workstacean`
+2. Restart: `docker restart workstacean`
 
-The A2APlugin fetches `/.well-known/agent.json` from the agent URL on startup and merges live skills — so the `agents.yaml` entry only needs to be approximate.
+The `SkillBrokerPlugin` dispatches via JSON-RPC 2.0. In-process agents take priority for any skill they declare — external A2A is the fallback.
 
 ---
 
-## A2A protocol
+## Skill resolution order
 
-All agent calls use JSON-RPC 2.0 `message/send`:
+1. **`AgentRuntimePlugin`** — checks `workspace/agents/*.yaml`:
+   - Explicit `targets[]` in the request → first matching agent name
+   - `skillHint` → first agent declaring that skill
+   - No match → falls through
+2. **`SkillBrokerPlugin`** — checks `workspace/agents.yaml`:
+   - Same resolution order against external A2A agents
+   - Timeout: 110s per call
+
+---
+
+## A2A protocol (external agents)
+
+External agent calls use JSON-RPC 2.0 `message/send`:
 
 ```json
 {

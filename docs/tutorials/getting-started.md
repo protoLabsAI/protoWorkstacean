@@ -33,25 +33,35 @@ The `workspace/` directory is the runtime configuration volume. Deployment-ident
 files are gitignored — copy the `.example` files to bootstrap:
 
 ```bash
+# In-process agent definitions (one file per agent)
+cp workspace/agents/ava.yaml.example   workspace/agents/ava.yaml
+cp workspace/agents/quinn.yaml.example workspace/agents/quinn.yaml
+cp workspace/agents/frank.yaml.example workspace/agents/frank.yaml
+
+# External A2A registry (for remote agents)
 cp workspace/agents.yaml.example   workspace/agents.yaml
 cp workspace/projects.yaml.example workspace/projects.yaml
 cp workspace/discord.yaml.example  workspace/discord.yaml
 cp workspace/google.yaml.example   workspace/google.yaml
 ```
 
-Then fill in your URLs, channel IDs, and env var names. The directory layout:
+Then fill in your model aliases, system prompts, URLs, and channel IDs. The directory layout:
 
 ```
 workspace/
-  agents.yaml      # agent registry — URLs, skills, chains          (gitignored)
-  projects.yaml    # project registry — repos, Discord channels      (gitignored)
-  discord.yaml     # Discord slash commands, channel IDs, moderation (gitignored)
-  google.yaml      # Google Workspace Drive/Calendar/Gmail config    (gitignored)
-  incidents.yaml   # live security incident state                    (gitignored)
-  actions.yaml     # GOAP action rules                               (tracked)
-  goals.yaml       # GOAP goal definitions                           (tracked)
-  ceremonies/      # ceremony YAML files                             (tracked)
-  crons/           # scheduled task YAML files                       (runtime, gitignored)
+  agents/          # in-process agent definitions (one .yaml per agent)  (gitignored)
+    ava.yaml       #   Ava — orchestrator
+    quinn.yaml     #   Quinn — QA / code review
+    frank.yaml     #   Frank — DevOps / CI
+  agents.yaml      # external A2A agent registry — URLs, skills, chains  (gitignored)
+  projects.yaml    # project registry — repos, Discord channels           (gitignored)
+  discord.yaml     # Discord slash commands, channel IDs, moderation      (gitignored)
+  google.yaml      # Google Workspace Drive/Calendar/Gmail config         (gitignored)
+  incidents.yaml   # live security incident state                         (gitignored)
+  actions.yaml     # GOAP action rules                                    (tracked)
+  goals.yaml       # GOAP goal definitions                                (tracked)
+  ceremonies/      # ceremony YAML files                                  (tracked)
+  crons/           # scheduled task YAML files                            (runtime, gitignored)
   plugins/         # hot-loaded workspace plugins
 ```
 
@@ -68,7 +78,11 @@ cp .env.example .env
 Minimum required secrets to start the server (no plugins enabled):
 
 ```
-# Agent calls
+# In-process agent runtime — LLM gateway (LiteLLM Proxy)
+LLM_GATEWAY_URL=http://gateway:4000/v1
+OPENAI_API_KEY=<gateway-api-key>
+
+# External A2A agents (legacy)
 AVA_API_KEY=<key>
 
 # Optional: enable GitHub plugin
@@ -95,7 +109,8 @@ Watch the startup log. You should see each plugin report whether it installed su
 ```
 [DiscordPlugin] installed — guild commands registered
 [GitHubPlugin] installed — webhook server on :8082
-[A2APlugin] installed — 6 agents loaded from agents.yaml
+[agent-runtime] Plugin installed — 3 agent(s): ava, quinn, frank | 6 tool(s): publish_event, ...
+[skill-broker] Plugin installed — 0 agent(s) registered
 [SchedulerPlugin] installed — 0 schedules loaded
 ```
 
