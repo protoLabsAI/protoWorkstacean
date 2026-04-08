@@ -39,6 +39,8 @@ interface CommandOption {
   description: string;
   type: "string" | "integer" | "boolean";
   required?: boolean;
+  /** When true, Discord sends autocomplete interactions for this option. */
+  autocomplete?: boolean;
 }
 
 interface Subcommand {
@@ -52,7 +54,13 @@ interface Subcommand {
 interface CommandConfig {
   name: string;
   description: string;
-  subcommands: Subcommand[];
+  /** Subcommand-based commands (mutually exclusive with top-level `options`). */
+  subcommands?: Subcommand[];
+  /** Top-level options for flat commands (no subcommands). */
+  options?: CommandOption[];
+  /** Content template for flat commands — supports {optionName} placeholders. */
+  content?: string;
+  skillHint?: string;
 }
 
 interface DiscordConfig {
@@ -151,6 +159,35 @@ function loadAgentPoolDefs(workspaceDir: string): AgentPoolEntry[] {
     return parsed.agents ?? [];
   } catch (err) {
     console.error("[discord] Failed to parse agents.yaml:", err);
+    return [];
+  }
+}
+
+// ── Projects loader (for autocomplete + project resolution) ───────────────────
+
+interface ProjectEntry {
+  slug: string;
+  title: string;
+  github?: string;
+  status?: string;
+  discord?: { general?: string; updates?: string; dev?: string };
+}
+
+interface ProjectsYaml {
+  projects: ProjectEntry[];
+}
+
+function loadProjectsDefs(workspaceDir: string): ProjectEntry[] {
+  const projectsPath = join(workspaceDir, "projects.yaml");
+  if (!existsSync(projectsPath)) return [];
+  try {
+    const raw = readFileSync(projectsPath, "utf8");
+    const parsed = parseYaml(raw) as ProjectsYaml;
+    return (parsed.projects ?? []).filter(
+      p => p.status !== "archived" && p.status !== "suspended"
+    );
+  } catch (err) {
+    console.error("[discord] Failed to parse projects.yaml:", err);
     return [];
   }
 }
@@ -298,8 +335,29 @@ export class DiscordPlugin implements Plugin {
       });
     });
 
-    // ── Slash commands ───────────────────────────────────────────────────────
+    // ── Slash commands + autocomplete ────────────────────────────────────────
     this.client.on(Events.InteractionCreate, async interaction => {
+      // ── Autocomplete: filter projects.yaml by typed value ─────────────────
+      if (interaction.isAutocomplete()) {
+        const cmdConfig = this.config.commands.find(c => c.name === interaction.commandName);
+        if (!cmdConfig) return;
+
+        const focused = interaction.options.getFocused(true);
+        if (focused.name === "project") {
+          const projects = loadProjectsDefs(this.workspaceDir);
+          const typed = focused.value.toLowerCase();
+          const choices = projects
+            .filter(p =>
+              p.slug.toLowerCase().includes(typed) ||
+              p.title.toLowerCase().includes(typed)
+            )
+            .slice(0, 25)
+            .map(p => ({ name: p.title, value: p.slug }));
+          await interaction.respond(choices).catch(console.error);
+        }
+        return;
+      }
+
       if (!interaction.isChatInputCommand()) return;
 
       const cmdConfig = this.config.commands.find(c => c.name === interaction.commandName);
@@ -313,9 +371,56 @@ export class DiscordPlugin implements Plugin {
 
       await interaction.deferReply();
 
-      const subName = interaction.options.getSubcommand(false) ?? cmdConfig.subcommands[0]?.name;
-      const subConfig = cmdConfig.subcommands.find(s => s.name === subName)
-        ?? cmdConfig.subcommands[0];
+      // ── Flat command (top-level options, no subcommands) ─────────────────
+      const isFlatCommand = !!cmdConfig.options?.length && !cmdConfig.subcommands?.length;
+      if (isFlatCommand) {
+        // Resolve project metadata from projects.yaml if a `project` option is present
+        const projectSlug = interaction.options.getString("project");
+        let devChannelId: string | undefined;
+        let projectRepo: string | undefined;
+
+        if (projectSlug) {
+          const projects = loadProjectsDefs(this.workspaceDir);
+          const project = projects.find(p => p.slug === projectSlug);
+          if (project) {
+            devChannelId = project.discord?.dev || undefined;
+            projectRepo = project.github || undefined;
+          }
+        }
+
+        const content = this._interpolateContent(
+          cmdConfig.content ?? "",
+          cmdConfig.options ?? [],
+          interaction,
+        );
+
+        const correlationId = makeId();
+        pendingReplies.set(correlationId, { interaction });
+
+        const topicSuffix = `slash.${interaction.id}`;
+        bus.publish(`message.inbound.discord.${topicSuffix}`, {
+          id: interaction.id,
+          correlationId,
+          topic: `message.inbound.discord.${topicSuffix}`,
+          timestamp: Date.now(),
+          payload: {
+            sender: interaction.user.id,
+            channel: interaction.channelId,
+            content,
+            skillHint: cmdConfig.skillHint,
+            ...(devChannelId ? { devChannelId } : {}),
+            ...(projectRepo ? { projectRepo } : {}),
+          },
+          source: { interface: "discord" as const, channelId: interaction.channelId, userId: interaction.user.id },
+          reply: { topic: `message.outbound.discord.${topicSuffix}` },
+        });
+        return;
+      }
+
+      // ── Subcommand-based command (existing behaviour) ─────────────────────
+      const subcommands = cmdConfig.subcommands ?? [];
+      const subName = interaction.options.getSubcommand(false) ?? subcommands[0]?.name;
+      const subConfig = subcommands.find(s => s.name === subName) ?? subcommands[0];
 
       if (!subConfig) {
         await interaction.editReply("Unknown subcommand.").catch(console.error);
@@ -623,21 +728,38 @@ export class DiscordPlugin implements Plugin {
       return;
     }
 
-    const commandData = this.config.commands.map(cmd => ({
-      name: cmd.name,
-      description: cmd.description,
-      options: cmd.subcommands.map(sub => ({
-        name: sub.name,
-        type: 1, // SUB_COMMAND
-        description: sub.description,
-        options: (sub.options ?? []).map(opt => ({
-          name: opt.name,
-          description: opt.description,
-          type: OPTION_TYPE_CODES[opt.type] ?? 3,
-          required: opt.required ?? false,
+    const commandData = this.config.commands.map(cmd => {
+      // Flat command: top-level options with optional autocomplete (no subcommands)
+      if (cmd.options?.length && !cmd.subcommands?.length) {
+        return {
+          name: cmd.name,
+          description: cmd.description,
+          options: cmd.options.map(opt => ({
+            name: opt.name,
+            description: opt.description,
+            type: OPTION_TYPE_CODES[opt.type] ?? 3,
+            required: opt.required ?? false,
+            autocomplete: opt.autocomplete ?? false,
+          })),
+        };
+      }
+      // Subcommand-based command (existing behaviour)
+      return {
+        name: cmd.name,
+        description: cmd.description,
+        options: (cmd.subcommands ?? []).map(sub => ({
+          name: sub.name,
+          type: 1, // SUB_COMMAND
+          description: sub.description,
+          options: (sub.options ?? []).map(opt => ({
+            name: opt.name,
+            description: opt.description,
+            type: OPTION_TYPE_CODES[opt.type] ?? 3,
+            required: opt.required ?? false,
+          })),
         })),
-      })),
-    }));
+      };
+    });
 
     await guild.commands.set(commandData);
     console.log(

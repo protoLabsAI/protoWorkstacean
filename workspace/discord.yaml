@@ -1,0 +1,39 @@
+# ── Channel IDs ───────────────────────────────────────────────────────────────
+channels:
+  # Default channel for cron-triggered posts (daily digest, etc.)
+  # Falls back to DISCORD_DIGEST_CHANNEL env var if blank.
+  digest: ""
+  # Channel for new member welcome messages. Leave blank to disable.
+  welcome: ""
+  # Channel for moderation log. Leave blank to disable.
+  modLog: ""
+
+# ── Moderation ────────────────────────────────────────────────────────────────
+moderation:
+  rateLimit:
+    maxMessages: 5
+    windowSeconds: 10
+  spamPatterns: []
+
+# ── Slash Commands ────────────────────────────────────────────────────────────
+# Autocomplete commands use top-level `options` (no subcommands).
+# Regular commands use `subcommands`.
+commands:
+  - name: report-bug
+    description: Report a bug against a project
+    # Top-level options — renders as a single command with autocomplete project picker.
+    # The `project` option value (slug) is resolved against projects.yaml to derive
+    # devChannelId (discord.dev) and projectRepo (github field) at dispatch time.
+    options:
+      - name: project
+        description: Project to report against (start typing to filter)
+        type: string
+        required: true
+        autocomplete: true
+      - name: description
+        description: Brief description of the bug
+        type: string
+        required: true
+    content: "Bug report for {project}: {description}"
+    skillHint: bug_triage
+    # admins: ["123456789"] — restrict if needed
