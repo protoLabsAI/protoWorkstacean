@@ -426,6 +426,26 @@ export class WorldStateCollectorPlugin implements Plugin {
       const redisLatencyMs = Date.now() - redisWriteStart;
       const durationMs = Date.now() - startTs;
 
+      // Publish to event bus so GoalEvaluatorPlugin can evaluate goals (world.state.# wildcard)
+      if (this.bus) {
+        const domainTopic = `world.state.${domain}`;
+        this.bus.publish(domainTopic, {
+          id: crypto.randomUUID(),
+          correlationId: crypto.randomUUID(),
+          topic: domainTopic,
+          timestamp: Date.now(),
+          payload: { domain, tickNumber: tickNum, state: this.worldState },
+        });
+        // Also publish world.state.updated with full WorldState so ActionDispatcherPlugin stays in sync
+        this.bus.publish("world.state.updated", {
+          id: crypto.randomUUID(),
+          correlationId: crypto.randomUUID(),
+          topic: "world.state.updated",
+          timestamp: Date.now(),
+          payload: this.worldState,
+        });
+      }
+
       span.end({
         domain,
         tickNumber: tickNum,
