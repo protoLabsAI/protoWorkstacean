@@ -29,16 +29,29 @@ git clone https://github.com/protoLabsAI/protoWorkstacean.git
 cd protoWorkstacean
 ```
 
-The `workspace/` directory is the runtime configuration volume. It ships with example YAML files. Review:
+The `workspace/` directory is the runtime configuration volume. Deployment-identity
+files are gitignored — copy the `.example` files to bootstrap:
+
+```bash
+cp workspace/agents.yaml.example   workspace/agents.yaml
+cp workspace/projects.yaml.example workspace/projects.yaml
+cp workspace/discord.yaml.example  workspace/discord.yaml
+cp workspace/google.yaml.example   workspace/google.yaml
+```
+
+Then fill in your URLs, channel IDs, and env var names. The directory layout:
 
 ```
 workspace/
-  agents.yaml      # agent registry — URLs, skills, chains
-  projects.yaml    # project registry — repos, Discord channels, Plane IDs
-  discord.yaml     # Discord slash commands, channel IDs, moderation
-  github.yaml      # mention handle, skill hints per event type
-  google.yaml      # Google Workspace Drive/Calendar/Gmail config
-  crons/           # scheduled task YAML files
+  agents.yaml      # agent registry — URLs, skills, chains          (gitignored)
+  projects.yaml    # project registry — repos, Discord channels      (gitignored)
+  discord.yaml     # Discord slash commands, channel IDs, moderation (gitignored)
+  google.yaml      # Google Workspace Drive/Calendar/Gmail config    (gitignored)
+  incidents.yaml   # live security incident state                    (gitignored)
+  actions.yaml     # GOAP action rules                               (tracked)
+  goals.yaml       # GOAP goal definitions                           (tracked)
+  ceremonies/      # ceremony YAML files                             (tracked)
+  crons/           # scheduled task YAML files                       (runtime, gitignored)
   plugins/         # hot-loaded workspace plugins
 ```
 

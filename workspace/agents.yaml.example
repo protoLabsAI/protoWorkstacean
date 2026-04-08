@@ -1,0 +1,31 @@
+# protoLabs A2A Agent Registry
+# Authoritative source for the agent fleet.
+# Skills are refreshed live from /.well-known/agent.json on startup.
+# apiKeyEnv: name of env var holding the API key for this agent's /a2a endpoint.
+
+agents:
+  - name: ava
+    url: http://your-agent-host:3008/a2a
+    apiKeyEnv: AVA_API_KEY
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_AVA
+    skills:
+      - name: plan
+        description: Break down a PRD or feature request into an actionable implementation plan
+      - name: sitrep
+        description: Generate a status report across active projects
+    subscribesTo:
+      - message.inbound.#
+      - hitl.response.#
+
+  - name: quinn
+    url: http://your-quinn-host:7870/a2a
+    apiKeyEnv: QUINN_API_KEY
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_QUINN
+    skills:
+      - name: bug_triage
+        description: Triage a bug report and recommend next steps
+      - name: pr_review
+        description: Review a pull request for quality, patterns, and correctness
+    subscribesTo:
+      - message.inbound.discord.#
+      - message.inbound.github.#

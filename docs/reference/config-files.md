@@ -67,6 +67,23 @@ _This is a reference doc. It covers all `workspace/*.yaml` schemas and environme
 
 ---
 
+## Gitignored workspace files
+
+The following files contain deployment-specific config and are not committed to the repo.
+Each has a `.example` counterpart — copy it to bootstrap a new deployment:
+
+| File | Copy from |
+|------|-----------|
+| `workspace/agents.yaml` | `workspace/agents.yaml.example` |
+| `workspace/projects.yaml` | `workspace/projects.yaml.example` |
+| `workspace/discord.yaml` | `workspace/discord.yaml.example` |
+| `workspace/google.yaml` | `workspace/google.yaml.example` |
+| `workspace/incidents.yaml` | `workspace/incidents.yaml.example` |
+
+Schema/behavior files (`actions.yaml`, `goals.yaml`, `ceremonies/`) are tracked and committed as-is.
+
+---
+
 ## workspace/agents.yaml
 
 Source of truth for the agent registry. The A2APlugin fetches `/.well-known/agent.json` from each agent URL on startup and merges live skills.
@@ -114,17 +131,23 @@ agents:
 
 Source of truth for the project registry. Consumed by Quinn and protoMaker via `GET /api/projects`. Written to during `onboard_project`.
 
+Webhook URLs are never stored here — use `webhookEnv` to point at an env var holding the URL.
+
 ```yaml
 projects:
-  - repo: protoLabsAI/my-repo
-    plane_project_id: "<uuid>"
+  - slug: your-org-your-repo
+    title: Your Project
+    github: your-org/your-repo
+    defaultBranch: main
+    status: active
+    agents: [ava, quinn]
     discord:
-      dev: "<channel-id>"
-      alerts: "<channel-id>"
-      releases: "<channel-id>"
-    github:
-      owner: protoLabsAI
-      name: my-repo
+      dev:
+        channelId: ""
+        webhookEnv: DISCORD_WEBHOOK_YOURPROJECT_DEV      # env var name, not the URL
+      release:
+        channelId: ""
+        webhookEnv: DISCORD_WEBHOOK_YOURPROJECT_RELEASE
 ```
 
 ---
