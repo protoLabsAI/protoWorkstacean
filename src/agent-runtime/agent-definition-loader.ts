@@ -64,9 +64,13 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
         .map((s) => {
           const name = typeof s.name === "string" ? s.name : "";
           if (!name) return null;
-          return {
+          const keywords = Array.isArray(s.keywords)
+            ? s.keywords.filter((k): k is string => typeof k === "string")
+            : undefined;
+        return {
             name,
             ...(typeof s.description === "string" ? { description: s.description } : {}),
+            ...(keywords?.length ? { keywords } : {}),
             ...(typeof s.systemPromptOverride === "string"
               ? { systemPromptOverride: s.systemPromptOverride }
               : {}),

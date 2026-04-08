@@ -28,7 +28,10 @@ maxTurns: 12
 skills:
   - name: ci_debug
     description: Debug a CI failure — read logs, identify root cause
+    keywords: [ci, pipeline, build failed, workflow, action failed, test failed, deploy failed]
   - name: health_check
     description: Run a comprehensive health check across all services
+    keywords: [health, unhealthy, down, unreachable, service, container, infra, /health]
   - name: deploy_check
     description: Verify a deployment is healthy after rollout
+    keywords: [deploy, deployment, rollout, release, ship, pushed, /deploy]

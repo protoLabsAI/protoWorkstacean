@@ -36,7 +36,10 @@ maxTurns: 15
 skills:
   - name: bug_triage
     description: Triage a bug report — severity, reproduction, root cause, Plane issue
+    keywords: [bug, issue, broken, crash, error, fail, exception, triage, TypeError, ReferenceError, not working, regression]
   - name: pr_review
     description: Review a pull request diff for correctness and regressions
+    keywords: [pr, pull request, review, merge, /review, code review, lgtm, looks good]
   - name: security_triage
     description: Triage a security incident — assess severity, draft remediation plan
+    keywords: [security, vulnerability, breach, leak, exposed, cve, exploit]

@@ -109,8 +109,20 @@ const enabledBuiltins = (process.env.ENABLED_PLUGINS ?? "").split(",").map((s) =
 
 const pluginRegistry: PluginRegistryEntry[] = [
   {
+    // RouterPlugin replaces AgentPlugin (Pi SDK) and A2APlugin (GitHub enricher).
+    // Translates message.inbound.# and cron.# into agent.skill.request events.
+    // AgentRuntimePlugin and SkillBrokerPlugin handle execution.
+    name: "router",
+    condition: () => !process.env.DISABLE_ROUTER,
+    factory: async () => {
+      const { RouterPlugin } = await import("./router/router-plugin.js");
+      return new RouterPlugin({ workspaceDir });
+    },
+  },
+  {
+    // Legacy Pi SDK agent — disabled by default, opt-in via ENABLE_LEGACY_AGENT=true
     name: "agent",
-    condition: () => !process.env.DISABLE_AGENT_PLUGIN,
+    condition: () => !!process.env.ENABLE_LEGACY_AGENT,
     factory: async () => {
       const { AgentPlugin } = await import("../lib/plugins/agent");
       return new AgentPlugin(workspaceDir, dataDir);
@@ -142,8 +154,10 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Legacy GitHub enricher — disabled by default, absorbed by RouterPlugin.
+    // Opt-in via ENABLE_LEGACY_A2A=true if RouterPlugin is also disabled.
     name: "a2a",
-    condition: () => true,
+    condition: () => !!process.env.ENABLE_LEGACY_A2A,
     factory: async () => {
       const { A2APlugin } = await import("../lib/plugins/a2a");
       return new A2APlugin(workspaceDir);

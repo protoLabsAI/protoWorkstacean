@@ -21,6 +21,12 @@ export type AgentRole =
 export interface AgentSkillDefinition {
   name: string;
   description?: string;
+  /**
+   * Keywords/phrases that trigger this skill via content matching.
+   * Case-insensitive substring search against message content.
+   * Example: ["bug", "broken", "crash", "error", "triage"]
+   */
+  keywords?: string[];
   /** Override the system prompt for this specific skill. */
   systemPromptOverride?: string;
 }
