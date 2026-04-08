@@ -102,12 +102,13 @@ if (!version) {
 // ── Claude rewrite ────────────────────────────────────────────────────────────
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
-if (!apiKey) {
-  console.error("ANTHROPIC_API_KEY not set");
-  process.exit(1);
-}
 
-const SYSTEM_PROMPT = `\
+let notes;
+if (!apiKey) {
+  console.warn("ANTHROPIC_API_KEY not set — posting raw commits without rewrite.");
+  notes = commits.map(c => `• ${c}`).join("\n");
+} else {
+  const SYSTEM_PROMPT = `\
 You are writing release notes for protoWorkstacean — an autonomous multi-agent orchestration engine \
 built on a typed event bus, YAML-driven world state, and a GOAP planner.
 
@@ -120,33 +121,37 @@ Rules:
 - Use • for bullets. Use **Section Title** for headers. No emojis.
 - Max 280 words. Plain markdown only — no code blocks, no headers with ##.`;
 
-const resp = await fetch("https://api.anthropic.com/v1/messages", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "x-api-key": apiKey,
-    "anthropic-version": "2023-06-01",
-  },
-  body: JSON.stringify({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 700,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: commits.join("\n") }],
-  }),
-});
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 700,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: commits.join("\n") }],
+    }),
+  });
 
-if (!resp.ok) {
-  console.error(`Claude API error: ${resp.status}`, await resp.text());
-  process.exit(1);
+  if (!resp.ok) {
+    console.error(`Claude API error: ${resp.status}`, await resp.text());
+    process.exit(1);
+  }
+
+  const data = await resp.json();
+  notes = data.content?.[0]?.text ?? commits.map(c => `• ${c}`).join("\n");
 }
 
-const data = await resp.json();
-let notes = data.content?.[0]?.text ?? commits.map(c => `• ${c}`).join("\n");
 if (notes.length > 3900) notes = notes.slice(0, 3897) + "…";
 
 // ── Discord post ──────────────────────────────────────────────────────────────
 
-const webhookUrl = resolveWebhook(values.slug);
+// DISCORD_WEBHOOK_URL takes precedence — use this in CI where projects.yaml is gitignored.
+// Falls back to projects.yaml webhook resolution for local runs.
+const webhookUrl = process.env.DISCORD_WEBHOOK_URL ?? resolveWebhook(values.slug);
 if (!webhookUrl) {
   console.log("No webhook resolved — release notes preview:\n\n" + notes);
   process.exit(0);
