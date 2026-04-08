@@ -48,6 +48,10 @@ export interface ActionMeta {
   timeout?: number;
   /** Arbitrary extra context passed through to the action handler. */
   context?: Record<string, unknown>;
+  /** If true, publish to topic then immediately complete as success (no outcome wait). */
+  fireAndForget?: boolean;
+  /** Hint for SkillBrokerPlugin: which skill to invoke. */
+  skillHint?: string;
 }
 
 export type ActionTier = "tier_0" | "tier_1" | "tier_2";

@@ -158,9 +158,9 @@ export class ActionDispatcherPlugin implements Plugin {
         return;
       }
 
-      // For tier_0 actions with a topic: fire-and-forget — publish then immediately succeed.
-      // Tier_0 means "deterministic/free"; waiting for an external outcome receipt is tier_1+.
-      if (action.tier === "tier_0") {
+      // For fire-and-forget actions: publish to topic then immediately succeed.
+      // Use meta.fireAndForget for alerts, ceremony triggers, and other side-effect-only dispatches.
+      if (action.meta.fireAndForget) {
         this.bus.publish(action.meta.topic, {
           id: crypto.randomUUID(),
           correlationId,
@@ -176,7 +176,7 @@ export class ActionDispatcherPlugin implements Plugin {
         return;
       }
 
-      // For tier_1+ actions with a dispatch topic, publish and wait for outcome via timeout
+      // For actions with a dispatch topic, publish and wait for outcome via timeout
       const timeoutMs = action.meta.timeout ?? this.config.defaultTimeoutMs ?? 30_000;
 
       await new Promise<void>((resolve) => {
