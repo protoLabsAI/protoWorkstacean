@@ -1,0 +1,8 @@
+id: board.cleanup
+name: Board Cleanup
+schedule: "0 8 * * *"
+skill: board_janitor
+targets:
+  - all
+notifyChannel: ""
+enabled: true

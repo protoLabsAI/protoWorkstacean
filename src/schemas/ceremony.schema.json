@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://protoworkstacean/schemas/ceremony.schema.json",
+  "title": "CeremonyConfig",
+  "description": "Schema for ceremony YAML configuration files used by CeremonyPlugin",
+  "type": "object",
+  "required": ["id", "name", "schedule", "skill", "targets", "enabled"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique ceremony identifier, e.g. 'board.pr-audit'",
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable ceremony name",
+      "minLength": 1
+    },
+    "schedule": {
+      "type": "string",
+      "description": "Cron expression, e.g. '0 */3 * * *'",
+      "minLength": 1
+    },
+    "skill": {
+      "type": "string",
+      "description": "Agent skill name to invoke when ceremony fires",
+      "minLength": 1
+    },
+    "targets": {
+      "type": "array",
+      "description": "Project paths to target, or ['all'] for all projects",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "notifyChannel": {
+      "type": "string",
+      "description": "Optional Discord channel slug for outcome notifications"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether this ceremony is active",
+      "default": true
+    }
+  }
+}

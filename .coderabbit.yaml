@@ -1,0 +1,18 @@
+# CodeRabbit configuration
+# https://docs.coderabbit.ai/configuration
+reviews:
+  # Don't review operational data files — they generate noise threads
+  # that block PR merges via required_review_thread_resolution
+  path_filters:
+    - '!.automaker/memory/**'
+    - '!.automaker/projects/**'
+    - '!data/**'
+  # Post a GitHub commit status check ("CodeRabbit") so it can be
+  # added as a required check in branch protection.
+  commit_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    # Review PRs targeting dev (feature PRs) and main (dev→main promotion).
+    base_branches:
+      - '^dev$'

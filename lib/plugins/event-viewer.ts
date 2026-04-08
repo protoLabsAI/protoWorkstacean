@@ -2,6 +2,7 @@ import { resolve, dirname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import type { ServerWebSocket } from "bun";
 import type { Plugin, EventBus, BusMessage } from "../types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -13,7 +14,7 @@ export class EventViewerPlugin implements Plugin {
 
   private bus: EventBus | null = null;
   private server: ReturnType<typeof Bun.serve> | null = null;
-  private wsClients: Set<ServerWebSocket<{ id: string }>> = new Set();
+  private wsClients: Set<ServerWebSocket<unknown>> = new Set();
   private subscriptionId: string | null = null;
   private port: number;
   private viewerDir: string;
@@ -38,7 +39,7 @@ export class EventViewerPlugin implements Plugin {
         const url = new URL(req.url);
 
         if (url.pathname === "/ws") {
-          const upgraded = server.upgrade<{ id: string }>(req, {
+          const upgraded = server.upgrade(req, {
             data: { id: crypto.randomUUID() },
           });
           if (upgraded) return undefined;

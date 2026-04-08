@@ -33,6 +33,7 @@ import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
+import { validateProjectEntry } from "../project-schema.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -42,22 +43,6 @@ interface ProjectDiscordChannels {
   dev?: string;
   alerts?: string;
   releases?: string;
-}
-
-interface ProjectEntry {
-  slug: string;
-  title?: string;
-  github: string;
-  defaultBranch?: string;
-  status?: string;
-  onboardedAt?: string;
-  team?: string;
-  agents?: string[];
-  discord?: ProjectDiscordChannels;
-}
-
-interface ProjectsYaml {
-  projects: ProjectEntry[];
 }
 
 interface ProjectIndex {
@@ -74,16 +59,26 @@ function buildIndex(projectsPath: string): Map<string, ProjectIndex> {
     return index;
   }
 
-  let parsed: ProjectsYaml;
+  let rawProjects: unknown[];
   try {
     const raw = readFileSync(projectsPath, "utf8");
-    parsed = parseYaml(raw) as ProjectsYaml;
+    const parsed = parseYaml(raw) as { projects?: unknown[] };
+    rawProjects = parsed.projects ?? [];
   } catch (err) {
     console.error(`[a2a] Failed to parse ${projectsPath}:`, err);
     return index;
   }
 
-  for (const project of parsed.projects ?? []) {
+  for (const rawProject of rawProjects) {
+    // Validate each entry against the schema; skip invalid ones with a warning.
+    const validation = validateProjectEntry(rawProject);
+    if (!validation.ok) {
+      const slug = (rawProject as Record<string, unknown>)?.slug ?? "(unknown)";
+      console.warn(`[a2a] Skipping invalid project entry "${slug}": ${validation.errors.join("; ")}`);
+      continue;
+    }
+
+    const project = validation.entry;
     if (!project.github || !project.slug) continue;
     if (project.status === "archived" || project.status === "suspended") continue;
 

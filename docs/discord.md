@@ -122,6 +122,52 @@ Array of regex strings (escaped for YAML). Matched case-insensitively. Matching 
 | `type` | Yes | `string`, `integer`, or `boolean` |
 | `required` | No | Defaults to `false` |
 
+### Autocomplete Commands
+
+Commands can use top-level `options` instead of `subcommands` to get Discord's autocomplete UX. Set `autocomplete: true` on any string option to enable live filtering.
+
+When `project` is an autocomplete option, the plugin loads `projects.yaml` and returns matching projects as choices (filtered by slug or title). On submission, the project slug is resolved to `devChannelId` (from `discord.dev`) and `projectRepo` (from the `github` field) and included in the bus payload.
+
+```yaml
+commands:
+  - name: report-bug
+    description: Report a bug against a project
+    # Top-level options — no subcommands
+    options:
+      - name: project
+        description: Project to report against (start typing to filter)
+        type: string
+        required: true
+        autocomplete: true
+      - name: description
+        description: Brief description of the bug
+        type: string
+        required: true
+    content: "Bug report for {project}: {description}"
+    skillHint: bug_triage
+```
+
+#### `commands[].options[]` (flat/autocomplete commands)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Option name — also the interpolation key in `content` |
+| `description` | Yes | Shown in Discord |
+| `type` | Yes | `string`, `integer`, or `boolean` |
+| `required` | No | Defaults to `false` |
+| `autocomplete` | No | When `true`, Discord sends autocomplete interactions. Only supported on `string` options. For `project` options, choices come from `projects.yaml`. |
+
+#### Flat command bus payload extras
+
+When `project` is resolved from `projects.yaml`, two extra fields are added to the inbound payload:
+
+```typescript
+{
+  devChannelId?: string;   // discord.dev channel ID for the matched project
+  projectRepo?: string;    // GitHub full name (e.g. "protoLabsAI/protoUI")
+}
+```
+
 ## Bus Topics
 
 | Topic | Direction | Description |

@@ -111,6 +111,57 @@ Match `correlationId` from the inbound message — the plugin uses it to look up
 | `issues` | New issue body containing `@mention` | `bug_triage` |
 | `pull_request_review_comment` | Review comment containing `@mention` | `pr_review` |
 | `pull_request` | PR opened/updated with `@mention` in body | `pr_review` |
+| `repository` (created) | New repository created in the org | `message.inbound.onboard` |
+
+## Org Webhook: repository.created
+
+When a new repository is created in the GitHub org, the plugin publishes `message.inbound.onboard` so Ava (or any subscriber) can automatically onboard the project.
+
+### Onboard Bus Payload
+
+```typescript
+{
+  event: "repository.created";
+  owner: string;       // org or user name
+  repo: string;        // repository name
+  fullName: string;    // "owner/repo"
+  url: string;         // HTML URL of the repository
+  description: string; // repository description (empty string if none)
+  isPrivate: boolean;
+}
+```
+
+Topic: `message.inbound.onboard`
+
+### Register the Org Webhook
+
+Register a single org-level webhook so all new repositories trigger the event automatically — no per-repo webhook needed.
+
+```bash
+gh api orgs/protoLabsAI/hooks \
+  --method POST \
+  --field name=web \
+  --field "config[url]=https://hooks.proto-labs.ai/webhook/github" \
+  --field "config[content_type]=json" \
+  --field "config[secret]=$GITHUB_WEBHOOK_SECRET" \
+  --field "config[insecure_ssl]=0" \
+  --field "events[]=repository"
+```
+
+To also receive existing repo events (issues, PRs) via the org hook, add them:
+
+```bash
+  --field "events[]=repository" \
+  --field "events[]=issues" \
+  --field "events[]=issue_comment" \
+  --field "events[]=pull_request" \
+  --field "events[]=pull_request_review_comment"
+```
+
+List existing org hooks:
+```bash
+gh api orgs/protoLabsAI/hooks
+```
 
 ## Signature Validation
 

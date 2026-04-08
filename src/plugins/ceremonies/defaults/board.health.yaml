@@ -1,0 +1,8 @@
+id: board.health
+name: Board Health Check
+schedule: "*/30 * * * *"
+skill: board_health
+targets:
+  - all
+notifyChannel: ""
+enabled: true

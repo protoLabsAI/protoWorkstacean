@@ -13,7 +13,7 @@
  *   GITHUB_TOKEN   posts chained agent responses as GitHub comments
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, watchFile, unwatchFile } from "node:fs";
 import { createSign } from "node:crypto";
 import { parse } from "yaml";
 
@@ -404,6 +404,10 @@ async function runChain(
   }
 }
 
+// ── Skills handled locally (never forwarded to an external agent) ────────────
+
+const LOCAL_SKILLS = new Set(["memory_recall", "memory_store", "onboard_project"]);
+
 // ── Plugin ──────────────────────────────────────────────────────────────────
 
 export default {
@@ -412,7 +416,7 @@ export default {
   capabilities: ["a2a-routing"],
 
   install(bus: EventBus) {
-    const agents = loadAgents();
+    let agents = loadAgents();
 
     if (!agents.length) {
       console.error("[a2a] No agents loaded — check workspace/agents.yaml");
@@ -422,8 +426,25 @@ export default {
     console.log(`[a2a] Loaded ${agents.length} agents: ${agents.map(a => a.name).join(", ")}`);
     refreshSkills(agents).catch(console.error);
 
+    // ── Hot-reload agents.yaml ─────────────────────────────────────────────
+    watchFile(AGENTS_YAML, { interval: 5_000 }, () => {
+      const updated = loadAgents();
+      if (updated.length) {
+        agents = updated;
+        console.log(`[a2a] agents.yaml reloaded — ${agents.length} agent(s): ${agents.map(a => a.name).join(", ")}`);
+        refreshSkills(agents).catch(console.error);
+      } else {
+        console.warn("[a2a] agents.yaml reload produced no agents — keeping previous registry");
+      }
+    });
+
     // ── Inbound messages ──────────────────────────────────────────────────
     bus.subscribe("message.inbound.#", "a2a", async (msg: BusMessage) => {
+      // Skip topics handled by local plugins to prevent routing loops.
+      // message.inbound.onboard is consumed by OnboardingPlugin — if a2a
+      // re-published to it the handler would fire again, creating an infinite loop.
+      if (msg.topic === "message.inbound.onboard" || msg.topic.startsWith("message.inbound.onboard.")) return;
+
       const p = msg.payload as Record<string, unknown>;
       const content = String(p.content ?? "").trim();
       if (!content) return;
@@ -438,6 +459,56 @@ export default {
       if (skill && MEMORY_SKILLS.has(skill)) {
         console.log(`[a2a] "${content.slice(0, 60)}" → memory (local, skill: ${skill})`);
         await handleMemorySkill(bus, skill, content, msg, outboundTopic, p);
+        return;
+      }
+
+      // onboard_project: route to OnboardingPlugin via message.inbound.onboard.
+      // The Discord payload has { content, channel, sender } but OnboardingPlugin
+      // expects { slug, title, github }.  Normalise here by parsing the content
+      // string for an "owner/repo" token, then building the structured payload.
+      // If the format is unrecognisable, reply with a usage error instead of
+      // silently dropping — a no-op is worse than a visible failure.
+      if (skill === "onboard_project") {
+        console.log(`[a2a] "${content.slice(0, 60)}" → onboarding (local, skill: onboard_project)`);
+
+        // Extract the first "owner/repo" token from the raw content string.
+        const githubMatch = content.match(/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/);
+        if (!githubMatch) {
+          console.warn(`[a2a] onboard_project: no owner/repo found in "${content.slice(0, 80)}"`);
+          publishResponse(
+            bus,
+            outboundTopic,
+            msg.correlationId,
+            "Usage: `/onboard <owner>/<repo> [slug] [title]`\nExample: `/onboard protolabsai/my-project`",
+            p.channel,
+            "a2a",
+          );
+          return;
+        }
+
+        const github = githubMatch[1];
+        // Derive slug from owner/repo: replace "/" and non-alphanumeric chars with "-"
+        const derivedSlug = github.replace(/\//g, "-").replace(/[^A-Za-z0-9-]/g, "-").toLowerCase();
+        // Optional explicit slug/title tokens after the repo: "owner/repo my-slug My Title"
+        const rest = content.slice(content.indexOf(github) + github.length).trim();
+        const restTokens = rest.split(/\s+/).filter(Boolean);
+        const slug = restTokens[0] && !restTokens[0].includes("/") ? restTokens[0] : derivedSlug;
+        const title = restTokens.length > 1
+          ? restTokens.slice(restTokens[0] === slug ? 1 : 0).join(" ")
+          : github.split("/")[1].replace(/[-_]/g, " ");
+
+        const onboardTopic = "message.inbound.onboard";
+        bus.publish(onboardTopic, {
+          ...msg,
+          id: crypto.randomUUID(),
+          topic: onboardTopic,
+          payload: {
+            ...p,
+            slug,
+            title,
+            github,
+          },
+        });
         return;
       }
 
@@ -493,5 +564,7 @@ export default {
     });
   },
 
-  uninstall(_bus: EventBus) {},
+  uninstall(_bus: EventBus) {
+    unwatchFile(AGENTS_YAML);
+  },
 };

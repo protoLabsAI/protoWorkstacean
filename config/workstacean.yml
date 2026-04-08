@@ -1,0 +1,26 @@
+# Workstacean configuration
+# Quinn PR review automation settings
+
+github:
+  # Webhook events that trigger the pr_review skill automatically
+  pull_request:
+    events:
+      - opened
+      - synchronize
+      - ready_for_review
+    skill: pr_review
+    # Skip draft PRs automatically (can be overridden with force_review: true)
+    skip_drafts: true
+    # Agent to route pr_review skill to
+    agent: quinn
+
+  # Issue/comment events (existing behavior)
+  issue_comment:
+    skill: bug_triage
+    agent: quinn
+  issues:
+    events:
+      - opened
+      - reopened
+    skill: bug_triage
+    agent: quinn

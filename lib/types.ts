@@ -33,6 +33,26 @@ export interface HITLRequest {
   expiresAt: string;      // ISO timestamp
   replyTopic: string;     // where to publish HITLResponse
   sourceMeta?: BusMessage["source"]; // carry source through so HITL plugin knows how to render
+  // ── Cost escalation fields (populated by BudgetPlugin L3 requests) ────────
+  escalation_reason?: string;
+  cost_trail?: Array<{
+    id: string;
+    timestamp: number;
+    tier: string;
+    estimatedCost: number;
+    wasEscalated: boolean;
+  }>;
+  escalationContext?: {
+    estimatedCost: number;
+    maxCost: number;
+    tier: string;
+    budgetState: {
+      remainingProjectBudget: number;
+      remainingDailyBudget: number;
+      projectBudgetRatio: number;
+      dailyBudgetRatio: number;
+    };
+  };
 }
 
 export interface HITLResponse {

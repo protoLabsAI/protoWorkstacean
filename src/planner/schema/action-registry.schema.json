@@ -1,0 +1,113 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ActionRegistrySchema",
+  "description": "Validation schema for Action objects registered in the ActionRegistry.",
+  "type": "object",
+  "required": ["id", "name", "description", "goalId", "tier", "preconditions", "effects", "cost", "priority", "meta"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique action identifier"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable action name"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed action description"
+    },
+    "goalId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ID of the goal this action advances"
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["tier_0", "tier_1", "tier_2"],
+      "description": "Execution tier: tier_0=deterministic/free, tier_1=agent, tier_2=HITL"
+    },
+    "preconditions": {
+      "type": "array",
+      "description": "World state conditions that must hold before dispatch",
+      "items": {
+        "type": "object",
+        "required": ["path", "operator"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Dot-notation path into WorldState"
+          },
+          "operator": {
+            "type": "string",
+            "enum": ["eq", "neq", "gt", "gte", "lt", "lte", "exists", "not_exists"]
+          },
+          "value": {
+            "description": "Expected value (optional for exists/not_exists operators)"
+          }
+        }
+      }
+    },
+    "effects": {
+      "type": "array",
+      "description": "Optimistic state mutations applied on dispatch",
+      "items": {
+        "type": "object",
+        "required": ["path", "operation"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Dot-notation path within WorldState.extensions"
+          },
+          "operation": {
+            "type": "string",
+            "enum": ["set", "increment", "decrement", "delete"]
+          },
+          "value": {
+            "description": "Value to set/increment/decrement (not required for delete)"
+          }
+        }
+      }
+    },
+    "cost": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Resource/time cost; 0 = free"
+    },
+    "priority": {
+      "type": "number",
+      "description": "Selection priority; higher = selected first when multiple actions match"
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Routing and execution metadata",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "description": "EventBus topic to publish when dispatching"
+        },
+        "agentId": {
+          "type": "string",
+          "description": "Agent ID to route the action to"
+        },
+        "timeout": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Dispatch timeout in milliseconds"
+        },
+        "context": {
+          "type": "object",
+          "description": "Arbitrary extra context for the action handler"
+        }
+      }
+    }
+  }
+}

@@ -19,81 +19,13 @@
  *   GITHUB_WEBHOOK_PORT     webhook HTTP server port (default: 8082)
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
-import { createSign } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { sanitizeIssueBody } from "../sanitize.ts";
 import type { SanitizationConfig } from "../sanitize.ts";
-
-// ── GitHub App auth ───────────────────────────────────────────────────────────
-
-class GitHubAppAuth {
-  private cache = new Map<string, { token: string; exp: number }>();
-
-  constructor(private appId: string, private privateKey: string) {}
-
-  async getToken(owner: string, repo: string): Promise<string> {
-    const key = `${owner}/${repo}`;
-    const cached = this.cache.get(key);
-    if (cached && cached.exp > Date.now() + 60_000) return cached.token;
-
-    const jwt = this.makeJWT();
-    const headers = this.appHeaders(jwt);
-
-    const installResp = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/installation`,
-      { headers },
-    );
-    if (!installResp.ok) {
-      throw new Error(`App not installed on ${owner}/${repo}: ${installResp.status}`);
-    }
-    const { id: installId } = await installResp.json() as { id: number };
-
-    const tokenResp = await fetch(
-      `https://api.github.com/app/installations/${installId}/access_tokens`,
-      { method: "POST", headers },
-    );
-    if (!tokenResp.ok) {
-      throw new Error(`Token fetch failed: ${tokenResp.status} ${await tokenResp.text()}`);
-    }
-    const { token, expires_at } = await tokenResp.json() as { token: string; expires_at: string };
-
-    this.cache.set(key, { token, exp: new Date(expires_at).getTime() });
-    return token;
-  }
-
-  private makeJWT(): string {
-    const now = Math.floor(Date.now() / 1000);
-    const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
-    const payload = Buffer.from(JSON.stringify({ iat: now - 60, exp: now + 600, iss: this.appId })).toString("base64url");
-    const data = `${header}.${payload}`;
-    const sig = createSign("RSA-SHA256").update(data).sign(this.privateKey, "base64url");
-    return `${data}.${sig}`;
-  }
-
-  private appHeaders(jwt: string): Record<string, string> {
-    return {
-      Authorization: `Bearer ${jwt}`,
-      Accept: "application/vnd.github+json",
-      "User-Agent": "protoWorkstacean/1.0",
-      "X-GitHub-Api-Version": "2022-11-28",
-    };
-  }
-}
-
-function makeGitHubAuth(): ((owner: string, repo: string) => Promise<string>) | null {
-  const appId = process.env.QUINN_APP_ID;
-  const privateKey = process.env.QUINN_APP_PRIVATE_KEY;
-  if (appId && privateKey) {
-    const app = new GitHubAppAuth(appId, privateKey);
-    return (owner, repo) => app.getToken(owner, repo);
-  }
-  const pat = process.env.GITHUB_TOKEN;
-  if (pat) return () => Promise.resolve(pat);
-  return null;
-}
+import { makeGitHubAuth } from "../github-auth.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -102,6 +34,7 @@ interface AutoTriageConfig {
   orgName: string;
   events: string[];
   skillHint: string;
+  /** Derived at runtime from projects.yaml — not read from github.yaml. */
   monitoredRepos: string[];
   sanitization: SanitizationConfig;
 }
@@ -113,10 +46,30 @@ interface GitHubConfig {
   autoTriage?: AutoTriageConfig;
 }
 
+/**
+ * Derive monitoredRepos from projects.yaml (all active projects with a github field).
+ * Called each time config is loaded so hot-reloads of projects.yaml are reflected.
+ */
+function deriveMonitoredRepos(workspaceDir: string): string[] {
+  const projectsPath = join(workspaceDir, "projects.yaml");
+  if (!existsSync(projectsPath)) return [];
+  try {
+    const raw = readFileSync(projectsPath, "utf8");
+    const data = parseYaml(raw) as { projects?: { github?: string; status?: string }[] };
+    return (data.projects ?? [])
+      .filter(p => p.github && p.status !== "archived" && p.status !== "suspended")
+      .map(p => p.github as string);
+  } catch {
+    return [];
+  }
+}
+
 function loadConfig(workspaceDir: string): GitHubConfig {
   const configPath = join(workspaceDir, "github.yaml");
+  let config: GitHubConfig;
+
   if (!existsSync(configPath)) {
-    return {
+    config = {
       mentionHandle: "@quinn",
       skillHints: {
         issue_comment: "bug_triage",
@@ -125,8 +78,17 @@ function loadConfig(workspaceDir: string): GitHubConfig {
         pull_request: "pr_review",
       },
     };
+  } else {
+    config = parseYaml(readFileSync(configPath, "utf8")) as GitHubConfig;
   }
-  return parseYaml(readFileSync(configPath, "utf8")) as GitHubConfig;
+
+  // monitoredRepos is always derived from projects.yaml at runtime
+  // (never read from github.yaml) so that onboarding new projects takes effect immediately.
+  if (config.autoTriage) {
+    config.autoTriage.monitoredRepos = deriveMonitoredRepos(workspaceDir);
+  }
+
+  return config;
 }
 
 // ── Pending comment context ───────────────────────────────────────────────────
@@ -244,6 +206,7 @@ export class GitHubPlugin implements Plugin {
 
   private server: ReturnType<typeof Bun.serve> | null = null;
   private workspaceDir: string;
+  private config!: GitHubConfig;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
@@ -259,9 +222,24 @@ export class GitHubPlugin implements Plugin {
     const usingApp = !!(process.env.QUINN_APP_ID && process.env.QUINN_APP_PRIVATE_KEY);
     console.log(`[github] Auth: ${usingApp ? "GitHub App (quinn[bot])" : "PAT (GITHUB_TOKEN)"}`);
 
-    const config = loadConfig(this.workspaceDir);
+    this.config = loadConfig(this.workspaceDir);
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? "";
     const port = parseInt(process.env.GITHUB_WEBHOOK_PORT ?? "8082", 10);
+
+    // ── Hot-reload github.yaml and projects.yaml ──────────────────────────────
+    const configPath = join(this.workspaceDir, "github.yaml");
+    const projectsPath = join(this.workspaceDir, "projects.yaml");
+
+    const reloadConfig = () => {
+      this.config = loadConfig(this.workspaceDir);
+      const repoCount = this.config.autoTriage?.monitoredRepos?.length ?? 0;
+      console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
+    };
+
+    // watchFile works even if the file doesn't exist yet — it will fire on creation.
+    watchFile(configPath, { interval: 5_000 }, reloadConfig);
+    // Also watch projects.yaml so monitoredRepos updates when projects are onboarded.
+    watchFile(projectsPath, { interval: 5_000 }, reloadConfig);
 
     // ── Outbound: post comment back to GitHub ────────────────────────────────
     bus.subscribe("message.outbound.github.#", "github-outbound", async (msg: BusMessage) => {
@@ -304,7 +282,7 @@ export class GitHubPlugin implements Plugin {
           return new Response("Bad request", { status: 400 });
         }
 
-        this._handleEvent(event, payload, config, bus, getToken);
+        this._handleEvent(event, payload, this.config, bus, getToken);
         return new Response("OK", { status: 200 });
       },
     });
@@ -314,6 +292,8 @@ export class GitHubPlugin implements Plugin {
 
   uninstall(): void {
     this.server?.stop();
+    unwatchFile(join(this.workspaceDir, "github.yaml"));
+    unwatchFile(join(this.workspaceDir, "projects.yaml"));
   }
 
   private _handleEvent(
@@ -323,6 +303,42 @@ export class GitHubPlugin implements Plugin {
     bus: EventBus,
     getToken: (owner: string, repo: string) => Promise<string>,
   ): void {
+    // ── Org webhook: repository.created → onboard ─────────────────────────
+    if (event === "repository" && payload.action === "created") {
+      const repo = payload.repository as Record<string, unknown> | undefined;
+      if (repo) {
+        const repoName = repo.name as string;
+        const fullName = repo.full_name as string;
+        const owner = (repo.owner as Record<string, unknown> | undefined)?.login as string;
+        const url = repo.html_url as string;
+        const description = (repo.description as string | null) ?? "";
+        const isPrivate = repo.private as boolean;
+
+        const correlationId = crypto.randomUUID();
+        const topic = "message.inbound.onboard";
+
+        bus.publish(topic, {
+          id: `repository-created-${fullName.replace("/", "-")}-${correlationId.slice(0, 8)}`,
+          correlationId,
+          topic,
+          timestamp: Date.now(),
+          payload: {
+            event: "repository.created",
+            owner,
+            repo: repoName,
+            fullName,
+            url,
+            description,
+            isPrivate,
+          },
+          source: { interface: "github" as const },
+        });
+
+        console.log(`[github] repository.created: ${fullName} → ${topic}`);
+      }
+      return;
+    }
+
     const ctx = extractContext(event, payload);
     if (!ctx) return;
 
