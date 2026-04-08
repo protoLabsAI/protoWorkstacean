@@ -13,6 +13,17 @@ import { z } from "zod";
 
 // ── Sub-schemas ───────────────────────────────────────────────────────────────
 
+export const GoogleWorkspaceSchema = z.object({
+  /** Per-project Drive folder ID (created by OnboardingPlugin step 9). */
+  driveFolderId: z.string().optional(),
+  /** Project spec/brief Google Doc ID. */
+  sharedDocId: z.string().optional(),
+  /** Project-scoped calendar ID (if needed). */
+  calendarId: z.string().optional(),
+}).optional();
+
+export type GoogleWorkspace = z.infer<typeof GoogleWorkspaceSchema>;
+
 export const ProjectDiscordSchema = z.object({
   general: z.string().optional(),
   updates: z.string().optional(),
@@ -43,6 +54,8 @@ export const ProjectEntrySchema = z.object({
   onboardedAt:   z.string().optional(),
   /** Optional per-project onboarding step tracking */
   onboardingState: OnboardingStateSchema,
+  /** Google Workspace resources for this project */
+  googleWorkspace: GoogleWorkspaceSchema,
 });
 
 export type ProjectEntry = z.infer<typeof ProjectEntrySchema>;
