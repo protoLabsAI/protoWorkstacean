@@ -26,6 +26,7 @@ import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { sanitizeIssueBody } from "../sanitize.ts";
 import type { SanitizationConfig } from "../sanitize.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
+import { withCircuitBreaker } from "./circuit-breaker.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -230,10 +231,14 @@ export class GitHubPlugin implements Plugin {
     const configPath = join(this.workspaceDir, "github.yaml");
     const projectsPath = join(this.workspaceDir, "projects.yaml");
 
+    let reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     const reloadConfig = () => {
-      this.config = loadConfig(this.workspaceDir);
-      const repoCount = this.config.autoTriage?.monitoredRepos?.length ?? 0;
-      console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
+      if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer);
+      reloadDebounceTimer = setTimeout(() => {
+        this.config = loadConfig(this.workspaceDir);
+        const repoCount = this.config.autoTriage?.monitoredRepos?.length ?? 0;
+        console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
+      }, 300);
     };
 
     // watchFile works even if the file doesn't exist yet — it will fire on creation.
@@ -377,16 +382,18 @@ export class GitHubPlugin implements Plugin {
       } else {
         url = `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/issues/${ctx.number}/reactions`;
       }
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "User-Agent": "protoWorkstacean/1.0",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-        body: JSON.stringify({ content: "eyes" }),
-      });
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ content: "eyes" }),
+        }),
+      );
       if (!res.ok) console.error(`[github] reaction failed ${res.status}: ${await res.text()}`);
     })().catch(err => console.error("[github] reaction error:", err));
 
@@ -525,15 +532,17 @@ export class GitHubPlugin implements Plugin {
     token: string,
   ): Promise<boolean> {
     try {
-      const res = await fetch(
-        `https://api.github.com/orgs/${orgName}/members/${username}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "User-Agent": "protoWorkstacean/1.0",
-            "X-GitHub-Api-Version": "2022-11-28",
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(
+          `https://api.github.com/orgs/${orgName}/members/${username}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "User-Agent": "protoWorkstacean/1.0",
+              "X-GitHub-Api-Version": "2022-11-28",
+            },
           },
-        },
+        ),
       );
       // 204 = member, 302/404 = not a member or org is private
       return res.status === 204;
@@ -560,14 +569,18 @@ export class GitHubPlugin implements Plugin {
       "that violates our submission guidelines. If you believe this is an error, please " +
       "open a new issue without the flagged content.";
 
-    await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments`,
-      { method: "POST", headers, body: JSON.stringify({ body: commentBody }) },
+    await withCircuitBreaker("github-api", () =>
+      fetch(
+        `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments`,
+        { method: "POST", headers, body: JSON.stringify({ body: commentBody }) },
+      ),
     );
 
-    await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/issues/${number}`,
-      { method: "PATCH", headers, body: JSON.stringify({ state: "closed", state_reason: "not_planned" }) },
+    await withCircuitBreaker("github-api", () =>
+      fetch(
+        `https://api.github.com/repos/${owner}/${repo}/issues/${number}`,
+        { method: "PATCH", headers, body: JSON.stringify({ state: "closed", state_reason: "not_planned" }) },
+      ),
     );
   }
 
@@ -579,16 +592,18 @@ export class GitHubPlugin implements Plugin {
     try {
       const token = await getToken(ctx.owner, ctx.repo);
       const url = `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/issues/${ctx.number}/comments`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "User-Agent": "protoWorkstacean/1.0",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-        body: JSON.stringify({ body }),
-      });
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ body }),
+        }),
+      );
       if (!res.ok) {
         console.error(`[github] Failed to post comment: ${res.status} ${await res.text()}`);
       } else {

@@ -186,3 +186,49 @@ export class CircuitBreaker {
     return [...this.circuits.values()].map((c) => ({ ...c }));
   }
 }
+
+// ── External API circuit breaker utility ──────────────────────────────────────
+
+/** Module-level singleton circuit breaker for external service calls. */
+const _apiBreaker = new CircuitBreaker({
+  failureThreshold: 5,
+  recoveryWindowMs: 60_000, // 1 minute
+  successThreshold: 1,
+});
+
+/**
+ * Wraps an async external API call with a named circuit breaker.
+ *
+ * - CLOSED    → call executes normally
+ * - OPEN      → throws immediately without executing fn (circuit open)
+ * - HALF_OPEN → one test call is allowed through
+ *
+ * On network-level failure (fn throws): records the failure, may open the circuit.
+ * On success: records the success, may close a HALF_OPEN circuit.
+ *
+ * @param name  Unique circuit name, e.g. "plane-api", "google-api", "github-api"
+ * @param fn    The async function to guard
+ */
+export async function withCircuitBreaker<T>(
+  name: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (!_apiBreaker.isAllowed(name, "api")) {
+    const msg = `[circuit-breaker] ${name}: circuit OPEN — call rejected`;
+    console.warn(msg);
+    throw new Error(msg);
+  }
+  try {
+    const result = await fn();
+    _apiBreaker.recordSuccess(name, "api");
+    return result;
+  } catch (err) {
+    _apiBreaker.recordFailure(name, "api");
+    throw err;
+  }
+}
+
+/** Expose the internal breaker for testing/monitoring. */
+export function getApiBreaker(): CircuitBreaker {
+  return _apiBreaker;
+}

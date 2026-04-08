@@ -36,6 +36,8 @@ export interface PlaneWebhook {
   [key: string]: unknown;
 }
 
+import { withCircuitBreaker } from "./plugins/circuit-breaker.ts";
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /** Escape HTML entities to prevent XSS when embedding text in comment_html. */
@@ -81,7 +83,9 @@ export class PlaneClient {
     const map = new Map<string, string>();
     try {
       const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/labels/`;
-      const resp = await fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
+      const resp = await withCircuitBreaker("plane-api", () =>
+        fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) }),
+      );
       if (resp.ok) {
         const data = (await resp.json()) as { results?: PlaneLabel[] };
         for (const label of data.results ?? []) {
@@ -103,7 +107,9 @@ export class PlaneClient {
     const map = new Map<string, string>();
     try {
       const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/states/`;
-      const resp = await fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
+      const resp = await withCircuitBreaker("plane-api", () =>
+        fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) }),
+      );
       if (resp.ok) {
         const data = (await resp.json()) as { results?: PlaneState[] };
         for (const state of data.results ?? []) {
@@ -131,12 +137,14 @@ export class PlaneClient {
   async patchIssueState(projectId: string, issueId: string, stateUUID: string): Promise<boolean> {
     try {
       const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/work-items/${issueId}/`;
-      const resp = await fetch(url, {
-        method: "PATCH",
-        headers: this.headers(),
-        body: JSON.stringify({ state: stateUUID }),
-        signal: AbortSignal.timeout(10_000),
-      });
+      const resp = await withCircuitBreaker("plane-api", () =>
+        fetch(url, {
+          method: "PATCH",
+          headers: this.headers(),
+          body: JSON.stringify({ state: stateUUID }),
+          signal: AbortSignal.timeout(10_000),
+        }),
+      );
       if (!resp.ok) {
         console.error(`[plane-client] PATCH issue state failed: ${resp.status} ${await resp.text()}`);
         return false;
@@ -151,12 +159,14 @@ export class PlaneClient {
   async addIssueComment(projectId: string, issueId: string, comment: string): Promise<boolean> {
     try {
       const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/work-items/${issueId}/comments/`;
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify({ comment_html: `<p>${escapeHtml(comment)}</p>` }),
-        signal: AbortSignal.timeout(10_000),
-      });
+      const resp = await withCircuitBreaker("plane-api", () =>
+        fetch(url, {
+          method: "POST",
+          headers: this.headers(),
+          body: JSON.stringify({ comment_html: `<p>${escapeHtml(comment)}</p>` }),
+          signal: AbortSignal.timeout(10_000),
+        }),
+      );
       if (!resp.ok) {
         console.error(`[plane-client] POST issue comment failed: ${resp.status} ${await resp.text()}`);
         return false;
@@ -180,7 +190,9 @@ export class PlaneClient {
   async listProjects(): Promise<PlanePlaneProject[]> {
     try {
       const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/`;
-      const resp = await fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
+      const resp = await withCircuitBreaker("plane-api", () =>
+        fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) }),
+      );
       if (!resp.ok) {
         console.warn(`[plane-client] Failed to list projects: ${resp.status}`);
         return [];
@@ -216,12 +228,14 @@ export class PlaneClient {
       const body: Record<string, unknown> = { name, identifier };
       if (description) body.description = description;
 
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15_000),
-      });
+      const resp = await withCircuitBreaker("plane-api", () =>
+        fetch(url, {
+          method: "POST",
+          headers: this.headers(),
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(15_000),
+        }),
+      );
 
       if (!resp.ok) {
         const text = await resp.text();
@@ -239,7 +253,9 @@ export class PlaneClient {
   async listWebhooks(): Promise<PlaneWebhook[]> {
     try {
       const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/webhooks/`;
-      const resp = await fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
+      const resp = await withCircuitBreaker("plane-api", () =>
+        fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) }),
+      );
       if (!resp.ok) return [];
       const data = (await resp.json()) as { results?: PlaneWebhook[] } | PlaneWebhook[];
       return Array.isArray(data) ? data : (data.results ?? []);
@@ -273,12 +289,14 @@ export class PlaneClient {
       };
       if (secret) body.secret = secret;
 
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15_000),
-      });
+      const resp = await withCircuitBreaker("plane-api", () =>
+        fetch(url, {
+          method: "POST",
+          headers: this.headers(),
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(15_000),
+        }),
+      );
 
       if (!resp.ok) {
         const text = await resp.text();
