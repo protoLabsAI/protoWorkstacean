@@ -33,6 +33,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { PlaneClient } from "../plane-client.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
+import { validateProjectEntry } from "../project-schema.ts";
 
 // ── In-process write lock for projects.yaml ───────────────────────────────────
 // Serialises concurrent onboarding writes to prevent TOCTOU races when two
@@ -431,14 +432,24 @@ export class OnboardingPlugin implements Plugin {
         status: "active",
         onboardedAt: new Date().toISOString(),
         agents: req.agents ?? ["ava", "quinn"],
+        // Ensure discord.dev is always present (required by schema)
+        discord: {
+          dev: "",
+          ...(req.discord ?? {}),
+        },
       };
-
-      if (req.discord) {
-        entry.discord = req.discord;
-      }
 
       if (planeProjectId) {
         entry.planeProjectId = planeProjectId;
+      }
+
+      // Validate the entry against the project schema before writing
+      const validation = validateProjectEntry(entry);
+      if (!validation.ok) {
+        return {
+          status: "error",
+          detail: `Schema validation failed: ${validation.errors.join("; ")}`,
+        };
       }
 
       projects.push(entry);
