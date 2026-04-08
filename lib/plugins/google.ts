@@ -22,6 +22,7 @@ import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
+import { withCircuitBreaker } from "./circuit-breaker.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -163,19 +164,21 @@ export async function createDriveFolder(
   }
 
   try {
-    const resp = await fetch("https://www.googleapis.com/drive/v3/files", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name,
-        mimeType: "application/vnd.google-apps.folder",
-        parents: [parentId],
+    const resp = await withCircuitBreaker("google-api", () =>
+      fetch("https://www.googleapis.com/drive/v3/files", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          mimeType: "application/vnd.google-apps.folder",
+          parents: [parentId],
+        }),
+        signal: AbortSignal.timeout(15_000),
       }),
-      signal: AbortSignal.timeout(15_000),
-    });
+    );
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => "");
@@ -345,17 +348,19 @@ export class GooglePlugin implements Plugin {
         content +
         `\r\n--${boundary}--`;
 
-      const resp = await fetch(
-        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": `multipart/related; boundary="${boundary}"`,
+      const resp = await withCircuitBreaker("google-api", () =>
+        fetch(
+          "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": `multipart/related; boundary="${boundary}"`,
+            },
+            body,
+            signal: AbortSignal.timeout(30_000),
           },
-          body,
-          signal: AbortSignal.timeout(30_000),
-        },
+        ),
       );
 
       if (!resp.ok) {
@@ -367,15 +372,17 @@ export class GooglePlugin implements Plugin {
     }
 
     // Metadata-only create (folder, or file without content)
-    const resp = await fetch("https://www.googleapis.com/drive/v3/files", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(metadata),
-      signal: AbortSignal.timeout(15_000),
-    });
+    const resp = await withCircuitBreaker("google-api", () =>
+      fetch("https://www.googleapis.com/drive/v3/files", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(metadata),
+        signal: AbortSignal.timeout(15_000),
+      }),
+    );
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => "");
@@ -398,9 +405,11 @@ export class GooglePlugin implements Plugin {
 
     let body = content;
     if (append) {
-      const fetchResp = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
+      const fetchResp = await withCircuitBreaker("google-api", () =>
+        fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+          { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
+        ),
       );
       if (fetchResp.ok) {
         const existing = await fetchResp.text();
@@ -408,17 +417,19 @@ export class GooglePlugin implements Plugin {
       }
     }
 
-    const resp = await fetch(
-      `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
-      {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "text/plain",
+    const resp = await withCircuitBreaker("google-api", () =>
+      fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "text/plain",
+          },
+          body,
+          signal: AbortSignal.timeout(30_000),
         },
-        body,
-        signal: AbortSignal.timeout(30_000),
-      },
+      ),
     );
 
     if (!resp.ok) {
@@ -464,15 +475,17 @@ export class GooglePlugin implements Plugin {
   ): Promise<Record<string, unknown>> {
     const title = String(payload.title ?? "Untitled Document");
 
-    const resp = await fetch("https://docs.googleapis.com/v1/documents", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ title }),
-      signal: AbortSignal.timeout(15_000),
-    });
+    const resp = await withCircuitBreaker("google-api", () =>
+      fetch("https://docs.googleapis.com/v1/documents", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ title }),
+        signal: AbortSignal.timeout(15_000),
+      }),
+    );
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => "");
@@ -501,19 +514,21 @@ export class GooglePlugin implements Plugin {
     const content = String(payload.content ?? "");
     const index = typeof payload.index === "number" ? payload.index : 1;
 
-    const resp = await fetch(
-      `https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+    const resp = await withCircuitBreaker("google-api", () =>
+      fetch(
+        `https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            requests: [{ insertText: { location: { index }, text: content } }],
+          }),
+          signal: AbortSignal.timeout(15_000),
         },
-        body: JSON.stringify({
-          requests: [{ insertText: { location: { index }, text: content } }],
-        }),
-        signal: AbortSignal.timeout(15_000),
-      },
+      ),
     );
 
     if (!resp.ok) {
@@ -569,10 +584,12 @@ export class GooglePlugin implements Plugin {
         url.searchParams.set("q", query);
         url.searchParams.set("maxResults", "10");
 
-        const listResp = await fetch(url.toString(), {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(15_000),
-        });
+        const listResp = await withCircuitBreaker("google-api", () =>
+          fetch(url.toString(), {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(15_000),
+          }),
+        );
 
         if (!listResp.ok) {
           console.warn(`[google] Gmail list failed for label "${label}": ${listResp.status}`);
@@ -585,9 +602,11 @@ export class GooglePlugin implements Plugin {
         for (const rawMsg of messages) {
           if (this.processedGmailIds.has(rawMsg.id)) continue;
 
-          const msgResp = await fetch(
-            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${rawMsg.id}`,
-            { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
+          const msgResp = await withCircuitBreaker("google-api", () =>
+            fetch(
+              `https://gmail.googleapis.com/gmail/v1/users/me/messages/${rawMsg.id}`,
+              { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
+            ),
           );
           if (!msgResp.ok) continue;
 
@@ -702,10 +721,12 @@ export class GooglePlugin implements Plugin {
       url.searchParams.set("orderBy", "startTime");
       url.searchParams.set("maxResults", "20");
 
-      const resp = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(15_000),
-      });
+      const resp = await withCircuitBreaker("google-api", () =>
+        fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(15_000),
+        }),
+      );
 
       if (!resp.ok) {
         console.warn(`[google] Calendar list failed: ${resp.status}`);
