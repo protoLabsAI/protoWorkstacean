@@ -7,6 +7,7 @@ projects:
     title: protoMaker
     team: dev
     github: protoLabsAI/protoMaker
+    repoUrl: "https://github.com/protoLabsAI/protoMaker"
     defaultBranch: main
     status: active
     agents: [ava, quinn, frank, matt, kai]
@@ -22,6 +23,7 @@ projects:
     title: Quinn
     team: dev
     github: protoLabsAI/quinn
+    repoUrl: "https://github.com/protoLabsAI/quinn"
     defaultBranch: main
     status: active
     agents: [ava, quinn]
@@ -37,6 +39,7 @@ projects:
     title: protoUI
     team: dev
     github: protoLabsAI/protoUI
+    repoUrl: "https://github.com/protoLabsAI/protoUI"
     defaultBranch: main
     status: active
     agents: [ava, quinn, matt]
@@ -52,6 +55,7 @@ projects:
     title: protoContent
     team: gtm
     github: protoLabsAI/protoContent
+    repoUrl: "https://github.com/protoLabsAI/protoContent"
     defaultBranch: main
     status: active
     agents: [jon, cindi]
@@ -67,6 +71,7 @@ projects:
     title: protoWorkstacean
     team: dev
     github: protoLabsAI/protoWorkstacean
+    repoUrl: "https://github.com/protoLabsAI/protoWorkstacean"
     defaultBranch: main
     status: active
     agents: [ava, quinn, frank, kai]
