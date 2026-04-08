@@ -230,10 +230,14 @@ export class GitHubPlugin implements Plugin {
     const configPath = join(this.workspaceDir, "github.yaml");
     const projectsPath = join(this.workspaceDir, "projects.yaml");
 
+    let reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     const reloadConfig = () => {
-      this.config = loadConfig(this.workspaceDir);
-      const repoCount = this.config.autoTriage?.monitoredRepos?.length ?? 0;
-      console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
+      if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer);
+      reloadDebounceTimer = setTimeout(() => {
+        this.config = loadConfig(this.workspaceDir);
+        const repoCount = this.config.autoTriage?.monitoredRepos?.length ?? 0;
+        console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
+      }, 300);
     };
 
     // watchFile works even if the file doesn't exist yet — it will fire on creation.

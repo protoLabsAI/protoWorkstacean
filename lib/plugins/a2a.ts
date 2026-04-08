@@ -122,9 +122,13 @@ export class A2APlugin implements Plugin {
 
     // Re-index on file change so the process can pick up new entries without restart.
     if (existsSync(projectsPath)) {
+      let debounceTimer: ReturnType<typeof setTimeout> | null = null;
       watchFile(projectsPath, { interval: 5_000 }, () => {
-        this.index = buildIndex(projectsPath);
-        console.log(`[a2a] projects.yaml changed — reloaded ${this.index.size} project(s)`);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          this.index = buildIndex(projectsPath);
+          console.log(`[a2a] projects.yaml changed — reloaded ${this.index.size} project(s)`);
+        }, 300);
       });
     }
 
