@@ -26,8 +26,7 @@ export class GoalEvaluatorPlugin implements Plugin, IGoalEvaluatorPlugin {
   readonly description = "Observe-only goal registry evaluator — diffs world state against goals and emits violations";
   readonly capabilities = ["goals", "evaluation", "observe-only"];
 
-  /** observeOnly: always true — planner actions are not supported in this milestone */
-  private readonly observeOnly: boolean = true;
+  private readonly observeOnly: boolean;
 
   private config: GoalsConfig;
   private loader: GoalsLoader;
@@ -48,6 +47,7 @@ export class GoalEvaluatorPlugin implements Plugin, IGoalEvaluatorPlugin {
 
   constructor(config?: Partial<GoalsConfig>) {
     this.config = { ...DEFAULT_GOALS_CONFIG, ...config };
+    this.observeOnly = this.config.observeOnly;
     this.loader = new GoalsLoader(this.config.workspaceDir, this.config.projectsBaseDir);
     this.langfuse = new LangfuseLogger();
     this.discord = new DiscordLogger();
@@ -158,9 +158,9 @@ export class GoalEvaluatorPlugin implements Plugin, IGoalEvaluatorPlugin {
       return;
     }
 
-    // Safety guard: never trigger planner actions in observe-only mode
-    if (!this.observeOnly) {
-      console.warn("[goal-evaluator] Planner action requested — feature not yet supported; dropping request");
+    // Safety guard: in observe-only mode, log but do not emit to bus
+    if (this.observeOnly) {
+      console.info(`[goal-evaluator] OBSERVE-ONLY VIOLATION [${violation.severity.toUpperCase()}] goal="${violation.goalId}" — ${violation.message}`);
       return;
     }
 

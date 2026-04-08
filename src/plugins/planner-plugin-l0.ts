@@ -20,6 +20,7 @@ import type {
   ActionOscillationPayload,
   PlannerEscalatePayload,
 } from "../event-bus/action-events.ts";
+import type { GoalViolatedEventPayload } from "../types/events.ts";
 import { TOPICS } from "../event-bus/topics.ts";
 import { ActionRegistry } from "../planner/action-registry.ts";
 import { matchActions } from "../planner/pattern-matcher.ts";
@@ -85,6 +86,28 @@ export class PlannerPluginL0 implements Plugin {
       }
     );
     this.subscriptionIds.push(outcomeId);
+
+    // React to goal violations by dispatching matching tier_0 actions
+    const violationSubId = bus.subscribe(
+      "world.goal.violated",
+      this.name,
+      async (msg: BusMessage) => {
+        const payload = msg.payload as GoalViolatedEventPayload;
+        const violation = payload.violation;
+        const matchingActions = this.registry.getByGoal(violation.goalId);
+        for (const action of matchingActions) {
+          if (this.inFlightGoals.has(action.goalId)) continue;
+          if (this.cooldownManager.isOnCooldown(action.goalId, action.id)) continue;
+          if (this.loopDetector.isOscillating(action.goalId, action.id)) {
+            this.handleOscillation(action.goalId, action.id, msg.correlationId);
+            continue;
+          }
+          this.inFlightGoals.add(action.goalId);
+          this.dispatchAction(action, {} as WorldState, msg.correlationId);
+        }
+      }
+    );
+    this.subscriptionIds.push(violationSubId);
   }
 
   uninstall(): void {

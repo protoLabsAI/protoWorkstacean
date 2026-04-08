@@ -1,0 +1,50 @@
+# World Engine Actions — mapped to goals by goalId
+# Tier 0 = deterministic/free, Tier 1 = A* planned, Tier 2 = Ava LLM
+
+actions:
+  - id: alert.efficiency_low
+    goalId: flow.efficiency_healthy
+    tier: tier_0
+    priority: 10
+    cost: 1
+    name: "Alert on low flow efficiency"
+    preconditions:
+      - path: "domains.board.data.efficiency"
+        operator: lt
+        value: 0.35
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      agentId: ava
+
+  - id: alert.distribution_drift
+    goalId: flow.distribution_balanced
+    tier: tier_0
+    priority: 10
+    cost: 1
+    name: "Alert on board distribution drift"
+    preconditions:
+      - path: "domains.board.data.distribution.feature"
+        operator: lt
+        value: 0.40
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      agentId: ava
+
+  - id: ceremony.service_health_check
+    goalId: services.all_healthy
+    tier: tier_0
+    priority: 5
+    cost: 1
+    name: "Trigger service health check ceremony"
+    preconditions:
+      - path: "domains.services.metadata.failed"
+        operator: eq
+        value: true
+    effects:
+      - path: "domains.services.metadata.failed"
+        operation: set
+        value: false
+    meta:
+      topic: "ceremony.health_check.execute"
