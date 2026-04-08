@@ -120,7 +120,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => !!process.env.DISCORD_BOT_TOKEN,
     factory: async () => {
       const { DiscordPlugin } = await import("../lib/plugins/discord");
-      return new DiscordPlugin(workspaceDir);
+      return new DiscordPlugin(workspaceDir, dataDir);
     },
   },
   {

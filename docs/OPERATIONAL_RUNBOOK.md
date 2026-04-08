@@ -54,6 +54,32 @@ const trend = tracker.getTrend(3600_000); // 1-hour buckets
 const reasons = tracker.getTopReasons(10);
 ```
 
+## Discord Rate Limiting
+
+### How It Works
+
+The Discord plugin enforces per-user message rate limits (default: 5 messages per 10 seconds, configurable in `workspace/discord.yaml`). Rate-limit windows are persisted to `data/events.db` in the `rate_limits` table so that limits survive process restarts.
+
+On startup, the plugin loads all non-expired hits from the DB, so a user who spammed before a restart will remain limited until their window expires.
+
+### Single-Instance Limitation
+
+**The rate-limit state is single-instance only.** Each Workstacean process maintains its own in-memory window and writes to the local SQLite DB. If multiple instances run behind a load balancer, each instance has independent state and limits are not enforced across the fleet.
+
+For multi-instance deployments, migrate to a shared Redis store using `INCR` + `EXPIRE` per-user keys. This is a known limitation and is not addressed by the current implementation.
+
+### Inspecting Rate-Limit State
+
+```bash
+sqlite3 data/events.db "SELECT user_id, COUNT(*) as hits, MAX(ts) as last_seen FROM rate_limits GROUP BY user_id;"
+```
+
+### Clearing Rate-Limit State for a User
+
+```bash
+sqlite3 data/events.db "DELETE FROM rate_limits WHERE user_id = 'USER_ID';"
+```
+
 ## Troubleshooting
 
 ### High Escalation Rate
