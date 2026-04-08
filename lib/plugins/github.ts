@@ -303,6 +303,42 @@ export class GitHubPlugin implements Plugin {
     bus: EventBus,
     getToken: (owner: string, repo: string) => Promise<string>,
   ): void {
+    // ── Org webhook: repository.created → onboard ─────────────────────────
+    if (event === "repository" && payload.action === "created") {
+      const repo = payload.repository as Record<string, unknown> | undefined;
+      if (repo) {
+        const repoName = repo.name as string;
+        const fullName = repo.full_name as string;
+        const owner = (repo.owner as Record<string, unknown> | undefined)?.login as string;
+        const url = repo.html_url as string;
+        const description = (repo.description as string | null) ?? "";
+        const isPrivate = repo.private as boolean;
+
+        const correlationId = crypto.randomUUID();
+        const topic = "message.inbound.onboard";
+
+        bus.publish(topic, {
+          id: `repository-created-${fullName.replace("/", "-")}-${correlationId.slice(0, 8)}`,
+          correlationId,
+          topic,
+          timestamp: Date.now(),
+          payload: {
+            event: "repository.created",
+            owner,
+            repo: repoName,
+            fullName,
+            url,
+            description,
+            isPrivate,
+          },
+          source: { interface: "github" as const },
+        });
+
+        console.log(`[github] repository.created: ${fullName} → ${topic}`);
+      }
+      return;
+    }
+
     const ctx = extractContext(event, payload);
     if (!ctx) return;
 
