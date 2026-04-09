@@ -233,7 +233,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { SkillDispatcherPlugin } = await import("./executor/skill-dispatcher-plugin.js");
-      return new SkillDispatcherPlugin(executorRegistry);
+      return new SkillDispatcherPlugin(executorRegistry, workspaceDir);
     },
   },
   {

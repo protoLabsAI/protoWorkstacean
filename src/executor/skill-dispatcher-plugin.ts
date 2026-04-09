@@ -16,6 +16,8 @@
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "./executor-registry.ts";
 import type { SkillRequest } from "./types.ts";
+import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
+import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 
 export class SkillDispatcherPlugin implements Plugin {
   readonly name = "skill-dispatcher";
@@ -24,8 +26,15 @@ export class SkillDispatcherPlugin implements Plugin {
 
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
+  private readonly graphiti = new GraphitiClient();
+  private readonly identityRegistry: IdentityRegistry;
 
-  constructor(private readonly registry: ExecutorRegistry) {}
+  constructor(
+    private readonly registry: ExecutorRegistry,
+    workspaceDir: string,
+  ) {
+    this.identityRegistry = new IdentityRegistry(workspaceDir);
+  }
 
   install(bus: EventBus): void {
     this.bus = bus;
@@ -87,9 +96,28 @@ export class SkillDispatcherPlugin implements Plugin {
       (targets.length > 0 ? ` (targets: ${targets.join(", ")})` : ""),
     );
 
+    // ── Memory enrichment ──────────────────────────────────────────────────────
+    // Prepend user context from Graphiti for human-originating messages.
+    // Cron/system events (no userId) are skipped.
+    const sourceUserId = (msg.source as Record<string, unknown> | undefined)?.userId as string | undefined;
+    const sourcePlatform = (msg.source as Record<string, unknown> | undefined)?.interface as string | undefined;
+    const sourceChannelId = (msg.source as Record<string, unknown> | undefined)?.channelId as string | undefined;
+
+    let rawContent = typeof payload.content === "string" ? payload.content : undefined;
+    let groupId: string | undefined;
+
+    if (sourceUserId && sourcePlatform && sourcePlatform !== "cron") {
+      groupId = this.identityRegistry.groupId(sourcePlatform, sourceUserId);
+      if (rawContent) {
+        const memoryContext = await this.graphiti.getContextBlock(groupId, rawContent).catch(() => "");
+        if (memoryContext) rawContent = `${memoryContext}\n${rawContent}`;
+      }
+    }
+    // ── End memory enrichment ─────────────────────────────────────────────────
+
     const req: SkillRequest = {
       skill,
-      content: typeof payload.content === "string" ? payload.content : undefined,
+      content: rawContent,
       prompt: typeof payload.prompt === "string" ? payload.prompt : undefined,
       correlationId,
       parentId,
@@ -129,6 +157,22 @@ export class SkillDispatcherPlugin implements Plugin {
           completedAt: Date.now(),
           meta: { skill, executorType: executor.type, durationMs: Date.now() - dispatchedAt },
         });
+      }
+
+      // Store completed turn in Graphiti (fire-and-forget, non-blocking)
+      if (!result.isError && result.text && groupId && rawContent) {
+        const identity = sourceUserId && sourcePlatform
+          ? this.identityRegistry.resolve(sourcePlatform, sourceUserId)
+          : null;
+        this.graphiti.addEpisode({
+          groupId,
+          userMessage: rawContent,
+          agentMessage: result.text,
+          userRole: identity?.displayName ?? sourceUserId,
+          agentName: targets[0],
+          channelId: sourceChannelId,
+          platform: sourcePlatform,
+        }).catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode error:", err));
       }
 
       this._publishResponse(

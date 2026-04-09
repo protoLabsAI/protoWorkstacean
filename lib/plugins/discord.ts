@@ -365,14 +365,9 @@ export class DiscordPlugin implements Plugin {
         this.pendingAgents.set(correlationId, channelEntry.agent);
       }
 
-      const rawContent = message.cleanContent
+      const content = message.cleanContent
         .replace(/<@!?\d+>/g, "")
         .trim();
-
-      // Prepend user memory context (non-blocking, best-effort)
-      const userGroupId = this.identityRegistry?.groupId("discord", userId) ?? `user:discord_${userId}`;
-      const memoryContext = await this.graphiti.getContextBlock(userGroupId, rawContent).catch(() => "");
-      const content = memoryContext ? `${memoryContext}\n${rawContent}` : rawContent;
 
       // Langfuse conversation tracing
       if (convEnabled) {
@@ -389,7 +384,7 @@ export class DiscordPlugin implements Plugin {
         this.pendingTurns.set(correlationId, {
           conversationId: correlationId,
           turnNumber,
-          input: rawContent,
+          input: content,
           userId,
           agentName: channelEntry?.agent,
           startTime: new Date(),
@@ -641,20 +636,7 @@ export class DiscordPlugin implements Plugin {
               endTime: new Date(),
             }).catch(err => console.error("[discord] Langfuse traceTurn error:", err));
 
-            // Fire-and-forget: store completed turn so Graphiti can extract facts
-            const episodeGroupId = this.identityRegistry?.groupId("discord", pendingTurn.userId)
-              ?? `user:discord_${pendingTurn.userId}`;
-            const identity = this.identityRegistry?.resolve("discord", pendingTurn.userId);
-            this.graphiti.addEpisode({
-              groupId: episodeGroupId,
-              userMessage: pendingTurn.input,
-              agentMessage: content,
-              userRole: identity?.displayName ?? pendingTurn.userId,
-              agentName: pendingTurn.agentName,
-              channelId: pending.message?.channelId ?? pending.interaction?.channelId ?? undefined,
-              platform: "discord",
-              timestamp: pendingTurn.startTime,
-            }).catch(err => console.debug("[discord] Graphiti addEpisode error:", err));
+            // Note: Graphiti addEpisode is handled by SkillDispatcherPlugin for all channels.
           }
 
           if (pending.interaction) {
@@ -985,12 +967,8 @@ export class DiscordPlugin implements Plugin {
     pendingReplies.set(conversationId, { message });
     if (agentName) this.pendingAgents.set(conversationId, agentName);
 
-    const rawContent = message.cleanContent.replace(/<@!?\d+>/g, "").trim();
-    if (!rawContent) return;
-
-    // Prepend user memory context (non-blocking, best-effort)
-    const memoryContext = await this.userMemory.getContextBlock(userId, "discord").catch(() => "");
-    const content = memoryContext ? `${memoryContext}\n${rawContent}` : rawContent;
+    const content = message.cleanContent.replace(/<@!?\d+>/g, "").trim();
+    if (!content) return;
 
     // Langfuse tracing
     if (isNew) {
@@ -1005,7 +983,7 @@ export class DiscordPlugin implements Plugin {
     this.pendingTurns.set(conversationId, {
       conversationId,
       turnNumber,
-      input: rawContent, // log raw, not memory-prefixed
+      input: content,
       userId,
       agentName,
       startTime: new Date(),
