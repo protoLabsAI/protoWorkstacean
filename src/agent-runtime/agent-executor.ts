@@ -16,6 +16,7 @@
  */
 
 import { query, createSdkMcpServer, isSDKResultMessage } from "@protolabsai/sdk";
+import type { SDKResultMessageSuccess } from "@protolabsai/sdk";
 import type { AgentDefinition } from "./types.ts";
 import type { ToolRegistry } from "./tool-registry.ts";
 
@@ -107,8 +108,10 @@ export class AgentExecutor {
         if (message.type === "result") {
           if ("result" in message) {
             // SDKResultMessageSuccess
-            resultText = message.result ?? "";
-            stopReason = message.stop_reason ?? undefined;
+            const success = message as SDKResultMessageSuccess;
+            resultText = success.result ?? "";
+            const rawStopReason = (success as Record<string, unknown>).stop_reason;
+            stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined;
           } else if ("error" in message) {
             // SDKResultMessageError
             isError = true;

@@ -14,7 +14,7 @@
  */
 
 import { tool } from "@protolabsai/sdk";
-import { z } from "zod/v3";
+import { z } from "zod";
 import type { SdkMcpToolDefinition } from "@protolabsai/sdk";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -199,7 +199,10 @@ export function createBusTools(opts: BusToolsOptions = {}): AnyToolDef[] {
     },
   );
 
-  return [publishEvent, getWorldState, getIncidents, reportIncident, getCeremonies, runCeremony];
+  // Each tool is SdkMcpToolDefinition<SpecificSchema>. TypeScript's strict function
+  // parameter contravariance prevents direct assignment to AnyToolDef[], so cast here.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return [publishEvent, getWorldState, getIncidents, reportIncident, getCeremonies, runCeremony] as unknown as AnyToolDef[];
 }
 
 /**
