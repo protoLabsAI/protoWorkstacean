@@ -26,22 +26,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
         working-directory: docs-site
-        run: npm install
-
-      - name: Link docs content
-        working-directory: docs-site
-        run: npm run link
+        run: bun install
 
       - name: Build static site
         working-directory: docs-site
-        run: npm run build
+        run: bun run build
         env:
           BASE_PATH: /protoWorkstacean
 
