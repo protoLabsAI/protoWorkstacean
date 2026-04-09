@@ -2,268 +2,406 @@
 title: HITL — Human-in-the-Loop Gate
 ---
 
-HITL is the approval gate that sits between Ava generating a SPARC PRD and features landing on the board. It exists because autonomous project creation has permanent side effects: board features, Plane state changes, Discord channel provisioning. The gate gives a human (or a trusted automated signal) the chance to approve, reject, or modify a plan before any of that happens.
+HITL is the approval gate that sits between an autonomous decision and its permanent side effects. It exists because some actions — board feature creation, infrastructure changes, high-cost agent runs — should not happen without a human in the loop.
 
 `correlationId` is the spine that connects every hop.
 
-## 1. Overview
+---
 
-When Ava completes the `plan` skill, it returns immediately with `{ status: "pending_approval", correlationId }` rather than blocking. The plan state (PRD + review scores + metadata) is checkpointed to SQLite (`plans.db`, 7-day TTL). An `HITLRequest` is published to the bus, which routes it to the originating interface plugin for native rendering. A human responds, the interface plugin publishes an `HITLResponse`, and Workstacean routes to Ava's `plan_resume` skill to complete the flow.
+## Overview
 
-The `auto` label on a Plane issue bypasses the gate entirely — see Section 6.
+When any system component needs a human decision, it publishes an `HITLRequest` to the bus. `HITLPlugin` routes it to the registered renderer for the originating interface (Discord, Plane, Signal, API). A human responds. The interface plugin publishes an `HITLResponse`. `HITLPlugin` routes the response back to the requester via `replyTopic` (bus) and, if configured, calls the plan_resume agent via A2A.
 
-## 2. Message Types
+Two types of HITL flow coexist on the same infrastructure:
+
+| Flow | Publisher | Callback path | Example |
+|---|---|---|---|
+| **Plan gate** | Ava | plan_resume A2A → Ava resumes feature creation | New project plan after SPARC PRD |
+| **Operational gate** | Any plugin | `replyTopic` on the bus | Budget L3 escalation, goal violation, queue saturation |
+
+Both use the same `HITLRequest`/`HITLResponse` shapes, the same topic conventions, and the same renderer interface.
+
+---
+
+## Message types
 
 ### HITLRequest
 
-Published by Ava to the `replyTopic` specified in the inbound BusMessage. The `correlationId` is the spine connecting all subsequent messages.
-
 ```typescript
-type HITLRequest = {
-  type: "HITLRequest"
-  correlationId: string       // e.g. "plane-{issueId}" or "workstacean-{channel}"
-  title: string               // short label for the approval prompt
-  summary: string             // human-readable PRD summary
-  avaVerdict: string          // Ava's operational review summary + score
-  jonVerdict: string          // Jon's strategic review summary + score
-  options: string[]           // available decisions, typically ["approve","reject","modify"]
-  expiresAt: number           // Unix ms — HITLPlugin sweeps expired requests after 60s
-  replyTopic: string          // topic to publish HITLResponse on
+interface HITLRequest {
+  type: "hitl_request";
+  correlationId: string;    // spine — set at message origin, never changes
+  title: string;            // short label for the approval prompt
+  summary: string;          // human-readable context (markdown ok)
+  options: string[];        // available decisions: ["approve","reject","modify"]
+  expiresAt: string;        // ISO timestamp — HITLPlugin sweeps expired entries every 60s
+  replyTopic: string;       // where to publish HITLResponse on the bus
+  sourceMeta?: {            // originating interface — used to pick the renderer
+    interface: string;      // "discord" | "plane" | "signal" | "slack" | "api"
+    channelId?: string;
+    userId?: string;
+  };
+  // ── Plan gate fields (populated by Ava) ────────────────────────────────────
+  avaVerdict?: { score: number; concerns: string[]; verdict: string };
+  jonVerdict?: { score: number; concerns: string[]; verdict: string };
+  // ── Operational gate fields (populated by BudgetPlugin L3, etc.) ───────────
+  escalation_reason?: string;
+  escalationContext?: {
+    estimatedCost: number;
+    maxCost: number;
+    tier: string;
+    budgetState: {
+      remainingProjectBudget: number;
+      remainingDailyBudget: number;
+      projectBudgetRatio: number;
+      dailyBudgetRatio: number;
+    };
+  };
 }
 ```
 
 ### HITLResponse
 
-Published by any interface plugin (Discord, Plane reply, API) after a human decision. Workstacean routes this to `plan_resume`.
-
 ```typescript
-type HITLResponse = {
-  type: "HITLResponse"
-  correlationId: string       // must match the HITLRequest correlationId
-  decision: "approve" | "reject" | "modify"
-  feedback?: string           // required when decision is "modify"; ignored otherwise
-  decidedBy: string           // Discord user ID, "auto", or interface identifier
+interface HITLResponse {
+  type: "hitl_response";
+  correlationId: string;                         // must match the HITLRequest
+  decision: "approve" | "reject" | "modify";
+  feedback?: string;                             // required when decision is "modify"
+  decidedBy: string;                             // Discord user ID, "auto", agent name, etc.
 }
 ```
 
-## 3. Plugin Architecture
+---
 
-`HITLPlugin` (`lib/plugins/hitl.ts`) is a Workstacean bus plugin that manages the in-memory state of pending approvals.
+## Bus topics
 
-**Subscriptions:**
-- `hitl.request.#` — stores the incoming HITLRequest in the pending Map; forwards to registered renderers
-- `hitl.response.#` — validates correlationId exists in Map; removes from Map; publishes to the `replyTopic` from the original request
+| Topic | Publisher | Subscriber | When |
+|---|---|---|---|
+| `hitl.request.{ns}.{correlationId}` | Any plugin or agent | HITLPlugin | New approval needed |
+| `hitl.response.{ns}.{correlationId}` | Interface plugin | HITLPlugin | Human decision collected |
+| `hitl.pending.{correlationId}` | HITLPlugin | API pollers | No registered renderer for the interface |
+| `hitl.expired.{correlationId}` | HITLPlugin | Registered renderers | TTL exceeded (60s sweep) |
 
-**In-memory Map:** keyed by `correlationId`, value is the full HITLRequest. The Map is not persisted — a workstacean restart clears it. If a restart happens while an approval is pending, the HITLResponse will still arrive but the lookup will miss and the response will be dropped. The PlanStore SQLite checkpoint is durable; the plan can be manually resumed by injecting an HITLResponse via `/publish`.
+`{ns}` is a namespace segment from the publisher (e.g. `budget`, `plan`, `goal`). It scopes the topic so different flows don't interfere.
 
-**Extension point — `registerHITLRenderer`:**
+---
+
+## Response routing
+
+When a renderer publishes an `HITLResponse` to `request.replyTopic` (a `hitl.response.*` topic):
+
+1. **Bus delivery** — the message lands on `request.replyTopic`. Any plugin that subscribed to that topic receives it automatically through pub/sub. No re-routing by HITLPlugin is needed — the bus handles it.
+
+2. **A2A plan_resume** — HITLPlugin subscribes to `hitl.response.#` and intercepts every response. If `workspace/agents.yaml` contains an agent with the `plan_resume` skill (Ava), HITLPlugin calls that agent via JSON-RPC 2.0. This is Ava's plan gate path — Ava is an external service that doesn't subscribe to the bus directly.
+
+Both paths are triggered by the single publish from the renderer. The A2A call is a no-op if no plan_resume agent is configured.
+
+> **Convention:** `request.replyTopic` is always in the `hitl.response.#` namespace so HITLPlugin can intercept it. Renderers should publish to `request.replyTopic` directly rather than constructing the topic themselves.
+
+---
+
+## The renderer interface
+
+Every channel plugin that wants to render HITL approvals implements two methods:
 
 ```typescript
-registerHITLRenderer(interfaceName: string, handler: (request: HITLRequest) => Promise<void>)
+interface HITLRenderer {
+  /**
+   * Called when a new HITLRequest arrives for this interface.
+   * Render the approval UI on your platform.
+   * When the user responds, publish an HITLResponse to the bus:
+   *
+   *   bus.publish(`hitl.response.${ns}.${request.correlationId}`, { ... })
+   */
+  render(request: HITLRequest, bus: EventBus): Promise<void>;
+
+  /**
+   * Called when the request expires before a decision is made.
+   * Clean up the rendered UI (disable buttons, post "timed out", etc.).
+   */
+  onExpired?(request: HITLRequest, bus: EventBus): Promise<void>;
+}
 ```
 
-Each interface plugin (Discord, etc.) registers a renderer on startup. When a new HITLRequest arrives, the plugin calls all registered renderers for interfaces that match the `source.interface` in the original BusMessage. This means adding a new rendering surface (Slack, voice, API webhook) requires only registering a renderer — no changes to HITLPlugin, the bus, or Ava.
+Register during `install()`:
 
-**Expiry sweep:** runs every 60 seconds. Any HITLRequest where `expiresAt < Date.now()` is removed from the Map and a message is published to `hitl.expired.{correlationId}`. Interface plugins can subscribe to `hitl.expired.#` to clean up rendered prompts (e.g., disable Discord buttons).
-
-## 4. Plan Flow
-
-### plan skill (fire-and-forget)
-
-Ava's `plan` skill is non-blocking from the caller's perspective:
-
-```
-1. Receive inbound message with skillHint "plan"
-2. Return immediately: { status: "pending_approval", correlationId }
-3. Async in background:
-   a. Generate SPARC PRD (Specification, Pseudocode, Architecture, Refinement, Completion sections)
-   b. Run antagonistic review:
-      - Ava lens: operational feasibility, complexity, risk
-      - Jon lens: strategic value, market positioning, ROI
-      - Each produces a numeric score (0–10) and written verdict
-   c. Checkpoint to PlanStore (SQLite, keyed by correlationId, 7-day TTL)
-   d. Evaluate scores → HITL gate or auto-approve path
+```typescript
+// In your plugin's install():
+hitlPlugin.registerRenderer("myplatform", {
+  async render(request, bus) {
+    // post approval UI to your platform
+    // collect decision
+    // publish hitl.response.*
+  },
+  async onExpired(request, bus) {
+    // disable buttons, post expiry notice
+  },
+});
 ```
 
-### plan_resume skill
+`HITLPlugin` resolves the renderer from `request.sourceMeta.interface`. If no renderer is registered for the interface, the request falls back to `hitl.pending.{correlationId}` for API polling.
 
-Triggered when Workstacean receives an HITLResponse on the bus:
+---
+
+## Publishing a HITL request
+
+Any plugin can gate on human approval:
+
+```typescript
+const correlationId = crypto.randomUUID();
+
+bus.publish(`hitl.request.budget.${correlationId}`, {
+  id: crypto.randomUUID(),
+  correlationId,
+  topic: `hitl.request.budget.${correlationId}`,
+  timestamp: Date.now(),
+  payload: {
+    type: "hitl_request",
+    correlationId,
+    title: "Budget approval required",
+    summary: `Agent \`frank\` wants to run a $4.20 operation.\n\nEstimated: **$4.20** | Budget remaining: **$6.40**`,
+    options: ["approve", "reject"],
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    replyTopic: `hitl.response.budget.${correlationId}`,
+    sourceMeta: originalMsg.source,
+    escalation_reason: "Estimated cost $4.20 exceeds L2 threshold ($5.00 with <10% remaining)",
+  },
+});
+
+// Subscribe to the response:
+bus.subscribe(`hitl.response.budget.${correlationId}`, "budget-plugin", (msg) => {
+  const resp = msg.payload as HITLResponse;
+  if (resp.decision === "approve") {
+    // proceed
+  } else {
+    // abort, notify
+  }
+});
+```
+
+---
+
+## Discord renderer (reference implementation)
+
+Discord is the reference HITL interface. It renders requests as embeds with interactive buttons and collects decisions natively.
+
+**What it renders:**
 
 ```
-1. Restore PRD + review results from PlanStore by correlationId
-2. Decision routing:
-   approve → create board features (one feature per PRD section/milestone)
-             stamp correlationId on each feature
-             publish to plane.reply.{correlationId} → PlanePlugin syncs back
-   reject  → archive plan in PlanStore (mark as rejected, no features created)
-             post rejection notice to originating interface
-   modify  → apply feedback to PRD (re-draft the affected sections)
-             re-run antagonistic review with updated PRD
-             re-emit HITLRequest (new expiresAt, same correlationId)
-             loop restarts at the HITL gate
+┌─────────────────────────────────────┐
+│ 🔐  Budget approval required        │
+│                                     │
+│ Agent `frank` wants to run a $4.20  │
+│ operation.                          │
+│                                     │
+│ Estimated: $4.20 | Remaining: $6.40 │
+│                                     │
+│ [✅ Approve]  [❌ Reject]            │
+│                                     │
+│ Expires in 30 minutes               │
+└─────────────────────────────────────┘
 ```
 
-## 5. Decision Paths
+**How it works:**
+
+1. Registered renderer's `render()` posts the embed with buttons to `sourceMeta.channelId`
+2. `DiscordPlugin` captures the button interaction
+3. On click: publishes `HITLResponse` to the bus with `decidedBy: interaction.user.id`
+4. `onExpired()`: edits the embed to show "Approval expired — re-trigger if still needed", disables buttons
+
+**Implementing it:**
+
+```typescript
+// In DiscordPlugin.install():
+const renderer: HITLRenderer = {
+  async render(request, bus) {
+    const embed = buildHITLEmbed(request);
+    const buttons = buildHITLButtons(request.options, request.correlationId);
+    const channelId = request.sourceMeta?.channelId;
+    if (!channelId) return;
+
+    const ch = client.channels.cache.get(channelId) as TextChannel;
+    const msg = await ch.send({ embeds: [embed], components: [buttons] });
+
+    // Track message for expiry cleanup
+    pendingHITLMessages.set(request.correlationId, msg);
+  },
+
+  async onExpired(request, bus) {
+    const msg = pendingHITLMessages.get(request.correlationId);
+    if (!msg) return;
+    pendingHITLMessages.delete(request.correlationId);
+    await msg.edit({
+      embeds: [expiredEmbed(request)],
+      components: [], // removes buttons
+    });
+  },
+};
+
+hitlPlugin.registerRenderer("discord", renderer);
+```
+
+Button interaction handler (in `Events.InteractionCreate`):
+
+```typescript
+if (interaction.isButton() && interaction.customId.startsWith("hitl:")) {
+  const [, decision, correlationId] = interaction.customId.split(":");
+  await interaction.deferUpdate();
+
+  // Use the stored replyTopic from the original request (set during render())
+  const entry = pendingHITLMessages.get(correlationId);
+  const replyTopic = entry?.replyTopic
+    ?? `hitl.response.${correlationId.split("-")[0]}.${correlationId}`;
+
+  bus.publish(replyTopic, {
+    id: crypto.randomUUID(),
+    correlationId,
+    topic: replyTopic,
+    timestamp: Date.now(),
+    payload: {
+      type: "hitl_response",
+      correlationId,
+      decision: decision as "approve" | "reject" | "modify",
+      decidedBy: interaction.user.id,
+    },
+  });
+
+  if (entry) pendingHITLMessages.delete(correlationId);
+  await interaction.message.edit({ components: [] }); // disable buttons after click
+}
+```
+
+---
+
+## Plan gate flow (Ava)
+
+The plan gate is one specific use of HITL, triggered after Ava generates a SPARC PRD and antagonistic review.
+
+```
+1. Inbound message with skillHint "plan"
+2. Ava generates SPARC PRD + antagonistic review
+   - Ava verdict: operational feasibility, risk score
+   - Jon verdict: strategic value, ROI score
+3. Ava checkpoints plan to PlanStore (SQLite, keyed by correlationId, 7-day TTL)
+4. Ava publishes hitl.request.plan.{correlationId} with replyTopic
+5. HITLPlugin routes to registered renderer (Discord embed shows PRD summary + verdicts)
+6. Human approves/rejects/modifies
+7. Renderer publishes hitl.response.plan.{correlationId}
+8. HITLPlugin:
+   a. Publishes response to replyTopic (bus)
+   b. Calls plan_resume via A2A → Ava restores checkpoint, executes decision
+```
+
+### plan_resume decisions
 
 | Decision | What happens |
 |---|---|
-| `approve` | Board features created, correlationId stamped, Plane issue → "In Progress" (if Plane-originated), summary comment posted to Plane issue |
-| `reject` | Plan archived in PlanStore, no features created, rejection notice sent to originating channel |
-| `modify` | PRD re-drafted with `feedback` applied, antagonistic review re-run, new HITLRequest emitted with same `correlationId` — the loop can repeat until approved or rejected |
+| `approve` | Board features created, Plane issue → "In Progress", summary comment posted |
+| `reject` | Plan archived in PlanStore, rejection notice sent to originating channel |
+| `modify` | PRD re-drafted with `feedback` applied, antagonistic review re-run, new `HITLRequest` emitted with same `correlationId` |
 
-For `modify`, the `feedback` field in HITLResponse is required. Ava treats it as a diff instruction: "make the scope smaller", "drop the third milestone", "reframe as an internal tool not a product". The re-drafted PRD replaces the checkpoint in PlanStore.
+### Auto-approve
 
-## 6. Auto-Approve
+Plane issues with the `auto` label skip the gate entirely. `PlanePlugin` sets `autoApprove: true` in the bus message. Ava internally generates `HITLResponse { decision: "approve", decidedBy: "auto" }` and calls `plan_resume` directly.
 
-If the originating Plane issue has the `auto` label, the HITL gate is skipped entirely:
+---
 
-- Workstacean's `PlanePlugin` detects the `auto` label before publishing to the bus.
-- The bus message payload carries `autoApprove: true`.
-- Ava's `plan` skill checks this flag after completing the PRD + review.
-- If set, it internally generates an HITLResponse with `decision: "approve"` and `decidedBy: "auto"` and calls `plan_resume` directly without publishing an HITLRequest.
-- No approval prompt is rendered anywhere.
+## correlationId conventions
 
-Use `auto` for trusted automation sources or low-stakes scaffolding tasks. Use `plan` for any idea that affects production infrastructure or significant engineering investment.
-
-## 7. Expiry
-
-The HITLPlugin expiry sweep runs every 60 seconds. When a request expires:
-
-1. The entry is removed from the pending Map.
-2. A message is published to `hitl.expired.{correlationId}`.
-3. The plan remains in PlanStore — it is not automatically rejected. A late HITLResponse injected after expiry will not be routed (Map miss) but the plan can still be manually resumed.
-
-The `expiresAt` value in HITLRequest is set by Ava at emit time. The default TTL for the pending Map entry is separate from the 7-day PlanStore TTL.
-
-Interface plugins should subscribe to `hitl.expired.#` to handle expiry rendering (e.g., editing a Discord embed to show "Approval expired — re-trigger with /plan").
-
-## 8. correlationId Conventions
-
-| Origin | correlationId format | Example |
+| Origin | Format | Example |
 |---|---|---|
 | Plane issue | `plane-{issueId}` | `plane-abc123de-f456-...` |
-| Discord / other interface | `workstacean-{channelId}` | `workstacean-1469080556720623699` |
+| Discord | `discord-{channelId}-{uuid8}` | `discord-1469080556720623699-a1b2c3d4` |
+| Budget | `budget-{requestId}` | `budget-3f8a12...` |
+| Goal violation | `goal-{goalId}-{uuid8}` | `goal-flow.efficiency_healthy-9f2b1c` |
 
-The `correlationId` is stable across the entire lifecycle: PRD generation, HITL request/response, plan_resume, and Plane sync-back all use the same value. It is stamped on every board feature created during `plan_resume` so the lineage is traceable.
+The `correlationId` is stable for the entire lifecycle. Every bus message, A2A call, and database record in the flow carries the same value.
 
-## 9. Bus Topics
+---
 
-| Topic | Publisher | Subscriber | Description |
-|-------|-----------|------------|-------------|
-| `hitl.request.#` | Ava | HITLPlugin | Approval request after SPARC PRD + review |
-| `hitl.response.#` | Interface plugin | HITLPlugin | Human decision |
-| `hitl.pending.{correlationId}` | HITLPlugin | API callers | Unrouted requests (no matching interface) |
-| `hitl.expired.{correlationId}` | HITLPlugin | Any | Request TTL exceeded — 60s sweep |
+## Expiry
 
-## 10. Interface Rendering
+HITLPlugin sweeps pending requests every 60s. When a request expires:
 
-### Discord
+1. Removed from in-memory Map
+2. `hitl.expired.{correlationId}` published (original request in payload)
+3. Registered renderer's `onExpired()` is called
 
-The Discord plugin renders HITLRequests as message embeds with interactive buttons. The embed shows:
-- `title` and `summary` from the request
-- Ava and Jon verdict summaries with scores
-- Approve / Reject / Modify buttons
-- Expiry timestamp in the embed footer
+The plan remains in PlanStore after expiry — it is not automatically rejected. A late `HITLResponse` injected after expiry will not be routed (Map miss). To manually resume an expired plan, inject an `HITLResponse` via `POST /publish`.
 
-Button interactions publish an HITLResponse to the bus with `decidedBy` set to the Discord user's ID.
+---
 
-### Plane reply
+## Adding HITL to a new channel
 
-When the originating interface is Plane (issue with `plan` label), the HITLRequest routes to `plane.reply.{correlationId}`. The PlanePlugin renders this as a comment on the Plane issue asking for approval, and a subsequent issue update or comment triggers the HITLResponse.
+Channel devs need three things:
 
-### API polling
-
-External services can poll `hitl.pending.#` by subscribing to the bus via the `/publish` endpoint or by calling `GET /api/hitl/{correlationId}` if the Workstacean HTTP API exposes it. This allows CI pipelines or other automated systems to act as approval sources without a UI.
-
-### Adding a new renderer
-
+**1. Implement `HITLRenderer`:**
 ```typescript
-// In your interface plugin's init():
-registerHITLRenderer("myinterface", async (request: HITLRequest) => {
-  // render the approval prompt in your interface
-  // when the user responds, publish:
-  await bus.publish(`hitl.response.${request.correlationId}`, {
-    type: "HITLResponse",
+const renderer: HITLRenderer = {
+  async render(request, bus) { /* post approval UI */ },
+  async onExpired(request, bus) { /* clean up */ },
+};
+```
+
+**2. Register it during `install()`:**
+```typescript
+hitlPlugin.registerRenderer("myplatform", renderer);
+```
+
+The `"myplatform"` name must match what your plugin sets in `BusMessage.source.interface`. `HITLPlugin` uses this to dispatch.
+
+**3. Collect the decision and publish `HITLResponse` to `request.replyTopic`:**
+```typescript
+bus.publish(request.replyTopic, {
+  id: crypto.randomUUID(),
+  correlationId: request.correlationId,
+  topic: request.replyTopic,
+  timestamp: Date.now(),
+  payload: {
+    type: "hitl_response",
     correlationId: request.correlationId,
     decision: "approve",
     decidedBy: "user-identifier",
-  })
-})
+  },
+});
 ```
 
-## 11. Pending Request Lifecycle
+That's it. The rest — routing to `replyTopic`, A2A callback to Ava — is handled by `HITLPlugin`.
 
-1. `HITLRequest` arrives on `hitl.request.#` → stored in `pendingRequests` map.
-2. Routed to interface. Interface renders and waits.
-3. `HITLResponse` arrives on `hitl.response.#` → removed from map, forwarded to Ava.
-4. If no response by `expiresAt` (checked every 60s) → removed from map, `hitl.expired.{correlationId}` published.
+---
 
-## 12. plan_resume A2A Call
+## Testing
 
-The HITLPlugin calls Ava directly over A2A (JSON-RPC 2.0):
-
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "message/send",
-  "params": {
-    "message": {
-      "role": "user",
-      "parts": [{ "kind": "text", "text": "HITL Decision: approve\nDecided by: chukz" }]
-    },
-    "contextId": "<correlationId>",
-    "metadata": {
-      "skillHint": "plan_resume",
-      "hitlResponse": { "type": "hitl_response", "correlationId": "...", "decision": "approve", ... }
-    }
-  }
-}
-```
-
-`contextId` matches the `correlationId` so Ava can look up the saved SQLite checkpoint. Timeout: 120s.
-
-## 13. Design Principle
-
-**The bus is dumb. Interface plugins own rendering. Ava owns plan state.**
-
-- The bus routes messages — it has no opinion about format or display.
-- Each interface plugin (Discord, Plane, API, future Slack/voice) handles its own rendering of the `HITLRequest` and collects the human response in whatever form is native to that interface.
-- Ava stores plan state in SQLite between the `plan` and `plan_resume` calls — the HITL gate is just a pause point, not a re-computation.
-- `correlationId` is set once (at inbound message creation) and threads through every hop without modification.
-
-## 14. Testing
-
-### Simulate an approval without a real Plane issue
-
-Use the `/publish` endpoint on Workstacean (port 3000, Docker network only — reachable from `ava` host via `http://workstacean:3000` from containers on the shared network):
+### Simulate an approval
 
 ```bash
-# Step 1: Inject a plan request to get a correlationId
-curl -s -X POST http://ava:3000/publish \
+# Step 1: trigger a plan request
+curl -s -X POST http://localhost:3000/publish \
   -H "Content-Type: application/json" \
   -d '{
-    "topic": "message.inbound.plane.issue.create",
+    "topic": "message.inbound.plane.issue.created",
     "payload": {
       "skillHint": "plan",
-      "correlationId": "plane-test-approval-001",
+      "correlationId": "plane-test-001",
       "content": "Add a weekly digest of merged PRs to the Discord dev channel",
       "source": { "interface": "plane", "channelId": "test" },
-      "reply": { "topic": "plane.reply.plane-test-approval-001", "format": "text" },
+      "reply": { "topic": "plane.reply.plane-test-001" },
       "autoApprove": false
     }
   }'
 
-# Step 2: Wait for Ava to generate the PRD (watch logs)
-docker logs -f workstacean | grep -E "(plan|HITL|PRD)"
+# Step 2: watch logs for HITLRequest
+# docker logs -f workstacean | grep hitl
 
-# Step 3: Inject an approval once HITLRequest appears on the bus
-curl -s -X POST http://ava:3000/publish \
+# Step 3: inject an approval
+curl -s -X POST http://localhost:3000/publish \
   -H "Content-Type: application/json" \
   -d '{
-    "topic": "hitl.response.plane-test-approval-001",
+    "topic": "hitl.response.plan.plane-test-001",
     "payload": {
-      "type": "HITLResponse",
-      "correlationId": "plane-test-approval-001",
+      "type": "hitl_response",
+      "correlationId": "plane-test-001",
       "decision": "approve",
       "decidedBy": "test-injection"
     }
@@ -273,42 +411,42 @@ curl -s -X POST http://ava:3000/publish \
 ### Simulate a modify round
 
 ```bash
-curl -s -X POST http://ava:3000/publish \
+curl -s -X POST http://localhost:3000/publish \
   -H "Content-Type: application/json" \
   -d '{
-    "topic": "hitl.response.plane-test-approval-001",
+    "topic": "hitl.response.plan.plane-test-001",
     "payload": {
-      "type": "HITLResponse",
-      "correlationId": "plane-test-approval-001",
+      "type": "hitl_response",
+      "correlationId": "plane-test-001",
       "decision": "modify",
-      "feedback": "Scope it down — weekly only, no per-PR detail, just a count + link",
-      "decidedBy": "test-injection"
-    }
-  }'
-# Ava will re-draft the PRD and emit a new HITLRequest with the same correlationId
-```
-
-### Simulate a rejection
-
-```bash
-curl -s -X POST http://ava:3000/publish \
-  -H "Content-Type: application/json" \
-  -d '{
-    "topic": "hitl.response.plane-test-approval-001",
-    "payload": {
-      "type": "HITLResponse",
-      "correlationId": "plane-test-approval-001",
-      "decision": "reject",
+      "feedback": "Scope it down — weekly only, no per-PR detail",
       "decidedBy": "test-injection"
     }
   }'
 ```
 
-### Verify PlanStore checkpoint
-
-The SQLite database is at `/data/plans.db` inside the `workstacean` container:
+### Verify PlanStore
 
 ```bash
 docker exec workstacean sqlite3 /data/plans.db \
   "SELECT correlationId, status, createdAt FROM plans ORDER BY createdAt DESC LIMIT 5;"
 ```
+
+### Poll pending requests (API mode)
+
+If no renderer is registered for the interface, requests land on `hitl.pending.{correlationId}`. Subscribe via the bus or poll:
+
+```bash
+curl http://localhost:3000/api/hitl/pending
+```
+
+---
+
+## Design principles
+
+**The bus routes. Interface plugins render. Requesters own their response logic.**
+
+- `HITLPlugin` is a router — it stores state, dispatches to renderers, and routes responses. It has no opinion on format, display, or what to do with the decision.
+- Each interface plugin (Discord, Plane, Signal, Slack, API) owns rendering for its platform.
+- The requester (BudgetPlugin, GoalEvaluator, Ava) owns what to do with the response — HITL doesn't know or care.
+- `correlationId` is immutable across the entire lifecycle.

@@ -28,11 +28,16 @@ import {
   GatewayIntentBits,
   Partials,
   Events,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   type Message,
   type ChatInputCommandInteraction,
   type TextChannel,
 } from "discord.js";
-import type { EventBus, BusMessage, Plugin } from "../types.ts";
+import type { EventBus, BusMessage, Plugin, HITLRequest } from "../types.ts";
+import type { HITLPlugin } from "./hitl.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -213,6 +218,10 @@ export class DiscordPlugin implements Plugin {
   private pendingAgents = new Map<string, string>();
 
   private channelRegistry?: ChannelRegistry;
+  private hitlPlugin?: HITLPlugin;
+
+  // correlationId → { message, replyTopic } for active HITL approvals
+  private pendingHITLMessages = new Map<string, { message: Message; replyTopic: string }>();
 
   // Runtime rate-limit state (built from config on install)
   private rateLimits = new Map<string, number[]>();
@@ -224,10 +233,11 @@ export class DiscordPlugin implements Plugin {
   private rlDb: Database | null = null;
   private dataDir: string | null = null;
 
-  constructor(workspaceDir: string, dataDir?: string, channelRegistry?: ChannelRegistry) {
+  constructor(workspaceDir: string, dataDir?: string, channelRegistry?: ChannelRegistry, hitlPlugin?: HITLPlugin) {
     this.workspaceDir = workspaceDir;
     this.dataDir = dataDir ? resolve(dataDir) : null;
     this.channelRegistry = channelRegistry;
+    this.hitlPlugin = hitlPlugin;
   }
 
   install(bus: EventBus): void {
@@ -378,6 +388,43 @@ export class DiscordPlugin implements Plugin {
             .map(p => ({ name: p.title, value: p.slug }));
           await interaction.respond(choices).catch(console.error);
         }
+        return;
+      }
+
+      // ── HITL button interactions ─────────────────────────────────────────
+      if (interaction.isButton() && interaction.customId.startsWith("hitl:")) {
+        const [, decision, correlationId] = interaction.customId.split(":");
+        await interaction.deferUpdate();
+
+        const entry = this.pendingHITLMessages.get(correlationId);
+        const replyTopic = entry?.replyTopic
+          ?? `hitl.response.${correlationId.split("-")[0]}.${correlationId}`;
+
+        bus.publish(replyTopic, {
+          id: crypto.randomUUID(),
+          correlationId,
+          topic: replyTopic,
+          timestamp: Date.now(),
+          payload: {
+            type: "hitl_response",
+            correlationId,
+            decision: decision as "approve" | "reject" | "modify",
+            decidedBy: interaction.user.id,
+          },
+        });
+
+        if (entry) this.pendingHITLMessages.delete(correlationId);
+
+        const color = decision === "approve" ? 0x22c55e
+          : decision === "reject"  ? 0xef4444
+          : 0x6b7280;
+        const label = decision.charAt(0).toUpperCase() + decision.slice(1);
+        const decidedEmbed = new EmbedBuilder()
+          .setTitle(interaction.message.embeds[0]?.title ?? "Decision recorded")
+          .setDescription(`**${label}** by <@${interaction.user.id}>`)
+          .setColor(color);
+
+        await interaction.message.edit({ embeds: [decidedEmbed], components: [] }).catch(console.error);
         return;
       }
 
@@ -552,6 +599,43 @@ export class DiscordPlugin implements Plugin {
       }
     });
 
+    // ── HITL renderer registration ───────────────────────────────────────────
+    if (this.hitlPlugin) {
+      this.hitlPlugin.registerRenderer("discord", {
+        render: async (request, _busRef) => {
+          const channelId = request.sourceMeta?.channelId;
+          if (!channelId) {
+            console.warn(`[discord] HITL ${request.correlationId} missing channelId — cannot render`);
+            return;
+          }
+          const ch = this.client.channels.cache.get(channelId) as TextChannel | undefined;
+          if (!ch) {
+            console.warn(`[discord] HITL channel ${channelId} not in cache — cannot render`);
+            return;
+          }
+          const embed = this._buildHITLEmbed(request);
+          const row = this._buildHITLButtons(request);
+          const msg = await ch.send({ embeds: [embed], components: [row] });
+          this.pendingHITLMessages.set(request.correlationId, {
+            message: msg,
+            replyTopic: request.replyTopic,
+          });
+          console.log(`[discord] HITL ${request.correlationId} rendered in channel ${channelId}`);
+        },
+        onExpired: async (request, _busRef) => {
+          const entry = this.pendingHITLMessages.get(request.correlationId);
+          if (!entry) return;
+          this.pendingHITLMessages.delete(request.correlationId);
+          const expiredEmbed = new EmbedBuilder()
+            .setTitle(request.title)
+            .setDescription("**Approval expired** — re-trigger if still needed.")
+            .setColor(0x6b7280);
+          await entry.message.edit({ embeds: [expiredEmbed], components: [] }).catch(console.error);
+          console.log(`[discord] HITL ${request.correlationId} marked expired`);
+        },
+      });
+    }
+
     // ── Hot-reload discord.yaml ───────────────────────────────────────────────
     // watchFile works even if the file doesn't exist yet (detects creation too).
     const configPath = join(this.workspaceDir, "discord.yaml");
@@ -593,6 +677,8 @@ export class DiscordPlugin implements Plugin {
   }
 
   uninstall(): void {
+    this.pendingHITLMessages.clear();
+
     // Destroy agent pool clients
     for (const [name, client] of this.agentClients) {
       client.destroy();
@@ -702,6 +788,56 @@ export class DiscordPlugin implements Plugin {
       result = result.replaceAll(placeholder, value);
     }
     return result.trim();
+  }
+
+  private _buildHITLEmbed(request: HITLRequest): EmbedBuilder {
+    const embed = new EmbedBuilder()
+      .setTitle(request.title)
+      .setDescription(request.summary.slice(0, 4096))
+      .setColor(0xf59e0b);
+
+    if (request.avaVerdict) {
+      embed.addFields({
+        name: `Ava verdict (score: ${request.avaVerdict.score})`,
+        value: request.avaVerdict.verdict.slice(0, 1024),
+        inline: false,
+      });
+    }
+    if (request.jonVerdict) {
+      embed.addFields({
+        name: `Jon verdict (score: ${request.jonVerdict.score})`,
+        value: request.jonVerdict.verdict.slice(0, 1024),
+        inline: false,
+      });
+    }
+    if (request.escalationContext) {
+      const ctx = request.escalationContext;
+      embed.addFields({
+        name: "Cost",
+        value: `Est: **$${ctx.estimatedCost.toFixed(4)}** | Max: $${ctx.maxCost.toFixed(4)} | Tier: ${ctx.tier}`,
+        inline: false,
+      });
+    }
+
+    embed.setFooter({ text: `Expires ${new Date(request.expiresAt).toLocaleString()}` });
+    return embed;
+  }
+
+  private _buildHITLButtons(request: HITLRequest): ActionRowBuilder<ButtonBuilder> {
+    const row = new ActionRowBuilder<ButtonBuilder>();
+    for (const option of request.options) {
+      const style =
+        option === "approve" ? ButtonStyle.Success :
+        option === "reject"  ? ButtonStyle.Danger  :
+                               ButtonStyle.Secondary;
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`hitl:${option}:${request.correlationId}`)
+          .setLabel(option.charAt(0).toUpperCase() + option.slice(1))
+          .setStyle(style),
+      );
+    }
+    return row;
   }
 
   private _initAgentPool(): void {

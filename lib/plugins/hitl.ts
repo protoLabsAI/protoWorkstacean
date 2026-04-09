@@ -102,6 +102,11 @@ export class HITLPlugin implements Plugin {
     this.workspaceDir = workspaceDir;
   }
 
+  /** All currently pending (unexpired, undecided) HITL requests. */
+  getPendingRequests(): HITLRequest[] {
+    return Array.from(pendingRequests.values());
+  }
+
   /**
    * Register a HITLRenderer for an interface.
    * Call this from your plugin's install() before any HITLRequests arrive.
@@ -198,17 +203,10 @@ export class HITLPlugin implements Plugin {
         console.warn(`[hitl] No pending request for correlationId ${resp.correlationId} — processing anyway`);
       }
 
-      // ── Bus callback: notify the original requester via replyTopic ───────
-      if (pending?.replyTopic) {
-        bus.publish(pending.replyTopic, {
-          id: crypto.randomUUID(),
-          correlationId: resp.correlationId,
-          topic: pending.replyTopic,
-          timestamp: Date.now(),
-          payload: resp,
-        });
-        console.log(`[hitl] Published HITLResponse (${resp.correlationId}) → ${pending.replyTopic}`);
-      }
+      // ── Bus delivery is automatic via pub/sub ────────────────────────────
+      // The renderer published to request.replyTopic (a hitl.response.* topic).
+      // Operational callers subscribed directly to that topic — they already
+      // received the message. No re-publish needed from HITLPlugin.
 
       // Find agent with plan_resume skill (should be Ava)
       const planAgent = this.agents.find(a => a.skills.includes("plan_resume"));

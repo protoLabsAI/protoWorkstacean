@@ -142,7 +142,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => !!process.env.DISCORD_BOT_TOKEN,
     factory: async () => {
       const { DiscordPlugin } = await import("../lib/plugins/discord");
-      return new DiscordPlugin(workspaceDir, dataDir, channelRegistry);
+      return new DiscordPlugin(workspaceDir, dataDir, channelRegistry, hitlPlugin);
     },
   },
   {
@@ -167,14 +167,6 @@ const pluginRegistry: PluginRegistryEntry[] = [
     factory: async () => {
       const { OnboardingPlugin } = await import("../lib/plugins/onboarding");
       return new OnboardingPlugin(workspaceDir);
-    },
-  },
-  {
-    name: "hitl",
-    condition: () => true,
-    factory: async () => {
-      const { HITLPlugin } = await import("../lib/plugins/hitl");
-      return new HITLPlugin(workspaceDir);
     },
   },
   {
@@ -296,6 +288,13 @@ const pluginRegistry: PluginRegistryEntry[] = [
 ];
 
 const registeredPlugins: Plugin[] = [];
+
+// ── HITLPlugin — pre-installed so DiscordPlugin can register its renderer ──
+const { HITLPlugin } = await import("../lib/plugins/hitl.js");
+const hitlPlugin = new HITLPlugin(workspaceDir);
+hitlPlugin.install(bus);
+registeredPlugins.push(hitlPlugin);
+
 for (const entry of pluginRegistry) {
   if (entry.condition()) {
     const plugin = await entry.factory();
@@ -741,6 +740,10 @@ async function handleAddChannel(req: Request): Promise<Response> {
   }
 }
 
+function handleGetHITLPending(): Response {
+  return Response.json({ success: true, data: hitlPlugin.getPendingRequests() });
+}
+
 function handleGetAgentSkills(agentName: string): Response {
   const agentsPath = join(workspaceDir, "agents.yaml");
   if (!existsSync(agentsPath)) {
@@ -800,6 +803,7 @@ const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
   { method: "POST", path: "/api/incidents/:id/resolve", handler: (req, p) => handleResolveIncident(req, p.id) },
   { method: "GET",  path: "/api/channels",             handler: () => handleGetChannels() },
   { method: "POST", path: "/api/channels",             handler: (req) => handleAddChannel(req) },
+  { method: "GET",  path: "/api/hitl/pending",         handler: () => handleGetHITLPending() },
 ];
 
 Bun.serve({
