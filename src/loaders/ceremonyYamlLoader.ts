@@ -118,6 +118,9 @@ export class CeremonyYamlLoader {
 
     const c = raw as Record<string, unknown>;
 
+    // Check enabled first — disabled ceremonies are silently skipped
+    if (c.enabled === false) return null;
+
     if (typeof c.id !== "string" || !c.id) {
       console.warn(`[ceremony-loader] Skipping ${filePath} (${source}): missing required 'id' field`);
       return null;

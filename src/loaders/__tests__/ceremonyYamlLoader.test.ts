@@ -146,7 +146,7 @@ targets: [all]
     expect(ceremonies[0]!.enabled).toBe(true);
   });
 
-  test("respects enabled: false", () => {
+  test("respects enabled: false — excluded from returned array", () => {
     writeFileSync(
       join(TEST_DIR, "ceremonies", "board.health.yaml"),
       `id: board.health
@@ -159,7 +159,7 @@ enabled: false
     );
 
     const ceremonies = loader.loadGlobal();
-    expect(ceremonies[0]!.enabled).toBe(false);
+    expect(ceremonies).toHaveLength(0);
   });
 
   test("loads notifyChannel when present", () => {

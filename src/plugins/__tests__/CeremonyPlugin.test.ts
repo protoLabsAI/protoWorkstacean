@@ -72,9 +72,9 @@ enabled: false
 
     plugin.install(bus);
     const ceremonies = plugin.getCeremonies();
+    // Disabled ceremonies are filtered out by the loader before reaching the plugin
     const disabled = ceremonies.find((c) => c.id === "board.disabled");
-    expect(disabled).toBeDefined();
-    expect(disabled!.enabled).toBe(false);
+    expect(disabled).toBeUndefined();
   });
 
   test("ceremony YAML: registerCeremony adds ceremony to registry", () => {
