@@ -97,6 +97,8 @@ export class AgentExecutor {
         sessionId: correlationId,
         cwd: cwd ?? process.cwd(),
         stderr: (line: string) => console.error(`[agent:${this.agentDef.name}:stderr]`, line),
+        ...(this.agentDef.allowedTools?.length ? { allowedTools: this.agentDef.allowedTools } : {}),
+        ...(this.agentDef.excludeTools?.length ? { excludeTools: this.agentDef.excludeTools } : {}),
         ...(mcpServers ? { mcpServers } : {}),
         ...(Object.keys(env).length > 0 ? { env } : {}),
       },

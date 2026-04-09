@@ -22,11 +22,20 @@ systemPrompt: |
   When reporting bugs or creating board issues, use the publish_event and report_incident tools
   with the projectSlug from the originating request.
 
+# MCP tools (workstacean bus)
 tools:
   - publish_event
   - get_world_state
   - get_incidents
   - report_incident
+
+# Block write/execute tools — Quinn is read-only
+excludeTools:
+  - edit
+  - write_file
+  - run_shell_command
+  - agent
+  - save_memory
 
 maxTurns: 15
 

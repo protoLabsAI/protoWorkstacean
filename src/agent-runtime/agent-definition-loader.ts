@@ -54,6 +54,14 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
     ? raw.tools.filter((t): t is string => typeof t === "string")
     : [];
 
+  const allowedTools: string[] | undefined = Array.isArray((raw as Record<string, unknown>).allowedTools)
+    ? ((raw as Record<string, unknown>).allowedTools as unknown[]).filter((t): t is string => typeof t === "string")
+    : undefined;
+
+  const excludeTools: string[] | undefined = Array.isArray((raw as Record<string, unknown>).excludeTools)
+    ? ((raw as Record<string, unknown>).excludeTools as unknown[]).filter((t): t is string => typeof t === "string")
+    : undefined;
+
   const canDelegate: string[] | undefined = Array.isArray(raw.canDelegate)
     ? raw.canDelegate.filter((d): d is string => typeof d === "string")
     : undefined;
@@ -89,6 +97,8 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
     model: raw.model,
     systemPrompt: raw.systemPrompt,
     tools,
+    ...(allowedTools?.length ? { allowedTools } : {}),
+    ...(excludeTools?.length ? { excludeTools } : {}),
     ...(canDelegate !== undefined ? { canDelegate } : {}),
     maxTurns,
     skills,

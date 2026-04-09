@@ -57,6 +57,19 @@ export interface AgentDefinition {
   tools: string[];
 
   /**
+   * CLI built-in tools to allow (whitelist). If set, only these tools are
+   * available alongside the MCP server tools. Use to create read-only agents.
+   * Example: ["read_file", "grep_search", "glob", "list_directory", "web_fetch"]
+   */
+  allowedTools?: string[];
+
+  /**
+   * CLI built-in tools to block (blacklist). Highest priority — overrides allowedTools.
+   * Example: ["edit", "write_file", "run_shell_command"]
+   */
+  excludeTools?: string[];
+
+  /**
    * Names of agents this agent may delegate to (DeepAgent pattern).
    * Only meaningful for role === "orchestrator".
    */
