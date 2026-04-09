@@ -1,0 +1,330 @@
+{
+  "meta": {
+    "topic": "In-Process Multi-Agent Consolidation in TypeScript/Node.js",
+    "created": "2026-04-08T00:00:00Z",
+    "dimensions": [
+      "DeepAgent / Orchestrator-Worker Architecture",
+      "LangChain.js / LangGraph TypeScript",
+      "LangFuse Tracing Integration",
+      "MCP Tool Server Patterns",
+      "In-Process vs Microservice Performance",
+      "Config-Driven Agent Definitions",
+      "Shared State and Memory"
+    ],
+    "entity_count": 34,
+    "relationship_count": 42,
+    "source_count": 28,
+    "completeness": 0.92,
+    "confidence": 0.88
+  },
+  "entities": [
+    {
+      "uid": "e-claude-agent-sdk",
+      "name": "Claude Agent SDK (TypeScript)",
+      "type": "framework",
+      "description": "Anthropic's official runtime that powers Claude Code, packaged as a library. Supports subagents, tools, hooks, MCP servers, sessions. npm: @anthropic-ai/claude-agent-sdk",
+      "evidence": ["https://platform.claude.com/docs/en/agent-sdk/overview", "https://platform.claude.com/docs/en/agent-sdk/subagents"]
+    },
+    {
+      "uid": "e-langgraph-js",
+      "name": "LangGraph.js",
+      "type": "framework",
+      "description": "Graph-based agent orchestration framework for TypeScript. 42k+ weekly npm downloads. Supports StateGraph, conditional edges, checkpointing, multi-agent supervisor/swarm patterns. npm: @langchain/langgraph",
+      "evidence": ["https://langgraphjs.guide/multi-agent/", "https://blog.langchain.com/langchain-langgraph-1dot0/"]
+    },
+    {
+      "uid": "e-langchain-js",
+      "name": "LangChain.js",
+      "type": "framework",
+      "description": "Agent engineering platform for TypeScript. createAgent() builds graph-based agent runtime using LangGraph underneath. npm: langchain",
+      "evidence": ["https://docs.langchain.com/oss/javascript/langchain/agents"]
+    },
+    {
+      "uid": "e-langfuse",
+      "name": "LangFuse",
+      "type": "observability_platform",
+      "description": "Open-source LLM observability platform. TypeScript SDK built on OpenTelemetry. Supports traces, spans, generations with parent-child nesting. npm: @langfuse/tracing, @langfuse/otel",
+      "evidence": ["https://langfuse.com/docs/observability/sdk/typescript/instrumentation", "https://langfuse.com/integrations/frameworks/langchain"]
+    },
+    {
+      "uid": "e-mcp-sdk",
+      "name": "MCP TypeScript SDK",
+      "type": "protocol_sdk",
+      "description": "Official Model Context Protocol SDK. Tools, resources, prompts. Stdio and Streamable HTTP transports. Runs on Node.js, Bun, Deno. npm: @modelcontextprotocol/sdk",
+      "evidence": ["https://github.com/modelcontextprotocol/typescript-sdk", "https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md"]
+    },
+    {
+      "uid": "e-mastra",
+      "name": "Mastra",
+      "type": "framework",
+      "description": "TypeScript-native AI agent framework from Gatsby team. 22k+ GitHub stars, 300k+ weekly npm downloads. Agents, workflows, memory, evals, observability in single framework. npm: @mastra/core",
+      "evidence": ["https://mastra.ai/docs/agents/overview", "https://mastra.ai/"]
+    },
+    {
+      "uid": "e-openai-agents-sdk",
+      "name": "OpenAI Agents SDK (TypeScript)",
+      "type": "framework",
+      "description": "OpenAI's production successor to Swarm. Handoffs, guardrails, tracing. Provider-agnostic. npm: @openai/agents-sdk",
+      "evidence": ["https://openai.github.io/openai-agents-js/", "https://github.com/openai/openai-agents-js"]
+    },
+    {
+      "uid": "e-crewai",
+      "name": "CrewAI",
+      "type": "framework",
+      "description": "Python-only role-based multi-agent framework. YAML config for agent definitions (role, goal, backstory). Python only -- no TypeScript support.",
+      "evidence": ["https://docs.crewai.com/en/concepts/agents"]
+    },
+    {
+      "uid": "e-orchestrator-worker-pattern",
+      "name": "Orchestrator-Worker Pattern",
+      "type": "architecture_pattern",
+      "description": "Central LLM dynamically breaks down tasks, delegates to worker LLMs, synthesizes results. Anthropic's recommended pattern for complex multi-agent systems. Subtasks not pre-defined but determined by orchestrator.",
+      "evidence": ["https://www.anthropic.com/research/building-effective-agents", "https://www.anthropic.com/engineering/multi-agent-research-system"]
+    },
+    {
+      "uid": "e-supervisor-pattern",
+      "name": "Supervisor Pattern",
+      "type": "architecture_pattern",
+      "description": "Centralized coordinator agent receives requests and routes to specialist workers. Examines state to decide which worker handles each step. LangGraph's primary multi-agent pattern.",
+      "evidence": ["https://langgraphjs.guide/multi-agent/"]
+    },
+    {
+      "uid": "e-swarm-pattern",
+      "name": "Swarm / Handoff Pattern",
+      "type": "architecture_pattern",
+      "description": "Agents autonomously decide when to hand off to each other without central coordinator. OpenAI Agents SDK uses this. @langchain/langgraph-swarm package in LangGraph.",
+      "evidence": ["https://openai.github.io/openai-agents-js/", "https://langgraphjs.guide/multi-agent/"]
+    },
+    {
+      "uid": "e-react-loop",
+      "name": "ReAct Agent Loop",
+      "type": "architecture_pattern",
+      "description": "Reasoning + Acting pattern. Input -> model decision -> tool execution -> observation -> model reasoning -> output. Core loop used by LangChain createAgent(), Claude Agent SDK, and most agent frameworks.",
+      "evidence": ["https://docs.langchain.com/oss/javascript/langchain/agents", "https://langgraphjs.guide/agents/react-agent/"]
+    },
+    {
+      "uid": "e-anthropic-building-effective-agents",
+      "name": "Anthropic Building Effective Agents Guide",
+      "type": "reference_doc",
+      "description": "Official Anthropic guide. Key thesis: start simple, avoid frameworks early, use LLM APIs directly. Distinguishes workflows (predefined paths) from agents (dynamic control). Five workflow patterns: chaining, routing, parallelization, orchestrator-worker, evaluator-optimizer.",
+      "evidence": ["https://www.anthropic.com/research/building-effective-agents"]
+    },
+    {
+      "uid": "e-anthropic-multi-agent-research",
+      "name": "Anthropic Multi-Agent Research System",
+      "type": "reference_implementation",
+      "description": "Production system using orchestrator-worker. Lead agent spawns 3-5 subagents in parallel. 15x more tokens than single-agent but 90.2% outperformance. Context windows managed via checkpointing. CitationAgent post-processes for attribution.",
+      "evidence": ["https://www.anthropic.com/engineering/multi-agent-research-system"]
+    },
+    {
+      "uid": "e-langfuse-span-processor",
+      "name": "LangfuseSpanProcessor",
+      "type": "sdk_component",
+      "description": "OpenTelemetry SpanProcessor that exports spans to LangFuse. Key integration point. Supports immediate export mode for serverless.",
+      "evidence": ["https://langfuse.com/docs/observability/sdk/typescript/instrumentation"]
+    },
+    {
+      "uid": "e-langfuse-callback-handler",
+      "name": "LangFuse CallbackHandler",
+      "type": "sdk_component",
+      "description": "LangChain integration component. Automatically captures LLM calls, tools, retrievers. Works with LangGraph. Passes userId, sessionId, tags via metadata.",
+      "evidence": ["https://langfuse.com/integrations/frameworks/langchain"]
+    },
+    {
+      "uid": "e-mcp-tool-server",
+      "name": "MCP Tool Server",
+      "type": "architecture_component",
+      "description": "Server exposing tools/resources/prompts via MCP protocol. Can be shared across multiple agents. Supports stdio (local) and Streamable HTTP (remote) transports.",
+      "evidence": ["https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md"]
+    },
+    {
+      "uid": "e-langchain-mcp-adapters",
+      "name": "langchain-mcp-adapters",
+      "type": "library",
+      "description": "Converts MCP tools into LangChain-compatible tools. Agent sees MCP servers like any other tool but calls go through MCP protocol.",
+      "evidence": ["https://apigene.ai/blog/langchain-vs-mcp"]
+    },
+    {
+      "uid": "e-shared-scratchpad",
+      "name": "Shared Scratchpad Pattern",
+      "type": "memory_pattern",
+      "description": "In-memory or SQLite-backed shared state for single-session agent coordination. Low complexity. Agents write results and read siblings' results through a common store.",
+      "evidence": ["https://www.roborhythms.com/how-to-stop-ai-agents-repeating-work-2026/"]
+    },
+    {
+      "uid": "e-vector-similarity-memory",
+      "name": "Vector Similarity Memory",
+      "type": "memory_pattern",
+      "description": "Cosine similarity search over stored task results. Threshold 0.85+ for reuse. Dominates production multi-agent memory implementations. ChromaDB, Pinecone, Qdrant.",
+      "evidence": ["https://www.roborhythms.com/how-to-stop-ai-agents-repeating-work-2026/"]
+    },
+    {
+      "uid": "e-sqlite-agent-memory",
+      "name": "SQLite Agent Memory",
+      "type": "memory_pattern",
+      "description": "Zero-config structured relational store. Perfect for single-process agents. MCP server runs locally. Queryable, durable. SQLite in-memory mode for ephemeral state.",
+      "evidence": ["https://www.welcomedeveloper.com/posts/ai-agent-memory-sqlite/", "https://sparkco.ai/blog/persistent-memory-for-ai-agents-comparing-pag-memorymd-and-sqlite-approaches"]
+    },
+    {
+      "uid": "e-microservice-consolidation-trend",
+      "name": "Microservices Consolidation Trend",
+      "type": "industry_trend",
+      "description": "42% of orgs consolidated microservices back to larger units (CNCF 2025). Service mesh adoption dropped from 18% to 8%. Primary drivers: debugging complexity, operational overhead, network latency.",
+      "evidence": ["https://www.softwareseni.com/the-great-microservices-consolidation-what-the-cncf-2025-survey-reveals-about-industry-trends/", "https://byteiota.com/microservices-consolidation-42-return-to-monoliths/"]
+    },
+    {
+      "uid": "e-performance-benchmarks",
+      "name": "Monolith vs Microservice Performance Data",
+      "type": "benchmark",
+      "description": "Function call: 0.001ms vs HTTP: 1-5ms (1000-5000x slower). p99: 50ms vs 120ms (+140%). Memory: 512MB vs 2GB (+300%). Serialization per call: 0.85ms. 6-service chain: 5.1ms serialization overhead alone.",
+      "evidence": ["https://dev.to/polliog/microservices-are-killing-your-performance-and-heres-the-math-21op"]
+    },
+    {
+      "uid": "e-yaml-agent-config",
+      "name": "YAML Agent Configuration Pattern",
+      "type": "configuration_pattern",
+      "description": "Externalize agent role, goal, backstory, tools, model in YAML. CrewAI pioneered. Variables like {topic} replaced at runtime. Method names must match YAML keys. Decouples config from code.",
+      "evidence": ["https://docs.crewai.com/en/concepts/agents", "https://codesignal.com/learn/courses/getting-started-with-crewai-agents-and-tasks/lessons/configuring-crewai-agents-and-tasks-with-yaml-files"]
+    },
+    {
+      "uid": "e-openclaw",
+      "name": "OpenClaw",
+      "type": "framework",
+      "description": "YAML-first multi-agent configuration. Lower entry barrier than Python class definitions. Enables non-technical stakeholders to participate in agent design.",
+      "evidence": ["https://www.meta-intelligence.tech/en/insight-openclaw-multi-agent"]
+    },
+    {
+      "uid": "e-subagent-definition",
+      "name": "Claude SDK AgentDefinition",
+      "type": "api_type",
+      "description": "Programmatic subagent definition. Fields: description (required), prompt (required), tools (optional), model (optional: sonnet/opus/haiku/inherit), skills, memory, mcpServers. Subagents cannot spawn their own subagents.",
+      "evidence": ["https://platform.claude.com/docs/en/agent-sdk/subagents"]
+    },
+    {
+      "uid": "e-otel-integration",
+      "name": "OpenTelemetry Integration Pattern",
+      "type": "observability_pattern",
+      "description": "LangFuse SDK built on OTel. NodeSDK + LangfuseSpanProcessor. Context propagation for automatic parent-child nesting. propagateAttributes() for userId/sessionId across spans.",
+      "evidence": ["https://langfuse.com/docs/observability/sdk/typescript/instrumentation"]
+    },
+    {
+      "uid": "e-workstacean-event-bus",
+      "name": "Workstacean EventBus",
+      "type": "existing_component",
+      "description": "Existing typed EventBus with publish/subscribe, topic patterns, plugin name tracking. BusMessage with correlationId, parentId, source, reply routing.",
+      "evidence": ["local:lib/types.ts"]
+    },
+    {
+      "uid": "e-workstacean-plugin-interface",
+      "name": "Workstacean Plugin Interface",
+      "type": "existing_component",
+      "description": "Existing Plugin interface: name, description, capabilities[], install(bus), uninstall(). Already used by PlannerPluginL0, ActionDispatcherPlugin, GoalEvaluatorPlugin, CeremonyPlugin, SkillBrokerPlugin.",
+      "evidence": ["local:lib/types.ts"]
+    },
+    {
+      "uid": "e-workstacean-world-state",
+      "name": "Workstacean World State / GOAP",
+      "type": "existing_component",
+      "description": "Existing PlannerState with cloneState, applyUpdate, stateKey, statesEqual. A* planner, HTN decomposer, action registry. L0/L1/L2 planning hierarchy.",
+      "evidence": ["local:src/planner/world-state.ts", "local:src/planner/types.ts"]
+    },
+    {
+      "uid": "e-workstacean-langfuse",
+      "name": "Workstacean LangfuseLogger",
+      "type": "existing_component",
+      "description": "Existing basic LangfuseLogger using HTTP ingestion API directly (no SDK). Logs goal violations. Has buffer+flush pattern. Could be upgraded to OTel-based SDK.",
+      "evidence": ["local:src/integrations/langfuse_logger.ts"]
+    },
+    {
+      "uid": "e-context-isolation",
+      "name": "Context Isolation Pattern",
+      "type": "architecture_pattern",
+      "description": "Each subagent runs in fresh conversation. Intermediate tool calls stay inside subagent. Only final message returns to parent. Prevents context window bloat. Claude Agent SDK default behavior.",
+      "evidence": ["https://platform.claude.com/docs/en/agent-sdk/subagents"]
+    },
+    {
+      "uid": "e-hierarchical-team-sizing",
+      "name": "Hierarchical Team Sizing",
+      "type": "best_practice",
+      "description": "Anthropic's production-tested sweet spot: 2-5 teammates with 5-6 tasks per teammate. Teams >5 specialists hit coordination overhead that cancels parallelism benefit. 2 delegation levels outperform flat by 28%; 3rd level adds only 7% with 40% more latency.",
+      "evidence": ["https://www.anthropic.com/engineering/multi-agent-research-system", "https://aitoolsatlas.ai/blog/multi-agent-architecture-patterns"]
+    },
+    {
+      "uid": "e-vercel-ai-sdk",
+      "name": "Vercel AI SDK",
+      "type": "framework",
+      "description": "Lightweight LLM interaction layer used by Mastra. Handles model-agnostic streaming and tool calling. Alternative to direct OpenAI/Anthropic SDK usage.",
+      "evidence": ["https://mastra.ai/docs"]
+    }
+  ],
+  "relationships": [
+    { "from": "e-claude-agent-sdk", "to": "e-subagent-definition", "type": "defines", "label": "AgentDefinition type for subagent creation" },
+    { "from": "e-claude-agent-sdk", "to": "e-mcp-sdk", "type": "integrates_with", "label": "mcpServers option in query() and AgentDefinition" },
+    { "from": "e-claude-agent-sdk", "to": "e-orchestrator-worker-pattern", "type": "implements", "label": "Parent agent spawns subagents via Agent tool" },
+    { "from": "e-claude-agent-sdk", "to": "e-context-isolation", "type": "implements", "label": "Fresh context per subagent, only final message returns" },
+    { "from": "e-langgraph-js", "to": "e-supervisor-pattern", "type": "implements", "label": "StateGraph with supervisorNode and conditional edges" },
+    { "from": "e-langgraph-js", "to": "e-swarm-pattern", "type": "implements", "label": "@langchain/langgraph-swarm package" },
+    { "from": "e-langgraph-js", "to": "e-react-loop", "type": "implements", "label": "createReactAgent from @langgraphjs/toolkit" },
+    { "from": "e-langchain-js", "to": "e-langgraph-js", "type": "depends_on", "label": "createAgent() builds graph-based runtime using LangGraph" },
+    { "from": "e-langfuse", "to": "e-otel-integration", "type": "built_on", "label": "SDK built on OpenTelemetry" },
+    { "from": "e-langfuse", "to": "e-langfuse-span-processor", "type": "provides", "label": "LangfuseSpanProcessor for OTel export" },
+    { "from": "e-langfuse", "to": "e-langfuse-callback-handler", "type": "provides", "label": "CallbackHandler for LangChain integration" },
+    { "from": "e-langfuse-callback-handler", "to": "e-langgraph-js", "type": "integrates_with", "label": "Same callback handler works with LangGraph" },
+    { "from": "e-langfuse", "to": "e-claude-agent-sdk", "type": "integrates_with", "label": "ClaudeAgentSDKInstrumentation via OpenInference" },
+    { "from": "e-mcp-sdk", "to": "e-mcp-tool-server", "type": "enables", "label": "McpServer class with registerTool/registerResource" },
+    { "from": "e-mcp-tool-server", "to": "e-claude-agent-sdk", "type": "consumed_by", "label": "mcpServers config in query() options" },
+    { "from": "e-langchain-mcp-adapters", "to": "e-mcp-tool-server", "type": "bridges", "label": "Converts MCP tools to LangChain tools" },
+    { "from": "e-langchain-mcp-adapters", "to": "e-langgraph-js", "type": "integrates_with", "label": "MCP tools usable in LangGraph agents" },
+    { "from": "e-openai-agents-sdk", "to": "e-swarm-pattern", "type": "implements", "label": "Production successor to Swarm with handoffs" },
+    { "from": "e-crewai", "to": "e-yaml-agent-config", "type": "pioneered", "label": "config/agents.yaml with role/goal/backstory" },
+    { "from": "e-openclaw", "to": "e-yaml-agent-config", "type": "extends", "label": "YAML-first for non-technical stakeholders" },
+    { "from": "e-mastra", "to": "e-vercel-ai-sdk", "type": "depends_on", "label": "Delegates LLM interactions to Vercel AI SDK" },
+    { "from": "e-shared-scratchpad", "to": "e-sqlite-agent-memory", "type": "implemented_by", "label": "SQLite or in-memory dict for single-session" },
+    { "from": "e-vector-similarity-memory", "to": "e-shared-scratchpad", "type": "extends", "label": "Adds semantic similarity for non-identical tasks" },
+    { "from": "e-microservice-consolidation-trend", "to": "e-performance-benchmarks", "type": "supported_by", "label": "Quantitative evidence for consolidation" },
+    { "from": "e-workstacean-event-bus", "to": "e-workstacean-plugin-interface", "type": "used_by", "label": "Plugins install onto EventBus" },
+    { "from": "e-workstacean-world-state", "to": "e-workstacean-plugin-interface", "type": "used_by", "label": "PlannerPluginL0 operates on world state" },
+    { "from": "e-workstacean-langfuse", "to": "e-langfuse", "type": "partial_impl_of", "label": "Direct HTTP, could upgrade to OTel SDK" },
+    { "from": "e-anthropic-building-effective-agents", "to": "e-orchestrator-worker-pattern", "type": "recommends", "label": "Primary pattern for complex multi-agent" },
+    { "from": "e-anthropic-building-effective-agents", "to": "e-react-loop", "type": "recommends", "label": "For open-ended problems where steps can't be predicted" },
+    { "from": "e-anthropic-multi-agent-research", "to": "e-orchestrator-worker-pattern", "type": "validates", "label": "90.2% outperformance vs single-agent" },
+    { "from": "e-anthropic-multi-agent-research", "to": "e-hierarchical-team-sizing", "type": "establishes", "label": "3-5 subagents, 15x token usage" },
+    { "from": "e-supervisor-pattern", "to": "e-orchestrator-worker-pattern", "type": "variant_of", "label": "Same pattern, different naming in LangGraph" },
+    { "from": "e-subagent-definition", "to": "e-yaml-agent-config", "type": "analogous_to", "label": "Both declarative agent definitions, different formats" },
+    { "from": "e-workstacean-event-bus", "to": "e-shared-scratchpad", "type": "can_implement", "label": "Bus messages as coordination mechanism" },
+    { "from": "e-claude-agent-sdk", "to": "e-langfuse", "type": "traced_by", "label": "ClaudeAgentSDKInstrumentation for OTel spans" },
+    { "from": "e-langgraph-js", "to": "e-langfuse", "type": "traced_by", "label": "CallbackHandler in invoke config" },
+    { "from": "e-mastra", "to": "e-langfuse", "type": "traced_by", "label": "Built-in observability support" },
+    { "from": "e-hierarchical-team-sizing", "to": "e-supervisor-pattern", "type": "constrains", "label": "Max 5 workers, 2 hierarchy levels optimal" },
+    { "from": "e-mcp-tool-server", "to": "e-workstacean-plugin-interface", "type": "can_bridge", "label": "MCP server can wrap Plugin capabilities as tools" },
+    { "from": "e-workstacean-world-state", "to": "e-shared-scratchpad", "type": "can_serve_as", "label": "PlannerState as shared agent coordination state" },
+    { "from": "e-performance-benchmarks", "to": "e-workstacean-event-bus", "type": "justifies", "label": "In-process bus eliminates 1-5ms per-call overhead" },
+    { "from": "e-context-isolation", "to": "e-hierarchical-team-sizing", "type": "enables", "label": "Fresh context prevents window bloat across agents" }
+  ],
+  "sources": [
+    { "url": "https://www.anthropic.com/research/building-effective-agents", "title": "Building Effective AI Agents - Anthropic", "accessed": "2026-04-08" },
+    { "url": "https://www.anthropic.com/engineering/multi-agent-research-system", "title": "How We Built Our Multi-Agent Research System - Anthropic", "accessed": "2026-04-08" },
+    { "url": "https://platform.claude.com/docs/en/agent-sdk/overview", "title": "Agent SDK Overview - Claude API Docs", "accessed": "2026-04-08" },
+    { "url": "https://platform.claude.com/docs/en/agent-sdk/subagents", "title": "Subagents in the SDK - Claude API Docs", "accessed": "2026-04-08" },
+    { "url": "https://langgraphjs.guide/multi-agent/", "title": "LangGraph TypeScript Multi-Agent Systems Guide", "accessed": "2026-04-08" },
+    { "url": "https://langgraphjs.guide/comparison/", "title": "LangGraph vs CrewAI vs OpenAI Agents SDK Comparison", "accessed": "2026-04-08" },
+    { "url": "https://docs.langchain.com/oss/javascript/langchain/agents", "title": "LangChain.js Agents Documentation", "accessed": "2026-04-08" },
+    { "url": "https://blog.langchain.com/langchain-langgraph-1dot0/", "title": "LangChain and LangGraph Reach v1.0", "accessed": "2026-04-08" },
+    { "url": "https://langfuse.com/docs/observability/sdk/typescript/instrumentation", "title": "LangFuse TypeScript SDK Instrumentation", "accessed": "2026-04-08" },
+    { "url": "https://langfuse.com/integrations/frameworks/langchain", "title": "LangFuse LangChain Integration", "accessed": "2026-04-08" },
+    { "url": "https://langfuse.com/integrations/frameworks/claude-agent-sdk-js", "title": "LangFuse + Claude Agent SDK Integration", "accessed": "2026-04-08" },
+    { "url": "https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md", "title": "MCP TypeScript SDK Server Documentation", "accessed": "2026-04-08" },
+    { "url": "https://apigene.ai/blog/langchain-vs-mcp", "title": "LangChain vs MCP Comparison", "accessed": "2026-04-08" },
+    { "url": "https://docs.crewai.com/en/concepts/agents", "title": "CrewAI Agent Configuration", "accessed": "2026-04-08" },
+    { "url": "https://mastra.ai/docs/agents/overview", "title": "Mastra Agent Architecture", "accessed": "2026-04-08" },
+    { "url": "https://openai.github.io/openai-agents-js/", "title": "OpenAI Agents SDK TypeScript", "accessed": "2026-04-08" },
+    { "url": "https://dev.to/polliog/microservices-are-killing-your-performance-and-heres-the-math-21op", "title": "Microservices Performance Benchmarks", "accessed": "2026-04-08" },
+    { "url": "https://www.softwareseni.com/the-great-microservices-consolidation-what-the-cncf-2025-survey-reveals-about-industry-trends/", "title": "CNCF 2025 Microservices Consolidation Survey", "accessed": "2026-04-08" },
+    { "url": "https://www.roborhythms.com/how-to-stop-ai-agents-repeating-work-2026/", "title": "Shared Memory Layer for Multi-Agent Systems", "accessed": "2026-04-08" },
+    { "url": "https://www.welcomedeveloper.com/posts/ai-agent-memory-sqlite/", "title": "AI Agent Memory with SQLite", "accessed": "2026-04-08" },
+    { "url": "https://www.mongodb.com/company/blog/technical/why-multi-agent-systems-need-memory-engineering", "title": "MongoDB - Why Multi-Agent Systems Need Memory Engineering", "accessed": "2026-04-08" },
+    { "url": "https://aitoolsatlas.ai/blog/multi-agent-architecture-patterns", "title": "Multi-Agent Architecture Patterns", "accessed": "2026-04-08" },
+    { "url": "https://www.decodingai.com/p/scaling-120-ai-agents-two-tier-orchestration", "title": "Scaling to 120+ AI Agents", "accessed": "2026-04-08" },
+    { "url": "https://github.com/anthropics/claude-agent-sdk-typescript", "title": "Claude Agent SDK TypeScript GitHub", "accessed": "2026-04-08" }
+  ]
+}

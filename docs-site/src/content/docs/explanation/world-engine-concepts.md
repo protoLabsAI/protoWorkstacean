@@ -4,7 +4,7 @@ title: World Engine — Concepts
 
 _This is an explanation doc. It covers the design decisions and mental models behind the World Engine — not the exact API surface._
 
-See also: [`reference/world-engine.md`](../reference/world-engine.md) for schemas, formats, and bus topics.
+See also: [`reference/world-engine.md`](../reference/world-engine) for schemas, formats, and bus topics.
 
 ---
 

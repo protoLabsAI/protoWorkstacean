@@ -49,7 +49,7 @@ AVA_BASE_URL=http://localhost:3008
 AVA_API_KEY=your-ava-key
 ```
 
-For a full list of variables, see [reference/env-vars.md](../reference/env-vars.md).
+For a full list of variables, see [reference/env-vars.md](../reference/env-vars).
 
 ## 3. Bootstrap the workspace
 
@@ -154,7 +154,7 @@ With `AVA_BASE_URL` set and domain collectors configured, this returns live JSON
 
 ## Next steps
 
-- [Your first GOAP goal](./first-goap-goal.md) — automate a reaction to a world-state condition
-- [Add an agent](../guides/add-an-agent.md) — register in-process or A2A agents
-- [Add a domain](../guides/add-a-domain.md) — poll custom HTTP endpoints for world state
-- [Reference: HTTP API](../reference/http-api.md) — all endpoints
+- [Your first GOAP goal](./first-goap-goal) — automate a reaction to a world-state condition
+- [Add an agent](../guides/add-an-agent) — register in-process or A2A agents
+- [Add a domain](../guides/add-a-domain) — poll custom HTTP endpoints for world state
+- [Reference: HTTP API](../reference/http-api) — all endpoints

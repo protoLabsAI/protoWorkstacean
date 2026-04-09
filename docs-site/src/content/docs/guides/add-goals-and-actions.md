@@ -242,7 +242,7 @@ actions:
 
 ## Related
 
-- [Your first GOAP goal](../tutorials/first-goap-goal.md) — end-to-end walkthrough
-- [Add a domain](./add-a-domain.md) — defining the data sources goals evaluate
-- [Explanation: world engine](../explanation/world-engine.md)
-- [Workspace files reference](../reference/workspace-files.md)
+- [Your first GOAP goal](../tutorials/first-goap-goal) — end-to-end walkthrough
+- [Add a domain](./add-a-domain) — defining the data sources goals evaluate
+- [Explanation: world engine](../explanation/world-engine)
+- [Workspace files reference](../reference/workspace-files)

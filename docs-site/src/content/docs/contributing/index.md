@@ -22,9 +22,9 @@ Contributions to protoWorkstacean are welcome. This section covers how to get st
 
 ## Where to start for common tasks
 
-**Add a new plugin**: create `src/plugins/my-plugin.ts`, implement `Plugin`, wire it into `src/index.ts`. See [explanation/plugin-system.md](../explanation/plugin-system.md) for the interface.
+**Add a new plugin**: create `src/plugins/my-plugin.ts`, implement `Plugin`, wire it into `src/index.ts`. See [explanation/plugin-system.md](../explanation/plugin-system) for the interface.
 
-**Add a new executor type**: implement `IExecutor` in `src/executor/executors/`, export it, register it in the appropriate plugin's `install()`. See [reference/executor-types.md](../reference/executor-types.md).
+**Add a new executor type**: implement `IExecutor` in `src/executor/executors/`, export it, register it in the appropriate plugin's `install()`. See [reference/executor-types.md](../reference/executor-types).
 
 **Change the HTTP API**: routes are defined in `src/services/` or directly in `src/index.ts`. Follow the existing pattern: define request/response types, add auth middleware for write endpoints.
 
@@ -32,7 +32,7 @@ Contributions to protoWorkstacean are welcome. This section covers how to get st
 
 ## Development setup
 
-See [development.md](./development.md) for install instructions, running tests, and the test structure.
+See [development.md](./development) for install instructions, running tests, and the test structure.
 
 ## Code style
 

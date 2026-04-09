@@ -6,7 +6,7 @@ _This is a reference doc. It covers the Plugin interface contract and how to wri
 
 ---
 
-See also: [`explanation/plugin-lifecycle.md`](../explanation/plugin-lifecycle.md) for how plugins register, subscribe, and reload.
+See also: [`explanation/plugin-lifecycle.md`](../explanation/plugin-lifecycle) for how plugins register, subscribe, and reload.
 
 ---
 
