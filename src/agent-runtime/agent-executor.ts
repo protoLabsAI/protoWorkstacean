@@ -42,9 +42,9 @@ export interface AgentRunResult {
  * Configuration for AgentExecutor shared across all agent runs.
  */
 export interface AgentExecutorConfig {
-  /** LLM gateway base URL. Default: process.env.LLM_GATEWAY_URL ?? "http://gateway:4000/v1" */
+  /** LLM gateway base URL (OpenAI-compat /v1 path). Default: process.env.LLM_GATEWAY_URL */
   gatewayUrl?: string;
-  /** API key for the gateway (sent as Bearer token). Default: process.env.OPENAI_API_KEY */
+  /** API key for the gateway. Default: process.env.OPENAI_API_KEY */
   gatewayApiKey?: string;
 }
 
@@ -83,18 +83,20 @@ export class AgentExecutor {
         : undefined;
 
     const env: Record<string, string> = {};
+    if (this.gatewayUrl) env.OPENAI_BASE_URL = this.gatewayUrl;
     if (this.gatewayApiKey) env.OPENAI_API_KEY = this.gatewayApiKey;
 
     const session = query({
       prompt,
       options: {
         model: this.agentDef.model,
-        ...(this.gatewayUrl ? { baseURL: this.gatewayUrl } : {}),
+        authType: this.gatewayUrl ? "openai" : "anthropic",
         permissionMode: "yolo",
         systemPrompt: this.agentDef.systemPrompt,
         maxSessionTurns: this.agentDef.maxTurns,
         sessionId: correlationId,
         cwd: cwd ?? process.cwd(),
+        stderr: (line: string) => console.error(`[agent:${this.agentDef.name}:stderr]`, line),
         ...(mcpServers ? { mcpServers } : {}),
         ...(Object.keys(env).length > 0 ? { env } : {}),
       },

@@ -296,6 +296,10 @@ export class DiscordPlugin implements Plugin {
     this.client.once(Events.ClientReady, async client => {
       console.log(`[discord] Logged in as ${client.user.tag}`);
       await this._registerSlashCommands();
+      // Pre-warm DM channels for known users so Discord delivers gateway events.
+      // Discord only sends MESSAGE_CREATE for DM channels in this session's
+      // private_channels list; calling createDM() subscribes to the channel.
+      this._warmDmChannels(client).catch(() => {});
     });
 
     // ── Message create ───────────────────────────────────────────────────────
@@ -505,6 +509,9 @@ export class DiscordPlugin implements Plugin {
       }
 
       if (!interaction.isChatInputCommand()) return;
+
+      // Pre-warm DM channel so subsequent DMs from this user are delivered via gateway.
+      this.client.users.createDM(interaction.user.id).catch(() => {});
 
       const cmdConfig = this.config.commands.find(c => c.name === interaction.commandName);
       if (!cmdConfig) return;
@@ -805,6 +812,30 @@ export class DiscordPlugin implements Plugin {
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
+
+  /**
+   * Pre-warm DM channels for all users in the identity registry that have a
+   * Discord ID set. Discord's gateway only delivers MESSAGE_CREATE for DM
+   * channels that appear in the session's private_channels list (sent in READY).
+   * Calling createDM() subscribes the bot to that channel for this session.
+   */
+  private async _warmDmChannels(client: Client<true>): Promise<void> {
+    // Collect all Discord IDs from the identity registry
+    const discordIds = this.identityRegistry
+      ?.memoryEnabledUsers()
+      .map(u => u.identities.discord)
+      .filter((id): id is string => !!id)
+      ?? [];
+    if (!discordIds.length) return;
+    let warmed = 0;
+    for (const discordId of discordIds) {
+      try {
+        await client.users.createDM(discordId);
+        warmed++;
+      } catch { /* skip if user not reachable */ }
+    }
+    if (warmed) console.log(`[discord] Pre-warmed ${warmed} DM channel(s)`);
+  }
 
   private _isAdmin(userId: string): boolean {
     if (!this.config.admins?.length) return true; // open if no list configured
