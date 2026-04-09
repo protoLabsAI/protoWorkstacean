@@ -38,6 +38,7 @@ interface DomainRegistration {
   tickMs: number;
   timer?: ReturnType<typeof setInterval>;
   tickCount: number;
+  tickInProgress: boolean;
 }
 
 // ── Redis abstraction (graceful fallback to in-memory) ────────────────────────
@@ -142,7 +143,7 @@ export class WorldStateEngine implements Plugin {
       if (old.timer) clearInterval(old.timer);
     }
 
-    const reg: DomainRegistration = { name, collector, tickMs, tickCount: 0 };
+    const reg: DomainRegistration = { name, collector, tickMs, tickCount: 0, tickInProgress: false };
     this.domains.set(name, reg);
 
     if (this.installed) {
@@ -238,8 +239,9 @@ export class WorldStateEngine implements Plugin {
       const age = now - domainData.metadata.collectedAt;
       if (age > maxAge) {
         console.warn(
-          `[world-state-engine] Domain "${options.domain}" data is stale (age: ${age}ms, max: ${maxAge}ms)`,
+          `[world-state-engine] Domain "${options.domain}" data is stale (age: ${age}ms, max: ${maxAge}ms) — returning null`,
         );
+        return null;
       }
       return domainData;
     }
@@ -300,6 +302,12 @@ export class WorldStateEngine implements Plugin {
   // ── Domain collection ──────────────────────────────────────────────────────
 
   private async _collectDomain(reg: DomainRegistration): Promise<void> {
+    // Serialize ticks — skip if a collection is already in-flight for this domain
+    if (reg.tickInProgress) {
+      console.debug(`[world-state-engine] Domain "${reg.name}" tick skipped — previous tick still running`);
+      return;
+    }
+    reg.tickInProgress = true;
     reg.tickCount += 1;
     const tickNum = reg.tickCount;
 
@@ -364,6 +372,8 @@ export class WorldStateEngine implements Plugin {
       }
 
       span.end({ domain: reg.name, tickNumber: tickNum, success: false, error: errorMsg });
+    } finally {
+      reg.tickInProgress = false;
     }
   }
 

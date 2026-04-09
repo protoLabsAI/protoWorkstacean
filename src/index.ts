@@ -299,6 +299,22 @@ for (const entry of pluginRegistry) {
   }
 }
 
+// Guard: warn if skill-dispatcher is installed but no executor registrars ran.
+// This happens when workspace/agents/*.yaml is empty AND workspace/agents.yaml has no entries.
+{
+  const hasDispatcher = registeredPlugins.some(p => p.name === "skill-dispatcher");
+  const hasRegistrar = registeredPlugins.some(p =>
+    p.name === "agent-runtime" || p.name === "skill-broker",
+  );
+  if (hasDispatcher && !hasRegistrar) {
+    console.warn(
+      "[startup] skill-dispatcher is installed but no executor registrar (agent-runtime / skill-broker) is active. " +
+      "All agent.skill.request messages will be dropped. " +
+      "Add workspace/agents/*.yaml or workspace/agents.yaml to register at least one agent.",
+    );
+  }
+}
+
 // --- Domain discovery — registers per-project HTTP domains + actions from projects.yaml ---
 {
   const wsEngine = registeredPlugins.find(p => p.name === "world-state-engine");

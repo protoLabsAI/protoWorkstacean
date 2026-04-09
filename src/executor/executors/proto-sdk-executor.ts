@@ -33,7 +33,7 @@ export class ProtoSdkExecutor implements IExecutor {
     });
 
     return {
-      text: result.isError ? "" : result.text,
+      text: result.text,
       isError: result.isError,
       correlationId: req.correlationId,
     };
@@ -43,7 +43,10 @@ export class ProtoSdkExecutor implements IExecutor {
     const lines = [`Execute skill: ${req.skill}`];
     const ctx = Object.entries(req.payload)
       .filter(([k]) => !["skill", "replyTopic", "correlationId", "parentId"].includes(k))
-      .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`);
+      .map(([k, v]) => {
+          if (typeof v !== "object") return `${k}: ${String(v)}`;
+          try { return `${k}: ${JSON.stringify(v)}`; } catch { return `${k}: [unserializable]`; }
+        });
     if (ctx.length > 0) lines.push("", "Context:", ...ctx);
     return lines.join("\n");
   }

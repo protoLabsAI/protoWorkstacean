@@ -14,7 +14,7 @@
  */
 
 import { tool } from "@protolabsai/sdk";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { SdkMcpToolDefinition } from "@protolabsai/sdk";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

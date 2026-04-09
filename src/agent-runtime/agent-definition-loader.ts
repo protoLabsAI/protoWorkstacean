@@ -32,6 +32,9 @@ function isValidRole(r: unknown): r is AgentRole {
  * Throws a descriptive error if required fields are missing or invalid.
  */
 export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefinition {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`[${fileName}] YAML must be a mapping object, got ${raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw}`);
+  }
   if (!raw.name || typeof raw.name !== "string") {
     throw new Error(`[${fileName}] Missing or invalid 'name' field`);
   }
@@ -55,8 +58,9 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
     ? raw.canDelegate.filter((d): d is string => typeof d === "string")
     : undefined;
 
+  // -1 means unlimited (pass through as-is); any other non-positive value falls back to 10
   const maxTurns: number =
-    typeof raw.maxTurns === "number" && raw.maxTurns > 0 ? raw.maxTurns : 10;
+    typeof raw.maxTurns === "number" && (raw.maxTurns === -1 || raw.maxTurns > 0) ? raw.maxTurns : 10;
 
   const skills: AgentSkillDefinition[] = Array.isArray(raw.skills)
     ? raw.skills

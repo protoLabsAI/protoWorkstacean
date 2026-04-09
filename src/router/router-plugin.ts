@@ -52,6 +52,7 @@ export class RouterPlugin implements Plugin {
   private readonly enricher = new ProjectEnricher();
   private readonly subscriptionIds: string[] = [];
   private readonly config: RouterConfig;
+  private reloadDebounce: ReturnType<typeof setTimeout> | null = null;
 
   constructor(config: RouterConfig) {
     this.config = config;
@@ -72,10 +73,10 @@ export class RouterPlugin implements Plugin {
 
     // Watch projects.yaml for live updates (no restart needed)
     if (existsSync(projectsPath)) {
-      let debounce: ReturnType<typeof setTimeout> | null = null;
       watchFile(projectsPath, { interval: 5_000 }, () => {
-        if (debounce) clearTimeout(debounce);
-        debounce = setTimeout(() => {
+        if (this.reloadDebounce) clearTimeout(this.reloadDebounce);
+        this.reloadDebounce = setTimeout(() => {
+          this.reloadDebounce = null;
           this.enricher.load(projectsPath);
           console.log("[router] projects.yaml reloaded");
         }, 300);
@@ -104,6 +105,10 @@ export class RouterPlugin implements Plugin {
   }
 
   uninstall(): void {
+    if (this.reloadDebounce) {
+      clearTimeout(this.reloadDebounce);
+      this.reloadDebounce = null;
+    }
     if (this.bus) {
       for (const id of this.subscriptionIds) this.bus.unsubscribe(id);
     }
@@ -228,9 +233,9 @@ export class RouterPlugin implements Plugin {
         prompt: content,
         _routed: true,
         runId,
-        source: "cron",
       },
       reply: { topic: replyTopic },
+      source: msg.source ?? { interface: "cron" },
     };
 
     this.bus.publish("agent.skill.request", skillRequest);

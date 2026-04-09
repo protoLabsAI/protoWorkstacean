@@ -111,7 +111,7 @@ export class ActionDispatcherPlugin implements Plugin {
     const startedAt = Date.now();
 
     // Try to dispatch immediately; queue if at WIP limit
-    const dispatched = this.queue.tryDispatch(action, correlationId);
+    const dispatched = this.queue.tryDispatch(action, correlationId, msg.correlationId);
 
     if (!dispatched) {
       // At capacity — publish queue_full backpressure signal
@@ -304,7 +304,7 @@ export class ActionDispatcherPlugin implements Plugin {
     // Complete in WIP queue and dispatch next if available
     const next = this.queue.complete(correlationId);
     if (next) {
-      await this.executeAction(next.action, next.correlationId, parentCorrelationId, crypto.randomUUID(), next.enqueuedAt);
+      await this.executeAction(next.action, next.correlationId, next.parentCorrelationId, crypto.randomUUID(), next.enqueuedAt);
     }
   }
 }

@@ -155,8 +155,9 @@ describe("AgentRuntimePlugin", () => {
   describe("end-to-end via SkillDispatcherPlugin", () => {
     test("dispatches skill request and publishes result", async () => {
       const { workspaceDir, cleanup } = makeTempWorkspace({ "quinn.yaml": quinnAgent });
+      const { AgentExecutor } = await import("../agent-executor.ts");
+      const originalRun = AgentExecutor.prototype.run;
       try {
-        const { AgentExecutor } = await import("../agent-executor.ts");
         AgentExecutor.prototype.run = mock(async () => ({
           text: "Bug triaged successfully.",
           isError: false,
@@ -185,14 +186,16 @@ describe("AgentRuntimePlugin", () => {
         agentRuntime.uninstall();
         dispatcher.uninstall();
       } finally {
+        AgentExecutor.prototype.run = originalRun;
         cleanup();
       }
     });
 
     test("publishes error when executor throws", async () => {
       const { workspaceDir, cleanup } = makeTempWorkspace({ "quinn.yaml": quinnAgent });
+      const { AgentExecutor } = await import("../agent-executor.ts");
+      const originalRun2 = AgentExecutor.prototype.run;
       try {
-        const { AgentExecutor } = await import("../agent-executor.ts");
         AgentExecutor.prototype.run = mock(async () => {
           throw new Error("Subprocess crashed");
         });
@@ -218,6 +221,7 @@ describe("AgentRuntimePlugin", () => {
         agentRuntime.uninstall();
         dispatcher.uninstall();
       } finally {
+        AgentExecutor.prototype.run = originalRun2;
         cleanup();
       }
     });

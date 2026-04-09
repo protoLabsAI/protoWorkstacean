@@ -95,7 +95,10 @@ export class A2AExecutor implements IExecutor {
       `Execute skill: ${req.skill}`,
       ...Object.entries(req.payload)
         .filter(([k]) => !["skill", "replyTopic", "correlationId", "parentId"].includes(k))
-        .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`),
+        .map(([k, v]) => {
+          if (typeof v !== "object") return `${k}: ${String(v)}`;
+          try { return `${k}: ${JSON.stringify(v)}`; } catch { return `${k}: [unserializable]`; }
+        }),
     ].join("\n");
   }
 }
