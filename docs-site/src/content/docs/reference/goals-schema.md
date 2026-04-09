@@ -13,7 +13,7 @@ as `world.goal.violated` events and logged to Langfuse and Discord.
 | Scope | Path |
 |-------|------|
 | Global | `workspace/goals.yaml` |
-| Per-project override | `.automaker/projects/{slug}/goals.yaml` |
+| Per-project override | `.proto/projects/{slug}/goals.yaml` |
 
 Project-level goals override global goals with the same `id`.
 

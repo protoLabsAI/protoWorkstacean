@@ -62,7 +62,7 @@ workspace/
     board-pr-audit.yaml
     weekly-sprint-review.yaml
 
-.automaker/
+.proto/
   projects/
     {project-slug}/
       ceremonies/                    # project-scoped overrides
@@ -139,7 +139,7 @@ When a ceremony fires:
 
 **Built-in ceremonies** ship as default YAML files in `src/plugins/ceremonies/defaults/`. On first run, CeremonyPlugin copies any missing defaults into `workspace/ceremonies/`. You can edit these files to customize them — they will not be overwritten on subsequent runs.
 
-**Custom ceremonies** are any YAML files you add to `workspace/ceremonies/` or `.automaker/projects/{slug}/ceremonies/`. There is no registration step — just drop the file and it will be picked up within 5 seconds.
+**Custom ceremonies** are any YAML files you add to `workspace/ceremonies/` or `.proto/projects/{slug}/ceremonies/`. There is no registration step — just drop the file and it will be picked up within 5 seconds.
 
 ## Outcome Persistence
 

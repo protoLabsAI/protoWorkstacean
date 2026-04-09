@@ -157,7 +157,7 @@ The `onboard_project` skill (Step 9 of the onboarding chain, triggered on Ava) a
 
 1. Calls `POST /api/v1/workspaces/protolabsai/projects/` with the project name and identifier derived from the repo name.
 2. Stores the returned `plane_project_id` in two places:
-   - `.automaker/settings.json` inside the target repo
+   - `.proto/settings.json` inside the target repo
    - `workspace/projects.yaml` (the authoritative project registry in this repo)
 
 This means every onboarded project gets a matching Plane project without manual setup.

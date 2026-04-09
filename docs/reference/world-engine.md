@@ -144,7 +144,7 @@ TTL is 2× the domain tick rate. When Redis is unavailable, `WorldStateCollector
 
 ## goals.yaml Format
 
-Goals are declared in `workspace/goals.yaml` with optional per-project overrides at `.automaker/projects/{slug}/goals.yaml`.
+Goals are declared in `workspace/goals.yaml` with optional per-project overrides at `.proto/projects/{slug}/goals.yaml`.
 
 ```yaml
 version: "1.0"
@@ -434,7 +434,7 @@ Stages are ranked by total accumulation time (item count × avg dwell time). A s
 
 ```typescript
 {
-  domain?: "services" | "board" | "ci" | "portfolio";
+  domain?: string;  // any registered domain name from domains.yaml
   maxAgeMs?: number;   // reject stale data (default: 60000 ms)
 }
 ```

@@ -123,5 +123,5 @@ Planner integration is deferred to a future milestone.
 
 ## Per-Project Goal Overrides
 
-Place a `goals.yaml` file at `.automaker/projects/{slug}/goals.yaml`.
+Place a `goals.yaml` file at `.proto/projects/{slug}/goals.yaml`.
 Project goals with the same `id` override global goals. New IDs are additive.
