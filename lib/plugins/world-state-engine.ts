@@ -332,6 +332,7 @@ export class WorldStateEngine implements Plugin {
 
       this.worldState.domains[reg.name] = domainData;
       this.worldState.timestamp = Date.now();
+      this.worldState.extensions[`${reg.name}_available`] = true;
 
       await this._writeToRedis(reg.name, domainData, reg.tickMs).catch(err => {
         console.warn(`[world-state-engine] Redis write failed for "${reg.name}": ${(err as Error).message}`);
@@ -364,6 +365,8 @@ export class WorldStateEngine implements Plugin {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(`[world-state-engine] Domain "${reg.name}" failed (tick ${tickNum}): ${errorMsg}`);
+
+      this.worldState.extensions[`${reg.name}_available`] = false;
 
       const existing = this.worldState.domains[reg.name];
       if (existing) {
@@ -537,7 +540,11 @@ export class WorldStateEngine implements Plugin {
 
 /**
  * Creates a DomainCollector that fetches domain state from an HTTP endpoint.
- * The endpoint should return JSON. The entire response body becomes the domain data.
+ *
+ * If the response is wrapped in `{ success, data }` (standard workstacean API
+ * envelope), the collector unwraps it so callers see the inner payload directly.
+ * This prevents double-wrapping when the engine stores the result as
+ * `WorldStateDomain.data`.
  */
 export function createHttpCollector(
   url: string,
@@ -554,7 +561,14 @@ export function createHttpCollector(
       throw new Error(`HTTP ${resp.status} from ${url}`);
     }
 
-    return resp.json();
+    const json = await resp.json();
+
+    // Unwrap standard API envelope: { success, data } → data
+    if (json && typeof json === "object" && "data" in json && "success" in json) {
+      return json.data;
+    }
+
+    return json;
   };
 }
 

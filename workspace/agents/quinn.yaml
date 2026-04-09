@@ -29,6 +29,7 @@ tools:
   - get_projects
   - get_incidents
   - report_incident
+  - get_outcomes
 
 # Block write/execute tools — Quinn is read-only
 excludeTools:

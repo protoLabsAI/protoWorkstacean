@@ -178,6 +178,21 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
+  const getOutcomes = tool(
+    "get_outcomes",
+    "Get GOAP action dispatch outcomes — success/failure rates and recent history. " +
+      "Use to introspect the self-healing flywheel's performance.",
+    {},
+    async () => {
+      try {
+        const data = await apiGet(baseUrl, "/api/outcomes", apiKey);
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
   const getCeremonies = tool(
     "get_ceremonies",
     "List all configured ceremonies from workspace/ceremonies/*.yaml.",
@@ -211,7 +226,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
-  return [publishEvent, getWorldState, getIncidents, reportIncident, getProjects, getCeremonies, runCeremony];
+  return [publishEvent, getWorldState, getIncidents, reportIncident, getProjects, getOutcomes, getCeremonies, runCeremony];
 }
 
 /**
@@ -224,6 +239,7 @@ export const BUS_TOOL_NAMES = [
   "get_incidents",
   "report_incident",
   "get_projects",
+  "get_outcomes",
   "get_ceremonies",
   "run_ceremony",
 ] as const;

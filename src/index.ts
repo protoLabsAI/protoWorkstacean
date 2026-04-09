@@ -629,6 +629,21 @@ function handleGetAgentHealth(): Response {
   });
 }
 
+// ── Action outcomes API ───────────────────────────────────────────────────────
+
+interface ActionDispatcherAPI { getOutcomes(): { getAll(): unknown[]; summary(): unknown; getRecent(n: number): unknown[] } }
+
+const actionDispatcher = registeredPlugins.find(p => p.name === "action-dispatcher") as (ActionDispatcherAPI & { name: string }) | undefined;
+
+function handleGetOutcomes(): Response {
+  if (!actionDispatcher) return Response.json({ summary: { success: 0, failure: 0, timeout: 0, total: 0 }, recent: [] });
+  const tracker = actionDispatcher.getOutcomes();
+  return Response.json({
+    summary: tracker.summary(),
+    recent: tracker.getRecent(50),
+  });
+}
+
 function handleGetCeremonies(): Response {
   const ceremoniesDir = join(workspaceDir, "ceremonies");
   if (!existsSync(ceremoniesDir)) return Response.json({ success: true, data: [] });
@@ -666,6 +681,24 @@ async function handleRunCeremony(req: Request, ceremonyId: string): Promise<Resp
 
 function handleGetIncidents(): Response {
   return serveWorkspaceYaml("incidents.yaml", "incidents");
+}
+
+function handleGetSecuritySummary(): Response {
+  const filePath = join(workspaceDir, "incidents.yaml");
+  if (!existsSync(filePath)) return Response.json({ openCount: 0, criticalCount: 0, incidents: [] });
+  try {
+    const parsed = parseYaml(readFileSync(filePath, "utf8")) as { incidents?: SecurityIncident[] };
+    const incidents = parsed.incidents ?? [];
+    const open = incidents.filter(i => i.status !== "resolved");
+    const critical = open.filter(i => i.severity === "critical");
+    return Response.json({
+      openCount: open.length,
+      criticalCount: critical.length,
+      incidents: open.map(i => ({ id: i.id, title: i.title, severity: i.severity, status: i.status })),
+    });
+  } catch {
+    return Response.json({ openCount: 0, criticalCount: 0, incidents: [] });
+  }
 }
 
 async function handleReportIncident(req: Request): Promise<Response> {
@@ -847,10 +880,12 @@ const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
   { method: "GET",  path: "/api/agent-health",          handler: () => handleGetAgentHealth() },
   { method: "GET",  path: "/api/flow-metrics",          handler: () => handleGetFlowMetrics() },
   { method: "GET",  path: "/api/flow-metrics/:metric",  handler: (_, p) => handleGetFlowMetrics(p.metric) },
+  { method: "GET",  path: "/api/outcomes",              handler: () => handleGetOutcomes() },
   { method: "GET",  path: "/api/ceremonies",            handler: () => handleGetCeremonies() },
   { method: "POST", path: "/api/ceremonies/:id/run",    handler: (req, p) => handleRunCeremony(req, p.id) },
   { method: "GET",  path: "/api/skills/:agentName",     handler: (_, p) => handleGetAgentSkills(p.agentName) },
   { method: "GET",  path: "/api/incidents",            handler: () => handleGetIncidents() },
+  { method: "GET",  path: "/api/security-summary",    handler: () => handleGetSecuritySummary() },
   { method: "POST", path: "/api/incidents",            handler: (req) => handleReportIncident(req) },
   { method: "POST", path: "/api/incidents/:id/resolve", handler: (req, p) => handleResolveIncident(req, p.id) },
   { method: "GET",  path: "/api/channels",             handler: () => handleGetChannels() },
@@ -885,7 +920,8 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     engine.registerDomain("flow", createHttpCollector(`${base}/api/flow-metrics`), 60_000);
     engine.registerDomain("services", createHttpCollector(`${base}/api/services`), 60_000);
     engine.registerDomain("agent_health", createHttpCollector(`${base}/api/agent-health`), 60_000);
+    engine.registerDomain("security", createHttpCollector(`${base}/api/security-summary`), 60_000);
 
-    console.log("[domain-discovery] Registered local domains: flow, services, agent_health (60s)");
+    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security (60s)");
   }
 }

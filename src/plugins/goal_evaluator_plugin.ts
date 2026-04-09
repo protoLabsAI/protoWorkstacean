@@ -75,7 +75,7 @@ export class GoalEvaluatorPlugin implements Plugin, IGoalEvaluatorPlugin {
       }
     }
 
-    console.log("[goal-evaluator] Plugin installed — listening on world.state.# (observe-only mode)");
+    console.log(`[goal-evaluator] Plugin installed — listening on world.state.# (${this.observeOnly ? "observe-only" : "active"} mode)`);
   }
 
   uninstall(): void {
