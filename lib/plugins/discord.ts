@@ -297,8 +297,13 @@ export class DiscordPlugin implements Plugin {
     this.client.on(Events.MessageCreate, async message => {
       if (message.author.bot) return;
 
+      // DMs — auto conversation, no @mention needed, main bot has no assigned agent
+      if (!message.guild) {
+        await this._handleDM(message, undefined, bus);
+        return;
+      }
+
       const isMentioned = message.mentions.has(this.client.user!);
-      const isDM = !message.guild;
       const userId = message.author.id;
 
       // Look up channel config early — needed for conversation settings check
@@ -312,7 +317,7 @@ export class DiscordPlugin implements Plugin {
         convConfig?.requireMentionAfterFirst !== true &&
         this.conversationManager.has(message.channelId, userId);
 
-      if (!isMentioned && !isDM && !continueWithoutMention) return;
+      if (!isMentioned && !continueWithoutMention) return;
 
       if (!this._isAdmin(userId)) {
         console.log(`[discord] message from ${userId} ignored — not in admins list`);
@@ -633,27 +638,34 @@ export class DiscordPlugin implements Plugin {
           }
 
           if (pending.message) {
-            if (agentClient) {
-              // Send from agent's bot identity in the same channel
+            const isDM = !pending.message.guild;
+
+            if (isDM) {
+              // DMs: reply directly through the message's own channel (works for any bot client)
+              await (pending.message.channel as TextChannel).send({ content }).catch(console.error);
+            } else if (agentClient) {
+              // Guild message via agent's bot identity
               const ch = agentClient.channels.cache.get(pending.message.channelId) as TextChannel | undefined;
               if (ch) {
                 console.debug(`[discord] Routing reply via agent client "${agentId}"`);
                 await ch.send({ content }).catch(console.error);
               } else {
-                // Agent client doesn't have channel cached — fall back to bus client
                 console.warn(`[discord] Agent "${agentId}" channel cache miss — falling back to bus client`);
                 await pending.message.reply({ content }).catch(console.error);
               }
             } else {
               const reply = await pending.message.reply({ content }).catch(console.error);
-              // Start a thread on first response if not already in one
+              // Start a thread on first guild response if not already in one
               if (reply && !pending.message.channel.isThread()) {
                 await reply.startThread({ name: content.slice(0, 50) || "Response" }).catch(() => {});
               }
             }
-            // Update reactions: 👀 → ✅ (always via bus client which owns the reaction)
-            await pending.message.reactions.resolve("👀")?.users.remove(this.client.user!).catch(() => {});
-            await pending.message.react("✅").catch(() => {});
+
+            // Reactions: only in guild channels (the main client owns them there)
+            if (!isDM) {
+              await pending.message.reactions.resolve("👀")?.users.remove(this.client.user!).catch(() => {});
+              await pending.message.react("✅").catch(() => {});
+            }
             return;
           }
         }
@@ -919,6 +931,73 @@ export class DiscordPlugin implements Plugin {
     return row;
   }
 
+  /**
+   * Handle an inbound DM — called from both the main bot and agent pool bots.
+   *
+   * DMs are always conversation-enabled (no channels.yaml entry needed).
+   * The stable conversationId becomes the A2A contextId, giving the agent
+   * full memory of the exchange across turns.
+   *
+   * agentName is undefined when the main bus bot receives the DM (routed by
+   * A2A keyword matching). When an agent pool bot receives it, agentName is
+   * the specific agent so the A2A layer routes directly.
+   */
+  private async _handleDM(message: Message, agentName: string | undefined, bus: EventBus): Promise<void> {
+    const userId = message.author.id;
+
+    if (!this._isAdmin(userId)) return;
+    if (this._isSpam(message.content)) { await message.delete().catch(() => {}); return; }
+    if (this._isRateLimited(userId)) {
+      await (message.channel as TextChannel).send("Easy there — you're sending messages too quickly.").catch(() => {});
+      return;
+    }
+
+    const timeoutMs = Number(process.env.DM_CONVERSATION_TIMEOUT_MS ?? 15 * 60_000);
+    const conv = this.conversationManager.getOrCreate(message.channelId, userId, timeoutMs, agentName);
+    const { conversationId, isNew, turnNumber } = conv;
+
+    pendingReplies.set(conversationId, { message });
+    if (agentName) this.pendingAgents.set(conversationId, agentName);
+
+    const content = message.cleanContent.replace(/<@!?\d+>/g, "").trim();
+    if (!content) return;
+
+    // Langfuse tracing
+    if (isNew) {
+      this.conversationTracer.startTrace({
+        conversationId,
+        userId,
+        channelId: message.channelId,
+        agentName,
+        platform: "discord-dm",
+      }).catch(err => console.error("[discord] Langfuse startTrace error:", err));
+    }
+    this.pendingTurns.set(conversationId, {
+      conversationId,
+      turnNumber,
+      input: content,
+      userId,
+      agentName,
+      startTime: new Date(),
+    });
+
+    bus.publish(`message.inbound.discord.${message.channelId}`, {
+      id: message.id,
+      correlationId: conversationId,
+      topic: `message.inbound.discord.${message.channelId}`,
+      timestamp: Date.now(),
+      payload: {
+        sender: userId,
+        channel: message.channelId,
+        content,
+        isDM: true,
+        ...(agentName ? { agentId: agentName } : {}),
+      },
+      source: { interface: "discord" as const, channelId: message.channelId, userId },
+      reply: { topic: `message.outbound.discord.${message.channelId}` },
+    });
+  }
+
   private _initAgentPool(): void {
     // Sources: agents.yaml (legacy) + channels.yaml (preferred)
     const agentsYamlEntries = loadAgentPoolDefs(this.workspaceDir)
@@ -946,11 +1025,24 @@ export class DiscordPlugin implements Plugin {
 
       try {
         const agentClient = new Client({
-          intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+          intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.MessageContent,
+            GatewayIntentBits.DirectMessages,
+          ],
+          partials: [Partials.Channel, Partials.Message],
         });
 
         agentClient.once(Events.ClientReady, c => {
           console.log(`[discord] Agent client "${agentName}" logged in as ${c.user.tag}`);
+        });
+
+        // Handle DMs sent directly to this agent's bot
+        agentClient.on(Events.MessageCreate, async (message) => {
+          if (message.author.bot) return;
+          if (message.guild) return; // guild messages handled by main client
+          await this._handleDM(message, agentName, this.busRef!);
         });
 
         agentClient.login(token).catch(err => {
