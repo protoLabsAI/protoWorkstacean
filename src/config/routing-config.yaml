@@ -1,0 +1,47 @@
+# L2 Planner Routing Configuration
+#
+# Controls when requests escalate from L0/L1 to L2 (Ava LLM)
+# and from L2 to L3 (human-in-the-loop).
+
+routing:
+  # Minimum confidence for L0 result to be accepted (0–1)
+  l0_confidence_threshold: 0.7
+
+  # Minimum confidence for L1 result to be accepted (0–1)
+  l1_confidence_threshold: 0.6
+
+  # Minimum L2 confidence before escalating to L3 human (0–1)
+  l2_confidence_threshold: 0.5
+
+  # Maximum number of LLM candidate plans to request
+  max_candidates: 3
+
+  # Time budget for L2 planning (ms)
+  l2_time_budget_ms: 30000
+
+  # Whether to attempt L1 before escalating to L2
+  try_l1_before_l2: true
+
+confidence:
+  # Weights for confidence breakdown components (must sum to 1.0)
+  weights:
+    feasibility: 0.35
+    goal_alignment: 0.30
+    cost_efficiency: 0.15
+    constraint_satisfaction: 0.20
+
+  # Borderline zone: if within this % of threshold, request confirmation
+  borderline_margin: 0.05
+
+learning:
+  # Minimum confidence for a plan to be eligible for rule extraction
+  min_learning_confidence: 0.8
+
+  # Number of successful executions before promoting to L0 rule
+  promotion_threshold: 3
+
+  # Maximum rules in the learned registry before pruning
+  max_learned_rules: 500
+
+  # Auto-rollback if learned rule causes escalation rate increase
+  auto_rollback_enabled: true

@@ -18,6 +18,7 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
+import { PlaneClient } from "../plane-client.ts";
 
 // ── Plane webhook types ──────────────────────────────────────────────────────
 
@@ -97,143 +98,6 @@ class DeliveryDedup {
   }
 }
 
-// ── Label resolution cache ───────────────────────────────────────────────────
-
-interface PlaneLabel {
-  id: string;
-  name: string;
-}
-
-interface PlaneState {
-  id: string;
-  name: string;
-  group: string;
-}
-
-class PlaneAPICache {
-  private baseUrl: string;
-  private workspaceSlug: string;
-  private apiKey: string;
-
-  // projectId → label UUID → label name
-  private labelCache = new Map<string, Map<string, string>>();
-  // projectId → state group → state UUID
-  private stateCache = new Map<string, Map<string, string>>();
-
-  constructor(baseUrl: string, workspaceSlug: string, apiKey: string) {
-    this.baseUrl = baseUrl;
-    this.workspaceSlug = workspaceSlug;
-    this.apiKey = apiKey;
-  }
-
-  private headers(): Record<string, string> {
-    return {
-      "X-Api-Key": this.apiKey,
-      "Content-Type": "application/json",
-    };
-  }
-
-  async fetchLabels(projectId: string): Promise<Map<string, string>> {
-    if (this.labelCache.has(projectId)) return this.labelCache.get(projectId)!;
-
-    const map = new Map<string, string>();
-    try {
-      const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/labels/`;
-      const resp = await fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
-      if (resp.ok) {
-        const data = (await resp.json()) as { results?: PlaneLabel[] };
-        for (const label of data.results ?? []) {
-          map.set(label.id, label.name.toLowerCase());
-        }
-      } else {
-        console.warn(`[plane] Failed to fetch labels for project ${projectId}: ${resp.status}`);
-      }
-    } catch (err) {
-      console.error("[plane] Error fetching labels:", err);
-    }
-
-    this.labelCache.set(projectId, map);
-    return map;
-  }
-
-  async fetchStates(projectId: string): Promise<Map<string, string>> {
-    if (this.stateCache.has(projectId)) return this.stateCache.get(projectId)!;
-
-    const map = new Map<string, string>();
-    try {
-      const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/states/`;
-      const resp = await fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
-      if (resp.ok) {
-        const data = (await resp.json()) as { results?: PlaneState[] };
-        for (const state of data.results ?? []) {
-          // Map group names like "started", "completed" to their state UUIDs
-          map.set(state.group, state.id);
-          // Also map by lowercased name for exact matches
-          map.set(state.name.toLowerCase(), state.id);
-        }
-      } else {
-        console.warn(`[plane] Failed to fetch states for project ${projectId}: ${resp.status}`);
-      }
-    } catch (err) {
-      console.error("[plane] Error fetching states:", err);
-    }
-
-    this.stateCache.set(projectId, map);
-    return map;
-  }
-
-  async hasLabel(projectId: string, labelUUIDs: string[], targetName: string): Promise<boolean> {
-    const labels = await this.fetchLabels(projectId);
-    return labelUUIDs.some(uuid => labels.get(uuid) === targetName.toLowerCase());
-  }
-
-  async patchIssueState(projectId: string, issueId: string, stateUUID: string): Promise<boolean> {
-    try {
-      const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/work-items/${issueId}/`;
-      const resp = await fetch(url, {
-        method: "PATCH",
-        headers: this.headers(),
-        body: JSON.stringify({ state: stateUUID }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!resp.ok) {
-        console.error(`[plane] PATCH issue state failed: ${resp.status} ${await resp.text()}`);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.error("[plane] Error patching issue state:", err);
-      return false;
-    }
-  }
-
-  async addIssueComment(projectId: string, issueId: string, comment: string): Promise<boolean> {
-    try {
-      const url = `${this.baseUrl}/api/v1/workspaces/${this.workspaceSlug}/projects/${projectId}/issues/${issueId}/comments/`;
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify({ comment_html: `<p>${comment}</p>` }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!resp.ok) {
-        console.error(`[plane] POST issue comment failed: ${resp.status} ${await resp.text()}`);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.error("[plane] Error adding issue comment:", err);
-      return false;
-    }
-  }
-
-  /** Invalidate cached labels/states for a project so they're re-fetched next time. */
-  invalidate(projectId: string): void {
-    this.labelCache.delete(projectId);
-    this.stateCache.delete(projectId);
-  }
-}
-
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 export class PlanePlugin implements Plugin {
@@ -263,10 +127,10 @@ export class PlanePlugin implements Plugin {
     }
 
     const dedup = new DeliveryDedup();
-    let apiCache: PlaneAPICache | null = null;
+    let apiCache: PlaneClient | null = null;
 
     if (apiKey) {
-      apiCache = new PlaneAPICache(baseUrl, workspaceSlug, apiKey);
+      apiCache = new PlaneClient(baseUrl, workspaceSlug, apiKey);
 
       // ── Outbound: update Plane issues on reply ────────────────────────────
       bus.subscribe("plane.reply.#", "plane-outbound", async (msg: BusMessage) => {
@@ -294,17 +158,31 @@ export class PlanePlugin implements Plugin {
         const states = await apiCache!.fetchStates(planeProjectId);
 
         if (status === "created" || status === "in_progress") {
-          const inProgressState = states.get("started") ?? states.get("in progress");
+          const inProgressState = states.get("group:started") ?? states.get("name:in progress");
           if (inProgressState) {
             await apiCache!.patchIssueState(planeProjectId, planeIssueId, inProgressState);
             console.log(`[plane] Issue ${planeIssueId} → In Progress`);
           }
+          bus.publish("flow.item.updated", {
+            id: crypto.randomUUID(),
+            correlationId: msg.correlationId ?? "",
+            topic: "flow.item.updated",
+            timestamp: Date.now(),
+            payload: { id: `plane-${planeIssueId}`, status: "active", stage: "in-progress" },
+          });
         } else if (status === "completed" || status === "done") {
-          const doneState = states.get("completed") ?? states.get("done");
+          const doneState = states.get("group:completed") ?? states.get("name:done");
           if (doneState) {
             await apiCache!.patchIssueState(planeProjectId, planeIssueId, doneState);
             console.log(`[plane] Issue ${planeIssueId} → Done`);
           }
+          bus.publish("flow.item.completed", {
+            id: crypto.randomUUID(),
+            correlationId: msg.correlationId ?? "",
+            topic: "flow.item.completed",
+            timestamp: Date.now(),
+            payload: { id: `plane-${planeIssueId}`, status: "complete", stage: "done", completedAt: Date.now() },
+          });
         }
 
         if (summary) {
@@ -367,7 +245,7 @@ export class PlanePlugin implements Plugin {
   private async _handleWebhook(
     payload: PlaneWebhookPayload,
     bus: EventBus,
-    apiCache: PlaneAPICache | null,
+    apiCache: PlaneClient | null,
   ): Promise<void> {
     const { event, action, data } = payload;
 
@@ -406,6 +284,23 @@ export class PlanePlugin implements Plugin {
 
     const correlationId = `plane-${issue.id}`;
     this.pendingIssues.set(correlationId, { planeIssueId: issue.id, planeProjectId: issue.project });
+
+    // Register this issue as a flow item so FlowMonitorPlugin can track its lifecycle
+    const flowItemType = issue.priority === "urgent" ? "defect" : "feature";
+    bus.publish("flow.item.created", {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic: "flow.item.created",
+      timestamp: Date.now(),
+      payload: {
+        id: `plane-${issue.id}`,
+        type: flowItemType,
+        status: "queued",
+        stage: "backlog",
+        createdAt: Date.now(),
+        meta: { source: "plane", issueId: issue.id, projectId: issue.project, title: issue.name, priority: issue.priority },
+      },
+    });
 
     bus.publish(topic, {
       id: crypto.randomUUID(),

@@ -1,0 +1,17 @@
+drive:
+  orgFolderId: ""       # root org Drive folder — shared across all projects
+  templateFolderId: ""  # per-project folder template (optional)
+
+calendar:
+  orgCalendarId: ""             # shared org calendar for milestones/deadlines
+  pollIntervalMinutes: 60       # how often to check for upcoming events
+
+gmail:
+  watchLabels: []               # Gmail labels to monitor for inbound routing
+  pollIntervalMinutes: 5        # how often to poll for new messages
+  routingRules: []              # label → skillHint mappings
+  # routingRules example:
+  # - label: "bug-report"
+  #   skillHint: bug_triage
+  # - label: "gtm-request"
+  #   skillHint: content_strategy

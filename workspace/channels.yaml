@@ -1,0 +1,11 @@
+channels:
+
+  - id: testing-conversation
+    platform: discord
+    channelId: "1491694275992354876"
+    agent: quinn
+    description: Dedicated test channel — multi-turn conversation smoke test
+    conversation:
+      enabled: true
+      timeoutMs: 300000
+      requireMentionAfterFirst: false

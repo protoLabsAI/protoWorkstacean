@@ -1,0 +1,116 @@
+# World Engine Actions — mapped to goals by goalId
+# Tier 0 = deterministic/free, Tier 1 = A* planned, Tier 2 = Ava LLM
+
+actions:
+  - id: alert.efficiency_low
+    goalId: flow.efficiency_healthy
+    tier: tier_0
+    priority: 10
+    cost: 1
+    name: "Alert on low flow efficiency"
+    preconditions:
+      - path: "domains.board.data.efficiency"
+        operator: lt
+        value: 0.35
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      agentId: ava
+      fireAndForget: true
+
+  - id: alert.distribution_drift
+    goalId: flow.distribution_balanced
+    tier: tier_0
+    priority: 10
+    cost: 1
+    name: "Alert on board distribution drift"
+    preconditions:
+      - path: "domains.board.data.distribution.feature"
+        operator: lt
+        value: 0.40
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      agentId: ava
+      fireAndForget: true
+
+  - id: alert.security_incident
+    goalId: security.no_open_incidents
+    tier: tier_0
+    priority: 100
+    cost: 0
+    name: "Alert on open security incidents"
+    preconditions:
+      - path: "domains.security.data.openIncidents"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: ceremony.security_triage
+    goalId: security.no_open_incidents
+    tier: tier_0
+    priority: 90
+    cost: 1
+    name: "Trigger security triage ceremony"
+    preconditions:
+      - path: "domains.security.data.openIncidents"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "ceremony.security-triage.execute"
+      fireAndForget: true
+
+  - id: alert.agent_unreachable
+    goalId: agents.all_reachable
+    tier: tier_0
+    priority: 10
+    cost: 1
+    name: "Alert when agents are unreachable"
+    preconditions:
+      - path: "domains.agent_health.data.totalUnreachable"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      agentId: ava
+      fireAndForget: true
+
+  - id: ci.debug_failures
+    goalId: ci.success_rate_healthy
+    tier: tier_0
+    priority: 8
+    cost: 1
+    name: "Trigger CI debug when success rate drops"
+    preconditions:
+      - path: "domains.ci.data.successRate"
+        operator: lt
+        value: 0.70
+    effects: []
+    meta:
+      topic: "agent.skill.request"
+      skillHint: "ci_debug"
+      agentId: frank
+      fireAndForget: true
+
+  - id: ceremony.service_health_check
+    goalId: services.all_healthy
+    tier: tier_0
+    priority: 5
+    cost: 1
+    name: "Trigger service health check ceremony"
+    preconditions:
+      - path: "domains.services.metadata.failed"
+        operator: eq
+        value: true
+    effects:
+      - path: "domains.services.metadata.failed"
+        operation: set
+        value: false
+    meta:
+      topic: "ceremony.health_check.execute"
+      fireAndForget: true

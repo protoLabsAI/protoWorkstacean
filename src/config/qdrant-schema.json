@@ -1,0 +1,59 @@
+{
+  "collections": {
+    "quinn-pr-history": {
+      "description": "Embedded PR diff chunks with review decisions and metadata",
+      "vector_size": 768,
+      "distance": "Cosine",
+      "metadata_fields": {
+        "repo": "string — owner/repo slug, e.g. protolabsai/protomaker",
+        "pr_number": "integer — GitHub PR number",
+        "file": "string — relative file path in the repo",
+        "decision": "string — APPROVE or REQUEST_CHANGES",
+        "merged_at": "string — ISO 8601 timestamp of merge",
+        "pr_url": "string — full URL to the PR on GitHub",
+        "chunk_index": "integer — zero-based index of this chunk within the file",
+        "line_start": "integer — first line number of the chunk in the original file",
+        "line_end": "integer — last line number of the chunk in the original file",
+        "review_issues": "string — comma-separated summary of issues flagged in review"
+      }
+    },
+    "quinn-code-patterns": {
+      "description": "Embedded symbol definitions and surrounding context from indexed repositories",
+      "vector_size": 768,
+      "distance": "Cosine",
+      "metadata_fields": {
+        "repo": "string — owner/repo slug",
+        "file": "string — relative file path in the repo",
+        "symbol_name": "string — name of the function, class, or export",
+        "symbol_type": "string — function | class | interface | export | method",
+        "language": "string — typescript | python | go | unknown",
+        "line": "integer — line number where the symbol is defined",
+        "context": "string — symbol definition plus surrounding lines"
+      }
+    },
+    "quinn-review-learnings": {
+      "description": "Dismissed Quinn comment patterns to avoid repeating low-signal feedback",
+      "vector_size": 768,
+      "distance": "Cosine",
+      "metadata_fields": {
+        "repo": "string — owner/repo slug",
+        "file_type": "string — ts | py | go | etc",
+        "dismissed_count": "integer — number of times this pattern was dismissed",
+        "approval_count": "integer — number of times this pattern was acted upon",
+        "most_recent_reason": "string — last developer-provided reason for dismissal",
+        "last_updated": "string — ISO 8601 timestamp of most recent update"
+      }
+    }
+  },
+  "embedding_model": {
+    "provider": "ollama",
+    "model": "nomic-embed-text",
+    "dimensions": 768,
+    "base_url": "http://ollama:11434"
+  },
+  "qdrant": {
+    "base_url": "http://qdrant:6333",
+    "timeout_ms": 5000,
+    "search_top_k": 5
+  }
+}

@@ -1,13 +1,26 @@
-import { existsSync, readdirSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, join, extname } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { InMemoryEventBus } from "../lib/bus";
 import { DebugPlugin } from "../lib/plugins/debug";
 import { LoggerPlugin } from "../lib/plugins/logger";
 import { CLIPlugin } from "../lib/plugins/cli";
 import { SignalPlugin } from "../lib/plugins/signal";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
+import { ActionRegistry } from "./planner/action-registry";
 import type { Plugin, BusMessage } from "../lib/types";
+import type { Action } from "./planner/types/action";
+// Security incident shape — application-level, owned by protoMaker
+interface SecurityIncident {
+  id: string;
+  title: string;
+  severity: "critical" | "high" | "medium" | "low";
+  status: "open" | "investigating" | "resolved";
+  reportedAt: string;
+  description?: string;
+  affectedProjects?: string[];
+  assignee?: string;
+}
 
 // --- Workspace config ---
 const workspaceDir = resolve(
@@ -22,6 +35,58 @@ const dataDir = resolve(
 );
 
 const bus = new InMemoryEventBus();
+
+// --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
+import { ChannelRegistry } from "../lib/channels/channel-registry.js";
+const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));
+channelRegistry.startWatching();
+
+// --- Shared ActionRegistry — populated from workspace/actions.yaml ---
+const actionRegistry = new ActionRegistry();
+
+function loadActionsYaml(): void {
+  const actionsPath = join(workspaceDir, "actions.yaml");
+  if (!existsSync(actionsPath)) return;
+  try {
+    const raw = parseYaml(readFileSync(actionsPath, "utf8")) as { actions?: Record<string, unknown>[] };
+    const actionsData = raw?.actions ?? [];
+    for (const a of actionsData) {
+      try {
+        const action: Action = {
+          id: a.id as string,
+          name: a.name as string,
+          description: (a.description as string) ?? "",
+          goalId: a.goalId as string,
+          tier: a.tier as Action["tier"],
+          priority: typeof a.priority === "number" ? a.priority : 0,
+          cost: typeof a.cost === "number" ? a.cost : 0,
+          preconditions: Array.isArray(a.preconditions)
+            ? (a.preconditions as Array<{ path: string; operator: string; value?: unknown }>).map((p) => ({
+                path: p.path,
+                operator: p.operator as Action["preconditions"][number]["operator"],
+                value: p.value,
+              }))
+            : [],
+          effects: Array.isArray(a.effects)
+            ? (a.effects as Array<{ path: string; op?: string; operation?: string; value?: unknown }>).map((e) => ({
+                path: e.path,
+                operation: ((e.operation ?? e.op) as Action["effects"][number]["operation"]),
+                value: e.value,
+              }))
+            : [],
+          meta: typeof a.meta === "object" && a.meta !== null ? (a.meta as Action["meta"]) : {},
+        };
+        actionRegistry.upsert(action);
+      } catch (err) {
+        console.warn(`[actions-loader] Skipping invalid action '${a.id}':`, err);
+      }
+    }
+    console.info(`[actions-loader] Loaded ${actionRegistry.size} action(s) from workspace/actions.yaml`);
+  } catch (err) {
+    console.error("[actions-loader] Failed to parse workspace/actions.yaml:", err);
+  }
+}
+loadActionsYaml();
 
 // Core plugins — always loaded, statically imported (no dynamic overhead needed)
 const debugPlugin = new DebugPlugin();
@@ -57,13 +122,19 @@ interface PluginRegistryEntry {
 
 const enabledBuiltins = (process.env.ENABLED_PLUGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
+// Shared ExecutorRegistry — populated by AgentRuntimePlugin + SkillBrokerPlugin,
+// consumed by SkillDispatcherPlugin (sole agent.skill.request subscriber).
+const { ExecutorRegistry } = await import("./executor/executor-registry.js");
+const executorRegistry = new ExecutorRegistry();
+
 const pluginRegistry: PluginRegistryEntry[] = [
   {
-    name: "agent",
-    condition: () => !process.env.DISABLE_AGENT_PLUGIN,
+    // RouterPlugin translates message.inbound.# and cron.# → agent.skill.request.
+    name: "router",
+    condition: () => true,
     factory: async () => {
-      const { AgentPlugin } = await import("../lib/plugins/agent");
-      return new AgentPlugin(workspaceDir, dataDir);
+      const { RouterPlugin } = await import("./router/router-plugin.js");
+      return new RouterPlugin({ workspaceDir, channelRegistry });
     },
   },
   {
@@ -71,7 +142,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => !!process.env.DISCORD_BOT_TOKEN,
     factory: async () => {
       const { DiscordPlugin } = await import("../lib/plugins/discord");
-      return new DiscordPlugin(workspaceDir);
+      return new DiscordPlugin(workspaceDir, dataDir, channelRegistry, hitlPlugin);
     },
   },
   {
@@ -84,7 +155,6 @@ const pluginRegistry: PluginRegistryEntry[] = [
   },
   {
     name: "plane",
-    // Always register — degrades gracefully without credentials
     condition: () => true,
     factory: async () => {
       const { PlanePlugin } = await import("../lib/plugins/plane");
@@ -92,19 +162,19 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
-    name: "a2a",
+    name: "onboarding",
     condition: () => true,
     factory: async () => {
-      const { A2APlugin } = await import("../lib/plugins/a2a");
-      return new A2APlugin(workspaceDir);
+      const { OnboardingPlugin } = await import("../lib/plugins/onboarding");
+      return new OnboardingPlugin(workspaceDir);
     },
   },
   {
-    name: "hitl",
+    name: "plane-hitl",
     condition: () => true,
     factory: async () => {
-      const { HITLPlugin } = await import("../lib/plugins/hitl");
-      return new HITLPlugin(workspaceDir);
+      const { PlaneHITLPlugin } = await import("../lib/plugins/plane-hitl");
+      return new PlaneHITLPlugin(workspaceDir);
     },
   },
   {
@@ -113,6 +183,97 @@ const pluginRegistry: PluginRegistryEntry[] = [
     factory: async () => {
       const { EventViewerPlugin } = await import("../lib/plugins/event-viewer");
       return new EventViewerPlugin();
+    },
+  },
+  {
+    name: "goal-evaluator",
+    condition: () => true,
+    factory: async () => {
+      const { GoalEvaluatorPlugin } = await import("./plugins/goal_evaluator_plugin.js");
+      return new GoalEvaluatorPlugin({ workspaceDir });
+    },
+  },
+  {
+    name: "planner-l0",
+    condition: () => true,
+    factory: async () => {
+      const { PlannerPluginL0 } = await import("./plugins/planner-plugin-l0.js");
+      return new PlannerPluginL0(actionRegistry);
+    },
+  },
+  {
+    // Registers ProtoSdkExecutors for workspace/agents/*.yaml into ExecutorRegistry.
+    name: "agent-runtime",
+    condition: () => true,
+    factory: async () => {
+      const { AgentRuntimePlugin } = await import("./agent-runtime/agent-runtime-plugin.js");
+      return new AgentRuntimePlugin(
+        {
+          workspaceDir,
+          apiBaseUrl: `http://localhost:${process.env.WORKSTACEAN_HTTP_PORT ?? "3000"}`,
+          apiKey: process.env.WORKSTACEAN_API_KEY,
+        },
+        executorRegistry,
+      );
+    },
+  },
+  {
+    // Registers A2AExecutors for workspace/agents.yaml into ExecutorRegistry.
+    name: "skill-broker",
+    condition: () => true,
+    factory: async () => {
+      const { SkillBrokerPlugin } = await import("./plugins/skill-broker-plugin.js");
+      return new SkillBrokerPlugin(workspaceDir, executorRegistry);
+    },
+  },
+  {
+    // Sole subscriber to agent.skill.request — dispatches via ExecutorRegistry.
+    // Must be installed AFTER agent-runtime and skill-broker (registrars).
+    name: "skill-dispatcher",
+    condition: () => true,
+    factory: async () => {
+      const { SkillDispatcherPlugin } = await import("./executor/skill-dispatcher-plugin.js");
+      return new SkillDispatcherPlugin(executorRegistry, workspaceDir);
+    },
+  },
+  {
+    name: "ceremony",
+    condition: () => true,
+    factory: async () => {
+      const { CeremonyPlugin } = await import("./plugins/CeremonyPlugin.js");
+      return new CeremonyPlugin({ workspaceDir });
+    },
+  },
+  {
+    name: "world-state-engine",
+    condition: () => true,
+    factory: async () => {
+      const { WorldStateEngine } = await import("../lib/plugins/world-state-engine.js");
+      return new WorldStateEngine({ knowledgeDbPath: `${dataDir}/knowledge.db` });
+    },
+  },
+  {
+    name: "action-dispatcher",
+    condition: () => true,
+    factory: async () => {
+      const { ActionDispatcherPlugin } = await import("./plugins/action-dispatcher-plugin.js");
+      return new ActionDispatcherPlugin({ wipLimit: 5 });
+    },
+  },
+  {
+    name: "world-engine-alert",
+    condition: () => true,
+    factory: async () => {
+      const { WorldEngineAlertPlugin } = await import("../lib/plugins/world-engine-alert.js");
+      return new WorldEngineAlertPlugin();
+    },
+  },
+  {
+    name: "flow-monitor",
+    condition: () => true,
+    factory: async () => {
+      const { FlowMonitorPlugin } = await import("../lib/plugins/flow-monitor.js");
+      return new FlowMonitorPlugin();
     },
   },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
@@ -127,11 +288,62 @@ const pluginRegistry: PluginRegistryEntry[] = [
 ];
 
 const registeredPlugins: Plugin[] = [];
+
+// ── HITLPlugin — pre-installed so DiscordPlugin can register its renderer ──
+const { HITLPlugin } = await import("../lib/plugins/hitl.js");
+const hitlPlugin = new HITLPlugin(workspaceDir);
+hitlPlugin.install(bus);
+registeredPlugins.push(hitlPlugin);
+
 for (const entry of pluginRegistry) {
   if (entry.condition()) {
     const plugin = await entry.factory();
     plugin.install(bus);
     registeredPlugins.push(plugin);
+  }
+}
+
+// Guard: warn if skill-dispatcher is installed but no executor registrars ran.
+// This happens when workspace/agents/*.yaml is empty AND workspace/agents.yaml has no entries.
+{
+  const hasDispatcher = registeredPlugins.some(p => p.name === "skill-dispatcher");
+  const hasRegistrar = registeredPlugins.some(p =>
+    p.name === "agent-runtime" || p.name === "skill-broker",
+  );
+  if (hasDispatcher && !hasRegistrar) {
+    console.warn(
+      "[startup] skill-dispatcher is installed but no executor registrar (agent-runtime / skill-broker) is active. " +
+      "All agent.skill.request messages will be dropped. " +
+      "Add workspace/agents/*.yaml or workspace/agents.yaml to register at least one agent.",
+    );
+  }
+}
+
+// --- Domain discovery — registers per-project HTTP domains + actions from projects.yaml ---
+{
+  const wsEngine = registeredPlugins.find(p => p.name === "world-state-engine");
+  if (wsEngine) {
+    const { discoverAndRegister } = await import("./world/domain-discovery.js");
+    type WorldStateEngine = import("../lib/plugins/world-state-engine.js").WorldStateEngine;
+    const projectsYamlPath = join(workspaceDir, "projects.yaml");
+    const dr = discoverAndRegister(
+      projectsYamlPath,
+      wsEngine as unknown as WorldStateEngine,
+      actionRegistry,
+    );
+    for (const err of dr.errors) console.warn(`[domain-discovery] ${err}`);
+    console.log(`[domain-discovery] ${dr.domainsRegistered.length} domain(s) registered, ${dr.actionsLoaded} action(s) loaded`);
+
+    // Register the local flow-metrics domain so WorldStateEngine polls FlowMonitorPlugin
+    // and GOAP goals (flow.efficiency_healthy, flow.distribution_balanced) get live data.
+    const { createHttpCollector } = await import("../lib/plugins/world-state-engine.js");
+    const port = parseInt(process.env.WORKSTACEAN_HTTP_PORT || "3000", 10);
+    (wsEngine as unknown as WorldStateEngine).registerDomain(
+      "flow",
+      createHttpCollector(`http://localhost:${port}/api/flow-metrics`),
+      60_000,
+    );
+    console.log("[domain-discovery] flow domain registered → /api/flow-metrics (60s)");
   }
 }
 
@@ -187,6 +399,36 @@ const workspacePlugins = await loadWorkspacePlugins();
 
 const allPlugins = [...corePlugins, ...registeredPlugins, ...workspacePlugins];
 
+// ── Wire dormant alert paths → Discord ──────────────────────────────────────
+// ops.alert.budget and world.action.queue_full are published but had no consumers.
+// Forward both to message.outbound.discord.alert so they surface to operators.
+
+bus.subscribe("ops.alert.budget", "alert-bridge", (msg) => {
+  const p = (msg.payload ?? {}) as Record<string, unknown>;
+  const text = p.type === "cost_discrepancy"
+    ? `Budget alert — cost discrepancy on request \`${p.requestId}\``
+    : `Budget alert — ${String(p.type ?? "unknown")}: ${String(p.report ?? "")}`;
+  bus.publish("message.outbound.discord.alert", {
+    id: crypto.randomUUID(),
+    correlationId: msg.correlationId,
+    topic: "message.outbound.discord.alert",
+    timestamp: Date.now(),
+    payload: { text, level: "warn", source: "budget" },
+  });
+});
+
+bus.subscribe("world.action.queue_full", "alert-bridge", (msg) => {
+  const p = (msg.payload ?? {}) as Record<string, unknown>;
+  const text = `Action queue full — WIP ${p.wipCount}/${p.wipLimit}, pending: \`${p.pendingActionId}\``;
+  bus.publish("message.outbound.discord.alert", {
+    id: crypto.randomUUID(),
+    correlationId: msg.correlationId,
+    topic: "message.outbound.discord.alert",
+    timestamp: Date.now(),
+    payload: { text, level: "warn", source: "action-dispatcher" },
+  });
+});
+
 console.log("WorkStacean started.");
 console.log(`Workspace: ${workspaceDir}`);
 console.log(`Plugins: ${allPlugins.map((p) => p.name).join(", ")}`);
@@ -210,134 +452,6 @@ function serveWorkspaceYaml(filename: string, key: string): Response {
   } catch {
     return Response.json({ success: false, error: `Failed to parse ${filename}` }, { status: 500 });
   }
-}
-
-// ---------------------------------------------------------------------------
-// Operational state enrichment for GET /api/projects?includeState=true
-// ---------------------------------------------------------------------------
-
-interface RegistryProject {
-  slug: string;
-  projectPath?: string;
-  studioUrl?: string;
-  agents?: string[];
-  status?: string;
-  [key: string]: unknown;
-}
-
-interface RegistryAgent {
-  name: string;
-  url?: string;
-  automakerPort?: number;
-  [key: string]: unknown;
-}
-
-type ProjectOperationalState =
-  | {
-      board: { backlog: number; inProgress: number; blocked: number };
-      autoMode: { running: boolean };
-      activeAgents: number;
-    }
-  | { state: "unreachable" };
-
-function loadAgentPortMap(): Record<string, number> {
-  const filePath = join(workspaceDir, "agents.yaml");
-  if (!existsSync(filePath)) return {};
-  try {
-    const parsed = parseYaml(readFileSync(filePath, "utf8")) as Record<string, unknown>;
-    const agents = (parsed["agents"] ?? []) as RegistryAgent[];
-    const map: Record<string, number> = {};
-    for (const agent of agents) {
-      if (typeof agent.automakerPort === "number") {
-        map[agent.name] = agent.automakerPort;
-      }
-    }
-    return map;
-  } catch {
-    return {};
-  }
-}
-
-function resolveAutomakerUrl(
-  project: RegistryProject,
-  agentPortMap: Record<string, number>
-): string | null {
-  // 1. Resolve port from agents.yaml via project's agents list
-  for (const agentName of (project.agents ?? [])) {
-    const port = agentPortMap[agentName];
-    if (port) return `http://localhost:${port}`;
-  }
-  // 2. Fall back to studioUrl if present
-  if (project.studioUrl) return project.studioUrl;
-  return null;
-}
-
-async function fetchProjectOperationalState(
-  project: RegistryProject,
-  agentPortMap: Record<string, number>
-): Promise<ProjectOperationalState> {
-  const automakerUrl = resolveAutomakerUrl(project, agentPortMap);
-  if (!automakerUrl || !project.projectPath) return { state: "unreachable" };
-
-  try {
-    const res = await fetch(`${automakerUrl}/api/sitrep`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectPath: project.projectPath }),
-      signal: AbortSignal.timeout(4_000),
-    });
-
-    if (!res.ok) return { state: "unreachable" };
-
-    const sitrep = (await res.json()) as {
-      board?: { backlog?: number; inProgress?: number; blocked?: number };
-      autoMode?: { running?: boolean; runningCount?: number };
-    };
-
-    return {
-      board: {
-        backlog: sitrep.board?.backlog ?? 0,
-        inProgress: sitrep.board?.inProgress ?? 0,
-        blocked: sitrep.board?.blocked ?? 0,
-      },
-      autoMode: { running: sitrep.autoMode?.running ?? false },
-      activeAgents: sitrep.autoMode?.runningCount ?? 0,
-    };
-  } catch {
-    return { state: "unreachable" };
-  }
-}
-
-async function serveProjectsWithStatus(): Promise<Response> {
-  const filePath = join(workspaceDir, "projects.yaml");
-  if (!existsSync(filePath)) {
-    return Response.json({ success: true, data: [] });
-  }
-
-  let projects: RegistryProject[];
-  try {
-    const parsed = parseYaml(readFileSync(filePath, "utf8")) as Record<string, unknown>;
-    projects = (parsed["projects"] ?? []) as RegistryProject[];
-  } catch {
-    return Response.json(
-      { success: false, error: "Failed to parse projects.yaml" },
-      { status: 500 }
-    );
-  }
-
-  const agentPortMap = loadAgentPortMap();
-
-  // Fetch operational state for all projects in parallel
-  const statusResults = await Promise.all(
-    projects.map((p) => fetchProjectOperationalState(p, agentPortMap))
-  );
-
-  const enriched = projects.map((p, i) => ({
-    ...p,
-    operationalState: statusResults[i],
-  }));
-
-  return Response.json({ success: true, data: enriched });
 }
 
 async function handlePublish(req: Request): Promise<Response> {
@@ -373,28 +487,335 @@ async function handlePublish(req: Request): Promise<Response> {
   return Response.json({ success: true, id: message.id });
 }
 
-type RouteHandler = (req: Request) => Response | Promise<Response>;
+async function handleOnboard(req: Request): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
 
-const routes = new Map<string, RouteHandler>([
-  ["GET /health",        () => Response.json({ status: "ok", timestamp: Date.now() })],
-  ["POST /publish",      handlePublish],
-  ["GET /api/projects",  (req: Request) => {
-    const { searchParams } = new URL(req.url);
-    return searchParams.get("includeState") === "true"
-      ? serveProjectsWithStatus()
-      : serveWorkspaceYaml("projects.yaml", "projects");
-  }],
-  ["GET /api/agents",    () => serveWorkspaceYaml("agents.yaml", "agents")],
-]);
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return Response.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!body.slug || !body.title || !body.github) {
+    return Response.json(
+      { success: false, error: "Missing required fields: slug, title, github (owner/repo)" },
+      { status: 400 },
+    );
+  }
+
+  const correlationId = crypto.randomUUID();
+  const topic = "message.inbound.onboard";
+
+  // Wait up to 30s for the pipeline to complete and reply
+  const result = await new Promise<Record<string, unknown>>((resolve) => {
+    const replyTopic = `onboard.result.${correlationId}`;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const subId = bus.subscribe(replyTopic, "onboard-http", (msg: BusMessage) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      bus.unsubscribe(subId);
+      resolve(msg.payload as Record<string, unknown>);
+    });
+
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      bus.unsubscribe(subId);
+      resolve({ success: true, status: "accepted", correlationId, message: "Onboarding started (no response within 30s)" });
+    }, 30_000);
+
+    bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic,
+      timestamp: Date.now(),
+      payload: body,
+      source: { interface: "api" as const },
+      reply: { topic: replyTopic },
+    });
+  });
+
+  const statusCode = result.success ? 200 : 422;
+  return Response.json(result, { status: statusCode });
+}
+
+// ── World-state API helpers ────────────────────────────────────────────────────
+
+// Minimal interface so we can call getWorldState() without importing the full type
+interface WorldStateAPI {
+  getWorldState(opts?: { domain?: string; maxAgeMs?: number }): unknown;
+}
+
+// Resolved after plugins are loaded
+const worldStateCollector = registeredPlugins.find(p => p.name === "world-state-engine") as (WorldStateAPI & { name: string }) | undefined;
+
+function handleGetWorldState(domain?: string): Response {
+  if (!worldStateCollector) {
+    return Response.json({ success: false, error: "world-state-collector not available" }, { status: 503 });
+  }
+  const data = worldStateCollector.getWorldState(domain ? { domain, maxAgeMs: 120_000 } : { maxAgeMs: 120_000 });
+  return Response.json({ success: true, data });
+}
+
+// ── Flow-metrics API ───────────────────────────────────────────────────────────
+
+interface FlowMonitorAPI {
+  getMetrics(opts?: { metric?: string }): unknown;
+}
+
+const flowMonitorPlugin = registeredPlugins.find(p => p.name === "flow-monitor") as (FlowMonitorAPI & { name: string }) | undefined;
+
+function handleGetFlowMetrics(metric?: string): Response {
+  if (!flowMonitorPlugin) {
+    return Response.json({ success: false, error: "flow-monitor not available" }, { status: 503 });
+  }
+  const data = flowMonitorPlugin.getMetrics(metric ? { metric } : undefined);
+  return Response.json({ success: true, data, collectedAt: Date.now() });
+}
+
+function handleGetCeremonies(): Response {
+  const ceremoniesDir = join(workspaceDir, "ceremonies");
+  if (!existsSync(ceremoniesDir)) return Response.json({ success: true, data: [] });
+  const files = readdirSync(ceremoniesDir).filter(f => f.endsWith(".yaml") || f.endsWith(".yml"));
+  const ceremonies: unknown[] = [];
+  for (const file of files) {
+    try {
+      const parsed = parseYaml(readFileSync(join(ceremoniesDir, file), "utf8")) as Record<string, unknown>;
+      ceremonies.push(parsed);
+    } catch { /* skip malformed files */ }
+  }
+  return Response.json({ success: true, data: ceremonies });
+}
+
+async function handleRunCeremony(req: Request, ceremonyId: string): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+  // Sanitize ceremonyId — only allow alphanumeric, dash, dot, underscore
+  if (!/^[\w.\-]+$/.test(ceremonyId)) {
+    return Response.json({ success: false, error: "Invalid ceremony id" }, { status: 400 });
+  }
+  const topic = `ceremony.${ceremonyId}.execute`;
+  bus.publish(topic, {
+    id: crypto.randomUUID(),
+    correlationId: crypto.randomUUID(),
+    topic,
+    timestamp: Date.now(),
+    payload: { type: "manual.execute", triggeredBy: "api" },
+  });
+  return Response.json({ success: true, message: `Ceremony "${ceremonyId}" triggered` });
+}
+
+// ── Incidents API ─────────────────────────────────────────────────────────────
+
+function handleGetIncidents(): Response {
+  return serveWorkspaceYaml("incidents.yaml", "incidents");
+}
+
+async function handleReportIncident(req: Request): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return Response.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!body.title || !body.severity) {
+    return Response.json(
+      { success: false, error: "Missing required fields: title, severity" },
+      { status: 400 }
+    );
+  }
+
+  const incidentsPath = join(workspaceDir, "incidents.yaml");
+  let existing: SecurityIncident[] = [];
+  if (existsSync(incidentsPath)) {
+    try {
+      const parsed = parseYaml(readFileSync(incidentsPath, "utf8")) as { incidents?: SecurityIncident[] };
+      existing = parsed.incidents ?? [];
+    } catch { /* start fresh */ }
+  }
+
+  const incident: SecurityIncident = {
+    id: `INC-${String(existing.length + 1).padStart(3, "0")}`,
+    title: body.title as string,
+    severity: body.severity as SecurityIncident["severity"],
+    status: (body.status as SecurityIncident["status"]) ?? "open",
+    reportedAt: new Date().toISOString(),
+    ...(body.description ? { description: body.description as string } : {}),
+    ...(Array.isArray(body.affectedProjects) ? { affectedProjects: body.affectedProjects as string[] } : {}),
+    ...(body.assignee ? { assignee: body.assignee as string } : {}),
+  };
+
+  existing.push(incident);
+  writeFileSync(incidentsPath, stringifyYaml({ incidents: existing }), "utf8");
+
+  // Notify bus — world-state-collector re-collects security domain immediately
+  bus.publish("security.incident.reported", {
+    id: crypto.randomUUID(),
+    correlationId: crypto.randomUUID(),
+    topic: "security.incident.reported",
+    timestamp: Date.now(),
+    payload: { incident },
+  });
+
+  return Response.json({ success: true, data: incident }, { status: 201 });
+}
+
+async function handleResolveIncident(req: Request, incidentId: string): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const incidentsPath = join(workspaceDir, "incidents.yaml");
+  if (!existsSync(incidentsPath)) {
+    return Response.json({ success: false, error: "No incidents file found" }, { status: 404 });
+  }
+
+  let incidents: SecurityIncident[];
+  try {
+    const parsed = parseYaml(readFileSync(incidentsPath, "utf8")) as { incidents?: SecurityIncident[] };
+    incidents = parsed.incidents ?? [];
+  } catch {
+    return Response.json({ success: false, error: "Failed to parse incidents.yaml" }, { status: 500 });
+  }
+
+  const idx = incidents.findIndex(i => i.id === incidentId);
+  if (idx === -1) {
+    return Response.json({ success: false, error: `Incident "${incidentId}" not found` }, { status: 404 });
+  }
+
+  incidents[idx] = { ...incidents[idx], status: "resolved" };
+  writeFileSync(incidentsPath, stringifyYaml({ incidents }), "utf8");
+
+  bus.publish("security.incident.reported", {
+    id: crypto.randomUUID(),
+    correlationId: crypto.randomUUID(),
+    topic: "security.incident.reported",
+    timestamp: Date.now(),
+    payload: { incident: incidents[idx] },
+  });
+
+  return Response.json({ success: true, data: incidents[idx] });
+}
+
+// ── Channels API ──────────────────────────────────────────────────────────────
+
+function handleGetChannels(): Response {
+  return Response.json({ success: true, data: channelRegistry.getAll() });
+}
+
+async function handleAddChannel(req: Request): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 });
+  }
+
+  if (!body.id || !body.platform) {
+    return Response.json({ success: false, error: "id and platform are required" }, { status: 400 });
+  }
+
+  try {
+    channelRegistry.add(body as unknown as import("../lib/types/channels.js").Channel);
+    return Response.json({ success: true, data: body });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return Response.json({ success: false, error: msg }, { status: 409 });
+  }
+}
+
+function handleGetHITLPending(): Response {
+  return Response.json({ success: true, data: hitlPlugin.getPendingRequests() });
+}
+
+function handleGetAgentSkills(agentName: string): Response {
+  const agentsPath = join(workspaceDir, "agents.yaml");
+  if (!existsSync(agentsPath)) {
+    return Response.json({ success: false, error: "agents.yaml not found" }, { status: 404 });
+  }
+  try {
+    const parsed = parseYaml(readFileSync(agentsPath, "utf8")) as {
+      agents?: Array<{ name: string; skills?: unknown[] }>;
+    };
+    const agent = (parsed.agents ?? []).find(a => a.name === agentName);
+    if (!agent) {
+      return Response.json({ success: false, error: `Agent "${agentName}" not found` }, { status: 404 });
+    }
+    return Response.json({ success: true, data: { name: agent.name, skills: agent.skills ?? [] } });
+  } catch {
+    return Response.json({ success: false, error: "Failed to parse agents.yaml" }, { status: 500 });
+  }
+}
+
+// ── HTTP router ───────────────────────────────────────────────────────────────
+
+type Params = Record<string, string>;
+type RouteHandler = (req: Request, params: Params) => Response | Promise<Response>;
+
+/** Match a path against a pattern like "/api/foo/:id/run". Returns params or null. */
+function matchPath(pattern: string, path: string): Params | null {
+  const pp = pattern.split("/");
+  const sp = path.split("/");
+  if (pp.length !== sp.length) return null;
+  const params: Params = {};
+  for (let i = 0; i < pp.length; i++) {
+    if (pp[i].startsWith(":")) {
+      params[pp[i].slice(1)] = sp[i];
+    } else if (pp[i] !== sp[i]) {
+      return null;
+    }
+  }
+  return params;
+}
+
+const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
+  { method: "GET",  path: "/health",                    handler: () => Response.json({ status: "ok", timestamp: Date.now() }) },
+  { method: "POST", path: "/publish",                   handler: handlePublish },
+  { method: "POST", path: "/api/onboard",               handler: handleOnboard },
+  { method: "GET",  path: "/api/projects",              handler: () => serveWorkspaceYaml("projects.yaml", "projects") },
+  { method: "GET",  path: "/api/agents",                handler: () => serveWorkspaceYaml("agents.yaml", "agents") },
+  { method: "GET",  path: "/api/goals",                 handler: () => serveWorkspaceYaml("goals.yaml", "goals") },
+  { method: "GET",  path: "/api/world-state",           handler: () => handleGetWorldState() },
+  { method: "GET",  path: "/api/world-state/:domain",   handler: (_, p) => handleGetWorldState(p.domain) },
+  { method: "GET",  path: "/api/flow-metrics",          handler: () => handleGetFlowMetrics() },
+  { method: "GET",  path: "/api/flow-metrics/:metric",  handler: (_, p) => handleGetFlowMetrics(p.metric) },
+  { method: "GET",  path: "/api/ceremonies",            handler: () => handleGetCeremonies() },
+  { method: "POST", path: "/api/ceremonies/:id/run",    handler: (req, p) => handleRunCeremony(req, p.id) },
+  { method: "GET",  path: "/api/skills/:agentName",     handler: (_, p) => handleGetAgentSkills(p.agentName) },
+  { method: "GET",  path: "/api/incidents",            handler: () => handleGetIncidents() },
+  { method: "POST", path: "/api/incidents",            handler: (req) => handleReportIncident(req) },
+  { method: "POST", path: "/api/incidents/:id/resolve", handler: (req, p) => handleResolveIncident(req, p.id) },
+  { method: "GET",  path: "/api/channels",             handler: () => handleGetChannels() },
+  { method: "POST", path: "/api/channels",             handler: (req) => handleAddChannel(req) },
+  { method: "GET",  path: "/api/hitl/pending",         handler: () => handleGetHITLPending() },
+];
 
 Bun.serve({
   port: HTTP_PORT,
   fetch: async (req) => {
     const { pathname } = new URL(req.url);
-    const handler = routes.get(`${req.method} ${pathname}`);
-    return handler
-      ? handler(req)
-      : Response.json({ success: false, error: "Not found" }, { status: 404 });
+    for (const route of routes) {
+      if (route.method !== req.method) continue;
+      const params = matchPath(route.path, pathname);
+      if (params) return route.handler(req, params);
+    }
+    return Response.json({ success: false, error: "Not found" }, { status: 404 });
   },
 });
 

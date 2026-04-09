@@ -1,0 +1,77 @@
+# workspace/channels.yaml
+# Copy to workspace/channels.yaml and fill in your channel IDs.
+#
+# Each entry maps a platform channel to an agent.
+# The system routes all inbound messages from that channel to the assigned agent,
+# and sends replies from that agent's own bot identity (if agentBotTokenEnv is set).
+#
+# Add channels at runtime: POST /api/channels
+# List channels:           GET  /api/channels
+#
+# Supported platforms: discord, github, signal, slack, plane
+
+channels:
+
+  # ── Discord ──────────────────────────────────────────────────────────────────
+  # Each Discord entry needs:
+  #   channelId:        the channel ID (right-click → Copy Channel ID)
+  #   agent:            which agent handles messages here
+  #   agentBotTokenEnv: env var holding that agent's bot token (optional)
+  #                     If unset, the default DISCORD_BOT_TOKEN bot is used.
+
+  - id: quinn-pr-reviews
+    platform: discord
+    channelId: "1234567890123456789"
+    agent: quinn
+    agentBotTokenEnv: QUINN_DISCORD_TOKEN
+    description: PR review requests — Quinn replies as herself
+
+  - id: ava-general
+    platform: discord
+    channelId: "9876543210987654321"
+    agent: ava
+    agentBotTokenEnv: AVA_DISCORD_TOKEN
+    description: General ops channel — Ava orchestrates
+
+  - id: frank-deployments
+    platform: discord
+    channelId: "1111222233334444555"
+    agent: frank
+    agentBotTokenEnv: FRANK_DISCORD_TOKEN
+    description: CI/CD and deployment channel
+
+  # ── GitHub ───────────────────────────────────────────────────────────────────
+  # Each GitHub entry routes @mentions on a specific repo to an agent.
+  # The agent field here is advisory — GitHubPlugin still uses @mention routing
+  # but RouterPlugin will prefer this assignment over keyword matching.
+
+  - id: github-protoWorkstacean-quinn
+    platform: github
+    repo: protoLabsAI/protoWorkstacean
+    agent: quinn
+    description: Quinn handles all @mentions on this repo
+
+  - id: github-ava-repo
+    platform: github
+    repo: protoLabsAI/ava
+    agent: ava
+    description: Ava handles @mentions on the ava repo
+
+  # ── Signal ───────────────────────────────────────────────────────────────────
+  # Routes messages from a Signal group or phone number to an agent.
+
+  - id: signal-ops
+    platform: signal
+    groupId: "SIGNAL_GROUP_ID_HERE"
+    agent: ava
+    description: Ops escalations via Signal
+
+  # ── Slack (future) ───────────────────────────────────────────────────────────
+  # Requires SlackPlugin (not yet implemented — see integrations/channels docs).
+
+  # - id: slack-eng
+  #   platform: slack
+  #   slackChannelId: "C1234567890"
+  #   agentSlackTokenEnv: QUINN_SLACK_TOKEN
+  #   agent: quinn
+  #   description: Engineering Slack channel

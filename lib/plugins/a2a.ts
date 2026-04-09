@@ -33,6 +33,7 @@ import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
+import { validateProjectEntry } from "../project-schema.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -42,49 +43,6 @@ interface ProjectDiscordChannels {
   dev?: string;
   alerts?: string;
   releases?: string;
-}
-
-interface ProjectInfisical {
-  projectId?: string;
-}
-
-interface ProjectObservability {
-  langfuseProjectId?: string;
-}
-
-interface ProjectGoogleWorkspace {
-  driveFolderId?: string;
-  sharedDocId?: string;
-}
-
-interface ProjectCapacity {
-  priorityWeight?: number;
-  minConcurrency?: number;
-  maxConcurrency?: number;
-}
-
-interface ProjectEntry {
-  slug: string;
-  title?: string;
-  github: string;
-  defaultBranch?: string;
-  status?: string;
-  onboardedAt?: string;
-  team?: string;
-  agents?: string[];
-  planeProjectId?: string;
-  planeIdentifier?: string;
-  projectPath?: string;
-  discord?: ProjectDiscordChannels;
-  webhooks?: Record<string, string>;
-  infisical?: ProjectInfisical;
-  observability?: ProjectObservability;
-  googleWorkspace?: ProjectGoogleWorkspace;
-  capacity?: ProjectCapacity;
-}
-
-interface ProjectsYaml {
-  projects: ProjectEntry[];
 }
 
 interface ProjectIndex {
@@ -101,16 +59,26 @@ function buildIndex(projectsPath: string): Map<string, ProjectIndex> {
     return index;
   }
 
-  let parsed: ProjectsYaml;
+  let rawProjects: unknown[];
   try {
     const raw = readFileSync(projectsPath, "utf8");
-    parsed = parseYaml(raw) as ProjectsYaml;
+    const parsed = parseYaml(raw) as { projects?: unknown[] };
+    rawProjects = parsed.projects ?? [];
   } catch (err) {
     console.error(`[a2a] Failed to parse ${projectsPath}:`, err);
     return index;
   }
 
-  for (const project of parsed.projects ?? []) {
+  for (const rawProject of rawProjects) {
+    // Validate each entry against the schema; skip invalid ones with a warning.
+    const validation = validateProjectEntry(rawProject);
+    if (!validation.ok) {
+      const slug = (rawProject as Record<string, unknown>)?.slug ?? "(unknown)";
+      console.warn(`[a2a] Skipping invalid project entry "${slug}": ${validation.errors.join("; ")}`);
+      continue;
+    }
+
+    const project = validation.entry;
     if (!project.github || !project.slug) continue;
     if (project.status === "archived" || project.status === "suspended") continue;
 
@@ -154,9 +122,13 @@ export class A2APlugin implements Plugin {
 
     // Re-index on file change so the process can pick up new entries without restart.
     if (existsSync(projectsPath)) {
+      let debounceTimer: ReturnType<typeof setTimeout> | null = null;
       watchFile(projectsPath, { interval: 5_000 }, () => {
-        this.index = buildIndex(projectsPath);
-        console.log(`[a2a] projects.yaml changed — reloaded ${this.index.size} project(s)`);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          this.index = buildIndex(projectsPath);
+          console.log(`[a2a] projects.yaml changed — reloaded ${this.index.size} project(s)`);
+        }, 300);
       });
     }
 

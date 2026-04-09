@@ -19,81 +19,14 @@
  *   GITHUB_WEBHOOK_PORT     webhook HTTP server port (default: 8082)
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
-import { createSign } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { sanitizeIssueBody } from "../sanitize.ts";
 import type { SanitizationConfig } from "../sanitize.ts";
-
-// ── GitHub App auth ───────────────────────────────────────────────────────────
-
-class GitHubAppAuth {
-  private cache = new Map<string, { token: string; exp: number }>();
-
-  constructor(private appId: string, private privateKey: string) {}
-
-  async getToken(owner: string, repo: string): Promise<string> {
-    const key = `${owner}/${repo}`;
-    const cached = this.cache.get(key);
-    if (cached && cached.exp > Date.now() + 60_000) return cached.token;
-
-    const jwt = this.makeJWT();
-    const headers = this.appHeaders(jwt);
-
-    const installResp = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/installation`,
-      { headers },
-    );
-    if (!installResp.ok) {
-      throw new Error(`App not installed on ${owner}/${repo}: ${installResp.status}`);
-    }
-    const { id: installId } = await installResp.json() as { id: number };
-
-    const tokenResp = await fetch(
-      `https://api.github.com/app/installations/${installId}/access_tokens`,
-      { method: "POST", headers },
-    );
-    if (!tokenResp.ok) {
-      throw new Error(`Token fetch failed: ${tokenResp.status} ${await tokenResp.text()}`);
-    }
-    const { token, expires_at } = await tokenResp.json() as { token: string; expires_at: string };
-
-    this.cache.set(key, { token, exp: new Date(expires_at).getTime() });
-    return token;
-  }
-
-  private makeJWT(): string {
-    const now = Math.floor(Date.now() / 1000);
-    const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
-    const payload = Buffer.from(JSON.stringify({ iat: now - 60, exp: now + 600, iss: this.appId })).toString("base64url");
-    const data = `${header}.${payload}`;
-    const sig = createSign("RSA-SHA256").update(data).sign(this.privateKey, "base64url");
-    return `${data}.${sig}`;
-  }
-
-  private appHeaders(jwt: string): Record<string, string> {
-    return {
-      Authorization: `Bearer ${jwt}`,
-      Accept: "application/vnd.github+json",
-      "User-Agent": "protoWorkstacean/1.0",
-      "X-GitHub-Api-Version": "2022-11-28",
-    };
-  }
-}
-
-function makeGitHubAuth(): ((owner: string, repo: string) => Promise<string>) | null {
-  const appId = process.env.QUINN_APP_ID;
-  const privateKey = process.env.QUINN_APP_PRIVATE_KEY;
-  if (appId && privateKey) {
-    const app = new GitHubAppAuth(appId, privateKey);
-    return (owner, repo) => app.getToken(owner, repo);
-  }
-  const pat = process.env.GITHUB_TOKEN;
-  if (pat) return () => Promise.resolve(pat);
-  return null;
-}
+import { makeGitHubAuth } from "../github-auth.ts";
+import { withCircuitBreaker } from "./circuit-breaker.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -102,6 +35,7 @@ interface AutoTriageConfig {
   orgName: string;
   events: string[];
   skillHint: string;
+  /** Derived at runtime from projects.yaml — not read from github.yaml. */
   monitoredRepos: string[];
   sanitization: SanitizationConfig;
 }
@@ -113,10 +47,30 @@ interface GitHubConfig {
   autoTriage?: AutoTriageConfig;
 }
 
+/**
+ * Derive monitoredRepos from projects.yaml (all active projects with a github field).
+ * Called each time config is loaded so hot-reloads of projects.yaml are reflected.
+ */
+function deriveMonitoredRepos(workspaceDir: string): string[] {
+  const projectsPath = join(workspaceDir, "projects.yaml");
+  if (!existsSync(projectsPath)) return [];
+  try {
+    const raw = readFileSync(projectsPath, "utf8");
+    const data = parseYaml(raw) as { projects?: { github?: string; status?: string }[] };
+    return (data.projects ?? [])
+      .filter(p => p.github && p.status !== "archived" && p.status !== "suspended")
+      .map(p => p.github as string);
+  } catch {
+    return [];
+  }
+}
+
 function loadConfig(workspaceDir: string): GitHubConfig {
   const configPath = join(workspaceDir, "github.yaml");
+  let config: GitHubConfig;
+
   if (!existsSync(configPath)) {
-    return {
+    config = {
       mentionHandle: "@quinn",
       skillHints: {
         issue_comment: "bug_triage",
@@ -125,8 +79,17 @@ function loadConfig(workspaceDir: string): GitHubConfig {
         pull_request: "pr_review",
       },
     };
+  } else {
+    config = parseYaml(readFileSync(configPath, "utf8")) as GitHubConfig;
   }
-  return parseYaml(readFileSync(configPath, "utf8")) as GitHubConfig;
+
+  // monitoredRepos is always derived from projects.yaml at runtime
+  // (never read from github.yaml) so that onboarding new projects takes effect immediately.
+  if (config.autoTriage) {
+    config.autoTriage.monitoredRepos = deriveMonitoredRepos(workspaceDir);
+  }
+
+  return config;
 }
 
 // ── Pending comment context ───────────────────────────────────────────────────
@@ -244,6 +207,7 @@ export class GitHubPlugin implements Plugin {
 
   private server: ReturnType<typeof Bun.serve> | null = null;
   private workspaceDir: string;
+  private config!: GitHubConfig;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
@@ -259,9 +223,28 @@ export class GitHubPlugin implements Plugin {
     const usingApp = !!(process.env.QUINN_APP_ID && process.env.QUINN_APP_PRIVATE_KEY);
     console.log(`[github] Auth: ${usingApp ? "GitHub App (quinn[bot])" : "PAT (GITHUB_TOKEN)"}`);
 
-    const config = loadConfig(this.workspaceDir);
+    this.config = loadConfig(this.workspaceDir);
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? "";
     const port = parseInt(process.env.GITHUB_WEBHOOK_PORT ?? "8082", 10);
+
+    // ── Hot-reload github.yaml and projects.yaml ──────────────────────────────
+    const configPath = join(this.workspaceDir, "github.yaml");
+    const projectsPath = join(this.workspaceDir, "projects.yaml");
+
+    let reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const reloadConfig = () => {
+      if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer);
+      reloadDebounceTimer = setTimeout(() => {
+        this.config = loadConfig(this.workspaceDir);
+        const repoCount = this.config.autoTriage?.monitoredRepos?.length ?? 0;
+        console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
+      }, 300);
+    };
+
+    // watchFile works even if the file doesn't exist yet — it will fire on creation.
+    watchFile(configPath, { interval: 5_000 }, reloadConfig);
+    // Also watch projects.yaml so monitoredRepos updates when projects are onboarded.
+    watchFile(projectsPath, { interval: 5_000 }, reloadConfig);
 
     // ── Outbound: post comment back to GitHub ────────────────────────────────
     bus.subscribe("message.outbound.github.#", "github-outbound", async (msg: BusMessage) => {
@@ -304,7 +287,7 @@ export class GitHubPlugin implements Plugin {
           return new Response("Bad request", { status: 400 });
         }
 
-        this._handleEvent(event, payload, config, bus, getToken);
+        this._handleEvent(event, payload, this.config, bus, getToken);
         return new Response("OK", { status: 200 });
       },
     });
@@ -314,6 +297,8 @@ export class GitHubPlugin implements Plugin {
 
   uninstall(): void {
     this.server?.stop();
+    unwatchFile(join(this.workspaceDir, "github.yaml"));
+    unwatchFile(join(this.workspaceDir, "projects.yaml"));
   }
 
   private _handleEvent(
@@ -323,6 +308,90 @@ export class GitHubPlugin implements Plugin {
     bus: EventBus,
     getToken: (owner: string, repo: string) => Promise<string>,
   ): void {
+    // ── Org webhook: repository.created → onboard ─────────────────────────
+    if (event === "repository" && payload.action === "created") {
+      const repo = payload.repository as Record<string, unknown> | undefined;
+      if (repo) {
+        const repoName = repo.name as string;
+        const fullName = repo.full_name as string;
+        const owner = (repo.owner as Record<string, unknown> | undefined)?.login as string;
+        const url = repo.html_url as string;
+        const description = (repo.description as string | null) ?? "";
+        const isPrivate = repo.private as boolean;
+
+        const correlationId = crypto.randomUUID();
+        const topic = "message.inbound.onboard";
+
+        bus.publish(topic, {
+          id: `repository-created-${fullName.replace("/", "-")}-${correlationId.slice(0, 8)}`,
+          correlationId,
+          topic,
+          timestamp: Date.now(),
+          payload: {
+            event: "repository.created",
+            owner,
+            repo: repoName,
+            fullName,
+            url,
+            description,
+            isPrivate,
+          },
+          source: { interface: "github" as const },
+        });
+
+        console.log(`[github] repository.created: ${fullName} → ${topic}`);
+      }
+      return;
+    }
+
+    // ── PR lifecycle → flow.item.* (independent of @mention) ─────────────────
+    if (event === "pull_request") {
+      const action = payload.action as string;
+      const pr = payload.pull_request as Record<string, unknown>;
+      const repo = payload.repository as Record<string, unknown> | undefined;
+      const owner = (repo?.owner as Record<string, unknown> | undefined)?.login as string ?? "";
+      const repoName = repo?.name as string ?? "";
+      const prNumber = pr?.number as number;
+      const prId = `github-pr-${owner}-${repoName}-${prNumber}`;
+      const isDraft = pr?.draft as boolean;
+
+      if (action === "opened" && !isDraft) {
+        bus.publish("flow.item.created", {
+          id: crypto.randomUUID(),
+          correlationId: prId,
+          topic: "flow.item.created",
+          timestamp: Date.now(),
+          payload: {
+            id: prId,
+            type: "feature",
+            status: "active",
+            stage: "open",
+            createdAt: Date.now(),
+            meta: { source: "github", owner, repo: repoName, number: prNumber, title: pr?.title, url: pr?.html_url },
+          },
+        });
+      } else if (action === "review_requested") {
+        bus.publish("flow.item.updated", {
+          id: crypto.randomUUID(),
+          correlationId: prId,
+          topic: "flow.item.updated",
+          timestamp: Date.now(),
+          payload: { id: prId, status: "active", stage: "review" },
+        });
+      } else if (action === "closed") {
+        const merged = pr?.merged as boolean;
+        if (merged) {
+          bus.publish("flow.item.completed", {
+            id: crypto.randomUUID(),
+            correlationId: prId,
+            topic: "flow.item.completed",
+            timestamp: Date.now(),
+            payload: { id: prId, status: "complete", stage: "done", completedAt: Date.now() },
+          });
+        }
+      }
+    }
+
     const ctx = extractContext(event, payload);
     if (!ctx) return;
 
@@ -361,16 +430,18 @@ export class GitHubPlugin implements Plugin {
       } else {
         url = `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/issues/${ctx.number}/reactions`;
       }
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "User-Agent": "protoWorkstacean/1.0",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-        body: JSON.stringify({ content: "eyes" }),
-      });
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ content: "eyes" }),
+        }),
+      );
       if (!res.ok) console.error(`[github] reaction failed ${res.status}: ${await res.text()}`);
     })().catch(err => console.error("[github] reaction error:", err));
 
@@ -509,15 +580,17 @@ export class GitHubPlugin implements Plugin {
     token: string,
   ): Promise<boolean> {
     try {
-      const res = await fetch(
-        `https://api.github.com/orgs/${orgName}/members/${username}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "User-Agent": "protoWorkstacean/1.0",
-            "X-GitHub-Api-Version": "2022-11-28",
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(
+          `https://api.github.com/orgs/${orgName}/members/${username}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "User-Agent": "protoWorkstacean/1.0",
+              "X-GitHub-Api-Version": "2022-11-28",
+            },
           },
-        },
+        ),
       );
       // 204 = member, 302/404 = not a member or org is private
       return res.status === 204;
@@ -544,14 +617,18 @@ export class GitHubPlugin implements Plugin {
       "that violates our submission guidelines. If you believe this is an error, please " +
       "open a new issue without the flagged content.";
 
-    await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments`,
-      { method: "POST", headers, body: JSON.stringify({ body: commentBody }) },
+    await withCircuitBreaker("github-api", () =>
+      fetch(
+        `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments`,
+        { method: "POST", headers, body: JSON.stringify({ body: commentBody }) },
+      ),
     );
 
-    await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/issues/${number}`,
-      { method: "PATCH", headers, body: JSON.stringify({ state: "closed", state_reason: "not_planned" }) },
+    await withCircuitBreaker("github-api", () =>
+      fetch(
+        `https://api.github.com/repos/${owner}/${repo}/issues/${number}`,
+        { method: "PATCH", headers, body: JSON.stringify({ state: "closed", state_reason: "not_planned" }) },
+      ),
     );
   }
 
@@ -563,16 +640,18 @@ export class GitHubPlugin implements Plugin {
     try {
       const token = await getToken(ctx.owner, ctx.repo);
       const url = `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/issues/${ctx.number}/comments`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "User-Agent": "protoWorkstacean/1.0",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-        body: JSON.stringify({ body }),
-      });
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ body }),
+        }),
+      );
       if (!res.ok) {
         console.error(`[github] Failed to post comment: ${res.status} ${await res.text()}`);
       } else {
