@@ -1,3 +1,7 @@
+---
+title: Google Workspace Plugin Reference
+---
+
 # Google Workspace Plugin Reference
 
 _This is a reference doc. It covers the plugin overview, configuration schema, bus topics, credentials, and agent usage._

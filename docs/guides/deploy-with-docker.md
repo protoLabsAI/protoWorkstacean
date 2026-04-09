@@ -1,3 +1,7 @@
+---
+title: Deploy with Docker
+---
+
 # Deploy with Docker
 
 This guide covers a production-ready Docker Compose deployment: building the image, mounting the workspace volume, wiring secrets via environment variables, and verifying health.

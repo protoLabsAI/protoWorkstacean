@@ -1,3 +1,7 @@
+---
+title: Distributed Tracing
+---
+
 # Distributed Tracing
 
 ## The two IDs

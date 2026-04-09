@@ -1,3 +1,7 @@
+---
+title: OnboardingPlugin Reference
+---
+
 # OnboardingPlugin Reference
 
 _This is a reference doc. It covers the OnboardingPlugin pipeline, request schema, idempotency guarantees, trigger sources, and related tooling._

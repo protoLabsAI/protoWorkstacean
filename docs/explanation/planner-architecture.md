@@ -1,3 +1,7 @@
+---
+title: Planner Architecture
+---
+
 # Planner Architecture
 
 ## Overview

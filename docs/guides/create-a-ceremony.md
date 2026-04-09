@@ -1,3 +1,7 @@
+---
+title: Create a Ceremony
+---
+
 # Create a Ceremony
 
 A **ceremony** is a scheduled skill invocation — a recurring fleet ritual defined in YAML, fired by a cron expression, and dispatched through the standard skill routing pipeline.

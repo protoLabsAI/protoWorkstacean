@@ -7,8 +7,8 @@ title: Quinn — PR Review Bot Reference
 _This is a reference doc. It covers Quinn's review pipeline, vector context system, budget tracking, configuration, and bus topics._
 
 See also:
-- [`how-to/use-quinn-pr-review.md`](\1/) — setup and operation guide
-- [`reference/bus-topics.md`](\1/) — full bus topic listing
+- [`how-to/use-quinn-pr-review.md`](../how-to/use-quinn-pr-review.md) — setup and operation guide
+- [`reference/bus-topics.md`](bus-topics.md) — full bus topic listing
 
 ---
 
@@ -178,7 +178,7 @@ Quinn consumes and emits via the GitHub plugin's standard topics:
 | `message.inbound.github.{owner}.{repo}.pull_request.{number}` | Consumed | Triggers `pr_review` skill |
 | `message.outbound.github.{owner}.{repo}.{number}` | Emitted | Review comment posted via GitHub API |
 
-Quinn does not publish custom bus topics. All output goes through A2APlugin → GitHubPlugin using the standard `message.outbound.github.*` path.
+Quinn does not publish custom bus topics. All output goes through RouterPlugin → GitHubPlugin using the standard `message.outbound.github.*` path.
 
 ---
 

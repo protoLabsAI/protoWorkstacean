@@ -8,7 +8,7 @@ _This is a reference doc. It covers the Plugin interface contract and the two ex
 
 ---
 
-See also: [`explanation/plugin-lifecycle.md`](\1/) for how plugins register, subscribe, and hot-reload.
+See also: [`explanation/plugin-lifecycle.md`](../explanation/plugin-lifecycle.md) for how plugins register, subscribe, and hot-reload.
 
 ---
 
@@ -198,4 +198,4 @@ Pi SDK **does not ship MCP support**. MCP bridges are possible via extensions: w
 
 - [Pi SDK Extensions Docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
 - [Pi SDK Docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md)
-- Migrated from: [`extensions.md`](\1/)
+- Migrated from: [`extensions.md`](../extensions.md)

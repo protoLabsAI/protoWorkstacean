@@ -6,7 +6,7 @@
  *
  * Responsibilities:
  *   1. Load ceremony YAML files from workspace/ceremonies/ and
- *      .automaker/projects/{slug}/ceremonies/
+ *      .proto/projects/{slug}/ceremonies/
  *   2. Schedule cron timers for enabled ceremonies
  *   3. Hot-reload new/updated ceremony files (5-second poll)
  *   4. Publish ceremony.{id}.execute events when cron fires
@@ -86,7 +86,7 @@ export class CeremonyPlugin implements Plugin {
     this.workspaceDir = resolve(options?.workspaceDir ?? "workspace");
     this.projectsBaseDir = options?.projectsBaseDir
       ? resolve(options.projectsBaseDir)
-      : join(dirname(this.workspaceDir), ".automaker", "projects");
+      : join(dirname(this.workspaceDir), ".proto", "projects");
     this.defaultsDir = join(dirname(new URL(import.meta.url).pathname), "ceremonies", "defaults");
 
     this.loader = new CeremonyYamlLoader(this.workspaceDir, this.projectsBaseDir);

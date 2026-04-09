@@ -13,9 +13,9 @@ Receives GitHub webhook events and routes `@mention` comments to the agent fleet
   → GitHub sends POST /webhook/github
     → GitHubPlugin validates HMAC-SHA256 signature
       → Publishes message.inbound.github.{owner}.{repo}.{event}.{number}
-        → A2APlugin routes to Quinn (skillHint: bug_triage / pr_review)
+        → RouterPlugin routes to Quinn (skillHint: bug_triage / pr_review)
           → Quinn processes and responds
-            → A2APlugin publishes message.outbound.github.{owner}.{repo}.{number}
+            → RouterPlugin publishes message.outbound.github.{owner}.{repo}.{number}
               → GitHubPlugin posts reply as GitHub comment
 ```
 
@@ -40,7 +40,7 @@ Place a `github.yaml` in your workspace directory (default: `workspace/github.ya
 mentionHandle: "@quinn"
 
 # Skill routed to per GitHub event type.
-# Becomes the skillHint on the bus message — tells A2APlugin which agent to call.
+# Becomes the skillHint on the bus message — tells RouterPlugin which agent to call.
 skillHints:
   issue_comment: bug_triage              # @mention in a comment on an issue
   issues: bug_triage                     # @mention in the body of a new issue

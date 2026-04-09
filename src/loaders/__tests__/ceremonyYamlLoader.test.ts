@@ -210,7 +210,7 @@ enabled: true
     );
 
     // Project override
-    const projectDir = join(TEST_DIR, "..", ".automaker", "projects", "my-project", "ceremonies");
+    const projectDir = join(TEST_DIR, "..", ".proto", "projects", "my-project", "ceremonies");
     mkdirSync(projectDir, { recursive: true });
     writeFileSync(
       join(projectDir, "board.health.yaml"),
@@ -234,7 +234,7 @@ enabled: true
     expect(ceremony!.targets).toEqual(["my-project"]);
 
     // Cleanup project dir
-    rmSync(join(TEST_DIR, "..", ".automaker"), { recursive: true, force: true });
+    rmSync(join(TEST_DIR, "..", ".proto"), { recursive: true, force: true });
   });
 
   test("skips invalid YAML files without crashing", () => {

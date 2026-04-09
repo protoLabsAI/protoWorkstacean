@@ -1,3 +1,7 @@
+---
+title: Bus Topics Reference
+---
+
 # Bus Topics Reference
 
 All bus topics published and subscribed across all plugins and subsystems. Topic patterns use `#` as a multi-segment wildcard (MQTT-style). `{variable}` denotes a dynamic segment.

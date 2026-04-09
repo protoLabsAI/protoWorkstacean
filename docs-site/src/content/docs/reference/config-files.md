@@ -306,4 +306,4 @@ lastFired: "2026-04-01T14:00:00.000Z"   # auto-updated by SchedulerPlugin
 
 ## workspace/plugins/{name}.ts
 
-Workspace plugins are TypeScript/JavaScript files exporting a default object implementing the `Plugin` interface. Loaded on container startup. See [`reference/plugins.md`](\1/) for the full interface contract.
+Workspace plugins are TypeScript/JavaScript files exporting a default object implementing the `Plugin` interface. Loaded on container startup. See [`reference/plugins.md`](plugins.md) for the full interface contract.

@@ -1,3 +1,7 @@
+---
+title: Plugin System
+---
+
 # Plugin System
 
 ## The plugin interface

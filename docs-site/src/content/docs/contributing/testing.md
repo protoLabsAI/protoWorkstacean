@@ -101,11 +101,13 @@ const dataDir = join(testDir, "data");
 // 2. Wire up plugins
 const bus = new InMemoryEventBus();
 const logger = new LoggerPlugin(dataDir);
-const agent = new AgentPlugin(workspaceDir, dataDir);
+const router = new RouterPlugin(workspaceDir);
+const dispatcher = new SkillDispatcherPlugin();
 const scheduler = new SchedulerPlugin(dataDir);
 
 logger.install(bus);
-agent.install(bus);
+router.install(bus);
+dispatcher.install(bus);
 scheduler.install(bus);
 
 // 3. Publish test message

@@ -1,3 +1,7 @@
+---
+title: Your First GOAP Goal
+---
+
 # Your First GOAP Goal
 
 This tutorial walks through the complete lifecycle of a GOAP goal: defining a goal, writing a matching action, watching the world engine detect a violation, and seeing the action dispatched.

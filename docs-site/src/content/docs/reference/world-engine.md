@@ -6,7 +6,7 @@ title: World Engine Reference
 
 _This is a reference doc. It covers schemas, formats, API surface, and bus topics — not conceptual explanations._
 
-See also: [`explanation/world-engine-concepts.md`](\1/) for the design rationale behind these components.
+See also: [`explanation/world-engine-concepts.md`](../explanation/world-engine-concepts.md) for the design rationale behind these components.
 
 ---
 

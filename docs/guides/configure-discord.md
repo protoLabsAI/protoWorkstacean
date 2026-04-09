@@ -1,3 +1,7 @@
+---
+title: Discord Plugin
+---
+
 # Discord Plugin
 
 Bridges Discord to the Workstacean bus. @mentions and slash commands become inbound bus messages; agent replies come back as Discord responses.
@@ -7,13 +11,13 @@ Bridges Discord to the Workstacean bus. @mentions and slash commands become inbo
 ```
 User @mentions Quinn in Discord
   → DiscordPlugin publishes message.inbound.discord.{channelId}
-    → A2APlugin routes to Quinn or Ava based on skillHint / keywords
+    → RouterPlugin routes to Quinn or Ava based on skillHint / keywords
       → Agent processes, publishes message.outbound.discord.{channelId}
         → DiscordPlugin sends Discord reply (👀 → ✅)
 
 User runs /quinn bugs
   → DiscordPlugin publishes message.inbound.discord.slash.{interactionId}
-    → A2APlugin routes to Quinn (skillHint: bug_triage)
+    → RouterPlugin routes to Quinn (skillHint: bug_triage)
       → Agent replies
         → DiscordPlugin calls interaction.editReply()
 ```
@@ -110,7 +114,7 @@ Array of regex strings (escaped for YAML). Matched case-insensitively. Matching 
 | `name` | Yes | Subcommand name (lowercase, no spaces) |
 | `description` | Yes | Shown in Discord's command picker |
 | `content` | Yes | Text sent as the message payload. Use `{optionName}` for interpolation. |
-| `skillHint` | No | Tells A2APlugin which skill to route to |
+| `skillHint` | No | Tells RouterPlugin which skill to route to |
 | `options` | No | Slash command options (see below) |
 
 #### `commands[].subcommands[].options[]`
@@ -211,7 +215,7 @@ Reacting to any message with 📋 triggers a `bug_triage` skill request using th
 
 ## Cron Integration
 
-Cron events routed through A2APlugin that include a `channel` in their payload are delivered to Discord via push:
+Cron events routed through RouterPlugin that include a `channel` in their payload are delivered to Discord via push:
 
 ```yaml
 # workspace/crons/daily-digest.yaml

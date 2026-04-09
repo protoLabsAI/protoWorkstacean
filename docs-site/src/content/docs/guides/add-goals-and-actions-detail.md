@@ -47,7 +47,7 @@ plugin.install(bus);
 
 ## Goals File Format
 
-See [goals-schema.md](\1/) for the full schema reference.
+See [goals-schema.md](./goals-schema.md) for the full schema reference.
 
 Example `workspace/goals.yaml`:
 
@@ -114,7 +114,7 @@ When a goal is violated, the plugin emits a `world.goal.violated` event:
 }
 ```
 
-See [events.md](\1/) for the full event catalog.
+See [events.md](./events.md) for the full event catalog.
 
 ## Observe-Only Mode
 

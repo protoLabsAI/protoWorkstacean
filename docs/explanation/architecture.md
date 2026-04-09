@@ -1,3 +1,7 @@
+---
+title: Architecture
+---
+
 # Architecture
 
 _Conceptual overview of how protoWorkstacean's components connect and why they are designed the way they are._

@@ -1,3 +1,7 @@
+---
+title: Agent Skills Reference
+---
+
 # Agent Skills Reference
 
 _This is a reference doc. It lists all skills in the agent registry, their routing keywords, and the agents that handle them._
@@ -32,7 +36,7 @@ Skills are matched in priority order:
 
 **Chain:** `bug_triage → ava/manage_feature`
 
-After Quinn completes `bug_triage`, A2APlugin automatically calls Ava's `manage_feature` with Quinn's response + original context. One level deep only.
+After Quinn completes `bug_triage`, SkillDispatcherPlugin automatically calls Ava's `manage_feature` with Quinn's response + original context. One level deep only.
 
 ---
 

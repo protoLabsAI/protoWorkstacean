@@ -8,7 +8,7 @@ _This is a reference doc. It covers the OnboardingPlugin pipeline, request schem
 
 ---
 
-See also: [`how-to/onboard-a-project.md`](\1/) for step-by-step operational procedures.
+See also: [`how-to/onboard-a-project.md`](../how-to/onboard-a-project.md) for step-by-step operational procedures.
 
 ---
 
@@ -214,6 +214,6 @@ bun scripts/backfill-plane.ts
 - [`lib/project-schema.ts`](../../lib/project-schema.ts) — Zod schema for `projects.yaml` entries
 - [`lib/plane-client.ts`](../../lib/plane-client.ts) — Plane REST API client
 - [`scripts/backfill-plane.ts`](../../scripts/backfill-plane.ts) — Plane backfill script
-- [`how-to/onboard-a-project.md`](\1/) — operational how-to
-- [`reference/bus-topics.md`](\1/) — full bus topic registry
-- [`reference/config-files.md`](\1/) — workspace config file reference
+- [`how-to/onboard-a-project.md`](../how-to/onboard-a-project.md) — operational how-to
+- [`reference/bus-topics.md`](bus-topics.md) — full bus topic registry
+- [`reference/config-files.md`](config-files.md) — workspace config file reference

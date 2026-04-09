@@ -1,3 +1,7 @@
+---
+title: Configuration Files Reference
+---
+
 # Configuration Files Reference
 
 _This is a reference doc. It covers all `workspace/*.yaml` schemas and environment variables for each plugin._

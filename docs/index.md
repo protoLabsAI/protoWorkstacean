@@ -1,3 +1,7 @@
+---
+title: protoWorkstacean Docs
+---
+
 # protoWorkstacean Docs
 
 **protoWorkstacean** is a homeostatic agent orchestration platform. It monitors world state, evaluates goals against it, and drives the protoLabs agent fleet to close deviations — continuously and autonomously.

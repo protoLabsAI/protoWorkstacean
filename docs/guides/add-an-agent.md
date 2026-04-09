@@ -1,3 +1,7 @@
+---
+title: Add an Agent
+---
+
 # Add an Agent
 
 protoWorkstacean supports two agent patterns:

@@ -1,3 +1,7 @@
+---
+title: Tutorials
+---
+
 # Tutorials
 
 Step-by-step walkthroughs for learning protoWorkstacean from scratch.

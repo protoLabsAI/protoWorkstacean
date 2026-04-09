@@ -15,7 +15,7 @@ User: "daily at 8a send me the weather"
     → Publishes command.schedule to bus
       → SchedulerPlugin creates timer
         → [8am] Timer fires → publishes to cron.daily-weather
-          → AgentPlugin processes via handleCron()
+          → RouterPlugin processes via handleCron()
             → Agent fetches weather, composes response
               → Publishes to message.outbound.signal.{sender}
                 → SignalPlugin sends via HTTP

@@ -1,3 +1,7 @@
+---
+title: World Engine — Concepts
+---
+
 # World Engine — Concepts
 
 _This is an explanation doc. It covers the design decisions and mental models behind the World Engine — not the exact API surface._

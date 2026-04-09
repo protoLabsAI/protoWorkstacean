@@ -1,3 +1,7 @@
+---
+title: HTN Decomposition Guide
+---
+
 # HTN Decomposition Guide
 
 ## Hierarchy Levels

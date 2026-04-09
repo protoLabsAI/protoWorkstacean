@@ -11,7 +11,7 @@ export class GoalsLoader {
     this.workspaceDir = resolve(workspaceDir);
     this.projectsBaseDir = projectsBaseDir
       ? resolve(projectsBaseDir)
-      : join(resolve(workspaceDir), "..", ".automaker", "projects");
+      : join(resolve(workspaceDir), "..", ".proto", "projects");
   }
 
   /** Load global goals from workspace/goals.yaml */
@@ -24,7 +24,7 @@ export class GoalsLoader {
     return this._parseGoalsFile(goalsPath, "global");
   }
 
-  /** Load per-project goals from .automaker/projects/{slug}/goals.yaml */
+  /** Load per-project goals from .proto/projects/{slug}/goals.yaml */
   loadProject(projectSlug: string): Goal[] {
     const goalsPath = join(this.projectsBaseDir, projectSlug, "goals.yaml");
     if (!existsSync(goalsPath)) {

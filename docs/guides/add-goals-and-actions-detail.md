@@ -1,3 +1,7 @@
+---
+title: Goal Registry & Evaluator (Milestone 2)
+---
+
 # Goal Registry & Evaluator (Milestone 2)
 
 The Goal Evaluator is an observe-only plugin that continuously monitors world state

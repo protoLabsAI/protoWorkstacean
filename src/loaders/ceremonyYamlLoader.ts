@@ -1,6 +1,6 @@
 /**
  * CeremonyYamlLoader — scans workspace/ceremonies/ and
- * .automaker/projects/{slug}/ceremonies/ for ceremony YAML files.
+ * .proto/projects/{slug}/ceremonies/ for ceremony YAML files.
  *
  * Merges global and per-project ceremonies. Project-level ceremonies
  * with the same ID override global ones.
@@ -25,7 +25,7 @@ export class CeremonyYamlLoader {
     this.workspaceDir = resolve(workspaceDir);
     this.projectsBaseDir = projectsBaseDir
       ? resolve(projectsBaseDir)
-      : join(resolve(workspaceDir), "..", ".automaker", "projects");
+      : join(resolve(workspaceDir), "..", ".proto", "projects");
   }
 
   /** Load global ceremonies from workspace/ceremonies/ */
@@ -34,7 +34,7 @@ export class CeremonyYamlLoader {
     return this._loadFromDir(ceremoniesDir, "global");
   }
 
-  /** Load per-project ceremonies from .automaker/projects/{slug}/ceremonies/ */
+  /** Load per-project ceremonies from .proto/projects/{slug}/ceremonies/ */
   loadProject(projectSlug: string): Ceremony[] {
     const ceremoniesDir = join(this.projectsBaseDir, projectSlug, "ceremonies");
     return this._loadFromDir(ceremoniesDir, `project:${projectSlug}`);

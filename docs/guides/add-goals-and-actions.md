@@ -1,3 +1,7 @@
+---
+title: Add Goals and Actions
+---
+
 # Add Goals and Actions
 
 Goals define the invariants and thresholds the system must maintain. Actions define what to do when a goal is violated. Together they form the GOAP (Goal-Oriented Action Planning) loop.

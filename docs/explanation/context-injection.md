@@ -1,3 +1,7 @@
+---
+title: Context Injection — Quinn Codebase-Wide Review Context
+---
+
 # Context Injection — Quinn Codebase-Wide Review Context
 
 Quinn's vector context pipeline injects a `CODEBASE CONTEXT` block into review prompts,

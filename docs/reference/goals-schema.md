@@ -1,3 +1,7 @@
+---
+title: goals.yaml Schema Reference
+---
+
 # goals.yaml Schema Reference
 
 The `goals.yaml` file defines observable goals for the GoalEvaluatorPlugin.

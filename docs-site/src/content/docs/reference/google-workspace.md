@@ -175,6 +175,6 @@ The plugin refreshes the access token automatically. Tokens are cached in memory
 
 ## See also
 
-- [`docs/how-to/set-up-google-workspace.md`](\1/) — step-by-step OAuth2 setup
-- [`docs/reference/bus-topics.md`](\1/) — full bus topic catalogue
-- [`docs/reference/config-files.md`](\1/) — all workspace config files
+- [`docs/how-to/set-up-google-workspace.md`](../how-to/set-up-google-workspace.md) — step-by-step OAuth2 setup
+- [`docs/reference/bus-topics.md`](bus-topics.md) — full bus topic catalogue
+- [`docs/reference/config-files.md`](config-files.md) — all workspace config files

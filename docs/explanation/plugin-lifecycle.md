@@ -1,3 +1,7 @@
+---
+title: Plugin Lifecycle — How Plugins Register, Subscribe, and Reload
+---
+
 # Plugin Lifecycle — How Plugins Register, Subscribe, and Reload
 
 _This is an explanation doc. It explains how the plugin system works conceptually, not how to write a specific plugin._

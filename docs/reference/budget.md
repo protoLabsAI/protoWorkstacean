@@ -1,3 +1,7 @@
+---
+title: Budget System — Architecture & Design
+---
+
 # Budget System — Architecture & Design
 
 ## Overview

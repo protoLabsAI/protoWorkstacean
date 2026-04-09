@@ -1,3 +1,7 @@
+---
+title: Plane Integration
+---
+
 # Plane Integration
 
 Plane is the project management layer for protoLabs. It acts as the human-facing strategic interface: ideas become Plane issues, Plane issues become SPARC PRDs, and approved PRDs become board features in the protoLabs Studio backlog. Workstacean is the bridge.
@@ -76,7 +80,7 @@ Only `issue` events (create/update/delete) are subscribed. Project/cycle/module 
       skillHint: "plan"
       correlationId: plane-{issueId}
    f. Store {planeIssueId, planeProjectId} in pendingIssues Map keyed by correlationId
-4. A2APlugin routes to Ava (skillHint "plan" → plan skill)
+4. RouterPlugin routes to Ava (skillHint "plan" → plan skill)
 5. Ava runs SPARC PRD + antagonistic review (Ava operational lens + Jon strategic lens)
 6. HITL gate:
    - "auto" label → skip gate, emit HITLResponse(approve) internally

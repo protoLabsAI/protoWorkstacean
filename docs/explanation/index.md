@@ -1,3 +1,7 @@
+---
+title: Explanation
+---
+
 # Explanation
 
 These docs explain the *why* behind protoWorkstacean's architecture. Read them when you want to understand the reasoning behind a design decision, not just what the system does.

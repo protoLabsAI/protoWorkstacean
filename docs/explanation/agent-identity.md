@@ -1,3 +1,7 @@
+---
+title: Agent Identity — Multi-Bot Design and Per-Agent Tokens
+---
+
 # Agent Identity — Multi-Bot Design and Per-Agent Tokens
 
 _This is an explanation doc. It explains why the fleet uses separate GitHub App identities per agent and how that affects message delivery._
@@ -17,9 +21,9 @@ This matters because:
 
 ## How it works: GitHub App identities
 
-Quinn and Ava each have their own GitHub App installation. Each app has an App ID and a private key (PKCS#1 PEM). The A2APlugin uses these to generate short-lived JWT tokens for GitHub API calls.
+Quinn and Ava each have their own GitHub App installation. Each app has an App ID and a private key (PKCS#1 PEM). RouterPlugin uses these to generate short-lived JWT tokens for GitHub API calls.
 
-When A2APlugin receives a response from Quinn:
+When RouterPlugin receives a response from Quinn:
 1. It looks up the GitHub context from the inbound `correlationId` (owner, repo, number)
 2. It generates a JWT using `QUINN_APP_ID` + `QUINN_APP_PRIVATE_KEY`
 3. It exchanges the JWT for a GitHub installation token
@@ -88,4 +92,4 @@ No secrets are stored in this repository. The `workspace/agents.yaml` file uses 
 3. Store `APP_ID` and `APP_PRIVATE_KEY` in Infisical
 4. Add to `docker-compose.yml` as env vars for the `workstacean` service
 5. Add `appId` and `appPrivateKeyEnv` fields to the agent entry in `workspace/agents.yaml`
-6. Update the A2APlugin's comment posting logic to use the new app credentials for this agent's skill responses
+6. Update RouterPlugin's comment posting logic to use the new app credentials for this agent's skill responses
