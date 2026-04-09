@@ -38,6 +38,8 @@ import {
 } from "discord.js";
 import type { EventBus, BusMessage, Plugin, HITLRequest } from "../types.ts";
 import type { HITLPlugin } from "./hitl.ts";
+import { ConversationManager } from "../conversation/conversation-manager.ts";
+import { ConversationTracer, type TurnData } from "../conversation/conversation-tracer.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -223,6 +225,12 @@ export class DiscordPlugin implements Plugin {
   // correlationId → { message, replyTopic } for active HITL approvals
   private pendingHITLMessages = new Map<string, { message: Message; replyTopic: string }>();
 
+  // Multi-turn conversation tracking
+  private conversationManager = new ConversationManager();
+  private conversationTracer = new ConversationTracer();
+  // correlationId (= conversationId for conv turns) → pending Langfuse turn data
+  private pendingTurns = new Map<string, TurnData>();
+
   // Runtime rate-limit state (built from config on install)
   private rateLimits = new Map<string, number[]>();
   private rateMaxMessages = 5;
@@ -238,6 +246,15 @@ export class DiscordPlugin implements Plugin {
     this.dataDir = dataDir ? resolve(dataDir) : null;
     this.channelRegistry = channelRegistry;
     this.hitlPlugin = hitlPlugin;
+
+    // When a conversation times out, finalize its Langfuse trace
+    this.conversationManager.setTimeoutCallback((entry) => {
+      this.conversationTracer.endTrace({
+        conversationId: entry.conversationId,
+        turnCount: entry.turnNumber,
+        endedBy: "timeout",
+      }).catch(err => console.error("[discord] Langfuse endTrace error:", err));
+    });
   }
 
   install(bus: EventBus): void {
@@ -282,9 +299,20 @@ export class DiscordPlugin implements Plugin {
 
       const isMentioned = message.mentions.has(this.client.user!);
       const isDM = !message.guild;
-      if (!isMentioned && !isDM) return;
-
       const userId = message.author.id;
+
+      // Look up channel config early — needed for conversation settings check
+      const channelEntry = this.channelRegistry?.findByTopic(`message.inbound.discord.${message.channelId}`);
+      const convConfig = channelEntry?.conversation;
+      const convEnabled = convConfig?.enabled === true;
+
+      // Allow continuing an active conversation without an @mention
+      const continueWithoutMention =
+        convEnabled &&
+        convConfig?.requireMentionAfterFirst !== true &&
+        this.conversationManager.has(message.channelId, userId);
+
+      if (!isMentioned && !isDM && !continueWithoutMention) return;
 
       if (!this._isAdmin(userId)) {
         console.log(`[discord] message from ${userId} ignored — not in admins list`);
@@ -302,11 +330,27 @@ export class DiscordPlugin implements Plugin {
 
       await message.react("👀").catch(() => {});
 
-      const correlationId = makeId();
+      // Determine correlationId — stable across turns when conversation is enabled
+      let correlationId: string;
+      let isNewConversation = false;
+      let turnNumber = 1;
+
+      if (convEnabled) {
+        const conv = this.conversationManager.getOrCreate(
+          message.channelId,
+          userId,
+          convConfig?.timeoutMs ?? 5 * 60_000,
+          channelEntry?.agent,
+        );
+        correlationId = conv.conversationId;
+        isNewConversation = conv.isNew;
+        turnNumber = conv.turnNumber;
+      } else {
+        correlationId = makeId();
+      }
+
       pendingReplies.set(correlationId, { message });
 
-      // Track which agent should respond (from channels.yaml assignment)
-      const channelEntry = this.channelRegistry?.findByTopic(`message.inbound.discord.${message.channelId}`);
       if (channelEntry?.agent) {
         this.pendingAgents.set(correlationId, channelEntry.agent);
       }
@@ -314,6 +358,28 @@ export class DiscordPlugin implements Plugin {
       const content = message.cleanContent
         .replace(/<@!?\d+>/g, "")
         .trim();
+
+      // Langfuse conversation tracing
+      if (convEnabled) {
+        if (isNewConversation) {
+          this.conversationTracer.startTrace({
+            conversationId: correlationId,
+            userId,
+            channelId: message.channelId,
+            agentName: channelEntry?.agent,
+            platform: "discord",
+          }).catch(err => console.error("[discord] Langfuse startTrace error:", err));
+        }
+        // Store turn data — output is filled in when the agent responds
+        this.pendingTurns.set(correlationId, {
+          conversationId: correlationId,
+          turnNumber,
+          input: content,
+          userId,
+          agentName: channelEntry?.agent,
+          startTime: new Date(),
+        });
+      }
 
       bus.publish(`message.inbound.discord.${message.channelId}`, {
         id: message.id,
@@ -549,6 +615,17 @@ export class DiscordPlugin implements Plugin {
           pendingReplies.delete(correlationId);
           this.pendingAgents.delete(correlationId);
 
+          // Finalize Langfuse generation for this conversation turn
+          const pendingTurn = this.pendingTurns.get(correlationId);
+          if (pendingTurn) {
+            this.pendingTurns.delete(correlationId);
+            this.conversationTracer.traceTurn({
+              ...pendingTurn,
+              output: content === "(no response)" ? undefined : content,
+              endTime: new Date(),
+            }).catch(err => console.error("[discord] Langfuse traceTurn error:", err));
+          }
+
           if (pending.interaction) {
             // Slash command interactions always use the bus client
             await pending.interaction.editReply({ content }).catch(console.error);
@@ -677,6 +754,8 @@ export class DiscordPlugin implements Plugin {
   }
 
   uninstall(): void {
+    this.conversationManager.destroy();
+    this.pendingTurns.clear();
     this.pendingHITLMessages.clear();
 
     // Destroy agent pool clients

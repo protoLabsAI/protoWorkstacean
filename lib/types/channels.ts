@@ -9,6 +9,33 @@
 
 export type ChannelPlatform = "discord" | "github" | "signal" | "slack" | "plane";
 
+/**
+ * Per-channel conversation settings (Discord only for now).
+ *
+ * When enabled, the channel maintains a stateful session per user. Messages
+ * from the same user in the same channel share a stable correlationId, which
+ * the A2A layer uses as the conversation contextId — giving agents full
+ * multi-turn memory.
+ */
+export interface ConversationConfig {
+  /** Enable multi-turn conversation mode. Default: false. */
+  enabled?: boolean;
+
+  /**
+   * Inactivity timeout in milliseconds before the session expires.
+   * A new @mention starts a fresh conversation after expiry.
+   * Default: 300000 (5 minutes).
+   */
+  timeoutMs?: number;
+
+  /**
+   * When false (default), the user can continue chatting without re-mentioning
+   * the bot once a conversation is active. Set to true to require @mention
+   * on every message.
+   */
+  requireMentionAfterFirst?: boolean;
+}
+
 export interface Channel {
   /** Unique identifier for this channel definition (used in logs and API responses). */
   id: string;
@@ -27,6 +54,12 @@ export interface Channel {
 
   /** Set false to disable this channel without removing the entry. Default: true. */
   enabled?: boolean;
+
+  /**
+   * Multi-turn conversation settings.
+   * When configured, the channel maintains a stateful session per user.
+   */
+  conversation?: ConversationConfig;
 
   // ── Discord ──────────────────────────────────────────────────────────────────
 

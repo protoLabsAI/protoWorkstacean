@@ -2,11 +2,11 @@
 title: Agent Skills Reference
 ---
 
-_This is a reference doc. It lists all skills in the agent registry, their routing keywords, and the agents that handle them._
+_Skills are the vocabulary of the agent router. Each skill is a named capability that an agent declares. The router matches inbound messages to skills and dispatches accordingly._
 
 ---
 
-Skills are declared in `workspace/agents/<name>.yaml` (in-process agents) or `workspace/agents.yaml` (external A2A agents). The `AgentRuntimePlugin` resolves skills from the per-agent YAML files first; unknown skills fall through to `SkillBrokerPlugin` for external dispatch.
+Skills are declared in `workspace/agents/<name>.yaml` (in-process agents) or `workspace/agents.yaml` (external A2A agents). The `AgentRuntimePlugin` resolves skills from per-agent YAML files first; unknown skills fall through to `SkillBrokerPlugin` for external dispatch.
 
 ---
 
@@ -15,79 +15,28 @@ Skills are declared in `workspace/agents/<name>.yaml` (in-process agents) or `wo
 Skills are matched in priority order:
 
 1. **Explicit hint** — `payload.skillHint` bypasses keyword matching (set by GitHubPlugin, DiscordPlugin, PlanePlugin)
-2. **Keyword match** — content scanned against the keyword table below
-3. **Default** — falls back to Ava
+2. **Keyword match** — content scanned against the keyword table in each agent's YAML
+3. **Default** — falls back to the agent declared as `default: true` in `agents.yaml`
 
 ---
 
-## Skill registry
+## Defining skills
 
-### Quinn (`http://quinn:7870/a2a`)
+Each skill entry in an agent's YAML declares:
 
-| Skill | Keywords | Description |
-|-------|----------|-------------|
-| `bug_triage` | bug, issue, broken, crash, error, fail, exception, triage, TypeError, ReferenceError | Classify and triage a bug report; optionally file a board item via `file_bug` tool |
-| `qa_report` | report, qa, digest, quality, /report | Generate a QA status digest for a project or sprint |
-| `board_audit` | audit, board, backlog, sprint, features, /audit | Audit the project board for staleness and hygiene |
-| `pr_review` | pr, pull request, review, merge, ci, /review | Full PR review with vector context (past decisions + similar patterns) |
-| `provision_discord` | (chain only) | Create Discord category + channels for a new project; called by chain from `onboard_project` |
+```yaml
+skills:
+  - name: my_skill
+    description: One-line description used for keyword extraction
+    keywords:         # optional — override automatic keyword extraction
+      - foo
+      - bar
+    chain:            # optional — auto-dispatch to another agent after completion
+      agent: other-agent
+      skill: followup_skill
+```
 
-**Chain:** `bug_triage → ava/manage_feature`
-
-After Quinn completes `bug_triage`, SkillDispatcherPlugin automatically calls Ava's `manage_feature` with Quinn's response + original context. One level deep only.
-
----
-
-### Ava (`http://automaker-server:3008/a2a`)
-
-| Skill | Keywords | Description |
-|-------|----------|-------------|
-| `sitrep` | status, sitrep, situation, summary, /sitrep | Current sprint/project status summary |
-| `manage_feature` | create feature, new feature, unblock, assign, move to, add to board | Create or update a feature on the board |
-| `board_health` | blocked, stalled, stuck, health, unhealthy | Surface blocked or stalled features |
-| `auto_mode` | auto mode, start auto, stop auto, pause auto | Toggle autonomous background work mode |
-| `onboard_project` | onboard, new project, add project, /onboard | Full project onboarding chain (GitHub + Plane + Discord) |
-| `plan` | idea, plan, build, proposal, project idea, /plan | Generate SPARC PRD + antagonistic review + HITL gate |
-| `plan_resume` | (not keyword-matched) | Resume a plan after HITLResponse arrives on bus with matching `correlationId` |
-
----
-
-### Frank (`http://frank:7880/a2a`)
-
-| Skill | Keywords | Description |
-|-------|----------|-------------|
-| `infra_health` | infra, deploy, monitoring, node, container | Infrastructure health check |
-| `deploy` | deploy | Deploy a service or artifact |
-| `monitoring` | monitoring | Check monitoring dashboards and alerts |
-
----
-
-### Jon (GTM)
-
-| Skill | Keywords | Description |
-|-------|----------|-------------|
-| `market_review` | market, competition | Market landscape review |
-| `positioning` | positioning | Product positioning analysis |
-| `antagonistic_review` | (chain only) | Strategic lens review; called by Ava during `plan` skill |
-
----
-
-### Cindi (GTM)
-
-| Skill | Keywords | Description |
-|-------|----------|-------------|
-| `blog` | blog, post | Write or review blog content |
-| `seo` | seo, search | SEO analysis |
-| `content_review` | content review | Review content for quality and messaging |
-
----
-
-### Researcher (Knowledge)
-
-| Skill | Keywords | Description |
-|-------|----------|-------------|
-| `research` | research, investigate, deep dive, knowledge | Deep research with entity extraction |
-| `entity_extract` | entity, extract | Extract structured entities from text |
+The `description` is used both for human documentation and as the source for automatic keyword extraction at startup.
 
 ---
 
@@ -95,12 +44,12 @@ After Quinn completes `bug_triage`, SkillDispatcherPlugin automatically calls Av
 
 ### In-process agent (recommended)
 
-Create `workspace/agents/<name>.yaml` (copy from the `.example` template):
+Create `workspace/agents/<name>.yaml`:
 
 ```yaml
 name: my-agent
 role: general                   # orchestrator | qa | devops | content | research | general
-model: claude-sonnet-4-6        # gateway model alias
+model: claude-sonnet-4-6
 systemPrompt: |
   You are MyAgent. Your job is...
 tools:
@@ -110,20 +59,22 @@ maxTurns: 10
 skills:
   - name: my_skill
     description: Does the thing
+    keywords:
+      - the thing
+      - do thing
 ```
 
-That's it. `AgentRuntimePlugin` picks up the file on next restart and registers `my_skill` for routing.
+`AgentRuntimePlugin` picks up the file on next restart and registers `my_skill` for routing.
 
-Available tools whitelist: `publish_event`, `get_world_state`, `get_incidents`, `report_incident`, `get_ceremonies`, `run_ceremony`. The agent also has access to all proto CLI built-in tools (file read/write, bash, search) regardless of the `tools` whitelist.
+Available tools: `publish_event`, `get_world_state`, `get_incidents`, `report_incident`, `get_ceremonies`, `run_ceremony`.
 
-### External A2A agent (legacy / remote)
+### External A2A agent
 
 1. Add the agent to `workspace/agents.yaml`:
 
 ```yaml
 agents:
   - name: my-agent
-    team: dev
     url: http://my-agent:PORT/a2a
     apiKeyEnv: MY_AGENT_API_KEY
     skills:
@@ -132,7 +83,7 @@ agents:
 
 2. Restart: `docker restart workstacean`
 
-The `SkillBrokerPlugin` dispatches via JSON-RPC 2.0. In-process agents take priority for any skill they declare — external A2A is the fallback.
+`SkillBrokerPlugin` dispatches via JSON-RPC 2.0. In-process agents take priority for any skill they declare — external A2A is the fallback.
 
 ---
 
@@ -164,4 +115,4 @@ External agent calls use JSON-RPC 2.0 `message/send`:
 }
 ```
 
-Timeout: 120s per agent call. `contextId` is derived from the message channel so conversation threads persist.
+Timeout: 120s per agent call. `contextId` is derived from the message channel so conversation context persists across turns.
