@@ -10,10 +10,10 @@ These docs explain the *why* behind protoWorkstacean's architecture. Read them w
 
 | Document | What it explains |
 |----------|-----------------|
-| [Executor layer](./executor-layer.md) | Why the executor layer exists, how resolution works, the registrar pattern, and why `SkillDispatcherPlugin` is the sole `agent.skill.request` subscriber |
-| [World engine](./world-engine.md) | Why `WorldState` is a generic record, the GOAP loop design, domain discovery rationale |
-| [Distributed tracing](./distributed-tracing.md) | How `correlationId` (trace-id) and `parentId` (span-id) flow from the bus through RouterPlugin, A2AExecutor, ava, and back |
-| [Plugin system](./plugin-system.md) | The plugin lifecycle, core vs integration vs workspace plugins, ordering guarantees |
+| [Executor layer](\1/) | Why the executor layer exists, how resolution works, the registrar pattern, and why `SkillDispatcherPlugin` is the sole `agent.skill.request` subscriber |
+| [World engine](\1/) | Why `WorldState` is a generic record, the GOAP loop design, domain discovery rationale |
+| [Distributed tracing](\1/) | How `correlationId` (trace-id) and `parentId` (span-id) flow from the bus through RouterPlugin, A2AExecutor, ava, and back |
+| [Plugin system](\1/) | The plugin lifecycle, core vs integration vs workspace plugins, ordering guarantees |
 
 ## Design philosophy
 

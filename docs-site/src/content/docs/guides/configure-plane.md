@@ -225,5 +225,5 @@ curl -s -X POST http://ava:3000/publish \
 3. Confirm HMAC validation, dedup check, and bus publish log lines.
 4. Wait for Ava to complete PRD generation (check Langfuse for the trace).
 5. An HITL embed should appear in the configured Discord channel (or reply to the Plane issue if rendered there).
-6. Approve via Discord or inject approval (see [hitl.md](hitl.md) for inject commands).
+6. Approve via Discord or inject approval (see [hitl.md](\1/) for inject commands).
 7. Confirm Plane issue state changes to "In Progress" and a comment is posted.

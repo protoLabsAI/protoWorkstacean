@@ -7,8 +7,8 @@ title: Quinn — PR Review Bot Reference
 _This is a reference doc. It covers Quinn's review pipeline, vector context system, budget tracking, configuration, and bus topics._
 
 See also:
-- [`how-to/use-quinn-pr-review.md`](../how-to/use-quinn-pr-review.md) — setup and operation guide
-- [`reference/bus-topics.md`](bus-topics.md) — full bus topic listing
+- [`how-to/use-quinn-pr-review.md`](\1/) — setup and operation guide
+- [`reference/bus-topics.md`](\1/) — full bus topic listing
 
 ---
 

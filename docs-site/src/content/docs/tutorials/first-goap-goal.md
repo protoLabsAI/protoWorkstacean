@@ -10,7 +10,7 @@ You will build a simple goal that monitors a custom HTTP endpoint reporting a se
 
 ## Prerequisites
 
-- protoWorkstacean running locally (see [Getting Started](./getting-started.md))
+- protoWorkstacean running locally (see [Getting Started](\1/))
 - A domain that reports numeric data — this tutorial uses a mock endpoint, but the same pattern applies to any HTTP collector
 - A Discord channel configured (optional — the action can target any topic)
 
@@ -160,6 +160,6 @@ actions.yaml        → PlannerPluginL0 selects alert.error_rate_high
 
 ## Next steps
 
-- [Add goals and actions](../guides/add-goals-and-actions.md) — full reference for goal types, operators, and effect types
-- [Add a domain](../guides/add-a-domain.md) — ENV interpolation, custom headers, tick intervals
-- [Create a ceremony](../guides/create-a-ceremony.md) — scheduled skills that run on cron
+- [Add goals and actions](\1/) — full reference for goal types, operators, and effect types
+- [Add a domain](\1/) — ENV interpolation, custom headers, tick intervals
+- [Create a ceremony](\1/) — scheduled skills that run on cron

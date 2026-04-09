@@ -138,7 +138,7 @@ If `metadata.failed` is `true`, check:
 
 ## Related
 
-- [Your first GOAP goal](../tutorials/first-goap-goal.md) — use a domain in a goal selector
-- [Add goals and actions](./add-goals-and-actions.md) — reference for selectors and operators
-- [Explanation: world engine](../explanation/world-engine.md) — design rationale
-- [Workspace files reference](../reference/workspace-files.md)
+- [Your first GOAP goal](\1/) — use a domain in a goal selector
+- [Add goals and actions](\1/) — reference for selectors and operators
+- [Explanation: world engine](\1/) — design rationale
+- [Workspace files reference](\1/)
