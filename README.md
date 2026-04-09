@@ -11,7 +11,7 @@ External surfaces (GitHub, Discord, Plane, HTTP)
   → Interface plugins → Event Bus
     → RouterPlugin → agent.skill.request
       → SkillDispatcherPlugin → ExecutorRegistry
-        → ProtoSdkExecutor (in-process Claude Code SDK)
+        → ProtoSdkExecutor (in-process @protolabsai/sdk)
         → A2AExecutor (HTTP/JSON-RPC 2.0 → ava)
 
 World engine loop (parallel):

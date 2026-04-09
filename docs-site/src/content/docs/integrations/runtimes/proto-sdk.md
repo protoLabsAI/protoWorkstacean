@@ -2,7 +2,7 @@
 title: ProtoSdk Runtime
 ---
 
-`ProtoSdkExecutor` runs a skill as an in-process Claude Code SDK session. This is the default runtime for all new agents defined in `workspace/agents/*.yaml`.
+`ProtoSdkExecutor` runs a skill as an in-process @protolabsai/sdk session. This is the default runtime for all new agents defined in `workspace/agents/*.yaml`.
 
 **Type string**: `proto-sdk`
 **Package**: `@protolabsai/sdk`
@@ -13,7 +13,7 @@ title: ProtoSdk Runtime
 1. `AgentRuntimePlugin` scans `workspace/agents/` on startup and creates one `ProtoSdkExecutor` per YAML file
 2. Each executor is registered in `ExecutorRegistry` for the skills listed in the agent's YAML
 3. When `SkillDispatcherPlugin` routes a `SkillRequest` to this executor, it:
-   - Instantiates a Claude Code SDK session with the agent's `systemPrompt`
+   - Instantiates a @protolabsai/sdk session with the agent's `systemPrompt`
    - Injects the whitelisted `tools` as MCP tools
    - Runs up to `maxTurns` agentic turns
    - Returns the final assistant message as `SkillResult.text`

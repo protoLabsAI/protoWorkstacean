@@ -21,4 +21,4 @@ protoWorkstacean is built around three ideas:
 
 2. **World state is ground truth.** The GOAP loop does not make decisions based on ephemeral signals. It polls durable HTTP domains, computes a world state snapshot, and evaluates goals against that snapshot. Goals are declarative invariants — the system continuously works to satisfy them.
 
-3. **Executors are interchangeable.** Whether a skill runs in-process via the Claude Code SDK or over HTTP via A2A JSON-RPC, the bus sees no difference. The executor layer is an internal seam, not an external protocol boundary.
+3. **Executors are interchangeable.** Whether a skill runs in-process via @protolabsai/sdk or over HTTP via A2A JSON-RPC, the bus sees no difference. The executor layer is an internal seam, not an external protocol boundary.

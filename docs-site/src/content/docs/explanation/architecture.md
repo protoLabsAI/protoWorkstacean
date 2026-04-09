@@ -38,7 +38,7 @@ flowchart TD
     end
 
     subgraph Executors["Executor implementations"]
-        PSE["ProtoSdkExecutor\nClaude Code SDK\nin-process"]
+        PSE["ProtoSdkExecutor\n@protolabsai/sdk\nin-process"]
         A2AE["A2AExecutor\nHTTP JSON-RPC 2.0\nX-Correlation-Id · X-Parent-Id"]
     end
 

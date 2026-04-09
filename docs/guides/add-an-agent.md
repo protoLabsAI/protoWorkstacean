@@ -4,7 +4,7 @@ title: Add an Agent
 
 protoWorkstacean supports two agent patterns:
 
-- **In-process** — the agent runs inside the workstacean process, powered by `@protolabsai/sdk`. Skills execute as Claude Code SDK sessions with a configurable system prompt and tool whitelist.
+- **In-process** — the agent runs inside the workstacean process, powered by `@protolabsai/sdk`. Skills execute as @protolabsai/sdk sessions with a configurable system prompt and tool whitelist.
 - **External A2A** — the agent runs in a separate service (e.g. ava/protoMaker). protoWorkstacean calls it over HTTP using JSON-RPC 2.0. This is the right choice for stateful agents with their own infrastructure.
 
 Both patterns register into `ExecutorRegistry` and are dispatched by `SkillDispatcherPlugin`. From the bus's perspective they are identical — both consume `agent.skill.request` and reply on `agent.skill.response.<correlationId>`.
