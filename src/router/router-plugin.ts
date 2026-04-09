@@ -1,0 +1,243 @@
+/**
+ * RouterPlugin — routes inbound messages to agents via agent.skill.request.
+ *
+ * This plugin replaces both:
+ *   - AgentPlugin (@mariozechner/pi-coding-agent) — the old Pi SDK catch-all handler
+ *   - A2APlugin — GitHub message enricher (projectSlug + Discord channels)
+ *
+ * It makes no LLM calls and holds no agent state. Its only job is to translate
+ * inbound bus messages into skill requests that AgentRuntimePlugin (in-process)
+ * or SkillBrokerPlugin (external A2A fallback) will execute.
+ *
+ * Subscribes to:
+ *   message.inbound.#  — from Discord, GitHub, Plane, Google, HTTP API
+ *   cron.#             — from SchedulerPlugin
+ *
+ * Publishes:
+ *   agent.skill.request  — with skill, content, projectSlug, and reply.topic
+ *
+ * Skill resolution order:
+ *   1. payload.skillHint  — explicit, set by surface plugins
+ *   2. keyword match      — configured in workspace/agents/*.yaml skills[].keywords
+ *   3. ROUTER_DEFAULT_SKILL env var — optional catch-all (e.g. "sitrep")
+ *
+ * Config:
+ *   workspace/agents/*.yaml       — skill keyword definitions
+ *   workspace/projects.yaml       — project registry for GitHub enrichment
+ *   ROUTER_DEFAULT_SKILL env var  — fallback skill when nothing matches
+ *   DISABLE_ROUTER env var        — set to skip loading this plugin
+ */
+
+import { existsSync, watchFile, unwatchFile } from "node:fs";
+import { join } from "node:path";
+import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
+import { SkillResolver } from "./skill-resolver.ts";
+import { ProjectEnricher } from "./project-enricher.ts";
+import { loadAgentDefinitions } from "../agent-runtime/agent-definition-loader.ts";
+
+export interface RouterConfig {
+  workspaceDir: string;
+  /** Fallback skill when no hint or keyword matches. Default: ROUTER_DEFAULT_SKILL env var. */
+  defaultSkill?: string;
+}
+
+export class RouterPlugin implements Plugin {
+  readonly name = "router";
+  readonly description =
+    "Routes message.inbound.# and cron.# to agents via agent.skill.request";
+  readonly capabilities = ["message-routing", "skill-dispatch", "github-enrichment"];
+
+  private bus?: EventBus;
+  private readonly resolver: SkillResolver;
+  private readonly enricher = new ProjectEnricher();
+  private readonly subscriptionIds: string[] = [];
+  private readonly config: RouterConfig;
+  private reloadDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(config: RouterConfig) {
+    this.config = config;
+    const defaultSkill =
+      config.defaultSkill ?? process.env.ROUTER_DEFAULT_SKILL;
+    this.resolver = new SkillResolver(defaultSkill);
+  }
+
+  install(bus: EventBus): void {
+    this.bus = bus;
+
+    // Load project enrichment index
+    const projectsPath = join(this.config.workspaceDir, "projects.yaml");
+    this.enricher.load(projectsPath);
+
+    // Load skill keyword map from agent definitions
+    this._reloadSkills();
+
+    // Watch projects.yaml for live updates (no restart needed)
+    if (existsSync(projectsPath)) {
+      watchFile(projectsPath, { interval: 5_000 }, () => {
+        if (this.reloadDebounce) clearTimeout(this.reloadDebounce);
+        this.reloadDebounce = setTimeout(() => {
+          this.reloadDebounce = null;
+          this.enricher.load(projectsPath);
+          console.log("[router] projects.yaml reloaded");
+        }, 300);
+      });
+    }
+
+    // Subscribe to inbound messages from all surfaces
+    this.subscriptionIds.push(
+      bus.subscribe("message.inbound.#", this.name, (msg) => {
+        void this._handleInbound(msg);
+      }),
+    );
+
+    // Subscribe to cron events from SchedulerPlugin
+    this.subscriptionIds.push(
+      bus.subscribe("cron.#", this.name, (msg) => {
+        void this._handleCron(msg);
+      }),
+    );
+
+    console.log(
+      `[router] Plugin installed — ` +
+      `${this.enricher.size} project(s), ` +
+      `${this.resolver.size} skill keyword entry/entries`,
+    );
+  }
+
+  uninstall(): void {
+    if (this.reloadDebounce) {
+      clearTimeout(this.reloadDebounce);
+      this.reloadDebounce = null;
+    }
+    if (this.bus) {
+      for (const id of this.subscriptionIds) this.bus.unsubscribe(id);
+    }
+    this.subscriptionIds.length = 0;
+    this.bus = undefined;
+
+    const projectsPath = join(this.config.workspaceDir, "projects.yaml");
+    unwatchFile(projectsPath);
+  }
+
+  private _reloadSkills(): void {
+    const defs = loadAgentDefinitions(this.config.workspaceDir);
+    this.resolver.loadFromAgents(defs);
+  }
+
+  private async _handleInbound(msg: BusMessage): Promise<void> {
+    if (!this.bus) return;
+
+    const payload = msg.payload as Record<string, unknown>;
+
+    // Skip system/internal messages that surface plugins re-publish for their
+    // own routing (e.g., enriched GitHub messages from the old A2APlugin).
+    // We detect these by checking if the message has already been routed.
+    if (payload._routed) return;
+
+    // Enrich GitHub messages with projectSlug + discordChannels.
+    // enricher.enrich() returns null if the message is already enriched,
+    // not a GitHub message, or the repo isn't in the project registry.
+    const enriched = this.enricher.enrich(msg);
+    const workingMsg = enriched ?? msg;
+    const workingPayload = workingMsg.payload as Record<string, unknown>;
+
+    const skillHint = workingPayload.skillHint as string | undefined;
+    const content = workingPayload.content as string | undefined;
+
+    const match = this.resolver.resolve(skillHint, content);
+
+    if (!match) {
+      console.log(
+        `[router] No skill match for topic "${msg.topic}"` +
+        (content ? ` content="${content.slice(0, 60)}"` : "") +
+        " — dropping",
+      );
+      return;
+    }
+
+    const runId = crypto.randomUUID();
+    const replyTopic =
+      (workingMsg.reply?.topic) ??
+      `agent.skill.response.${runId}`;
+
+    console.log(
+      `[router] ${msg.topic} → skill "${match.skill}" (via ${match.via})` +
+      (match.agentName ? ` [${match.agentName}]` : "") +
+      ` reply → ${replyTopic}`,
+    );
+
+    const skillRequest: BusMessage = {
+      id: crypto.randomUUID(),
+      correlationId: workingMsg.correlationId,
+      parentId: workingMsg.id,
+      topic: "agent.skill.request",
+      timestamp: Date.now(),
+      payload: {
+        // Forward enriched payload fields (includes projectSlug if enriched)
+        ...workingPayload,
+        // Routing metadata — overrides any matching fields from original payload
+        skill: match.skill,
+        content,
+        prompt: content,
+        _routed: true,
+        runId,
+      },
+      reply: { topic: replyTopic },
+      source: workingMsg.source,
+    };
+
+    this.bus.publish("agent.skill.request", skillRequest);
+  }
+
+  private async _handleCron(msg: BusMessage): Promise<void> {
+    if (!this.bus) return;
+
+    const payload = msg.payload as Record<string, unknown>;
+    const content = payload.content as string | undefined;
+    const skillHint = payload.skillHint as string | undefined;
+    const channel = (payload.channel as string | undefined) ?? "cli";
+    const recipient = payload.recipient as string | undefined;
+
+    const match = this.resolver.resolve(skillHint, content);
+
+    if (!match) {
+      console.log(`[router] cron "${msg.topic}" — no skill match, dropping`);
+      return;
+    }
+
+    const runId = crypto.randomUUID();
+
+    // Construct reply topic from channel/recipient (matches AgentPlugin's old logic)
+    const replyTopic =
+      msg.reply?.topic ??
+      (channel === "signal" && recipient
+        ? `message.outbound.signal.${recipient}`
+        : channel === "signal"
+          ? "message.outbound.signal.cron"
+          : `message.outbound.${channel}`);
+
+    console.log(
+      `[router] cron "${msg.topic}" → skill "${match.skill}" (via ${match.via}) → ${replyTopic}`,
+    );
+
+    const skillRequest: BusMessage = {
+      id: crypto.randomUUID(),
+      correlationId: msg.correlationId,
+      parentId: msg.id,
+      topic: "agent.skill.request",
+      timestamp: Date.now(),
+      payload: {
+        ...payload,
+        skill: match.skill,
+        content,
+        prompt: content,
+        _routed: true,
+        runId,
+      },
+      reply: { topic: replyTopic },
+      source: msg.source ?? { interface: "cron" },
+    };
+
+    this.bus.publish("agent.skill.request", skillRequest);
+  }
+}

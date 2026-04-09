@@ -11,6 +11,8 @@ import type { Action } from "../planner/types/action.ts";
 export interface QueuedAction {
   action: Action;
   correlationId: string;
+  /** The bus message correlationId under which this action was originally enqueued. */
+  parentCorrelationId: string;
   enqueuedAt: number;
 }
 
@@ -51,13 +53,13 @@ export class DispatchQueue {
    * Attempt to dispatch an action immediately.
    * Returns true if dispatched (slot available), false if queued (WIP limit reached).
    */
-  tryDispatch(action: Action, correlationId: string): boolean {
+  tryDispatch(action: Action, correlationId: string, parentCorrelationId: string): boolean {
     if (this.active.size < this.config.wipLimit) {
       this.active.add(correlationId);
       return true;
     }
     // Queue in priority order (higher priority = earlier in array)
-    const item: QueuedAction = { action, correlationId, enqueuedAt: Date.now() };
+    const item: QueuedAction = { action, correlationId, parentCorrelationId, enqueuedAt: Date.now() };
     const insertAt = this.pending.findIndex((p) => p.action.priority < action.priority);
     if (insertAt === -1) {
       this.pending.push(item);

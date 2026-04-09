@@ -9,6 +9,7 @@ workspace/*.log.automaker-lock
 workspace/incidents.yaml
 workspace/projects.yaml
 workspace/agents.yaml
+workspace/agents/*.yaml
 workspace/discord.yaml
 workspace/google.yaml
 .automaker-lock

@@ -1,178 +1,158 @@
-# Getting Started with protoWorkstacean
+# Getting Started
 
-_This is a tutorial. It walks you step-by-step from a fresh clone to your first agent interaction on the bus._
-
----
-
-## What you'll achieve
-
-By the end of this tutorial you will have:
-
-1. The workstacean container running locally
-2. A message published to the bus and routed to an agent
-3. A real reply arriving back via the configured output channel
-
----
+This tutorial walks you through installing protoWorkstacean, writing a minimal workspace configuration, starting the server, and triggering your first skill via the HTTP API.
 
 ## Prerequisites
 
-- Docker + Docker Compose
-- Access to Infisical (AI project `11e172e0`) **or** a `.env` file with the required secrets
-- A Discord bot token (for Discord output) **or** the ability to read replies from logs
+- [Bun](https://bun.sh) >= 1.1
+- An Anthropic API key (for in-process agent execution)
+- Optional: a running ava instance for A2A routing
 
----
-
-## Step 1 — Clone and configure the workspace
+## 1. Clone and install
 
 ```bash
 git clone https://github.com/protoLabsAI/protoWorkstacean.git
 cd protoWorkstacean
+bun install
 ```
 
-The `workspace/` directory is the runtime configuration volume. Deployment-identity
-files are gitignored — copy the `.example` files to bootstrap:
+## 2. Configure environment
+
+Copy the example env file and fill in the required values:
 
 ```bash
-cp workspace/agents.yaml.example   workspace/agents.yaml
+cp .env.dist .env
+```
+
+Minimum required to start the server with in-process agents:
+
+```dotenv
+# In-process agent execution
+ANTHROPIC_API_KEY=sk-ant-...
+
+# HTTP port (default 3000)
+WORKSTACEAN_HTTP_PORT=3000
+
+# API key protecting the /publish endpoint
+WORKSTACEAN_API_KEY=dev-secret
+
+# Workspace config directory
+WORKSPACE_DIR=./workspace
+```
+
+If you have ava running, add:
+
+```dotenv
+AVA_BASE_URL=http://localhost:3008
+AVA_API_KEY=your-ava-key
+```
+
+For a full list of variables, see [reference/env-vars.md](../reference/env-vars.md).
+
+## 3. Bootstrap the workspace
+
+The `workspace/` directory holds all runtime configuration. Start from the bundled examples:
+
+```bash
+# In-process agent definitions
+cp workspace/agents/ava.yaml.example   workspace/agents/ava.yaml
+cp workspace/agents/frank.yaml.example workspace/agents/frank.yaml
+
+# External A2A agent registry (leave empty if not using ava)
+cp workspace/agents.yaml.example workspace/agents.yaml
+
+# Project registry
 cp workspace/projects.yaml.example workspace/projects.yaml
-cp workspace/discord.yaml.example  workspace/discord.yaml
-cp workspace/google.yaml.example   workspace/google.yaml
 ```
 
-Then fill in your URLs, channel IDs, and env var names. The directory layout:
+Edit `workspace/agents/ava.yaml` and set your `systemPrompt`. The file looks like:
 
+```yaml
+name: ava
+role: orchestrator
+model: claude-opus-4-6
+systemPrompt: |
+  You are Ava, the Chief of Staff for protoLabs AI. ...
+tools:
+  - publish_event
+  - get_world_state
+maxTurns: 20
+skills:
+  - name: sitrep
+    description: Generate a situational awareness report
+    keywords: [status, sitrep, /sitrep]
 ```
-workspace/
-  agents.yaml      # agent registry — URLs, skills, chains          (gitignored)
-  projects.yaml    # project registry — repos, Discord channels      (gitignored)
-  discord.yaml     # Discord slash commands, channel IDs, moderation (gitignored)
-  google.yaml      # Google Workspace Drive/Calendar/Gmail config    (gitignored)
-  incidents.yaml   # live security incident state                    (gitignored)
-  actions.yaml     # GOAP action rules                               (tracked)
-  goals.yaml       # GOAP goal definitions                           (tracked)
-  ceremonies/      # ceremony YAML files                             (tracked)
-  crons/           # scheduled task YAML files                       (runtime, gitignored)
-  plugins/         # hot-loaded workspace plugins
-```
 
----
-
-## Step 2 — Set environment variables
-
-Copy the example env file and fill in the required secrets:
+Create minimal stubs for the GOAP files (required at startup):
 
 ```bash
-cp .env.example .env
+echo "goals: []"   > workspace/goals.yaml
+echo "actions: []" > workspace/actions.yaml
 ```
 
-Minimum required secrets to start the server (no plugins enabled):
-
-```
-# Agent calls
-AVA_API_KEY=<key>
-
-# Optional: enable GitHub plugin
-GITHUB_TOKEN=<pat>
-GITHUB_WEBHOOK_SECRET=<secret>
-
-# Optional: enable Discord plugin
-DISCORD_BOT_TOKEN=<token>
-DISCORD_GUILD_ID=<guild-id>
-```
-
-For the full secret list, see [`docs/reference/config-files.md`](../reference/config-files.md).
-
----
-
-## Step 3 — Start the container
+## 4. Start the server
 
 ```bash
-docker compose up workstacean
+bun run src/index.ts
 ```
 
-Watch the startup log. You should see each plugin report whether it installed successfully:
+Startup logs should look like:
 
 ```
-[DiscordPlugin] installed — guild commands registered
-[GitHubPlugin] installed — webhook server on :8082
-[A2APlugin] installed — 6 agents loaded from agents.yaml
-[SchedulerPlugin] installed — 0 schedules loaded
+[agent-runtime] loaded agent: ava (orchestrator, 2 skills)
+[skill-broker] loaded 0 external agents
+[ceremony-plugin] loaded 3 ceremonies
+[world-state] domain discovery: 0 domains registered
+[http] listening on :3000
+[workstacean] ready
 ```
 
-If a plugin is skipped (missing env var), it logs:
-```
-[DiscordPlugin] skipped — DISCORD_BOT_TOKEN not set
-```
-
-That is expected and safe — the server starts regardless.
-
----
-
-## Step 4 — Publish your first bus message
-
-The server exposes a `/publish` endpoint on port 3000 (Docker-internal only). From another container on the same network, or using `docker exec`:
+Confirm health:
 
 ```bash
-docker exec workstacean curl -s -X POST http://localhost:3000/publish \
+curl http://localhost:3000/health
+# {"status":"ok","uptime":3.1}
+```
+
+## 5. Trigger your first skill
+
+The `/publish` endpoint injects a message directly onto the bus. This is the same code path that Discord @mentions, GitHub webhooks, and cron events follow.
+
+```bash
+curl -X POST http://localhost:3000/publish \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-secret" \
   -d '{
-    "topic": "message.inbound.test",
+    "topic": "agent.skill.request",
     "payload": {
-      "sender": "tutorial",
-      "content": "What is the status of the dev board?",
-      "channel": "cli",
-      "skillHint": "sitrep"
+      "skill": "sitrep",
+      "content": "Give me a quick status summary.",
+      "correlationId": "tutorial-001",
+      "replyTopic": "agent.skill.response.tutorial-001"
     }
   }'
 ```
 
----
+`SkillDispatcherPlugin` picks this up, resolves `sitrep` to ava's `ProtoSdkExecutor`, and runs the in-process agent. The result lands on `agent.skill.response.tutorial-001`.
 
-## Step 5 — Observe the response
-
-Watch the container logs:
+To read the response, query the SQLite event log:
 
 ```bash
-docker logs -f workstacean
+sqlite3 data/events.db \
+  "SELECT payload FROM events WHERE topic LIKE 'agent.skill.response.tutorial-001' ORDER BY ts DESC LIMIT 1;"
 ```
 
-You will see:
+## 6. Inspect world state
 
-1. `[A2APlugin] routing message.inbound.test → ava (sitrep)`
-2. The A2A call to Ava's `/a2a` endpoint
-3. `[A2APlugin] publishing message.outbound.discord.push.<channel>`
-
-If you have a Discord channel configured, the reply appears there. Otherwise it appears in the log output.
-
----
-
-## Step 6 — Trigger a real workflow via Discord
-
-If the Discord plugin is running:
-
-1. In your Discord server, go to any channel the bot has access to
-2. Type `@YourBot` followed by your message, e.g.: `@YourBot sitrep`
-3. The bot adds 👀 (processing) then ✅ (done) and replies in-thread
-
-That's it — you've completed your first end-to-end flow:
-
-```
-Discord @mention
-  → DiscordPlugin → bus (message.inbound.discord.{channelId})
-    → A2APlugin → Ava (sitrep skill)
-      → Ava responds
-        → message.outbound.discord.{channelId}
-          → DiscordPlugin posts reply
+```bash
+curl http://localhost:3000/api/world-state
 ```
 
----
+With `AVA_BASE_URL` set and domain collectors configured, this returns live JSON from every registered domain.
 
 ## Next steps
 
-| Goal | Where to go |
-|------|-------------|
-| Onboard a new project | [how-to/onboard-a-project.md](../how-to/onboard-a-project.md) |
-| Configure Discord commands | [how-to/configure-discord.md](../how-to/configure-discord.md) |
-| Schedule recurring tasks | [how-to/create-a-ceremony.md](../how-to/create-a-ceremony.md) |
-| Understand how the bus works | [explanation/architecture.md](../explanation/architecture.md) |
-| See all bus topics | [reference/bus-topics.md](../reference/bus-topics.md) |
+- [Your first GOAP goal](./first-goap-goal.md) — automate a reaction to a world-state condition
+- [Add an agent](../guides/add-an-agent.md) — register in-process or A2A agents
+- [Add a domain](../guides/add-a-domain.md) — poll custom HTTP endpoints for world state
+- [Reference: HTTP API](../reference/http-api.md) — all endpoints

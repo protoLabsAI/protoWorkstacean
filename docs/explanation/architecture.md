@@ -1,224 +1,182 @@
-# Architecture — How protoWorkstacean Works
+# Architecture
 
-_This is an explanation doc. It explains the design decisions, concepts, and how components connect — not how to use them._
+_Conceptual overview of how protoWorkstacean's components connect and why they are designed the way they are._
 
 ---
 
-## What protoWorkstacean is
+## System overview
 
-protoWorkstacean is a personal agent orchestration platform. It coordinates a fleet of specialized AI agents (Quinn, Ava, Frank, Jon, Cindi, Researcher) across GitHub, Discord, Plane, and Google Workspace. Every interaction — a GitHub PR, a Discord @mention, a scheduled cron, a Plane issue — enters the system as a message on the same in-process event bus.
+```mermaid
+flowchart TD
+    subgraph Surfaces["External Surfaces"]
+        GH[GitHub webhooks]
+        DC[Discord gateway]
+        PL[Plane webhooks]
+        HTTP["HTTP API :3000\n/publish · /api/*"]
+        MCP["MCP Server\n(Claude Code agents)"]
+    end
 
-The key architectural decision is that **the bus is the only communication channel**. No plugin talks directly to another plugin. No plugin talks directly to an agent. Everything goes through the bus.
+    BUS[("Event Bus\nin-process pub/sub\nhierarchical topics")]
+
+    subgraph Adapters["Interface Plugins"]
+        GHP[GitHubPlugin]
+        DCP[DiscordPlugin]
+        PLP[PlanePlugin]
+    end
+
+    subgraph Routing["Skill Routing"]
+        RTP["RouterPlugin\nmessage.inbound.# + cron.#\n→ agent.skill.request"]
+        SDP["SkillDispatcherPlugin\nagent.skill.request subscriber\n(sole consumer)"]
+        REG["ExecutorRegistry\nresolve(skill, targets)"]
+    end
+
+    subgraph Registrars["Registrars (install-time only)"]
+        ART["AgentRuntimePlugin\nworkspace/agents/*.yaml\n→ ProtoSdkExecutor"]
+        SKB["SkillBrokerPlugin\nworkspace/agents.yaml\n→ A2AExecutor"]
+    end
+
+    subgraph Executors["Executor implementations"]
+        PSE["ProtoSdkExecutor\nClaude Code SDK\nin-process"]
+        A2AE["A2AExecutor\nHTTP JSON-RPC 2.0\nX-Correlation-Id · X-Parent-Id"]
+    end
+
+    subgraph WorldEngine["World Engine"]
+        WSE["WorldStateEngine\ngeneric domain poller\nregisterDomain(name, collector, tickMs)"]
+        DD["domain-discovery\nprojects.yaml → workspace/domains.yaml\nworkspace/actions.yaml"]
+        GEP["GoalEvaluatorPlugin\nworkspace/goals.yaml"]
+        PL0["PlannerPluginL0\nActionRegistry"]
+        ADP["ActionDispatcherPlugin\nWIP limit: 5"]
+    end
+
+    subgraph Ava["ava (protoMaker)"]
+        AVA_A2A["POST /a2a\nJSON-RPC 2.0"]
+        AVA_WORLD["/api/world/board\n/api/world/agent-health"]
+    end
+
+    GH --> GHP
+    DC --> DCP
+    PL --> PLP
+    HTTP --> BUS
+    MCP --> BUS
+
+    GHP & DCP & PLP --> BUS
+
+    BUS -- "message.inbound.#\ncron.#" --> RTP
+    RTP -- "agent.skill.request" --> BUS
+    BUS -- "agent.skill.request" --> SDP
+    SDP --> REG
+    REG --> PSE & A2AE
+
+    ART -- "register ProtoSdkExecutor" --> REG
+    SKB -- "register A2AExecutor" --> REG
+
+    A2AE --> AVA_A2A
+
+    DD -- "registerDomain\nupsert(action)" --> WSE
+    WSE -- "HTTP poll" --> AVA_WORLD
+    WSE -- "world.state.updated" --> GEP
+    GEP -- "world.goal.violated" --> BUS
+    BUS --> PL0
+    PL0 -- "world.action.plan" --> BUS
+    BUS --> ADP
+    ADP -- "agent.skill.request\nceremony.*.execute\nmessage.outbound.*" --> BUS
+```
 
 ---
 
 ## The event bus
 
-```mermaid
-flowchart LR
-    subgraph In["Inbound"]
-        GH[GitHub]
-        DC[Discord]
-        PL[Plane]
-        GG[Google]
-        HTTP[HTTP API\n+ MCP Server]
-    end
+The bus is the only communication channel. No plugin talks directly to another plugin — everything goes through `bus.publish()` and `bus.subscribe()`. Topic matching is hierarchical: `#` matches anything, `*` matches one segment.
 
-    BUS[("Event Bus\npub/sub · hierarchical topics")]
-
-    subgraph Out["Processing"]
-        A2A[A2APlugin\n→ agent fleet]
-        WE[World Engine\nGOAP pipeline]
-        CER[CeremonyPlugin\n→ scheduled skills]
-    end
-
-    In --> BUS
-    BUS --> Out
-    Out --> BUS
-```
-
-The bus is an in-process pub/sub system with MQTT-style hierarchical topic matching. `#` matches any number of path segments:
-
-- `message.inbound.#` catches everything entering the system
-- `message.inbound.discord.#` catches only Discord messages
-- `message.inbound.discord.1234567890` catches one specific channel
-
-This topic hierarchy is the routing backbone. Plugins subscribe narrowly — each plugin only sees the messages it cares about.
+This constraint is what makes the system composable. Adding Discord support doesn't touch the GitHub plugin. Adding a new executor type doesn't touch the routing logic. Plugins are independently installable and testable.
 
 ---
 
-## The plugin layer
+## Executor layer
 
-Plugins are the adapters between the outside world and the bus. Each plugin:
+The executor layer is the unified dispatch path for all agent skill calls. Before it existed, `AgentPlugin` and `A2APlugin` both subscribed to `agent.skill.request` and raced for messages. Adding a third agent type required a third subscriber.
 
-1. Listens for external events (GitHub webhooks, Discord gateway events, Plane webhooks, cron timers)
-2. Validates and normalizes the event into a `BusMessage`
-3. Publishes the `BusMessage` on the appropriate `message.inbound.*` topic
+The executor layer fixes this with a clean separation:
 
-And in the other direction:
+- **Registrars** (`AgentRuntimePlugin`, `SkillBrokerPlugin`) — register executors into `ExecutorRegistry` at `install()` time, no bus subscriptions
+- **Dispatcher** (`SkillDispatcherPlugin`) — sole subscriber to `agent.skill.request`, delegates to the registry
 
-1. Subscribes to `message.outbound.*` topics
-2. Delivers the outbound message to the external service (posts a GitHub comment, sends a Discord message, patches a Plane issue)
+```
+agent.skill.request
+  → SkillDispatcherPlugin
+    → ExecutorRegistry.resolve(skill, targets?)
+      1. Named target: any registration whose agentName ∈ targets[]
+      2. Skill match: highest priority registration where skill matches
+      3. Default executor
+      4. null → error response, message dropped
+    → executor.execute(SkillRequest)
+      → result published to replyTopic
+```
 
-Plugins are symmetric — they bridge in both directions, but they don't process the content. They don't decide what to say. That's the agent's job.
+`SkillRequest` carries `correlationId` (trace-id) and `parentId` (parent span-id), set by `SkillDispatcherPlugin` from the triggering bus message.
+
+See [Executor Layer](./executor-layer) for the full design rationale.
 
 ---
 
-## The A2A plugin
+## World Engine — GOAP homeostatic loop
 
-The A2APlugin is the bridge between the bus and the agent fleet. It:
+The `WorldStateEngine` is completely generic. It knows nothing about boards, agents, or CI. All domain knowledge lives in ava's `workspace/domains.yaml`.
 
-1. Subscribes to `message.inbound.#` and `cron.#`
-2. Matches each message to a skill (explicit hint → keyword → default Ava)
-3. Calls the appropriate agent via JSON-RPC 2.0 (`message/send`)
-4. Publishes the agent's response to the appropriate `message.outbound.*` topic
-
-The agent fleet is defined in `workspace/agents.yaml`. The A2APlugin doesn't know anything about what agents do — it only knows which topics to route to which agents.
-
----
-
-## Message flow: end-to-end
+Domain discovery runs at startup:
 
 ```
-Discord @mention
-  ↓
-DiscordPlugin validates, publishes message.inbound.discord.{channelId}
-  ↓
-A2APlugin keyword-matches → routes to Ava (sitrep)
-  ↓
-callA2A(ava, content, contextId) — JSON-RPC 2.0 HTTP call
-  ↓
-Ava processes, returns response
-  ↓
-A2APlugin publishes message.outbound.discord.{channelId}
-  ↓
-DiscordPlugin sends Discord reply
+WORKSPACE_DIR/projects.yaml
+  → for each project with projectPath:
+      {projectPath}/workspace/domains.yaml   → engine.registerDomain(name, httpCollector, tickMs)
+      {projectPath}/workspace/actions.yaml   → actionRegistry.upsert(action)
 ```
 
-This same pattern holds for every interface: GitHub → GitHubPlugin → bus → A2APlugin → agent → bus → GitHubPlugin → GitHub comment.
-
----
-
-## Quinn's vector context pipeline
-
-Quinn extends this pattern with a multi-step retrieval pipeline before the LLM call:
-
-```
-PR opened/synchronize
-  → GitHubPlugin → message.inbound.github.*
-  → A2APlugin → Quinn (pr_review skill)
-  → runReviewPipeline(diff, repo, pr)
-      ├── parseDiff + extractSymbols
-      ├── Qdrant: retrieveAllPastPRDecisions (quinn-pr-history)
-      ├── Qdrant: findAllSimilarPatterns (quinn-code-patterns)
-      ├── formatCodebaseContext + applyTokenBudget (20% cap)
-      └── assembleReviewPrompt → LLM call
-```
-
-The Qdrant collections are populated as PRs are merged:
-
-```
-PR merged
-  → fetchPRDiff + fetchReviewDecision
-  → chunkDiff → embed → quinn-pr-history
-  → extractSymbols → fetchSymbolContexts → quinn-code-patterns
-```
-
-Developer dismissals are tracked in `quinn-review-learnings` and used to suppress low-signal comment patterns over time.
-
----
-
-## The World Engine
-
-The World Engine is a second major system alongside the A2A routing pipeline. Where A2A is reactive (respond to an event), the World Engine is **homeostatic** — it continuously measures system state against declared goals and autonomously acts to close deviations.
-
-Four plugins compose the pipeline:
-
-1. **WorldStateCollector** — six independent tickers collect domain state: `services` (30s), `board` (60s), `CI` (5min), `portfolio` (15min), `security` (30s), `agent_health` (60s). Results are merged into a single `WorldState` snapshot.
-2. **GoalEvaluatorPlugin** — evaluates every goal in `goals.yaml` against the current snapshot. When a goal is violated, publishes `world.goal.violated`.
-3. **PlannerPluginL0** — on `world.goal.violated`, scans `actions.yaml` for applicable tier_0 actions (matching goal + preconditions), selects the highest-priority set, and publishes `world.action.plan`.
-4. **ActionDispatcherPlugin** — executes the plan. For `fireAndForget: true` actions (alerts, ceremonies), it publishes to the action's topic immediately and marks complete. WIP limit: 5 concurrent non-fire-and-forget actions.
+Domain URLs support `${ENV_VAR}` interpolation. ava exposes `/api/world/board` and `/api/world/agent-health` as pollable endpoints.
 
 ```mermaid
 flowchart LR
-    WSC["WorldStateCollector\n6 domains · independent ticks"]
-    GEP["GoalEvaluatorPlugin\ngoals.yaml"]
-    PL0["PlannerPluginL0\nactions.yaml"]
-    ADP["ActionDispatcherPlugin"]
-
-    subgraph Outcomes["Action outcomes"]
-        DISC["Discord alert"]
-        CER["ceremony.*.execute\n→ CeremonyPlugin → SkillBroker → A2A"]
-        SKILL["agent.skill.request\n→ SkillBroker → A2A"]
+    subgraph Domains["ava/workspace/domains.yaml"]
+        D1["board — 30s"]
+        D2["agent-health — 15s"]
     end
 
-    WSC --> GEP
-    GEP -- "world.goal.violated" --> PL0
-    PL0 -- "world.action.plan" --> ADP
-    ADP --> DISC & CER & SKILL
+    Domains --> WSE["WorldStateEngine\nWorldState.domains\nRecord‹string, WorldStateDomain‹unknown››"]
+    WSE -- "world.state.updated" --> GEP["GoalEvaluatorPlugin"]
+    GEP -- "world.goal.violated" --> PL0["PlannerPluginL0"]
+    PL0 --> ADP["ActionDispatcherPlugin"]
+    ADP -- "agent.skill.request" --> BUS["Event Bus"]
 ```
 
-Goals and actions are **declarative YAML** — adding a new monitored condition requires only an entry in `goals.yaml` and a matching action in `actions.yaml`. No code change needed.
+See [World Engine](./world-engine) for the design rationale.
 
 ---
 
-## The MCP server
+## Distributed tracing
 
-`mcp/server.ts` is a stdio MCP server that exposes the bus to Claude Code agents. It wraps the HTTP API and provides typed tools: `report_incident`, `report_bug`, `get_world_state`, `publish`, `run_ceremony`, and others. All tools accept a `projectSlug` parameter that flows through the event payload to route downstream work to the correct project's agents and board.
+Every `BusMessage` carries:
 
-This closes the loop: a Claude Code session can report an incident → the incident enters `incidents.yaml` → the security domain surfaces it in world state → GOAP fires the alert and triage ceremony → Quinn triages it and files a board issue.
-
----
-
-## The HITL gate
-
-The HITL (human-in-the-loop) gate is the approval checkpoint for the `plan` skill. It exists because plan execution has permanent side effects: board features, Plane state changes, Discord channel provisioning.
-
-The design principle: **the bus is dumb, interface plugins own rendering, Ava owns plan state**.
-
-- When Ava's `plan` skill finishes, it publishes an `HITLRequest` to the bus with the PRD summary and review scores
-- The originating interface plugin (Discord, Plane, API) receives the `HITLRequest` and renders it natively — Discord gets interactive buttons, Plane gets a comment
-- The human responds; the interface plugin publishes an `HITLResponse` on the bus
-- The A2APlugin routes to Ava's `plan_resume` skill, which restores the SQLite checkpoint and creates the board features
-
-Adding a new interface (Slack, voice, SMS) requires only implementing the renderer — no changes to Ava, the bus, or the HITL plugin.
-
-`correlationId` is the thread connecting every message in the plan lifecycle. Set once at the inbound message and stamped on every downstream artifact.
-
----
-
-## Service layer
-
-Quinn's vector pipeline uses a dedicated service layer in `src/services/`:
-
-| Package | Responsibility |
-|---|---|
-| `qdrant/client.ts` | Qdrant REST API client (5s timeout, fallback on error) |
-| `embeddings/ollama-client.ts` | Ollama embedding API (nomic-embed-text) |
-| `diff/chunker.ts` | Parse unified diff, chunk large files |
-| `diff/symbol-extractor.ts` | Route to language-specific symbol extractors |
-| `reviews/review-pipeline.ts` | Orchestrate full context retrieval pipeline |
-| `reviews/context-formatter.ts` | Format the `CODEBASE CONTEXT` block |
-| `reviews/token-budgeter.ts` | Enforce 20% token budget cap |
-
----
-
-## External services
-
-| Service | URL | Purpose |
+| Field | Role | Changes? |
 |---|---|---|
-| Qdrant | `http://qdrant:6333` | Vector search and storage |
-| Ollama | `http://ollama:11434` | Local LLM and embedding inference |
-| GitHub API | `https://api.github.com` | PR data, diffs, comments |
-| Plane | configured via `PLANE_API_URL` | Project management |
-| Discord | bot token | Team notifications |
+| `correlationId` | W3C trace-id — links every message in a request tree | Never |
+| `parentId` | Parent span-id — = triggering message's `id` | At each hop |
+
+`RouterPlugin` sets `parentId` when translating inbound messages to `agent.skill.request`. `A2AExecutor` forwards both as `X-Correlation-Id` and `X-Parent-Id` HTTP headers. ava propagates `X-Correlation-Id` into its internal chat calls.
+
+See [Distributed Tracing](./distributed-tracing).
 
 ---
 
-## Design principles
+## Message routing conventions
 
-1. **Bus is dumb** — routes messages, no business logic
-2. **Plugins are thin** — validate, normalize, publish, deliver. No content decisions.
-3. **Agents are stateless from the bus's perspective** — state lives in SQLite (PlanStore), Qdrant, or the agent itself
-4. **`correlationId` is the spine** — threads any multi-hop flow without the bus needing to understand it
-5. **Adding a surface requires only a plugin** — new Discord slash commands, new render targets for HITL, new external webhooks — none require touching core routing logic
+```
+message.inbound.github.<owner>.<repo>.<event>.<number>   — inbound from GitHub
+message.outbound.github.<owner>.<repo>.<number>          — outbound to GitHub comment
+message.inbound.discord.<channelId>                      — inbound from Discord
+message.outbound.discord.<channelId>                     — outbound to Discord
+agent.skill.request                                      — route to agent via SkillDispatcher
+ceremony.<id>.execute                                    — trigger named ceremony
+world.goal.violated                                      — GOAP goal deviation detected
+world.action.plan                                        — planner output ready for dispatch
+security.incident.reported                               — immediate domain recollect
+```

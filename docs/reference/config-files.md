@@ -6,12 +6,21 @@ _This is a reference doc. It covers all `workspace/*.yaml` schemas and environme
 
 ## Environment variables
 
+### Agent Runtime Plugin
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `LLM_GATEWAY_URL` | No | LiteLLM Proxy base URL for all in-process agent LLM calls (default: `http://gateway:4000/v1`) |
+| `OPENAI_API_KEY` | Yes (for agents) | Bearer token for the gateway — set to your gateway API key |
+| `DISABLE_AGENT_RUNTIME` | No | Set to any value to skip loading `AgentRuntimePlugin` |
+| `DISABLE_SKILL_BROKER` | No | Set to any value to skip loading `SkillBrokerPlugin` (use once all agents are migrated in-process) |
+
 ### Core / A2A Plugin
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `AGENTS_YAML` | No | Path to agent registry (default: `/workspace/agents.yaml`) |
-| `AVA_API_KEY` | If using Ava | API key injected as `X-API-Key` header |
+| `AGENTS_YAML` | No | Path to external A2A agent registry (default: `/workspace/agents.yaml`) |
+| `AVA_API_KEY` | If using external Ava | API key injected as `X-API-Key` header |
 | `AVA_APP_ID` | For chain comments | GitHub App ID — chain responses post as `protoava[bot]` |
 | `AVA_APP_PRIVATE_KEY` | For chain comments | GitHub App private key (PKCS#1 PEM) |
 
@@ -74,7 +83,8 @@ Each has a `.example` counterpart — copy it to bootstrap a new deployment:
 
 | File | Copy from |
 |------|-----------|
-| `workspace/agents.yaml` | `workspace/agents.yaml.example` |
+| `workspace/agents/<name>.yaml` | `workspace/agents/<name>.yaml.example` — one file per in-process agent |
+| `workspace/agents.yaml` | `workspace/agents.yaml.example` — external A2A agent registry |
 | `workspace/projects.yaml` | `workspace/projects.yaml.example` |
 | `workspace/discord.yaml` | `workspace/discord.yaml.example` |
 | `workspace/google.yaml` | `workspace/google.yaml.example` |
@@ -84,9 +94,57 @@ Schema/behavior files (`actions.yaml`, `goals.yaml`, `ceremonies/`) are tracked 
 
 ---
 
+## workspace/agents/\<name\>.yaml
+
+Per-agent definition for the **in-process** `AgentRuntimePlugin`. One file per agent under `workspace/agents/`. Files ending in `.example` are skipped. All files in this directory are gitignored.
+
+```yaml
+name: quinn                         # unique agent key — used in skill routing
+role: qa                            # orchestrator | qa | devops | content | research | general
+
+# LLM model alias — resolved by the gateway (LiteLLM Proxy at LLM_GATEWAY_URL)
+model: claude-sonnet-4-6
+
+systemPrompt: |
+  You are Quinn, the QA Engineer for protoLabs AI.
+  ...
+
+# Workstacean bus tools this agent may call.
+# Available: publish_event, get_world_state, get_incidents, report_incident,
+#            get_ceremonies, run_ceremony
+tools:
+  - publish_event
+  - get_world_state
+  - report_incident
+
+# Agents this agent may delegate to (orchestrator role only, DeepAgent pattern)
+canDelegate:
+  - researcher
+
+# Max agentic turns per invocation (-1 = unlimited, default: 10)
+maxTurns: 15
+
+# Skills this agent handles — matched against agent.skill.request skillHint
+skills:
+  - name: bug_triage
+    description: Triage a bug report — severity, root cause, Plane issue
+  - name: pr_review
+    description: Review a pull request diff
+```
+
+**`role`** drives the agent profile and delegation rules:
+- `orchestrator` — Ava pattern; can delegate to `canDelegate` agents
+- `qa`, `devops`, `content`, `research`, `general` — ReAct subagent; no delegation
+
+**`tools`** is a whitelist — the agent subprocess only sees the tools listed here, plus proto CLI built-ins (file, bash, search).
+
+**`model`** is any alias the LiteLLM gateway recognises. See your gateway config for the full alias list.
+
+---
+
 ## workspace/agents.yaml
 
-Source of truth for the agent registry. The A2APlugin fetches `/.well-known/agent.json` from each agent URL on startup and merges live skills.
+Source of truth for the **external A2A** agent registry. Used by `SkillBrokerPlugin` to dispatch skills to remote agents over JSON-RPC 2.0. Agents listed here run as separate services (Docker containers or remote hosts).
 
 ```yaml
 agents:
@@ -124,6 +182,8 @@ agents:
 ```
 
 **`chain`** is optional. When `chain[skill]` is set, the named agent is called with the first agent's response as context. One level deep only.
+
+> **Migration note:** `workspace/agents/<name>.yaml` (in-process) and `workspace/agents.yaml` (external A2A) coexist. `AgentRuntimePlugin` handles agents it knows about and lets unknown skills fall through to `SkillBrokerPlugin`. Set `DISABLE_SKILL_BROKER=true` once all agents are migrated in-process.
 
 ---
 
