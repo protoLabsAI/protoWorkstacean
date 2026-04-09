@@ -1,0 +1,51 @@
+projects:
+
+  - slug: protoworkstacean
+    title: protoWorkstacean
+    team: dev
+    github: protoLabsAI/protoWorkstacean
+    repoUrl: "https://github.com/protoLabsAI/protoWorkstacean"
+    projectPath: /home/josh/dev/protoWorkstacean
+    defaultBranch: master
+    status: active
+    agents: [quinn]
+
+  - slug: protomaker
+    title: protoMaker
+    team: dev
+    github: protoLabsAI/protoMaker
+    repoUrl: "https://github.com/protoLabsAI/protoMaker"
+    projectPath: /home/josh/dev/labs/protoMaker
+    defaultBranch: main
+    status: active
+    agents: [quinn]
+
+  - slug: protocli
+    title: protoCLI
+    team: dev
+    github: protoLabsAI/protoCLI
+    repoUrl: "https://github.com/protoLabsAI/protoCLI"
+    projectPath: /home/josh/dev/labs/protoCLI
+    defaultBranch: main
+    status: active
+    agents: [quinn]
+
+  - slug: mythxengine
+    title: mythxengine
+    team: dev
+    github: protoLabsAI/mythxengine
+    repoUrl: "https://github.com/protoLabsAI/mythxengine"
+    projectPath: /home/josh/dev/labs/mythxengine
+    defaultBranch: main
+    status: active
+    agents: [quinn]
+
+  - slug: rabbit-hole-io
+    title: rabbit-hole-io
+    team: dev
+    github: protoLabsAI/rabbit-hole.io
+    repoUrl: "https://github.com/protoLabsAI/rabbit-hole.io"
+    projectPath: /home/josh/dev/labs/rabbit-hole-io
+    defaultBranch: main
+    status: active
+    agents: [quinn]
