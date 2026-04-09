@@ -41,6 +41,7 @@ import type { HITLPlugin } from "./hitl.ts";
 import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer, type TurnData } from "../conversation/conversation-tracer.ts";
 import { GraphitiClient } from "../memory/graphiti-client.ts";
+import { IdentityRegistry } from "../identity/identity-registry.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -230,6 +231,7 @@ export class DiscordPlugin implements Plugin {
   private conversationManager = new ConversationManager();
   private conversationTracer = new ConversationTracer();
   private graphiti = new GraphitiClient();
+  private identityRegistry: IdentityRegistry | null = null;
   // correlationId (= conversationId for conv turns) → pending Langfuse turn data
   private pendingTurns = new Map<string, TurnData>();
 
@@ -267,6 +269,7 @@ export class DiscordPlugin implements Plugin {
 
     this.busRef = bus;
     this.config = loadConfig(this.workspaceDir);
+    this.identityRegistry = new IdentityRegistry(this.workspaceDir);
 
     // Apply moderation config
     const { rateLimit, spamPatterns } = this.config.moderation;
@@ -367,7 +370,8 @@ export class DiscordPlugin implements Plugin {
         .trim();
 
       // Prepend user memory context (non-blocking, best-effort)
-      const memoryContext = await this.graphiti.getContextBlock(userId, "discord", rawContent).catch(() => "");
+      const userGroupId = this.identityRegistry?.groupId("discord", userId) ?? `user:discord_${userId}`;
+      const memoryContext = await this.graphiti.getContextBlock(userGroupId, rawContent).catch(() => "");
       const content = memoryContext ? `${memoryContext}\n${rawContent}` : rawContent;
 
       // Langfuse conversation tracing
@@ -638,13 +642,17 @@ export class DiscordPlugin implements Plugin {
             }).catch(err => console.error("[discord] Langfuse traceTurn error:", err));
 
             // Fire-and-forget: store completed turn so Graphiti can extract facts
+            const episodeGroupId = this.identityRegistry?.groupId("discord", pendingTurn.userId)
+              ?? `user:discord_${pendingTurn.userId}`;
+            const identity = this.identityRegistry?.resolve("discord", pendingTurn.userId);
             this.graphiti.addEpisode({
-              userId: pendingTurn.userId,
-              platform: "discord",
+              groupId: episodeGroupId,
               userMessage: pendingTurn.input,
               agentMessage: content,
+              userRole: identity?.displayName ?? pendingTurn.userId,
               agentName: pendingTurn.agentName,
               channelId: pending.message?.channelId ?? pending.interaction?.channelId ?? undefined,
+              platform: "discord",
               timestamp: pendingTurn.startTime,
             }).catch(err => console.debug("[discord] Graphiti addEpisode error:", err));
           }

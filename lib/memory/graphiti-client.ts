@@ -43,13 +43,14 @@ export class GraphitiClient {
    * Retrieve relevant facts for a user given the current message.
    * Uses /get-memory so Graphiti can build the best query from context.
    * Returns a formatted [User context] block, or "" if no facts found.
+   *
+   * @param groupId  Canonical group ID — use IdentityRegistry.groupId() to resolve.
+   *                 Falls back to "user:{platform}_{userId}" if unresolved.
    */
   async getContextBlock(
-    userId: string,
-    platform: string,
+    groupId: string,
     currentMessage: string,
   ): Promise<string> {
-    const groupId = this._groupId(userId, platform);
 
     const result = await this._post<{ facts: GraphitiFact[] }>("/get-memory", {
       group_id: groupId,
@@ -71,7 +72,7 @@ export class GraphitiClient {
     if (active.length === 0) return "";
 
     const lines = active.map(f => `- ${f.fact}`);
-    return `[User context — ${platform} user ${userId}]\n${lines.join("\n")}\n`;
+    return `[User context — ${groupId}]\n${lines.join("\n")}\n`;
   }
 
   /**
@@ -80,27 +81,28 @@ export class GraphitiClient {
    * Graphiti handles extraction, dedup, and contradiction resolution.
    */
   async addEpisode(params: {
-    userId: string;
-    platform: string;
+    groupId: string;
     userMessage: string;
     agentMessage: string;
+    /** Role label for the user turn (e.g. display name or canonical id) */
+    userRole?: string;
     agentName?: string;
     channelId?: string;
+    platform?: string;
     timestamp?: Date;
   }): Promise<void> {
-    const groupId = this._groupId(params.userId, params.platform);
     const ts = (params.timestamp ?? new Date()).toISOString();
-    const source = params.channelId
+    const source = params.channelId && params.platform
       ? `${params.platform} channel ${params.channelId}`
-      : params.platform;
+      : (params.platform ?? "unknown");
 
     await this._post("/messages", {
-      group_id: groupId,
+      group_id: params.groupId,
       messages: [
         {
           content: params.userMessage,
           role_type: "user",
-          role: params.userId,
+          role: params.userRole ?? params.groupId,
           timestamp: ts,
           source_description: source,
         },
@@ -116,21 +118,19 @@ export class GraphitiClient {
   }
 
   /** Delete all memory for a user (cascades to all episodes, entities, edges). */
-  async clearUser(userId: string, platform: string): Promise<void> {
-    const groupId = this._groupId(userId, platform);
+  async clearUser(groupId: string): Promise<void> {
     await this._delete(`/group/${encodeURIComponent(groupId)}`);
   }
 
   /** Direct fact search — useful for slash commands like /memory search <query>. */
   async search(
-    userId: string,
-    platform: string,
+    groupId: string,
     query: string,
     maxFacts = 10,
   ): Promise<GraphitiFact[]> {
     const result = await this._post<{ facts: GraphitiFact[] }>("/search", {
       query,
-      group_ids: [this._groupId(userId, platform)],
+      group_ids: [groupId],
       max_facts: maxFacts,
     });
     return result?.facts ?? [];
@@ -145,10 +145,6 @@ export class GraphitiClient {
     } catch {
       return false;
     }
-  }
-
-  private _groupId(userId: string, platform: string): string {
-    return `user:${platform}_${userId}`;
   }
 
   private async _post<T>(path: string, body: unknown): Promise<T | null> {
