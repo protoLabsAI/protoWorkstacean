@@ -26,6 +26,9 @@ All environment variables recognised by protoWorkstacean, their defaults, and wh
 | `OPENAI_BASE_URL` | _(none)_ | ProtoSdkExecutor | Alternative base URL override (takes precedence over `LLM_GATEWAY_URL` if set). |
 | `ANTHROPIC_API_KEY` | _(none)_ | AgentRuntimePlugin | Direct Anthropic API key (used when running without a gateway). |
 | `ROUTER_DEFAULT_SKILL` | _(none)_ | RouterPlugin | Fallback skill when no keyword match or `skillHint` found. If unset, unmatched messages are dropped. |
+| `ROUTER_DM_DEFAULT_AGENT` | _(none)_ | RouterPlugin | Agent to route Discord DMs to when no keyword matches. E.g. `quinn`. Required to enable natural DM conversations. |
+| `ROUTER_DM_DEFAULT_SKILL` | `chat` | RouterPlugin | Skill used for DMs routed by `ROUTER_DM_DEFAULT_AGENT`. Defaults to `chat`. |
+| `DM_CONVERSATION_TIMEOUT_MS` | `900000` | DiscordPlugin / RouterPlugin | Idle timeout (ms) before a DM conversation session expires. Default: 15 min. |
 | `DISABLE_ROUTER` | _(none)_ | RouterPlugin | Set to any non-empty value to skip RouterPlugin entirely. |
 
 ## Observability (LangFuse)

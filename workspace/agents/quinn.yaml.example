@@ -34,6 +34,10 @@ tools:
 maxTurns: 15
 
 skills:
+  - name: chat
+    description: General conversation — answer questions, discuss code, think through problems
+    keywords: []
+
   - name: bug_triage
     description: Triage a bug report — severity, reproduction, root cause, Plane issue
     keywords: [bug, issue, broken, crash, error, fail, exception, triage, TypeError, ReferenceError, not working, regression]

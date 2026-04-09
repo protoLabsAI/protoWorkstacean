@@ -343,3 +343,152 @@ describe("RouterPlugin", () => {
     });
   });
 });
+
+// ── DM conversation stickiness ────────────────────────────────────────────────
+
+describe("RouterPlugin — DM conversation stickiness", () => {
+  const quinnWithChat = {
+    ...quinnAgent,
+    skills: [
+      { name: "chat", keywords: [] },
+      { name: "bug_triage", keywords: ["bug", "broken", "error"] },
+      { name: "pr_review",  keywords: ["pr", "review"] },
+    ],
+  };
+
+  function makeDM(
+    conversationId: string,
+    content: string,
+    replyTopic = "reply.dm",
+  ): BusMessage {
+    return {
+      id: crypto.randomUUID(),
+      correlationId: conversationId,
+      topic: "message.inbound.discord.dm-channel-1",
+      timestamp: Date.now(),
+      payload: { content, isDM: true, sender: "user-1" },
+      reply: { topic: replyTopic },
+      source: { interface: "discord", userId: "user-1", channelId: "dm-channel-1" },
+    };
+  }
+
+  test("DM turn 1 with keyword match routes correctly", async () => {
+    const { workspaceDir, cleanup } = makeWorkspace({ agents: { "quinn.yaml": quinnWithChat } });
+    try {
+      const bus = new InMemoryEventBus();
+      const plugin = new RouterPlugin({ workspaceDir });
+      plugin.install(bus);
+
+      const convId = crypto.randomUUID();
+      const req = waitForSkillRequest(bus);
+      bus.publish("message.inbound.discord.dm-channel-1", makeDM(convId, "there is a bug in the auth module"));
+      const result = await req;
+
+      expect(result).not.toBeNull();
+      expect((result!.payload as Record<string, unknown>).skill).toBe("bug_triage");
+      expect((result!.payload as Record<string, unknown>).targets).toEqual(["quinn"]);
+
+      plugin.uninstall();
+    } finally { cleanup(); }
+  });
+
+  test("DM turn 2 without keywords stays with same agent (sticky)", async () => {
+    const { workspaceDir, cleanup } = makeWorkspace({ agents: { "quinn.yaml": quinnWithChat } });
+    try {
+      const bus = new InMemoryEventBus();
+      const plugin = new RouterPlugin({ workspaceDir });
+      plugin.install(bus);
+
+      const convId = crypto.randomUUID();
+
+      // Turn 1 — keyword match
+      const req1 = waitForSkillRequest(bus);
+      bus.publish("message.inbound.discord.dm-channel-1", makeDM(convId, "there is a bug in auth"));
+      const result1 = await req1;
+      expect(result1).not.toBeNull();
+      expect((result1!.payload as Record<string, unknown>).skill).toBe("bug_triage");
+
+      // Turn 2 — no keyword, should stay with quinn via stickiness
+      const req2 = waitForSkillRequest(bus);
+      bus.publish("message.inbound.discord.dm-channel-1", makeDM(convId, "can you look into this more?"));
+      const result2 = await req2;
+      expect(result2).not.toBeNull();
+      expect((result2!.payload as Record<string, unknown>).targets).toEqual(["quinn"]);
+
+      plugin.uninstall();
+    } finally { cleanup(); }
+  });
+
+  test("DM with no keyword and ROUTER_DM_DEFAULT_AGENT routes to default agent", async () => {
+    const { workspaceDir, cleanup } = makeWorkspace({ agents: { "quinn.yaml": quinnWithChat } });
+    const orig = process.env.ROUTER_DM_DEFAULT_AGENT;
+    process.env.ROUTER_DM_DEFAULT_AGENT = "quinn";
+    process.env.ROUTER_DM_DEFAULT_SKILL = "chat";
+    try {
+      const bus = new InMemoryEventBus();
+      const plugin = new RouterPlugin({ workspaceDir });
+      plugin.install(bus);
+
+      const convId = crypto.randomUUID();
+      const req = waitForSkillRequest(bus);
+      bus.publish("message.inbound.discord.dm-channel-1", makeDM(convId, "hey quinn, how are you?"));
+      const result = await req;
+
+      expect(result).not.toBeNull();
+      expect((result!.payload as Record<string, unknown>).skill).toBe("chat");
+      expect((result!.payload as Record<string, unknown>).targets).toEqual(["quinn"]);
+
+      plugin.uninstall();
+    } finally {
+      if (orig === undefined) delete process.env.ROUTER_DM_DEFAULT_AGENT;
+      else process.env.ROUTER_DM_DEFAULT_AGENT = orig;
+      delete process.env.ROUTER_DM_DEFAULT_SKILL;
+      cleanup();
+    }
+  });
+
+  test("DM with no keyword and no default drops message", async () => {
+    const { workspaceDir, cleanup } = makeWorkspace({ agents: { "quinn.yaml": quinnWithChat } });
+    const orig = process.env.ROUTER_DM_DEFAULT_AGENT;
+    delete process.env.ROUTER_DM_DEFAULT_AGENT;
+    try {
+      const bus = new InMemoryEventBus();
+      const plugin = new RouterPlugin({ workspaceDir });
+      plugin.install(bus);
+
+      const convId = crypto.randomUUID();
+      const req = waitForSkillRequest(bus, 100);
+      bus.publish("message.inbound.discord.dm-channel-1", makeDM(convId, "just saying hello"));
+      expect(await req).toBeNull();
+
+      plugin.uninstall();
+    } finally {
+      if (orig !== undefined) process.env.ROUTER_DM_DEFAULT_AGENT = orig;
+      cleanup();
+    }
+  });
+
+  test("different conversations are independent (different convIds don't share session)", async () => {
+    const { workspaceDir, cleanup } = makeWorkspace({ agents: { "quinn.yaml": quinnWithChat } });
+    try {
+      const bus = new InMemoryEventBus();
+      const plugin = new RouterPlugin({ workspaceDir });
+      plugin.install(bus);
+
+      const convA = crypto.randomUUID();
+      const convB = crypto.randomUUID();
+
+      // Conv A: Turn 1 (keyword match — establishes sticky session)
+      const req1 = waitForSkillRequest(bus);
+      bus.publish("message.inbound.discord.dm-channel-1", makeDM(convA, "there is a bug here"));
+      await req1;
+
+      // Conv B: Turn 1 (no keyword) — should drop (different convId, no session)
+      const req2 = waitForSkillRequest(bus, 100);
+      bus.publish("message.inbound.discord.dm-channel-1", makeDM(convB, "just chatting"));
+      expect(await req2).toBeNull();
+
+      plugin.uninstall();
+    } finally { cleanup(); }
+  });
+});

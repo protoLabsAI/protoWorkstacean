@@ -35,6 +35,7 @@ import { SkillResolver } from "./skill-resolver.ts";
 import { ProjectEnricher } from "./project-enricher.ts";
 import { loadAgentDefinitions } from "../agent-runtime/agent-definition-loader.ts";
 import type { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
+import { TTLCache } from "../../lib/ttl-cache.ts";
 
 export interface RouterConfig {
   workspaceDir: string;
@@ -61,11 +62,23 @@ export class RouterPlugin implements Plugin {
   private readonly config: RouterConfig;
   private reloadDebounce: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * DM conversation stickiness: once a skill/agent is matched for a DM
+   * conversation, subsequent turns reuse the same target without re-running
+   * keyword matching. TTL slides on every turn (default: DM_CONVERSATION_TIMEOUT_MS).
+   */
+  private readonly dmSessions: TTLCache<{ agentName: string; skill: string }>;
+
   constructor(config: RouterConfig) {
     this.config = config;
     const defaultSkill =
       config.defaultSkill ?? process.env.ROUTER_DEFAULT_SKILL;
     this.resolver = new SkillResolver(defaultSkill);
+
+    const dmTimeoutSec = Math.round(
+      Number(process.env.DM_CONVERSATION_TIMEOUT_MS ?? 15 * 60_000) / 1000,
+    );
+    this.dmSessions = new TTLCache(dmTimeoutSec);
   }
 
   install(bus: EventBus): void {
@@ -150,15 +163,32 @@ export class RouterPlugin implements Plugin {
 
     const skillHint = workingPayload.skillHint as string | undefined;
     const content = workingPayload.content as string | undefined;
+    const isDM = workingPayload.isDM === true;
 
     // Channel-based agent assignment — takes priority over keyword agent matching.
     // If channels.yaml assigns this channel to a specific agent, prefer that.
     const channelEntry = this.config.channelRegistry?.findByTopic(msg.topic);
     const channelAgent = channelEntry?.agent;
 
-    const match = this.resolver.resolve(skillHint, content);
+    // ── DM conversation stickiness ─────────────────────────────────────────
+    // Once an agent/skill is matched for a DM conversation, reuse it for all
+    // subsequent turns so the conversation stays with the same agent regardless
+    // of whether later messages contain matching keywords.
+    const conversationId = workingMsg.correlationId;
+    const storedSession = isDM ? this.dmSessions.get(conversationId) : undefined;
 
-    if (!match) {
+    let match = this.resolver.resolve(skillHint, content);
+
+    if (isDM && !match && !storedSession) {
+      // No keyword match and no active session — check DM default fallback.
+      const defaultAgent = process.env.ROUTER_DM_DEFAULT_AGENT;
+      const defaultSkill = process.env.ROUTER_DM_DEFAULT_SKILL ?? "chat";
+      if (defaultAgent) {
+        match = { skill: defaultSkill, agentName: defaultAgent, via: "default" };
+      }
+    }
+
+    if (!match && !storedSession) {
       console.log(
         `[router] No skill match for topic "${msg.topic}"` +
         (content ? ` content="${content.slice(0, 60)}"` : "") +
@@ -167,8 +197,27 @@ export class RouterPlugin implements Plugin {
       return;
     }
 
-    // Build targets list: channel assignment wins, then keyword-matched agent name.
-    const agentName = channelAgent ?? match.agentName;
+    // Resolve final agent/skill — stored DM session takes priority over fresh match
+    // for agent assignment (so conversation stays sticky), but a keyword match with
+    // a different skill is still honoured (e.g. "triage this bug" mid-conversation).
+    let agentName: string | undefined;
+    let skill: string;
+
+    if (storedSession) {
+      // Re-set TTL on every turn (sliding window)
+      this.dmSessions.set(conversationId, storedSession);
+      agentName = channelAgent ?? storedSession.agentName;
+      skill = match?.skill ?? storedSession.skill;
+    } else {
+      agentName = channelAgent ?? match!.agentName;
+      skill = match!.skill;
+    }
+
+    // Store new DM session if this is the first matched turn
+    if (isDM && !storedSession && agentName) {
+      this.dmSessions.set(conversationId, { agentName, skill });
+    }
+
     const targets = agentName ? [agentName] : [];
 
     const runId = crypto.randomUUID();
@@ -176,8 +225,9 @@ export class RouterPlugin implements Plugin {
       (workingMsg.reply?.topic) ??
       `agent.skill.response.${runId}`;
 
+    const via = match?.via ?? "sticky";
     console.log(
-      `[router] ${msg.topic} → skill "${match.skill}" (via ${match.via})` +
+      `[router] ${msg.topic} → skill "${skill}" (via ${via})` +
       (agentName ? ` [${agentName}]` : "") +
       ` reply → ${replyTopic}`,
     );
@@ -192,7 +242,7 @@ export class RouterPlugin implements Plugin {
         // Forward enriched payload fields (includes projectSlug if enriched)
         ...workingPayload,
         // Routing metadata — overrides any matching fields from original payload
-        skill: match.skill,
+        skill,
         content,
         prompt: content,
         targets: targets.length ? targets : undefined,
