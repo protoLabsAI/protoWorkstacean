@@ -86,7 +86,24 @@ If Qdrant is unavailable at any point during context retrieval, Quinn logs a war
 
 ## Vector context
 
-Quinn uses three Qdrant collections to give reviews repo-wide awareness:
+Quinn injects a `CODEBASE CONTEXT` block into review prompts, giving the LLM cross-repository awareness beyond the current diff.
+
+### Context pipeline
+
+```
+PR review triggered
+  → parseDiff(diff) — extract changed files and hunks
+  → extractAllSymbols(files) — identify changed functions/classes/exports
+  → [parallel]
+      retrieveAllPastPRDecisions(repo, filePaths)   → quinn-pr-history
+      findAllSimilarPatterns(symbols)               → quinn-code-patterns
+  → formatCodebaseContext({ pastDecisions, similarPatterns })
+  → applyTokenBudget(context, totalBudget)
+  → assembleReviewPrompt({ diff, context, ... })
+  → LLM call with enriched prompt
+```
+
+### Collections
 
 | Collection | Contents | Used for |
 |---|---|---|
@@ -96,22 +113,71 @@ Quinn uses three Qdrant collections to give reviews repo-wide awareness:
 
 **Embedding model:** `nomic-embed-text` via Ollama (768-dimensional cosine vectors, configurable via `QDRANT_VECTOR_SIZE`).
 
-**Token budget:** The assembled `CODEBASE CONTEXT` block is capped at **20% of the total prompt token budget** (default budget: 8,000 tokens → max 1,600 context tokens). Truncation priority:
-1. Keep past PR decisions (highest value)
-2. Trim similar patterns from lowest-scored first
-3. Drop learnings summary last
+Collections are created on first use via `initializeCollections()` from `src/services/qdrant/collections.ts`. Idempotent — safe to call on every startup.
 
-### Learning loop
+### CODEBASE CONTEXT block format
 
-When a developer dismisses a Quinn review comment, `dismissal-tracker.ts` records the dismissal in `quinn-review-learnings`. `low-signal-filter.ts` uses this collection to suppress similar patterns in future reviews.
+```
+CODEBASE CONTEXT:
+
+Past PR decisions on changed files:
+  src/middleware/auth.ts:
+    - PR #142 (2026-04-01): APPROVE — Token expiry not checked; consider adding clock skew tolerance
+    - PR #138 (2026-03-15): REQUEST_CHANGES — JWT secret not validated at startup
+
+Similar code patterns across the repository:
+  `validateToken` in src/utils/jwt.ts:23 (protolabsai/protomaker)
+    23: export function validateToken(token: string): boolean {
+    24:   // Similar implementation without expiry check
+    25: }
+```
+
+### Token budget
+
+The `CODEBASE CONTEXT` block is capped at **20% of the total prompt token budget** (default budget: 8,000 tokens → max 1,600 context tokens).
+
+Token estimation: `1 token ≈ 4 characters` (GPT-style approximation). The conservative `maxCost` is 1.5× the estimate when heuristics are used.
+
+**Truncation priority:**
+1. Past PR decisions — always kept (highest value, historically proven)
+2. Similar patterns — trimmed from lowest-scored first
+3. If budget too small for any context, block is omitted and review proceeds diff-only
+
+### Fallback behavior
+
+| Condition | Action |
+|---|---|
+| Qdrant unavailable | Log warning, skip context block, diff-only review |
+| Embedding fails for a chunk | Skip that chunk, continue with remaining |
+| No historical context found | Omit that section from the block |
+| Context exceeds 20% token budget | Truncate low-priority items |
 
 ### PR history indexing
 
-After a PR merges, `indexPRHistory()` (exported from `review-pipeline.ts`) embeds the merged diff and stores it in `quinn-pr-history`. This keeps the context collection current.
+After a PR merges (`pull_request.closed` + `merged: true`), `indexPRHistory()` (exported from `review-pipeline.ts`) runs:
 
-### Collection initialization
+```
+fetch diff + comments + decision
+  → parseDiff → chunkDiff (500-line blocks with 50-line overlap for large files)
+  → embed each chunk via Ollama
+  → upsert to quinn-pr-history with metadata
+  → extractAllSymbols → fetchSymbolContexts (GitHub raw content API)
+  → embed each symbol context
+  → upsert to quinn-code-patterns
+```
 
-Collections are created on first use via `initializeCollections()` from `src/services/qdrant/collections.ts`. This is idempotent — safe to call on every startup.
+### Learning loop
+
+When a developer responds to a Quinn inline comment:
+
+```
+pull_request_review_comment.created (with in_reply_to_id)
+  → isDismissalResponse(responseBody) — heuristic detection
+  → trackCommentResponse({ repo, filePath, commentBody, dismissed, reason })
+  → recordDismissalEvent → quinn-review-learnings
+```
+
+`dismissal-tracker.ts` records the dismissal; `low-signal-filter.ts` uses `isLowSignalPattern(repo, fileType, commentText)` to suppress similar patterns in future reviews. If dismissal rate exceeds 50% with ≥ 3 samples, the comment is skipped.
 
 ---
 
