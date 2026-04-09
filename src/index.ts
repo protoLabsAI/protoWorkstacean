@@ -334,16 +334,8 @@ for (const entry of pluginRegistry) {
     for (const err of dr.errors) console.warn(`[domain-discovery] ${err}`);
     console.log(`[domain-discovery] ${dr.domainsRegistered.length} domain(s) registered, ${dr.actionsLoaded} action(s) loaded`);
 
-    // Register the local flow-metrics domain so WorldStateEngine polls FlowMonitorPlugin
-    // and GOAP goals (flow.efficiency_healthy, flow.distribution_balanced) get live data.
-    const { createHttpCollector } = await import("../lib/plugins/world-state-engine.js");
-    const port = parseInt(process.env.WORKSTACEAN_HTTP_PORT || "3000", 10);
-    (wsEngine as unknown as WorldStateEngine).registerDomain(
-      "flow",
-      createHttpCollector(`http://localhost:${port}/api/flow-metrics`),
-      60_000,
-    );
-    console.log("[domain-discovery] flow domain registered → /api/flow-metrics (60s)");
+    // Local self-polling domains are registered AFTER Bun.serve() starts (see below)
+    // to avoid "Unable to connect" on the initial immediate tick.
   }
 }
 
@@ -579,6 +571,64 @@ function handleGetFlowMetrics(metric?: string): Response {
   return Response.json({ success: true, data, collectedAt: Date.now() });
 }
 
+// ── Services health API ────────────────────────────────────────────────────────
+
+function handleGetServices(): Response {
+  // Check Discord connectivity via runtime property (private in TS, accessible at runtime)
+  const discord = allPlugins.find(p => p.name === "discord") as Record<string, unknown> | undefined;
+  const discordClient = discord?.["client"] as { isReady(): boolean; user?: { tag: string } } | undefined;
+  const discordReady = discordClient?.isReady() ?? false;
+
+  const services: Record<string, unknown> = {
+    discord: {
+      configured: !!process.env.DISCORD_BOT_TOKEN,
+      connected: discordReady,
+      bot: discordReady ? discordClient?.user?.tag ?? null : null,
+    },
+    github: {
+      configured: !!(process.env.GITHUB_TOKEN || process.env.QUINN_APP_PRIVATE_KEY),
+      authType: process.env.QUINN_APP_PRIVATE_KEY ? "app" : process.env.GITHUB_TOKEN ? "token" : null,
+    },
+    plane: {
+      configured: !!process.env.PLANE_API_KEY,
+      baseUrl: process.env.PLANE_BASE_URL || null,
+    },
+    gateway: {
+      configured: !!process.env.LLM_GATEWAY_URL,
+      url: process.env.LLM_GATEWAY_URL || null,
+    },
+    langfuse: {
+      configured: !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY),
+    },
+    graphiti: {
+      configured: !!process.env.GRAPHITI_URL,
+      url: process.env.GRAPHITI_URL || null,
+    },
+  };
+
+  return Response.json(services);
+}
+
+// ── Agent health API ──────────────────────────────────────────────────────────
+
+function handleGetAgentHealth(): Response {
+  const registrations = executorRegistry.list();
+
+  // Group by agent name
+  const agents: Record<string, { skills: string[]; executorType: string }> = {};
+  for (const reg of registrations) {
+    const name = reg.agentName ?? "_default";
+    if (!agents[name]) agents[name] = { skills: [], executorType: reg.executor.type };
+    agents[name].skills.push(reg.skill);
+  }
+
+  return Response.json({
+    agentCount: Object.keys(agents).length,
+    agents,
+    registrationCount: registrations.length,
+  });
+}
+
 function handleGetCeremonies(): Response {
   const ceremoniesDir = join(workspaceDir, "ceremonies");
   if (!existsSync(ceremoniesDir)) return Response.json({ success: true, data: [] });
@@ -793,6 +843,8 @@ const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
   { method: "GET",  path: "/api/goals",                 handler: () => serveWorkspaceYaml("goals.yaml", "goals") },
   { method: "GET",  path: "/api/world-state",           handler: () => handleGetWorldState() },
   { method: "GET",  path: "/api/world-state/:domain",   handler: (_, p) => handleGetWorldState(p.domain) },
+  { method: "GET",  path: "/api/services",              handler: () => handleGetServices() },
+  { method: "GET",  path: "/api/agent-health",          handler: () => handleGetAgentHealth() },
   { method: "GET",  path: "/api/flow-metrics",          handler: () => handleGetFlowMetrics() },
   { method: "GET",  path: "/api/flow-metrics/:metric",  handler: (_, p) => handleGetFlowMetrics(p.metric) },
   { method: "GET",  path: "/api/ceremonies",            handler: () => handleGetCeremonies() },
@@ -820,3 +872,20 @@ Bun.serve({
 });
 
 console.log(`HTTP API listening on port ${HTTP_PORT}`);
+
+// ── Register self-polling world-state domains (after HTTP server is up) ───────
+{
+  const wsEngine = registeredPlugins.find(p => p.name === "world-state-engine");
+  if (wsEngine) {
+    const { createHttpCollector } = await import("../lib/plugins/world-state-engine.js");
+    type WorldStateEngine = import("../lib/plugins/world-state-engine.js").WorldStateEngine;
+    const engine = wsEngine as unknown as WorldStateEngine;
+    const base = `http://localhost:${HTTP_PORT}`;
+
+    engine.registerDomain("flow", createHttpCollector(`${base}/api/flow-metrics`), 60_000);
+    engine.registerDomain("services", createHttpCollector(`${base}/api/services`), 60_000);
+    engine.registerDomain("agent_health", createHttpCollector(`${base}/api/agent-health`), 60_000);
+
+    console.log("[domain-discovery] Registered local domains: flow, services, agent_health (60s)");
+  }
+}

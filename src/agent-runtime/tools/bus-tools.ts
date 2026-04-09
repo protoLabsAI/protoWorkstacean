@@ -94,14 +94,15 @@ export function createBusTools(opts: BusToolsOptions = {}) {
 
   const getWorldState = tool(
     "get_world_state",
-    "Read the current world state snapshot from the protoWorkstacean GOAP engine. " +
-      "Returns all or a single domain: services, board, ci, portfolio, security, agent_health.",
+    "Read the current world state snapshot from the GOAP engine. " +
+      "Returns all domains or a single one. Built-in domains: services (integration health), " +
+      "agent_health (loaded agents and skills), flow (velocity/efficiency metrics).",
     {
       domain: z
         .string()
         .optional()
         .describe(
-          "Optional domain filter: services | board | ci | portfolio | security | agent_health",
+          "Optional domain filter — omit to get all domains",
         ),
     },
     async ({ domain }) => {
