@@ -73,20 +73,13 @@ jobs:
 
       - name: Notify Discord — what shipped
         env:
-          DISCORD_WEBHOOK_PROTOWORKSTACEAN_DEV: ${{ secrets.DISCORD_WEBHOOK_PROTOWORKSTACEAN_DEV }}
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_PROTOWORKSTACEAN_DEV }}
           COMMIT_SUBJECT: ${{ github.event.head_commit.message }}
           SHORT_SHA: ${{ github.sha }}
           COMMIT_URL: ${{ github.event.head_commit.url }}
         run: |
           node -e "
-          import { readFileSync } from 'fs';
-          import { parse } from 'yaml';
-
-          const projects = parse(readFileSync('workspace/projects.yaml', 'utf8')).projects ?? [];
-          const project  = projects.find(p => p.slug === 'protolabsai-protoworkstacean');
-          const envVar   = project?.discord?.dev?.webhookEnv;
-          const webhook  = envVar ? process.env[envVar] : null;
-
+          const webhook = process.env.WEBHOOK;
           if (!webhook) { console.log('No dev webhook configured — skipping'); process.exit(0); }
 
           const subject = (process.env.COMMIT_SUBJECT ?? '').split('\n')[0];
