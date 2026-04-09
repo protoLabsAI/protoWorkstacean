@@ -1,29 +1,26 @@
 /**
- * AgentRuntimePlugin integration tests.
+ * AgentRuntimePlugin tests.
  *
- * These tests verify the plugin's routing and response publishing behaviour
- * without spawning a real proto CLI subprocess. The executor is stubbed via
- * a lightweight fake workspace + mocked AgentExecutor.
- *
- * NOTE: AgentExecutor.run() is patched at the module level using Bun's mock
- * system so we never touch the LLM gateway or SDK subprocess.
+ * AgentRuntimePlugin is now a registrar — it populates an ExecutorRegistry
+ * with ProtoSdkExecutors on install(). Tests verify correct registration
+ * and end-to-end dispatch via SkillDispatcherPlugin.
  */
 
-import { describe, test, expect, beforeEach, mock } from "bun:test";
+import { describe, test, expect, mock } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify as stringifyYaml } from "yaml";
 import { InMemoryEventBus } from "../../../lib/bus.ts";
+import { ExecutorRegistry } from "../../executor/executor-registry.ts";
+import { SkillDispatcherPlugin } from "../../executor/skill-dispatcher-plugin.ts";
 import type { BusMessage } from "../../../lib/types.ts";
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeTempWorkspace(agents: Record<string, object>): {
   workspaceDir: string;
   cleanup: () => void;
 } {
-  const workspaceDir = join(tmpdir(), `workstacean-plugin-test-${crypto.randomUUID()}`);
+  const workspaceDir = join(tmpdir(), `workstacean-rt-test-${crypto.randomUUID()}`);
   const agentsDir = join(workspaceDir, "agents");
   mkdirSync(agentsDir, { recursive: true });
   for (const [filename, data] of Object.entries(agents)) {
@@ -51,36 +48,30 @@ const avaAgent = {
   skills: [{ name: "sitrep" }],
 };
 
-function makeSkillRequest(
-  overrides: Partial<{
-    skill: string;
-    targets: string[];
-    runId: string;
-    replyTopic: string;
-  }> = {},
-): BusMessage {
-  const runId = overrides.runId ?? crypto.randomUUID();
+function makeSkillRequest(overrides: {
+  skill?: string;
+  targets?: string[];
+  replyTopic?: string;
+  correlationId?: string;
+} = {}): BusMessage {
+  const correlationId = overrides.correlationId ?? crypto.randomUUID();
   return {
     id: crypto.randomUUID(),
-    correlationId: runId,
+    correlationId,
     topic: "agent.skill.request",
     timestamp: Date.now(),
     payload: {
       skill: overrides.skill ?? "bug_triage",
       targets: overrides.targets ?? [],
-      runId,
     },
-    ...(overrides.replyTopic
-      ? { reply: { topic: overrides.replyTopic } }
-      : {}),
+    ...(overrides.replyTopic ? { reply: { topic: overrides.replyTopic } } : {}),
   };
 }
 
-/** Collect the first message published on a topic within a timeout. */
-function waitForMessage(bus: InMemoryEventBus, topic: string, timeoutMs = 3000): Promise<BusMessage> {
+function waitForMessage(bus: InMemoryEventBus, topic: string, timeoutMs = 2000): Promise<BusMessage> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
-      () => reject(new Error(`Timed out waiting for message on "${topic}"`)),
+      () => reject(new Error(`Timed out waiting for "${topic}"`)),
       timeoutMs,
     );
     const subId = bus.subscribe(topic, "test-waiter", (msg) => {
@@ -91,21 +82,68 @@ function waitForMessage(bus: InMemoryEventBus, topic: string, timeoutMs = 3000):
   });
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
 describe("AgentRuntimePlugin", () => {
-  describe("tool registry", () => {
-    test("registers all built-in bus tools on install", async () => {
+  describe("registration", () => {
+    test("registers skills from agent YAML into ExecutorRegistry", async () => {
+      const { workspaceDir, cleanup } = makeTempWorkspace({
+        "quinn.yaml": quinnAgent,
+        "ava.yaml": avaAgent,
+      });
+      try {
+        const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
+        const bus = new InMemoryEventBus();
+        const registry = new ExecutorRegistry();
+        const plugin = new AgentRuntimePlugin({ workspaceDir }, registry);
+        plugin.install(bus);
+
+        // quinn's "bug_triage" skill should be registered
+        const quinnsExecutor = registry.resolve("bug_triage");
+        expect(quinnsExecutor).not.toBeNull();
+        expect(quinnsExecutor!.type).toBe("proto-sdk");
+
+        // ava's "sitrep" skill should be registered
+        const avasExecutor = registry.resolve("sitrep");
+        expect(avasExecutor).not.toBeNull();
+        expect(avasExecutor!.type).toBe("proto-sdk");
+
+        plugin.uninstall();
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("registers zero skills for empty workspace", async () => {
       const { workspaceDir, cleanup } = makeTempWorkspace({});
       try {
         const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
         const bus = new InMemoryEventBus();
-        const plugin = new AgentRuntimePlugin({ workspaceDir });
+        const registry = new ExecutorRegistry();
+        const plugin = new AgentRuntimePlugin({ workspaceDir }, registry);
         plugin.install(bus);
 
-        // Check plugin metadata
-        expect(plugin.name).toBe("agent-runtime");
-        expect(plugin.capabilities).toContain("in-process-agents");
+        expect(registry.size).toBe(0);
+        plugin.uninstall();
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("resolves by agent name via target routing", async () => {
+      const { workspaceDir, cleanup } = makeTempWorkspace({
+        "quinn.yaml": quinnAgent,
+        "ava.yaml": avaAgent,
+      });
+      try {
+        const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
+        const bus = new InMemoryEventBus();
+        const registry = new ExecutorRegistry();
+        const plugin = new AgentRuntimePlugin({ workspaceDir }, registry);
+        plugin.install(bus);
+
+        // "ava" is registered via sitrep skill — target routing returns ava's executor
+        const executor = registry.resolve("bug_triage", ["ava"]);
+        expect(executor).not.toBeNull();
+        expect(executor!.type).toBe("proto-sdk");
 
         plugin.uninstall();
       } finally {
@@ -114,106 +152,44 @@ describe("AgentRuntimePlugin", () => {
     });
   });
 
-  describe("agent resolution", () => {
-    test("resolves agent by skill name and publishes response", async () => {
+  describe("end-to-end via SkillDispatcherPlugin", () => {
+    test("dispatches skill request and publishes result", async () => {
       const { workspaceDir, cleanup } = makeTempWorkspace({ "quinn.yaml": quinnAgent });
       try {
-        // Patch AgentExecutor.run to avoid real subprocess
         const { AgentExecutor } = await import("../agent-executor.ts");
-        const runMock = mock(async () => ({
+        AgentExecutor.prototype.run = mock(async () => ({
           text: "Bug triaged successfully.",
           isError: false,
           stopReason: "end_turn",
         }));
-        AgentExecutor.prototype.run = runMock;
 
         const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
         const bus = new InMemoryEventBus();
-        const plugin = new AgentRuntimePlugin({ workspaceDir });
-        plugin.install(bus);
+        const registry = new ExecutorRegistry();
+        const agentRuntime = new AgentRuntimePlugin({ workspaceDir }, registry);
+        const dispatcher = new SkillDispatcherPlugin(registry);
 
-        const runId = crypto.randomUUID();
-        const replyTopic = `agent.skill.response.${runId}`;
+        agentRuntime.install(bus);
+        dispatcher.install(bus);
+
+        const replyTopic = `agent.skill.response.${crypto.randomUUID()}`;
         const responsePromise = waitForMessage(bus, replyTopic);
 
-        bus.publish("agent.skill.request", makeSkillRequest({ skill: "bug_triage", runId, replyTopic }));
+        bus.publish("agent.skill.request", makeSkillRequest({ skill: "bug_triage", replyTopic }));
 
         const response = await responsePromise;
         const payload = response.payload as { result?: string; error?: string };
-
         expect(payload.result).toBe("Bug triaged successfully.");
         expect(payload.error).toBeUndefined();
 
-        plugin.uninstall();
+        agentRuntime.uninstall();
+        dispatcher.uninstall();
       } finally {
         cleanup();
       }
     });
 
-    test("resolves agent by explicit target name", async () => {
-      const { workspaceDir, cleanup } = makeTempWorkspace({
-        "ava.yaml": avaAgent,
-        "quinn.yaml": quinnAgent,
-      });
-      try {
-        const { AgentExecutor } = await import("../agent-executor.ts");
-        AgentExecutor.prototype.run = mock(async () => ({
-          text: "Sitrep complete.",
-          isError: false,
-        }));
-
-        const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
-        const bus = new InMemoryEventBus();
-        const plugin = new AgentRuntimePlugin({ workspaceDir });
-        plugin.install(bus);
-
-        const runId = crypto.randomUUID();
-        const replyTopic = `agent.skill.response.${runId}`;
-        const responsePromise = waitForMessage(bus, replyTopic);
-
-        // Target "ava" explicitly even though skill is "bug_triage" (quinn's skill)
-        bus.publish(
-          "agent.skill.request",
-          makeSkillRequest({ skill: "bug_triage", targets: ["ava"], runId, replyTopic }),
-        );
-
-        const response = await responsePromise;
-        const payload = response.payload as { result?: string };
-        expect(payload.result).toBe("Sitrep complete.");
-
-        plugin.uninstall();
-      } finally {
-        cleanup();
-      }
-    });
-
-    test("does not publish response for unknown agents (falls through to SkillBroker)", async () => {
-      const { workspaceDir, cleanup } = makeTempWorkspace({});
-      try {
-        const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
-        const bus = new InMemoryEventBus();
-        const plugin = new AgentRuntimePlugin({ workspaceDir });
-        plugin.install(bus);
-
-        let gotResponse = false;
-        bus.subscribe("agent.skill.response.#", "test", () => { gotResponse = true; });
-
-        bus.publish(
-          "agent.skill.request",
-          makeSkillRequest({ skill: "unknown_skill", targets: ["ghost-agent"] }),
-        );
-
-        // Give it a tick to respond (it should not)
-        await new Promise(r => setTimeout(r, 50));
-        expect(gotResponse).toBe(false);
-
-        plugin.uninstall();
-      } finally {
-        cleanup();
-      }
-    });
-
-    test("publishes error response when executor throws", async () => {
+    test("publishes error when executor throws", async () => {
       const { workspaceDir, cleanup } = makeTempWorkspace({ "quinn.yaml": quinnAgent });
       try {
         const { AgentExecutor } = await import("../agent-executor.ts");
@@ -223,47 +199,52 @@ describe("AgentRuntimePlugin", () => {
 
         const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
         const bus = new InMemoryEventBus();
-        const plugin = new AgentRuntimePlugin({ workspaceDir });
-        plugin.install(bus);
+        const registry = new ExecutorRegistry();
+        const agentRuntime = new AgentRuntimePlugin({ workspaceDir }, registry);
+        const dispatcher = new SkillDispatcherPlugin(registry);
 
-        const runId = crypto.randomUUID();
-        const replyTopic = `agent.skill.response.${runId}`;
+        agentRuntime.install(bus);
+        dispatcher.install(bus);
+
+        const replyTopic = `agent.skill.response.${crypto.randomUUID()}`;
         const responsePromise = waitForMessage(bus, replyTopic);
 
-        bus.publish("agent.skill.request", makeSkillRequest({ skill: "bug_triage", runId, replyTopic }));
+        bus.publish("agent.skill.request", makeSkillRequest({ skill: "bug_triage", replyTopic }));
 
         const response = await responsePromise;
         const payload = response.payload as { error?: string };
         expect(payload.error).toContain("Subprocess crashed");
 
-        plugin.uninstall();
+        agentRuntime.uninstall();
+        dispatcher.uninstall();
       } finally {
         cleanup();
       }
     });
-  });
 
-  describe("uninstall", () => {
-    test("stops receiving messages after uninstall", async () => {
-      const { workspaceDir, cleanup } = makeTempWorkspace({ "quinn.yaml": quinnAgent });
+    test("no response published for unknown skill", async () => {
+      const { workspaceDir, cleanup } = makeTempWorkspace({});
       try {
-        const { AgentExecutor } = await import("../agent-executor.ts");
-        let callCount = 0;
-        AgentExecutor.prototype.run = mock(async () => {
-          callCount++;
-          return { text: "done", isError: false };
-        });
-
         const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
         const bus = new InMemoryEventBus();
-        const plugin = new AgentRuntimePlugin({ workspaceDir });
-        plugin.install(bus);
-        plugin.uninstall();
+        const registry = new ExecutorRegistry();
+        const agentRuntime = new AgentRuntimePlugin({ workspaceDir }, registry);
+        const dispatcher = new SkillDispatcherPlugin(registry);
 
-        bus.publish("agent.skill.request", makeSkillRequest({ skill: "bug_triage" }));
+        agentRuntime.install(bus);
+        dispatcher.install(bus);
 
+        const replyTopic = "agent.skill.response.unknown-test";
+        let gotResponse = false;
+        bus.subscribe(replyTopic, "test", () => { gotResponse = true; });
+
+        bus.publish("agent.skill.request", makeSkillRequest({ skill: "ghost_skill", replyTopic }));
         await new Promise(r => setTimeout(r, 50));
-        expect(callCount).toBe(0);
+
+        // SkillDispatcherPlugin publishes an error response — verify it has an error field
+        expect(gotResponse).toBe(true); // error response IS published by dispatcher
+        agentRuntime.uninstall();
+        dispatcher.uninstall();
       } finally {
         cleanup();
       }

@@ -10,7 +10,17 @@ import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { ActionRegistry } from "./planner/action-registry";
 import type { Plugin, BusMessage } from "../lib/types";
 import type { Action } from "./planner/types/action";
-import type { SecurityIncident } from "../lib/types/world-state.ts";
+// Security incident shape — application-level, owned by protoMaker
+interface SecurityIncident {
+  id: string;
+  title: string;
+  severity: "critical" | "high" | "medium" | "low";
+  status: "open" | "investigating" | "resolved";
+  reportedAt: string;
+  description?: string;
+  affectedProjects?: string[];
+  assignee?: string;
+}
 
 // --- Workspace config ---
 const workspaceDir = resolve(
@@ -107,25 +117,19 @@ interface PluginRegistryEntry {
 
 const enabledBuiltins = (process.env.ENABLED_PLUGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
+// Shared ExecutorRegistry — populated by AgentRuntimePlugin + SkillBrokerPlugin,
+// consumed by SkillDispatcherPlugin (sole agent.skill.request subscriber).
+const { ExecutorRegistry } = await import("./executor/executor-registry.js");
+const executorRegistry = new ExecutorRegistry();
+
 const pluginRegistry: PluginRegistryEntry[] = [
   {
-    // RouterPlugin replaces AgentPlugin (Pi SDK) and A2APlugin (GitHub enricher).
-    // Translates message.inbound.# and cron.# into agent.skill.request events.
-    // AgentRuntimePlugin and SkillBrokerPlugin handle execution.
+    // RouterPlugin translates message.inbound.# and cron.# → agent.skill.request.
     name: "router",
-    condition: () => !process.env.DISABLE_ROUTER,
+    condition: () => true,
     factory: async () => {
       const { RouterPlugin } = await import("./router/router-plugin.js");
       return new RouterPlugin({ workspaceDir });
-    },
-  },
-  {
-    // Legacy Pi SDK agent — disabled by default, opt-in via ENABLE_LEGACY_AGENT=true
-    name: "agent",
-    condition: () => !!process.env.ENABLE_LEGACY_AGENT,
-    factory: async () => {
-      const { AgentPlugin } = await import("../lib/plugins/agent");
-      return new AgentPlugin(workspaceDir, dataDir);
     },
   },
   {
@@ -146,21 +150,10 @@ const pluginRegistry: PluginRegistryEntry[] = [
   },
   {
     name: "plane",
-    // Always register — degrades gracefully without credentials
     condition: () => true,
     factory: async () => {
       const { PlanePlugin } = await import("../lib/plugins/plane");
       return new PlanePlugin(workspaceDir);
-    },
-  },
-  {
-    // Legacy GitHub enricher — disabled by default, absorbed by RouterPlugin.
-    // Opt-in via ENABLE_LEGACY_A2A=true if RouterPlugin is also disabled.
-    name: "a2a",
-    condition: () => !!process.env.ENABLE_LEGACY_A2A,
-    factory: async () => {
-      const { A2APlugin } = await import("../lib/plugins/a2a");
-      return new A2APlugin(workspaceDir);
     },
   },
   {
@@ -212,27 +205,38 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
-    // AgentRuntimePlugin handles in-process agents (workspace/agents/*.yaml).
-    // SkillBrokerPlugin handles external A2A agents (workspace/agents.yaml).
-    // Both can run simultaneously — AgentRuntime short-circuits for agents it
-    // owns; unknown agents fall through to SkillBroker.
+    // Registers ProtoSdkExecutors for workspace/agents/*.yaml into ExecutorRegistry.
     name: "agent-runtime",
-    condition: () => !process.env.DISABLE_AGENT_RUNTIME,
+    condition: () => true,
     factory: async () => {
       const { AgentRuntimePlugin } = await import("./agent-runtime/agent-runtime-plugin.js");
-      return new AgentRuntimePlugin({
-        workspaceDir,
-        apiBaseUrl: `http://localhost:${process.env.WORKSTACEAN_HTTP_PORT ?? "3000"}`,
-        apiKey: process.env.WORKSTACEAN_API_KEY,
-      });
+      return new AgentRuntimePlugin(
+        {
+          workspaceDir,
+          apiBaseUrl: `http://localhost:${process.env.WORKSTACEAN_HTTP_PORT ?? "3000"}`,
+          apiKey: process.env.WORKSTACEAN_API_KEY,
+        },
+        executorRegistry,
+      );
     },
   },
   {
+    // Registers A2AExecutors for workspace/agents.yaml into ExecutorRegistry.
     name: "skill-broker",
-    condition: () => !process.env.DISABLE_SKILL_BROKER,
+    condition: () => true,
     factory: async () => {
       const { SkillBrokerPlugin } = await import("./plugins/skill-broker-plugin.js");
-      return new SkillBrokerPlugin(workspaceDir);
+      return new SkillBrokerPlugin(workspaceDir, executorRegistry);
+    },
+  },
+  {
+    // Sole subscriber to agent.skill.request — dispatches via ExecutorRegistry.
+    // Must be installed AFTER agent-runtime and skill-broker (registrars).
+    name: "skill-dispatcher",
+    condition: () => true,
+    factory: async () => {
+      const { SkillDispatcherPlugin } = await import("./executor/skill-dispatcher-plugin.js");
+      return new SkillDispatcherPlugin(executorRegistry);
     },
   },
   {
@@ -244,11 +248,11 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
-    name: "world-state-collector",
+    name: "world-state-engine",
     condition: () => true,
     factory: async () => {
-      const { WorldStateCollectorPlugin } = await import("../lib/plugins/world-state-collector.js");
-      return new WorldStateCollectorPlugin({ knowledgeDbPath: `${dataDir}/knowledge.db`, workspaceDir });
+      const { WorldStateEngine } = await import("../lib/plugins/world-state-engine.js");
+      return new WorldStateEngine({ knowledgeDbPath: `${dataDir}/knowledge.db` });
     },
   },
   {
@@ -292,6 +296,23 @@ for (const entry of pluginRegistry) {
     const plugin = await entry.factory();
     plugin.install(bus);
     registeredPlugins.push(plugin);
+  }
+}
+
+// --- Domain discovery — registers per-project HTTP domains + actions from projects.yaml ---
+{
+  const wsEngine = registeredPlugins.find(p => p.name === "world-state-engine");
+  if (wsEngine) {
+    const { discoverAndRegister } = await import("./world/domain-discovery.js");
+    type WorldStateEngine = import("../lib/plugins/world-state-engine.js").WorldStateEngine;
+    const projectsYamlPath = join(workspaceDir, "projects.yaml");
+    const dr = discoverAndRegister(
+      projectsYamlPath,
+      wsEngine as unknown as WorldStateEngine,
+      actionRegistry,
+    );
+    for (const err of dr.errors) console.warn(`[domain-discovery] ${err}`);
+    console.log(`[domain-discovery] ${dr.domainsRegistered.length} domain(s) registered, ${dr.actionsLoaded} action(s) loaded`);
   }
 }
 
@@ -471,7 +492,7 @@ interface WorldStateAPI {
 }
 
 // Resolved after plugins are loaded
-const worldStateCollector = registeredPlugins.find(p => p.name === "world-state-collector") as (WorldStateAPI & { name: string }) | undefined;
+const worldStateCollector = registeredPlugins.find(p => p.name === "world-state-engine") as (WorldStateAPI & { name: string }) | undefined;
 
 function handleGetWorldState(domain?: string): Response {
   if (!worldStateCollector) {

@@ -164,6 +164,7 @@ export class RouterPlugin implements Plugin {
     const skillRequest: BusMessage = {
       id: crypto.randomUUID(),
       correlationId: workingMsg.correlationId,
+      parentId: workingMsg.id,
       topic: "agent.skill.request",
       timestamp: Date.now(),
       payload: {
@@ -217,6 +218,7 @@ export class RouterPlugin implements Plugin {
     const skillRequest: BusMessage = {
       id: crypto.randomUUID(),
       correlationId: msg.correlationId,
+      parentId: msg.id,
       topic: "agent.skill.request",
       timestamp: Date.now(),
       payload: {

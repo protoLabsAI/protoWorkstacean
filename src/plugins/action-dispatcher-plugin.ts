@@ -133,13 +133,14 @@ export class ActionDispatcherPlugin implements Plugin {
       return;
     }
 
-    await this.executeAction(action, correlationId, msg.correlationId, startedAt);
+    await this.executeAction(action, correlationId, msg.correlationId, msg.id, startedAt);
   }
 
   private async executeAction(
     action: import("../planner/types/action.ts").Action,
     correlationId: string,
     parentCorrelationId: string,
+    parentMsgId: string,
     startedAt: number
   ): Promise<void> {
     // Apply optimistic state effects
@@ -164,6 +165,7 @@ export class ActionDispatcherPlugin implements Plugin {
         this.bus.publish(action.meta.topic, {
           id: crypto.randomUUID(),
           correlationId,
+          parentId: parentMsgId,
           topic: action.meta.topic,
           timestamp: Date.now(),
           payload: {
@@ -198,6 +200,7 @@ export class ActionDispatcherPlugin implements Plugin {
         this.bus.publish(action.meta.topic!, {
           id: crypto.randomUUID(),
           correlationId,
+          parentId: parentMsgId,
           topic: action.meta.topic!,
           timestamp: Date.now(),
           payload: {
@@ -301,7 +304,7 @@ export class ActionDispatcherPlugin implements Plugin {
     // Complete in WIP queue and dispatch next if available
     const next = this.queue.complete(correlationId);
     if (next) {
-      await this.executeAction(next.action, next.correlationId, parentCorrelationId, next.enqueuedAt);
+      await this.executeAction(next.action, next.correlationId, parentCorrelationId, crypto.randomUUID(), next.enqueuedAt);
     }
   }
 }

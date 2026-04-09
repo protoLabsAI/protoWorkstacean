@@ -1,139 +1,18 @@
 /**
- * WorldState TypeScript schema — typed core properties with generic extension mechanism.
+ * WorldState TypeScript schema — generic, engine-level types only.
  *
- * Domains:
- *   - services: infrastructure / service health (30s tick)
- *   - board:    Plane project board state (60s tick)
- *   - ci:       GitHub CI pipeline state (5min tick)
- *   - portfolio: workspace project portfolio (15min tick)
+ * Domain data is entirely application-defined. protoWorkstacean makes no
+ * assumptions about what domains exist or what shape their data takes.
+ * Applications (e.g. protoMaker/ava) register their own domains with the
+ * WorldStateEngine via registerDomain() or workspace/domains.yaml.
  *
- * The `extensions` field provides a generic Record-based mechanism for domain-specific
- * data that does not fit the core domain types.
+ * The engine provides:
+ *   - WorldStateDomain<T>   — per-domain envelope with metadata
+ *   - WorldState            — the full state container
+ *   - WorldStateSnapshot    — persistence envelope
  */
 
-// ── Service state ─────────────────────────────────────────────────────────────
-
-export interface ServiceInstance {
-  name: string;
-  status: "healthy" | "degraded" | "down" | "unknown";
-  uptime?: number;        // seconds
-  lastChecked: number;    // Unix timestamp ms
-  meta?: Record<string, unknown>;
-}
-
-export interface ServiceState {
-  instances: ServiceInstance[];
-  totalHealthy: number;
-  totalDegraded: number;
-  totalDown: number;
-}
-
-// ── Board state ───────────────────────────────────────────────────────────────
-
-export interface BoardIssue {
-  id: string;
-  title: string;
-  status: string;
-  priority?: string;
-  assignee?: string;
-  updatedAt?: string;
-}
-
-export interface BoardState {
-  projectSlug: string;
-  openIssues: number;
-  inProgress: number;
-  done: number;
-  issues: BoardIssue[];
-  /** Flow efficiency: in-progress / (in-progress + open-backlog). Target >= 0.35. */
-  efficiency: number;
-  /** Distribution of work by type across all active issues. */
-  distribution: {
-    feature: number;  // 0.0 – 1.0
-    defect: number;
-    risk: number;
-    debt: number;
-  };
-}
-
-// ── CI state ──────────────────────────────────────────────────────────────────
-
-export interface CIRun {
-  id: string;
-  name: string;
-  status: "success" | "failure" | "pending" | "running" | "cancelled" | string;
-  branch: string;
-  startedAt?: string;
-  finishedAt?: string;
-  url?: string;
-}
-
-export interface CIState {
-  repository: string;
-  runs: CIRun[];
-  successRate?: number;   // 0.0 – 1.0
-}
-
-// ── Portfolio state ───────────────────────────────────────────────────────────
-
-export interface PortfolioProject {
-  slug: string;
-  title: string;
-  github: string;
-  status: "active" | "archived" | "paused" | string;
-  agents: string[];
-  lastActivity?: string;
-}
-
-export interface PortfolioState {
-  totalProjects: number;
-  activeProjects: number;
-  projects: PortfolioProject[];
-}
-
-// ── Security state ────────────────────────────────────────────────────────────
-
-export interface SecurityIncident {
-  id: string;
-  title: string;
-  severity: "critical" | "high" | "medium" | "low";
-  status: "open" | "investigating" | "resolved";
-  reportedAt: string;
-  description?: string;
-  affectedProjects?: string[];
-  assignee?: string;
-}
-
-export interface SecurityState {
-  incidents: SecurityIncident[];
-  openIncidents: number;
-  criticalIncidents: number;
-}
-
-// ── Agent health state ────────────────────────────────────────────────────────
-
-export interface AgentHealthEntry {
-  name: string;
-  url: string;
-  reachable: boolean;
-  latencyMs?: number;
-  lastChecked: number;    // Unix timestamp ms
-  error?: string;
-}
-
-export interface AgentHealthState {
-  entries: AgentHealthEntry[];
-  totalReachable: number;
-  totalUnreachable: number;
-  unreachableAgents: string[];
-}
-
-// ── Generic extension mechanism ───────────────────────────────────────────────
-
-/** Arbitrary domain-specific extensions keyed by domain name or feature slug. */
-export type WorldStateExtensions = Record<string, unknown>;
-
-// ── Core world state container ────────────────────────────────────────────────
+// ── Per-domain metadata ───────────────────────────────────────────────────────
 
 export interface WorldStateMetadata {
   collectedAt: number;    // Unix timestamp ms
@@ -143,23 +22,25 @@ export interface WorldStateMetadata {
   errorMessage?: string;
 }
 
+// ── Domain envelope ───────────────────────────────────────────────────────────
+
 export interface WorldStateDomain<T = unknown> {
   data: T;
   metadata: WorldStateMetadata;
 }
 
+// ── Core world state container ────────────────────────────────────────────────
+
 export interface WorldState {
-  timestamp: number;      // Unix timestamp ms of most recent update across all domains
-  domains: {
-    services?: WorldStateDomain<ServiceState>;
-    board?: WorldStateDomain<BoardState>;
-    ci?: WorldStateDomain<CIState>;
-    portfolio?: WorldStateDomain<PortfolioState>;
-    agent_health?: WorldStateDomain<AgentHealthState>;
-    security?: WorldStateDomain<SecurityState>;
-  };
-  /** Generic extension mechanism for future domains or domain-specific data. */
-  extensions: WorldStateExtensions;
+  /** Unix timestamp ms of the most recent domain update. */
+  timestamp: number;
+  /** Application-defined domains. Keys are domain names; values are typed envelopes. */
+  domains: Record<string, WorldStateDomain<unknown>>;
+  /**
+   * Ephemeral extensions written by actions via effects.
+   * Not persisted between snapshots. Keyed by domain or feature slug.
+   */
+  extensions: Record<string, unknown>;
   snapshotVersion: number;
 }
 
