@@ -30,12 +30,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: docs-site/package-lock.json
 
       - name: Install dependencies
         working-directory: docs-site
-        run: npm ci
+        run: npm install
 
       - name: Link docs content
         working-directory: docs-site
