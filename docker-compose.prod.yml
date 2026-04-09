@@ -3,7 +3,6 @@ services:
     build:
       context: .
       target: release
-    container_name: workstacean
     restart: unless-stopped
     ports:
       - "8081:8080"   # Event viewer UI
