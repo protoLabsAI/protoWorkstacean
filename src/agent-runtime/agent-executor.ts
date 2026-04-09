@@ -57,10 +57,11 @@ export class AgentExecutor {
     private readonly toolRegistry: ToolRegistry,
     config: AgentExecutorConfig = {},
   ) {
+    // If neither config nor env provides a gateway URL, leave undefined so the
+    // SDK falls back to native Anthropic mode (ANTHROPIC_API_KEY). Avoids
+    // hardwiring a container hostname that only exists in the homelab network.
     this.gatewayUrl =
-      config.gatewayUrl ??
-      process.env.LLM_GATEWAY_URL ??
-      "http://gateway:4000/v1";
+      config.gatewayUrl ?? process.env.LLM_GATEWAY_URL;
     this.gatewayApiKey =
       config.gatewayApiKey ?? process.env.OPENAI_API_KEY;
   }
@@ -88,7 +89,7 @@ export class AgentExecutor {
       prompt,
       options: {
         model: this.agentDef.model,
-        baseURL: this.gatewayUrl,
+        ...(this.gatewayUrl ? { baseURL: this.gatewayUrl } : {}),
         permissionMode: "yolo",
         systemPrompt: this.agentDef.systemPrompt,
         maxSessionTurns: this.agentDef.maxTurns,
