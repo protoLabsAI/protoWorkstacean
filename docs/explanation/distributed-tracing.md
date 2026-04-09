@@ -2,8 +2,6 @@
 title: Distributed Tracing
 ---
 
-# Distributed Tracing
-
 ## The two IDs
 
 protoWorkstacean uses two IDs to track causality across the bus, the executor layer, and external A2A calls:

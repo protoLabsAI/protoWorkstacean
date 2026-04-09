@@ -2,8 +2,6 @@
 title: Executor Types Reference
 ---
 
-# Executor Types Reference
-
 The executor layer is the uniform interface through which all skill work is dispatched. Every agent — in-process or external — is wrapped in an `IExecutor` implementation and registered in `ExecutorRegistry`.
 
 ## IExecutor interface

@@ -1,8 +1,6 @@
 ---
-title: Goal Registry & Evaluator (Milestone 2)
+title: Goal Registry & Evaluator
 ---
-
-# Goal Registry & Evaluator (Milestone 2)
 
 The Goal Evaluator is an observe-only plugin that continuously monitors world state
 against declared goals and emits violation events when deviations are detected.
@@ -31,7 +29,7 @@ import { GoalEvaluatorPlugin } from "./src/plugins/goal_evaluator_plugin.ts";
 
 const plugin = new GoalEvaluatorPlugin({
   workspaceDir: "workspace",
-  observeOnly: true,  // always true — no planner in this milestone
+  observeOnly: true,
 });
 plugin.install(bus);
 ```
@@ -123,7 +121,7 @@ The plugin **never triggers planner actions**. It only:
 2. Emits `world.goal.violated` events
 3. Logs violations to Langfuse and Discord
 
-Planner integration is deferred to a future milestone.
+Violation events are consumed by the escalation ladder (TierRouter → BudgetPlugin → Ava/HITL).
 
 ## Per-Project Goal Overrides
 

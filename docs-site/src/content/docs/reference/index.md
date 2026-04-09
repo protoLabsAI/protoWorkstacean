@@ -2,8 +2,6 @@
 title: Reference
 ---
 
-# Reference
-
 Complete technical reference for protoWorkstacean APIs, configuration schemas, and data contracts.
 
 ## Available reference docs

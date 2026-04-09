@@ -2,8 +2,6 @@
 title: goals.yaml Schema Reference
 ---
 
-# goals.yaml Schema Reference
-
 The `goals.yaml` file defines observable goals for the GoalEvaluatorPlugin.
 Goals are evaluated against incoming world state events. Violations are emitted
 as `world.goal.violated` events and logged to Langfuse and Discord.

@@ -2,8 +2,6 @@
 title: HITL — Human-in-the-Loop Gate
 ---
 
-# HITL — Human-in-the-Loop Gate
-
 HITL is the approval gate that sits between Ava generating a SPARC PRD and features landing on the board. It exists because autonomous project creation has permanent side effects: board features, Plane state changes, Discord channel provisioning. The gate gives a human (or a trusted automated signal) the chance to approve, reject, or modify a plan before any of that happens.
 
 `correlationId` is the spine that connects every hop.

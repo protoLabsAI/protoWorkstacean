@@ -2,8 +2,6 @@
 title: Plugin API Reference
 ---
 
-# Plugin API Reference
-
 _This is a reference doc. It covers the Plugin interface contract and the two extension mechanisms available._
 
 ---

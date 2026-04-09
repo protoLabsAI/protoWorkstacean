@@ -2,8 +2,6 @@
 title: Environment Variables
 ---
 
-# Environment Variables
-
 All environment variables recognised by protoWorkstacean, their defaults, and which plugin or subsystem reads them.
 
 ## Core / HTTP

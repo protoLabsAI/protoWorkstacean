@@ -2,8 +2,6 @@
 title: Runbook — Budget Alerts
 ---
 
-# Runbook — Budget Alerts
-
 ## Alert: Budget Threshold Crossed (50% or 80%)
 
 **Topic:** Discord webhook (or `budget.alert.threshold` on bus)

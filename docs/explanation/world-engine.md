@@ -2,8 +2,6 @@
 title: World Engine
 ---
 
-# World Engine
-
 ## The core idea
 
 protoWorkstacean is a homeostatic system. "Homeostatic" means it maintains a desired state by continuously measuring deviations and applying corrective actions. The world engine is the measurement side: it builds a faithful model of reality (the world state) and evaluates whether that reality satisfies the system's declared goals.

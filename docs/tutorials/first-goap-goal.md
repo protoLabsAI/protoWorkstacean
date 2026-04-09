@@ -2,8 +2,6 @@
 title: Your First GOAP Goal
 ---
 
-# Your First GOAP Goal
-
 This tutorial walks through the complete lifecycle of a GOAP goal: defining a goal, writing a matching action, watching the world engine detect a violation, and seeing the action dispatched.
 
 You will build a simple goal that monitors a custom HTTP endpoint reporting a service's error rate and sends a Discord alert when it crosses a threshold.

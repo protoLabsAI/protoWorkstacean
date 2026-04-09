@@ -2,8 +2,6 @@
 title: Add a Domain
 ---
 
-# Add a Domain
-
 A **domain** is a named slot in the world state, backed by an HTTP collector that polls a URL on a fixed interval. WorldStateEngine is generic — it has no hardcoded knowledge of any service. Any HTTP endpoint that returns JSON can become a domain.
 
 ## Where domains are defined

@@ -2,8 +2,6 @@
 title: Agent Identity — Multi-Bot Design and Per-Agent Tokens
 ---
 
-# Agent Identity — Multi-Bot Design and Per-Agent Tokens
-
 _This is an explanation doc. It explains why the fleet uses separate GitHub App identities per agent and how that affects message delivery._
 
 ---

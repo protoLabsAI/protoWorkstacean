@@ -2,8 +2,6 @@
 title: Plane Integration
 ---
 
-# Plane Integration
-
 Plane is the project management layer for protoLabs. It acts as the human-facing strategic interface: ideas become Plane issues, Plane issues become SPARC PRDs, and approved PRDs become board features in the protoLabs Studio backlog. Workstacean is the bridge.
 
 ## 1. Overview

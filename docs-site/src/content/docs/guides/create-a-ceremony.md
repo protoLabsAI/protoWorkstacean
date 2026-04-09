@@ -2,8 +2,6 @@
 title: Create a Ceremony
 ---
 
-# Create a Ceremony
-
 A **ceremony** is a scheduled skill invocation — a recurring fleet ritual defined in YAML, fired by a cron expression, and dispatched through the standard skill routing pipeline.
 
 Ceremonies are distinct from GOAP actions. Actions react to world-state violations. Ceremonies run on a fixed schedule regardless of world state, like a daily standup or a weekly retrospective.

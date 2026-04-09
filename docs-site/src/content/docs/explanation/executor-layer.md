@@ -2,8 +2,6 @@
 title: Executor Layer
 ---
 
-# Executor Layer
-
 ## Why it exists
 
 Before the executor layer, protoWorkstacean had two competing patterns for dispatching work to agents:

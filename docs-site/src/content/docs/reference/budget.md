@@ -2,8 +2,6 @@
 title: Budget System — Architecture & Design
 ---
 
-# Budget System — Architecture & Design
-
 ## Overview
 
 The BudgetPlugin provides cost-aware budget management for the Workstacean bus.

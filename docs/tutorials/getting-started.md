@@ -2,8 +2,6 @@
 title: Getting Started
 ---
 
-# Getting Started
-
 This tutorial walks you through installing protoWorkstacean, writing a minimal workspace configuration, starting the server, and triggering your first skill via the HTTP API.
 
 ## Prerequisites

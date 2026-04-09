@@ -2,8 +2,6 @@
 title: Workspace Files Reference
 ---
 
-# Workspace Files Reference
-
 All YAML configuration files in the `workspace/` directory (or the directory pointed to by `WORKSPACE_DIR`). These files are loaded at startup. Most require a restart to pick up changes.
 
 ---

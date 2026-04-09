@@ -2,8 +2,6 @@
 title: Scheduler
 ---
 
-# Scheduler
-
 Cron-style scheduled events that publish to the message bus. No external cron daemon needed.
 
 ## How It Works

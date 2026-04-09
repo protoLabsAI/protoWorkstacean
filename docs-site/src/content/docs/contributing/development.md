@@ -2,8 +2,6 @@
 title: Development Guide
 ---
 
-# Development Guide
-
 ## Setup
 
 ```bash

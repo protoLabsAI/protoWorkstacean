@@ -2,8 +2,6 @@
 title: HTTP API Reference
 ---
 
-# HTTP API Reference
-
 All HTTP endpoints exposed by protoWorkstacean. The server listens on `WORKSTACEAN_HTTP_PORT` (default `3000`).
 
 ## Authentication

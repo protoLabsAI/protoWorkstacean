@@ -2,8 +2,6 @@
 title: Contributing
 ---
 
-# Contributing
-
 Contributions to protoWorkstacean are welcome. This section covers how to get started, where the key entry points are, and the conventions the codebase follows.
 
 ## Key entry points

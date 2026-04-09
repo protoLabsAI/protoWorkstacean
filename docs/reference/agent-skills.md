@@ -2,8 +2,6 @@
 title: Agent Skills Reference
 ---
 
-# Agent Skills Reference
-
 _This is a reference doc. It lists all skills in the agent registry, their routing keywords, and the agents that handle them._
 
 ---

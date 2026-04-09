@@ -2,8 +2,6 @@
 title: Add an Agent
 ---
 
-# Add an Agent
-
 protoWorkstacean supports two agent patterns:
 
 - **In-process** — the agent runs inside the workstacean process, powered by `@protolabsai/sdk`. Skills execute as Claude Code SDK sessions with a configurable system prompt and tool whitelist.

@@ -2,8 +2,6 @@
 title: Plugin System
 ---
 
-# Plugin System
-
 ## The plugin interface
 
 Every plugin in protoWorkstacean implements:

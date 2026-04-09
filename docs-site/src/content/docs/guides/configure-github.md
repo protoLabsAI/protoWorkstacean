@@ -2,8 +2,6 @@
 title: GitHub Plugin
 ---
 
-# GitHub Plugin
-
 Receives GitHub webhook events and routes `@mention` comments to the agent fleet. Agent replies are posted back as GitHub comments.
 
 ## How It Works

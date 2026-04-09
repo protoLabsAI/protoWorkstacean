@@ -2,8 +2,6 @@
 title: Guides
 ---
 
-# Guides
-
 Task-oriented guides for common operations in protoWorkstacean.
 
 ## Available guides

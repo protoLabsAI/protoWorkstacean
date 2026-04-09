@@ -2,8 +2,6 @@
 title: Discord Plugin
 ---
 
-# Discord Plugin
-
 Bridges Discord to the Workstacean bus. @mentions and slash commands become inbound bus messages; agent replies come back as Discord responses.
 
 ## How It Works

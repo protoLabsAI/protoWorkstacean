@@ -2,8 +2,6 @@
 title: Testing Methodology
 ---
 
-# Testing Methodology
-
 This document describes the testing approach for WorkStacean's agent and cron functionality using sequential, observational test scripts.
 
 ## Overview

@@ -2,8 +2,6 @@
 title: Planner Architecture
 ---
 
-# Planner Architecture
-
 ## Overview
 
 The L1 planner is a budget-bounded A* search system that serves as fallback when the L0 rule matcher cannot handle a request. It operates on an action graph where world states are nodes and actions are directed edges.

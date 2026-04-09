@@ -2,8 +2,6 @@
 title: HTN Decomposition Guide
 ---
 
-# HTN Decomposition Guide
-
 ## Hierarchy Levels
 
 The HTN system decomposes tasks through four levels:

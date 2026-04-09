@@ -2,8 +2,6 @@
 title: CeremonyPlugin Reference
 ---
 
-# CeremonyPlugin Reference
-
 CeremonyPlugin replaces hardcoded cron tasks with configurable, observable, and hot-reloadable YAML-defined ceremonies. A **ceremony** is a recurring scheduled ritual — for example, a daily board health check, PR triage, or weekly sprint review.
 
 ## What is a Ceremony?
