@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { ToolRegistry } from "../tool-registry.ts";
 import { tool } from "@protolabsai/sdk";
-import { z } from "zod";
+import { z } from "zod/v3";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
