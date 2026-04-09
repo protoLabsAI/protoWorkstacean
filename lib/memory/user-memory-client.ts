@@ -199,7 +199,7 @@ export class UserMemoryClient {
       throw new Error(`Neo4j HTTP error ${resp.status}: ${text}`);
     }
 
-    const json: Neo4jResponse = await resp.json();
+    const json = await resp.json() as Neo4jResponse;
     if (json.errors.length > 0) {
       throw new Error(`Neo4j error: ${json.errors[0].code} — ${json.errors[0].message}`);
     }
