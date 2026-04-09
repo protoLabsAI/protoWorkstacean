@@ -253,7 +253,7 @@ async function callA2A(
     .flatMap(a => a.parts ?? [])
     .filter(p => p.kind === "text")
     .map(p => p.text ?? "")
-    .join("\n") || "(no response)";
+    .join("\n");
 }
 
 // ── Output helpers ──────────────────────────────────────────────────────────
@@ -555,7 +555,7 @@ export default {
       try {
         const response = await callA2A(agent, content, `workstacean-cron-${cronId}`);
         const channel = String(p.channel ?? "");
-        if (channel) {
+        if (channel && response) {
           publishResponse(bus, `message.outbound.discord.push.${channel}`, msg.correlationId, response, channel, agent.name);
         }
       } catch (err) {

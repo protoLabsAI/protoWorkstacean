@@ -602,7 +602,8 @@ export class DiscordPlugin implements Plugin {
     // ── Outbound: reply to pending messages / interactions ───────────────────
     bus.subscribe("message.outbound.discord.#", "discord-outbound", async (msg: BusMessage) => {
       const payload = msg.payload as Record<string, unknown>;
-      const content = String(payload.content ?? "").slice(0, 2000) || "(no response)";
+      const content = String(payload.content ?? "").slice(0, 2000);
+      if (!content) return; // drop empty outbound messages silently
       const correlationId = msg.correlationId;
 
       // Resolve agent-specific client — payload.agentId wins, then pendingAgents map
@@ -626,7 +627,7 @@ export class DiscordPlugin implements Plugin {
             this.pendingTurns.delete(correlationId);
             this.conversationTracer.traceTurn({
               ...pendingTurn,
-              output: content === "(no response)" ? undefined : content,
+              output: content,
               endTime: new Date(),
             }).catch(err => console.error("[discord] Langfuse traceTurn error:", err));
           }
