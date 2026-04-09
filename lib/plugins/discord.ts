@@ -40,7 +40,7 @@ import type { EventBus, BusMessage, Plugin, HITLRequest } from "../types.ts";
 import type { HITLPlugin } from "./hitl.ts";
 import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer, type TurnData } from "../conversation/conversation-tracer.ts";
-import { UserMemoryClient } from "../memory/user-memory-client.ts";
+import { GraphitiClient } from "../memory/graphiti-client.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -229,7 +229,7 @@ export class DiscordPlugin implements Plugin {
   // Multi-turn conversation tracking
   private conversationManager = new ConversationManager();
   private conversationTracer = new ConversationTracer();
-  private userMemory = new UserMemoryClient();
+  private graphiti = new GraphitiClient();
   // correlationId (= conversationId for conv turns) → pending Langfuse turn data
   private pendingTurns = new Map<string, TurnData>();
 
@@ -367,7 +367,7 @@ export class DiscordPlugin implements Plugin {
         .trim();
 
       // Prepend user memory context (non-blocking, best-effort)
-      const memoryContext = await this.userMemory.getContextBlock(userId, "discord").catch(() => "");
+      const memoryContext = await this.graphiti.getContextBlock(userId, "discord", rawContent).catch(() => "");
       const content = memoryContext ? `${memoryContext}\n${rawContent}` : rawContent;
 
       // Langfuse conversation tracing
@@ -627,7 +627,7 @@ export class DiscordPlugin implements Plugin {
           pendingReplies.delete(correlationId);
           this.pendingAgents.delete(correlationId);
 
-          // Finalize Langfuse generation for this conversation turn
+          // Finalize Langfuse generation + store episode in Graphiti
           const pendingTurn = this.pendingTurns.get(correlationId);
           if (pendingTurn) {
             this.pendingTurns.delete(correlationId);
@@ -636,6 +636,17 @@ export class DiscordPlugin implements Plugin {
               output: content,
               endTime: new Date(),
             }).catch(err => console.error("[discord] Langfuse traceTurn error:", err));
+
+            // Fire-and-forget: store completed turn so Graphiti can extract facts
+            this.graphiti.addEpisode({
+              userId: pendingTurn.userId,
+              platform: "discord",
+              userMessage: pendingTurn.input,
+              agentMessage: content,
+              agentName: pendingTurn.agentName,
+              channelId: pending.message?.channelId ?? pending.interaction?.channelId ?? undefined,
+              timestamp: pendingTurn.startTime,
+            }).catch(err => console.debug("[discord] Graphiti addEpisode error:", err));
           }
 
           if (pending.interaction) {
