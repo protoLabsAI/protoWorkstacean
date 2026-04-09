@@ -199,6 +199,4 @@ Returns:
 
 ## Related
 
-- [Executor types reference](../reference/executor-types)
-- [Explanation: executor layer](../explanation/executor-layer)
-- [Workspace files reference](../reference/workspace-files)
+- [Workspace files reference](../../reference/workspace-files)

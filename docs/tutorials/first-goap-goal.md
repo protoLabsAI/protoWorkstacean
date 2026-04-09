@@ -158,6 +158,6 @@ actions.yaml        → PlannerPluginL0 selects alert.error_rate_high
 
 ## Next steps
 
-- [Add goals and actions](../guides/add-goals-and-actions) — full reference for goal types, operators, and effect types
-- [Add a domain](../guides/add-a-domain) — ENV interpolation, custom headers, tick intervals
-- [Create a ceremony](../guides/create-a-ceremony) — scheduled skills that run on cron
+- [Add goals and actions](../../guides/add-goals-and-actions) — full reference for goal types, operators, and effect types
+- [Add a domain](../../guides/add-a-domain) — ENV interpolation, custom headers, tick intervals
+- [Create a ceremony](../../guides/create-a-ceremony) — scheduled skills that run on cron

@@ -76,7 +76,7 @@ WORKSPACE_DIR=/workspace
 DATA_DIR=/data
 ```
 
-For a full list of all supported variables, see [reference/env-vars.md](../reference/env-vars).
+For a full list of all supported variables, see [reference/env-vars.md](../../reference/env-vars).
 
 ## Workspace volume
 
@@ -191,6 +191,6 @@ volumes:
 
 ## Related
 
-- [Getting Started](../tutorials/getting-started)
-- [Environment variables reference](../reference/env-vars)
-- [HTTP API reference](../reference/http-api)
+- [Getting Started](../../tutorials/getting-started)
+- [Environment variables reference](../../reference/env-vars)
+- [HTTP API reference](../../reference/http-api)

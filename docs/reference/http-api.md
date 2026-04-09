@@ -316,3 +316,108 @@ List skills registered for a specific agent.
 ```
 
 Returns `404` if the agent is not registered.
+
+---
+
+## GET /api/flow-metrics
+
+Return all flow efficiency metrics collected by the FlowMonitor plugin.
+
+**Auth**: None
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "cycleTimeP50Ms": 86400000,
+    "cycleTimeP90Ms": 259200000,
+    "throughputPerWeek": 4.2,
+    "wipCount": 3
+  },
+  "collectedAt": 1712563200000
+}
+```
+
+Returns `503` if the flow-monitor plugin is not available.
+
+---
+
+## GET /api/flow-metrics/:metric
+
+Return a single flow metric by name.
+
+**Auth**: None
+
+**Path parameters**:
+- `metric` — metric name (e.g. `cycleTimeP50Ms`, `wipCount`)
+
+**Response**: Same shape as `/api/flow-metrics` but `data` contains only the requested metric.
+
+Returns `503` if the flow-monitor plugin is not available.
+
+---
+
+## GET /api/channels
+
+List all channels loaded from `workspace/channels.yaml`.
+
+**Auth**: None
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": [
+    { "id": "general", "platform": "discord", "channelId": "1234567890", "description": "General updates" },
+    { "id": "alerts",  "platform": "discord", "channelId": "9876543210", "description": "Alert notifications" }
+  ]
+}
+```
+
+---
+
+## POST /api/channels
+
+Register a new channel at runtime (without restarting).
+
+**Auth**: `X-API-Key: $WORKSTACEAN_API_KEY`
+
+**Request body**:
+```typescript
+{
+  id: string;          // Logical channel name
+  platform: string;    // "discord" | "slack" | "signal"
+  channelId: string;   // Platform-specific channel/room ID
+  description?: string;
+}
+```
+
+**Response**: `200 OK` with `{ "success": true, "data": { ... } }`.
+
+Returns `409` if a channel with that `id` already exists.
+
+---
+
+## GET /api/hitl/pending
+
+List all pending Human-in-the-Loop approval requests.
+
+**Auth**: None
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "hitl-abc123",
+      "type": "prd_approval",
+      "projectSlug": "my-project",
+      "summary": "Approve PRD for feature X",
+      "createdAt": "2026-04-09T09:00:00.000Z",
+      "expiresAt": "2026-04-10T09:00:00.000Z"
+    }
+  ]
+}
+```

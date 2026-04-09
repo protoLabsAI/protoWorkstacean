@@ -37,7 +37,7 @@ tools:
   - write
 ```
 
-See [Agent Skills Reference](../../reference/agent-skills) for the full YAML schema and available tools.
+See [Agent Skills Reference](../../../reference/agent-skills) for the full YAML schema and available tools.
 
 ## LLM gateway
 

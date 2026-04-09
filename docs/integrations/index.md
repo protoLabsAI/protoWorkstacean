@@ -18,6 +18,12 @@ protoWorkstacean connects to external services through **plugins** and runs agen
 | [Google Workspace](google-workspace) | Gmail polling, Calendar polling, Drive/Docs write | `GOOGLE_CLIENT_ID` |
 | [Signal](signal) | Inbound/outbound Signal messages | `SIGNAL_URL` + `SIGNAL_NUMBER` |
 
+## Memory
+
+| Integration | What it does | Env var that enables it |
+|-------------|-------------|------------------------|
+| [User Memory (Graphiti)](memory) | Temporal knowledge graph — facts persist across conversations, scoped per user | `GRAPHITI_URL` |
+
 ## Agent runtimes
 
 | Runtime | What it does | When to use |

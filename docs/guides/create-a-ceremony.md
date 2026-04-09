@@ -155,5 +155,5 @@ enabled: true
 ## Related
 
 - [Add an agent](./add-an-agent) — register the agent that will run the ceremony's skill
-- [Bus topics reference](../reference/bus-topics) — `ceremony.<id>.execute`, `cron.<id>`
-- [Workspace files reference](../reference/workspace-files)
+- [Bus topics reference](../../reference/bus-topics) — `ceremony.<id>.execute`, `cron.<id>`
+- [Workspace files reference](../../reference/workspace-files)
