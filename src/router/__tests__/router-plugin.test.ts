@@ -470,6 +470,8 @@ describe("RouterPlugin — DM conversation stickiness", () => {
 
   test("different conversations are independent (different convIds don't share session)", async () => {
     const { workspaceDir, cleanup } = makeWorkspace({ agents: { "quinn.yaml": quinnWithChat } });
+    const origDefault = process.env.ROUTER_DM_DEFAULT_AGENT;
+    delete process.env.ROUTER_DM_DEFAULT_AGENT;
     try {
       const bus = new InMemoryEventBus();
       const plugin = new RouterPlugin({ workspaceDir });
@@ -489,6 +491,10 @@ describe("RouterPlugin — DM conversation stickiness", () => {
       expect(await req2).toBeNull();
 
       plugin.uninstall();
-    } finally { cleanup(); }
+    } finally {
+      if (origDefault === undefined) delete process.env.ROUTER_DM_DEFAULT_AGENT;
+      else process.env.ROUTER_DM_DEFAULT_AGENT = origDefault;
+      cleanup();
+    }
   });
 });
