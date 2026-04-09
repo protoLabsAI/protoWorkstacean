@@ -6,17 +6,6 @@ _This is an explanation doc. It explains how the plugin system works conceptuall
 
 ---
 
-## Two plugin systems, one codebase
-
-protoWorkstacean has two distinct plugin systems that serve different purposes:
-
-1. **Workspace bus plugins** (`workspace/plugins/`) — extend the message bus; restart-based
-2. **Pi SDK extensions** (`.pi/extensions/`) — extend the LLM tool set; runtime, no restart
-
-They operate independently. An agent can use both simultaneously.
-
----
-
 ## Workspace bus plugins
 
 ### Startup loading
@@ -72,47 +61,6 @@ The restart is fast (seconds) and is the intended workflow for plugin developmen
 
 ---
 
-## Pi SDK extensions
-
-### Runtime registration
-
-Pi SDK extensions load via the Pi SDK's extension discovery mechanism. They can register tools, commands, and shortcuts at runtime — no container restart required.
-
-```typescript
-// .pi/extensions/my-tool.ts
-pi.registerTool({
-  name: "my-tool",
-  // ...
-  async execute(toolCallId, params) {
-    return { content: [{ type: "text", text: "done" }] };
-  },
-});
-```
-
-After `pi.registerTool()` returns, the tool is immediately callable by the LLM in the current session.
-
-### Discovery locations
-
-| Path | Scope |
-|------|-------|
-| `~/.pi/agent/extensions/*.ts` | Global — loaded for all projects |
-| `.pi/extensions/*.ts` | Project-local — loaded only in this project |
-
-Extensions in `.pi/extensions/` are tied to the project directory. When the agent starts in the protoWorkstacean workspace, all extensions in this directory are loaded.
-
-### Extension lifecycle events
-
-Extensions can subscribe to lifecycle events:
-
-- `session_start` — fires when an agent session begins
-- `session_end` — fires when a session ends
-- `tool_call` — fires before each tool call (can intercept/block)
-- `agent_turn` — fires after each agent response
-
-These enable patterns like injecting context at session start, logging tool calls, or implementing dynamic tool enable/disable based on project state.
-
----
-
 ## SchedulerPlugin lifecycle
 
 The SchedulerPlugin has its own internal lifecycle for timers:
@@ -126,16 +74,6 @@ The SchedulerPlugin has its own internal lifecycle for timers:
 **Missed fire recovery**: On startup, after loading all schedules, the plugin checks each `lastFired` timestamp. If a schedule was due between `lastFired` and now:
 - Missed by ≤ 24 hours → fires immediately once
 - Missed by > 24 hours → skipped; next regular fire applies
-
----
-
-## Why plugins need restart but extensions don't
-
-Workspace bus plugins use Node.js dynamic imports (`import()`). The Node module loader caches imports. Replacing a cached module requires restarting the process — there is no safe way to hot-reload a module in a running Node/Bun process without risking stale closure references.
-
-Pi SDK extensions bypass this by using the Pi SDK's own extension runtime, which has first-class support for dynamic tool registration via `pi.registerTool()`. The Pi SDK is designed for interactive use where adding tools at runtime is a core feature.
-
-The two systems are complementary: use Pi SDK extensions when you need immediate availability without restart; use workspace plugins when you need to bridge external services at the transport layer (HTTP servers, gateway connections, polling loops).
 
 ---
 

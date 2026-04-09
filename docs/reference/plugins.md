@@ -2,11 +2,11 @@
 title: Plugin API Reference
 ---
 
-_This is a reference doc. It covers the Plugin interface contract and the two extension mechanisms available._
+_This is a reference doc. It covers the Plugin interface contract and how to write workspace bus plugins._
 
 ---
 
-See also: [`explanation/plugin-lifecycle.md`](../explanation/plugin-lifecycle.md) for how plugins register, subscribe, and hot-reload.
+See also: [`explanation/plugin-lifecycle.md`](../explanation/plugin-lifecycle.md) for how plugins register, subscribe, and reload.
 
 ---
 
@@ -88,49 +88,7 @@ interface BusMessage {
 
 ---
 
-## Pi SDK Extensions (Runtime, No Restart)
-
-Pi SDK extensions extend the **LLM tool set** at runtime via `pi.registerTool()`. No container restart needed.
-
-```typescript
-// Inside a Pi SDK extension (e.g., .pi/extensions/my-tool.ts)
-pi.registerTool({
-  name: "deploy",
-  label: "Deploy",
-  description: "Deploy the application to an environment",
-  parameters: Type.Object({
-    env: StringEnum(["dev", "staging", "prod"]),
-  }),
-  async execute(toolCallId, params, signal, onUpdate, ctx) {
-    // ...
-    return { content: [{ type: "text", text: "Deployed" }], details: {} };
-  },
-});
-```
-
-### Extension discovery
-
-| Location | Scope |
-|----------|-------|
-| `~/.pi/agent/extensions/*.ts` | Global (all projects) |
-| `.pi/extensions/*.ts` | Project-local |
-
-### Pi SDK extension capabilities
-
-- `pi.registerTool()` — add LLM-callable tools
-- `pi.registerCommand()` — add slash commands
-- `pi.registerShortcut()` — add keyboard shortcuts
-- `pi.setActiveTools()` — enable/disable tools at runtime
-- `pi.getAllTools()` — list all registered tools
-- Subscribe to lifecycle events (tool calls, session start/end, agent turns)
-- Intercept/block tool calls before execution
-- Inject context or modify system prompts
-
----
-
-## Workspace Bus Plugins (Restart-Based)
-
-Bus plugins extend the **message bus** and are loaded from `workspace/plugins/` on container startup.
+## Writing a workspace bus plugin
 
 ```typescript
 // workspace/plugins/my-plugin.ts
@@ -156,7 +114,7 @@ export default {
 } satisfies Plugin;
 ```
 
-### Bus plugin capabilities
+### Capabilities
 
 - Subscribe to any bus topic
 - Publish messages to any topic
@@ -164,36 +122,8 @@ export default {
 - Transform or route messages between channels
 - Implement custom command handlers
 
-### Bus plugin limitations
+### Limitations
 
-- Cannot register LLM-callable tools (use Pi SDK extensions)
-- Cannot modify the agent's system prompt
-- Cannot intercept tool calls
-
----
-
-## When to use which
-
-| Goal | Use |
-|------|-----|
-| Add an LLM-callable tool | Pi SDK extension |
-| Add a slash command | Pi SDK extension |
-| React to bus messages | Workspace plugin |
-| Bridge an external service | Workspace plugin |
-| Intercept/block tool calls | Pi SDK extension |
-| Route messages between channels | Workspace plugin |
-| Add capabilities without restart | Pi SDK extension |
-
----
-
-## MCP support
-
-Pi SDK **does not ship MCP support**. MCP bridges are possible via extensions: write a Pi SDK extension that connects to MCP servers and registers their tools via `pi.registerTool()`.
-
----
-
-## References
-
-- [Pi SDK Extensions Docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
-- [Pi SDK Docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md)
-- Migrated from: [`extensions.md`](../extensions.md)
+- Cannot modify the agent's system prompt directly
+- Cannot intercept tool calls at the LLM layer
+- Hot reload requires a container restart (`docker restart workstacean`)
