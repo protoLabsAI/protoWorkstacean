@@ -40,6 +40,7 @@ import type { EventBus, BusMessage, Plugin, HITLRequest } from "../types.ts";
 import type { HITLPlugin } from "./hitl.ts";
 import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer, type TurnData } from "../conversation/conversation-tracer.ts";
+import { UserMemoryClient } from "../memory/user-memory-client.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -228,6 +229,7 @@ export class DiscordPlugin implements Plugin {
   // Multi-turn conversation tracking
   private conversationManager = new ConversationManager();
   private conversationTracer = new ConversationTracer();
+  private userMemory = new UserMemoryClient();
   // correlationId (= conversationId for conv turns) → pending Langfuse turn data
   private pendingTurns = new Map<string, TurnData>();
 
@@ -360,9 +362,13 @@ export class DiscordPlugin implements Plugin {
         this.pendingAgents.set(correlationId, channelEntry.agent);
       }
 
-      const content = message.cleanContent
+      const rawContent = message.cleanContent
         .replace(/<@!?\d+>/g, "")
         .trim();
+
+      // Prepend user memory context (non-blocking, best-effort)
+      const memoryContext = await this.userMemory.getContextBlock(userId, "discord").catch(() => "");
+      const content = memoryContext ? `${memoryContext}\n${rawContent}` : rawContent;
 
       // Langfuse conversation tracing
       if (convEnabled) {
@@ -375,11 +381,11 @@ export class DiscordPlugin implements Plugin {
             platform: "discord",
           }).catch(err => console.error("[discord] Langfuse startTrace error:", err));
         }
-        // Store turn data — output is filled in when the agent responds
+        // Store turn data — log raw content, not the memory-prefixed version
         this.pendingTurns.set(correlationId, {
           conversationId: correlationId,
           turnNumber,
-          input: content,
+          input: rawContent,
           userId,
           agentName: channelEntry?.agent,
           startTime: new Date(),
@@ -960,8 +966,12 @@ export class DiscordPlugin implements Plugin {
     pendingReplies.set(conversationId, { message });
     if (agentName) this.pendingAgents.set(conversationId, agentName);
 
-    const content = message.cleanContent.replace(/<@!?\d+>/g, "").trim();
-    if (!content) return;
+    const rawContent = message.cleanContent.replace(/<@!?\d+>/g, "").trim();
+    if (!rawContent) return;
+
+    // Prepend user memory context (non-blocking, best-effort)
+    const memoryContext = await this.userMemory.getContextBlock(userId, "discord").catch(() => "");
+    const content = memoryContext ? `${memoryContext}\n${rawContent}` : rawContent;
 
     // Langfuse tracing
     if (isNew) {
@@ -976,7 +986,7 @@ export class DiscordPlugin implements Plugin {
     this.pendingTurns.set(conversationId, {
       conversationId,
       turnNumber,
-      input: content,
+      input: rawContent, // log raw, not memory-prefixed
       userId,
       agentName,
       startTime: new Date(),
