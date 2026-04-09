@@ -240,7 +240,7 @@ export class SkillDispatcherPlugin implements Plugin {
       correlationId,
       topic: replyTopic,
       timestamp: Date.now(),
-      payload: { result, error, correlationId },
+      payload: { content: result, error, correlationId },
     });
   }
 }

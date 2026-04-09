@@ -179,8 +179,8 @@ describe("AgentRuntimePlugin", () => {
         bus.publish("agent.skill.request", makeSkillRequest({ skill: "bug_triage", replyTopic }));
 
         const response = await responsePromise;
-        const payload = response.payload as { result?: string; error?: string };
-        expect(payload.result).toBe("Bug triaged successfully.");
+        const payload = response.payload as { content?: string; error?: string };
+        expect(payload.content).toBe("Bug triaged successfully.");
         expect(payload.error).toBeUndefined();
 
         agentRuntime.uninstall();

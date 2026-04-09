@@ -82,7 +82,7 @@ describe("SkillDispatcherPlugin", () => {
 
     const reply = bus.published.find(m => m.topic === "reply.test");
     expect(reply).toBeDefined();
-    expect((reply!.payload as Record<string, unknown>).result).toBe("done");
+    expect((reply!.payload as Record<string, unknown>).content).toBe("done");
     expect((reply!.payload as Record<string, unknown>).error).toBeUndefined();
   });
 
@@ -120,7 +120,7 @@ describe("SkillDispatcherPlugin", () => {
     const reply = bus.published.find(m => m.topic === "reply.fail");
     expect(reply).toBeDefined();
     expect((reply!.payload as Record<string, unknown>).error).toBeDefined();
-    expect((reply!.payload as Record<string, unknown>).result).toBeUndefined();
+    expect((reply!.payload as Record<string, unknown>).content).toBeUndefined();
   });
 
   it("resolves by target agent name", async () => {
@@ -338,6 +338,6 @@ describe("SkillDispatcherPlugin — memory enrichment", () => {
 
     const reply = bus.published.find(m => m.topic === "reply.user");
     expect(reply).toBeDefined();
-    expect((reply!.payload as Record<string, unknown>).result).toBe("ok anyway");
+    expect((reply!.payload as Record<string, unknown>).content).toBe("ok anyway");
   });
 });
