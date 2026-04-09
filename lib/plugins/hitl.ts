@@ -1,21 +1,21 @@
 /**
  * HITLPlugin — Human-in-the-Loop gate for the Workstacean bus.
  *
- * Routes HITLRequest messages to the correct interface plugin for rendering,
- * and HITLResponse messages back to the planning agent (Ava) for checkpoint
- * resumption.
+ * Dispatches HITLRequest messages to registered HITLRenderer instances (one per
+ * interface), and routes HITLResponse messages back to requesters via two paths:
+ *   1. Bus callback — publishes to request.replyTopic (operational callers)
+ *   2. A2A plan_resume — calls Ava to resume a checkpointed plan
+ *
+ * Interface plugins register a renderer during install():
+ *   hitlPlugin.registerRenderer("discord", renderer)
  *
  * Inbound topics:
- *   hitl.request.#  — emitted by Ava after SPARC PRD + antagonistic review
- *   hitl.response.# — emitted by interface plugins after user decision
- *
- * Outbound routing (extensible via registerInterface / registerHITLRenderer):
- *   discord → message.outbound.discord.push.{channelId}
- *   api     → hitl.pending.{correlationId} (callers poll this)
- *   unknown → hitl.pending.{correlationId}
+ *   hitl.request.#  — new approval needed
+ *   hitl.response.# — human decision collected
  *
  * Pending requests are tracked in-memory with expiry. On a 60s interval,
- * expired entries are removed and hitl.expired.{correlationId} is published.
+ * expired entries are removed, hitl.expired.{correlationId} is published,
+ * and the renderer's onExpired() is called.
  *
  * Config: workspace/agents.yaml (to find Ava's A2A endpoint for plan_resume)
  */
@@ -23,7 +23,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { EventBus, BusMessage, Plugin, HITLRequest, HITLResponse } from "../types.ts";
+import type { EventBus, BusMessage, Plugin, HITLRequest, HITLResponse, HITLRenderer } from "../types.ts";
 
 // ── Agent registry (minimal — just enough to find Ava) ──────────────────────
 
@@ -38,45 +38,11 @@ interface AgentsYaml {
   agents: AgentDef[];
 }
 
-// ── Interface router ─────────────────────────────────────────────────────────
-// Maps interface name → function that returns the outbound topic for a given HITLRequest.
-// Plugins can call registerInterface() to extend this.
+// ── Renderer registry ─────────────────────────────────────────────────────────
+// Maps interface name → HITLRenderer.
+// Plugins call hitlPlugin.registerRenderer() during install() to hook in.
 
-type InterfaceRouter = (req: HITLRequest) => string | null;
-
-const interfaceRouters = new Map<string, InterfaceRouter>();
-
-// Built-in routers
-interfaceRouters.set("discord", (req: HITLRequest) => {
-  const channelId = req.sourceMeta?.channelId;
-  if (!channelId) return null;
-  return `message.outbound.discord.push.${channelId}`;
-});
-
-interfaceRouters.set("api", (req: HITLRequest) => {
-  return `hitl.pending.${req.correlationId}`;
-});
-
-/** Register a custom interface router. Plugins call this to extend HITL routing. */
-export function registerInterface(name: string, router: InterfaceRouter): void {
-  interfaceRouters.set(name, router);
-}
-
-/**
- * Register a custom HITL renderer for an interface.
- * Alias for registerInterface — allows future plugins to register their own
- * rendering logic without modifying the HITL plugin directly.
- */
-export function registerHITLRenderer(
-  interfaceName: string,
-  handler: (req: HITLRequest) => void,
-): void {
-  // Wrap the handler as an InterfaceRouter that returns null (handler does its own publishing)
-  interfaceRouters.set(interfaceName, (req: HITLRequest) => {
-    handler(req);
-    return null; // handler is responsible for publishing
-  });
-}
+const renderers = new Map<string, HITLRenderer>();
 
 // ── Pending request store ───────────────────────────────────────────────────
 
@@ -124,7 +90,7 @@ async function callPlanResume(agent: AgentDef, response: HITLResponse): Promise<
 
 export class HITLPlugin implements Plugin {
   readonly name = "hitl";
-  readonly description = "Human-in-the-Loop gate — routes approval requests to interface plugins and responses back to Ava";
+  readonly description = "Human-in-the-Loop gate — routes approval requests to interface plugins and responses back to callers";
   readonly capabilities = ["hitl-routing"];
 
   private workspaceDir: string;
@@ -134,6 +100,15 @@ export class HITLPlugin implements Plugin {
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
+  }
+
+  /**
+   * Register a HITLRenderer for an interface.
+   * Call this from your plugin's install() before any HITLRequests arrive.
+   */
+  registerRenderer(interfaceName: string, renderer: HITLRenderer): void {
+    renderers.set(interfaceName, renderer);
+    console.log(`[hitl] Registered renderer for interface "${interfaceName}"`);
   }
 
   install(bus: EventBus): void {
@@ -155,6 +130,13 @@ export class HITLPlugin implements Plugin {
             timestamp: Date.now(),
             payload: { type: "hitl_expired", correlationId, originalRequest: req },
           });
+          const iface = req.sourceMeta?.interface ?? "unknown";
+          const renderer = renderers.get(iface);
+          if (renderer?.onExpired) {
+            renderer.onExpired(req, bus).catch(err =>
+              console.error(`[hitl] renderer.onExpired failed for ${correlationId}:`, err),
+            );
+          }
         }
       }
     }, 60_000);
@@ -183,10 +165,10 @@ export class HITLPlugin implements Plugin {
       pendingRequests.set(req.correlationId, req);
 
       const iface = req.sourceMeta?.interface ?? "unknown";
-      const router = interfaceRouters.get(iface);
+      const renderer = renderers.get(iface);
 
-      if (!router) {
-        console.warn(`[hitl] No router for interface "${iface}" — publishing to hitl.pending`);
+      if (!renderer) {
+        console.warn(`[hitl] No renderer for interface "${iface}" — publishing to hitl.pending`);
         bus.publish(`hitl.pending.${req.correlationId}`, {
           id: crypto.randomUUID(),
           correlationId: req.correlationId,
@@ -197,20 +179,10 @@ export class HITLPlugin implements Plugin {
         return;
       }
 
-      const outboundTopic = router(req);
-      if (!outboundTopic) {
-        console.log(`[hitl] Interface "${iface}" returned no outbound topic (inline response) — skipping bus publish`);
-        return;
-      }
-
-      console.log(`[hitl] Routing HITLRequest (${req.correlationId}) → ${outboundTopic}`);
-      bus.publish(outboundTopic, {
-        id: crypto.randomUUID(),
-        correlationId: req.correlationId,
-        topic: outboundTopic,
-        timestamp: Date.now(),
-        payload: req,
-      });
+      console.log(`[hitl] Dispatching HITLRequest (${req.correlationId}) to "${iface}" renderer`);
+      renderer.render(req, bus).catch(err =>
+        console.error(`[hitl] renderer.render failed for ${req.correlationId}:`, err),
+      );
     });
 
     // ── Route HITLResponse back to Ava ───────────────────────────────────
@@ -224,6 +196,18 @@ export class HITLPlugin implements Plugin {
         pendingRequests.delete(resp.correlationId);
       } else {
         console.warn(`[hitl] No pending request for correlationId ${resp.correlationId} — processing anyway`);
+      }
+
+      // ── Bus callback: notify the original requester via replyTopic ───────
+      if (pending?.replyTopic) {
+        bus.publish(pending.replyTopic, {
+          id: crypto.randomUUID(),
+          correlationId: resp.correlationId,
+          topic: pending.replyTopic,
+          timestamp: Date.now(),
+          payload: resp,
+        });
+        console.log(`[hitl] Published HITLResponse (${resp.correlationId}) → ${pending.replyTopic}`);
       }
 
       // Find agent with plan_resume skill (should be Ava)
