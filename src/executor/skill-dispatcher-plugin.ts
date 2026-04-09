@@ -97,13 +97,38 @@ export class SkillDispatcherPlugin implements Plugin {
       payload: payload as Record<string, unknown>,
     };
 
+    const flowItemId = `skill-${correlationId}`;
+    const dispatchedAt = Date.now();
+    this._publishFlowEvent("flow.item.created", {
+      id: flowItemId,
+      type: "feature",
+      status: "active",
+      stage: "dispatched",
+      createdAt: dispatchedAt,
+      startedAt: dispatchedAt,
+      meta: { skill, executorType: executor.type },
+    });
+
     try {
       const result = await executor.execute(req);
 
       if (result.isError) {
         console.error(`[skill-dispatcher] Executor "${executor.type}" error for skill "${skill}"`);
+        this._publishFlowEvent("flow.item.updated", {
+          id: flowItemId,
+          status: "blocked",
+          stage: "error",
+          meta: { skill, error: result.text },
+        });
       } else {
         console.log(`[skill-dispatcher] Skill "${skill}" completed via ${executor.type}`);
+        this._publishFlowEvent("flow.item.completed", {
+          id: flowItemId,
+          status: "complete",
+          stage: "done",
+          completedAt: Date.now(),
+          meta: { skill, executorType: executor.type, durationMs: Date.now() - dispatchedAt },
+        });
       }
 
       this._publishResponse(
@@ -115,8 +140,25 @@ export class SkillDispatcherPlugin implements Plugin {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(`[skill-dispatcher] Unhandled error dispatching "${skill}": ${errorMsg}`);
+      this._publishFlowEvent("flow.item.updated", {
+        id: flowItemId,
+        status: "blocked",
+        stage: "error",
+        meta: { skill, error: errorMsg },
+      });
       this._publishResponse(replyTopic, correlationId, undefined, errorMsg);
     }
+  }
+
+  private _publishFlowEvent(topic: string, item: Record<string, unknown>): void {
+    if (!this.bus) return;
+    this.bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId: item.id as string,
+      topic,
+      timestamp: Date.now(),
+      payload: item,
+    });
   }
 
   private _publishResponse(

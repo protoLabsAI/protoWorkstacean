@@ -344,6 +344,54 @@ export class GitHubPlugin implements Plugin {
       return;
     }
 
+    // ── PR lifecycle → flow.item.* (independent of @mention) ─────────────────
+    if (event === "pull_request") {
+      const action = payload.action as string;
+      const pr = payload.pull_request as Record<string, unknown>;
+      const repo = payload.repository as Record<string, unknown> | undefined;
+      const owner = (repo?.owner as Record<string, unknown> | undefined)?.login as string ?? "";
+      const repoName = repo?.name as string ?? "";
+      const prNumber = pr?.number as number;
+      const prId = `github-pr-${owner}-${repoName}-${prNumber}`;
+      const isDraft = pr?.draft as boolean;
+
+      if (action === "opened" && !isDraft) {
+        bus.publish("flow.item.created", {
+          id: crypto.randomUUID(),
+          correlationId: prId,
+          topic: "flow.item.created",
+          timestamp: Date.now(),
+          payload: {
+            id: prId,
+            type: "feature",
+            status: "active",
+            stage: "open",
+            createdAt: Date.now(),
+            meta: { source: "github", owner, repo: repoName, number: prNumber, title: pr?.title, url: pr?.html_url },
+          },
+        });
+      } else if (action === "review_requested") {
+        bus.publish("flow.item.updated", {
+          id: crypto.randomUUID(),
+          correlationId: prId,
+          topic: "flow.item.updated",
+          timestamp: Date.now(),
+          payload: { id: prId, status: "active", stage: "review" },
+        });
+      } else if (action === "closed") {
+        const merged = pr?.merged as boolean;
+        if (merged) {
+          bus.publish("flow.item.completed", {
+            id: crypto.randomUUID(),
+            correlationId: prId,
+            topic: "flow.item.completed",
+            timestamp: Date.now(),
+            payload: { id: prId, status: "complete", stage: "done", completedAt: Date.now() },
+          });
+        }
+      }
+    }
+
     const ctx = extractContext(event, payload);
     if (!ctx) return;
 

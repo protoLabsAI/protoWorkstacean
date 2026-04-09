@@ -163,12 +163,26 @@ export class PlanePlugin implements Plugin {
             await apiCache!.patchIssueState(planeProjectId, planeIssueId, inProgressState);
             console.log(`[plane] Issue ${planeIssueId} → In Progress`);
           }
+          bus.publish("flow.item.updated", {
+            id: crypto.randomUUID(),
+            correlationId: msg.correlationId ?? "",
+            topic: "flow.item.updated",
+            timestamp: Date.now(),
+            payload: { id: `plane-${planeIssueId}`, status: "active", stage: "in-progress" },
+          });
         } else if (status === "completed" || status === "done") {
           const doneState = states.get("group:completed") ?? states.get("name:done");
           if (doneState) {
             await apiCache!.patchIssueState(planeProjectId, planeIssueId, doneState);
             console.log(`[plane] Issue ${planeIssueId} → Done`);
           }
+          bus.publish("flow.item.completed", {
+            id: crypto.randomUUID(),
+            correlationId: msg.correlationId ?? "",
+            topic: "flow.item.completed",
+            timestamp: Date.now(),
+            payload: { id: `plane-${planeIssueId}`, status: "complete", stage: "done", completedAt: Date.now() },
+          });
         }
 
         if (summary) {
@@ -270,6 +284,23 @@ export class PlanePlugin implements Plugin {
 
     const correlationId = `plane-${issue.id}`;
     this.pendingIssues.set(correlationId, { planeIssueId: issue.id, planeProjectId: issue.project });
+
+    // Register this issue as a flow item so FlowMonitorPlugin can track its lifecycle
+    const flowItemType = issue.priority === "urgent" ? "defect" : "feature";
+    bus.publish("flow.item.created", {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic: "flow.item.created",
+      timestamp: Date.now(),
+      payload: {
+        id: `plane-${issue.id}`,
+        type: flowItemType,
+        status: "queued",
+        stage: "backlog",
+        createdAt: Date.now(),
+        meta: { source: "plane", issueId: issue.id, projectId: issue.project, title: issue.name, priority: issue.priority },
+      },
+    });
 
     bus.publish(topic, {
       id: crypto.randomUUID(),

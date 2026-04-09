@@ -329,6 +329,17 @@ for (const entry of pluginRegistry) {
     );
     for (const err of dr.errors) console.warn(`[domain-discovery] ${err}`);
     console.log(`[domain-discovery] ${dr.domainsRegistered.length} domain(s) registered, ${dr.actionsLoaded} action(s) loaded`);
+
+    // Register the local flow-metrics domain so WorldStateEngine polls FlowMonitorPlugin
+    // and GOAP goals (flow.efficiency_healthy, flow.distribution_balanced) get live data.
+    const { createHttpCollector } = await import("../lib/plugins/world-state-engine.js");
+    const port = parseInt(process.env.WORKSTACEAN_HTTP_PORT || "3000", 10);
+    (wsEngine as unknown as WorldStateEngine).registerDomain(
+      "flow",
+      createHttpCollector(`http://localhost:${port}/api/flow-metrics`),
+      60_000,
+    );
+    console.log("[domain-discovery] flow domain registered → /api/flow-metrics (60s)");
   }
 }
 
@@ -383,6 +394,36 @@ async function loadWorkspacePlugins(): Promise<Plugin[]> {
 const workspacePlugins = await loadWorkspacePlugins();
 
 const allPlugins = [...corePlugins, ...registeredPlugins, ...workspacePlugins];
+
+// ── Wire dormant alert paths → Discord ──────────────────────────────────────
+// ops.alert.budget and world.action.queue_full are published but had no consumers.
+// Forward both to message.outbound.discord.alert so they surface to operators.
+
+bus.subscribe("ops.alert.budget", "alert-bridge", (msg) => {
+  const p = (msg.payload ?? {}) as Record<string, unknown>;
+  const text = p.type === "cost_discrepancy"
+    ? `Budget alert — cost discrepancy on request \`${p.requestId}\``
+    : `Budget alert — ${String(p.type ?? "unknown")}: ${String(p.report ?? "")}`;
+  bus.publish("message.outbound.discord.alert", {
+    id: crypto.randomUUID(),
+    correlationId: msg.correlationId,
+    topic: "message.outbound.discord.alert",
+    timestamp: Date.now(),
+    payload: { text, level: "warn", source: "budget" },
+  });
+});
+
+bus.subscribe("world.action.queue_full", "alert-bridge", (msg) => {
+  const p = (msg.payload ?? {}) as Record<string, unknown>;
+  const text = `Action queue full — WIP ${p.wipCount}/${p.wipLimit}, pending: \`${p.pendingActionId}\``;
+  bus.publish("message.outbound.discord.alert", {
+    id: crypto.randomUUID(),
+    correlationId: msg.correlationId,
+    topic: "message.outbound.discord.alert",
+    timestamp: Date.now(),
+    payload: { text, level: "warn", source: "action-dispatcher" },
+  });
+});
 
 console.log("WorkStacean started.");
 console.log(`Workspace: ${workspaceDir}`);
@@ -516,6 +557,22 @@ function handleGetWorldState(domain?: string): Response {
   }
   const data = worldStateCollector.getWorldState(domain ? { domain, maxAgeMs: 120_000 } : { maxAgeMs: 120_000 });
   return Response.json({ success: true, data });
+}
+
+// ── Flow-metrics API ───────────────────────────────────────────────────────────
+
+interface FlowMonitorAPI {
+  getMetrics(opts?: { metric?: string }): unknown;
+}
+
+const flowMonitorPlugin = registeredPlugins.find(p => p.name === "flow-monitor") as (FlowMonitorAPI & { name: string }) | undefined;
+
+function handleGetFlowMetrics(metric?: string): Response {
+  if (!flowMonitorPlugin) {
+    return Response.json({ success: false, error: "flow-monitor not available" }, { status: 503 });
+  }
+  const data = flowMonitorPlugin.getMetrics(metric ? { metric } : undefined);
+  return Response.json({ success: true, data, collectedAt: Date.now() });
 }
 
 function handleGetCeremonies(): Response {
@@ -697,6 +754,8 @@ const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
   { method: "GET",  path: "/api/goals",                 handler: () => serveWorkspaceYaml("goals.yaml", "goals") },
   { method: "GET",  path: "/api/world-state",           handler: () => handleGetWorldState() },
   { method: "GET",  path: "/api/world-state/:domain",   handler: (_, p) => handleGetWorldState(p.domain) },
+  { method: "GET",  path: "/api/flow-metrics",          handler: () => handleGetFlowMetrics() },
+  { method: "GET",  path: "/api/flow-metrics/:metric",  handler: (_, p) => handleGetFlowMetrics(p.metric) },
   { method: "GET",  path: "/api/ceremonies",            handler: () => handleGetCeremonies() },
   { method: "POST", path: "/api/ceremonies/:id/run",    handler: (req, p) => handleRunCeremony(req, p.id) },
   { method: "GET",  path: "/api/skills/:agentName",     handler: (_, p) => handleGetAgentSkills(p.agentName) },

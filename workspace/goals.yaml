@@ -5,14 +5,15 @@ goals:
   - id: flow.efficiency_healthy
     type: Threshold
     severity: medium
-    selector: "domains.board.data.efficiency"
+    selector: "domains.flow.data.efficiency.ratio"
     min: 0.35
     description: "Flow efficiency must stay >= 35%"
 
   - id: flow.distribution_balanced
     type: Distribution
     severity: medium
-    description: "Board must have >= 40% features, <= 30% defects"
+    description: "Work mix must have >= 40% features, <= 30% defects"
+    selector: "domains.flow.data.distribution.ratios"
     distribution:
       feature: 0.40
       defect: 0.30
