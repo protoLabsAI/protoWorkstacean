@@ -168,7 +168,7 @@ describe("AgentRuntimePlugin", () => {
         const bus = new InMemoryEventBus();
         const registry = new ExecutorRegistry();
         const agentRuntime = new AgentRuntimePlugin({ workspaceDir }, registry);
-        const dispatcher = new SkillDispatcherPlugin(registry);
+        const dispatcher = new SkillDispatcherPlugin(registry, "/tmp");
 
         agentRuntime.install(bus);
         dispatcher.install(bus);
@@ -204,7 +204,7 @@ describe("AgentRuntimePlugin", () => {
         const bus = new InMemoryEventBus();
         const registry = new ExecutorRegistry();
         const agentRuntime = new AgentRuntimePlugin({ workspaceDir }, registry);
-        const dispatcher = new SkillDispatcherPlugin(registry);
+        const dispatcher = new SkillDispatcherPlugin(registry, "/tmp");
 
         agentRuntime.install(bus);
         dispatcher.install(bus);
@@ -233,7 +233,7 @@ describe("AgentRuntimePlugin", () => {
         const bus = new InMemoryEventBus();
         const registry = new ExecutorRegistry();
         const agentRuntime = new AgentRuntimePlugin({ workspaceDir }, registry);
-        const dispatcher = new SkillDispatcherPlugin(registry);
+        const dispatcher = new SkillDispatcherPlugin(registry, "/tmp");
 
         agentRuntime.install(bus);
         dispatcher.install(bus);

@@ -49,7 +49,7 @@ describe("SkillDispatcherPlugin", () => {
 
   beforeEach(() => {
     registry = new ExecutorRegistry();
-    plugin = new SkillDispatcherPlugin(registry);
+    plugin = new SkillDispatcherPlugin(registry, "/tmp");
     bus = makeBus();
     plugin.install(bus as never);
   });
