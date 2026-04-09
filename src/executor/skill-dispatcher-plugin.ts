@@ -26,13 +26,16 @@ export class SkillDispatcherPlugin implements Plugin {
 
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
-  private readonly graphiti = new GraphitiClient();
+  private readonly graphiti: GraphitiClient;
   private readonly identityRegistry: IdentityRegistry;
 
   constructor(
     private readonly registry: ExecutorRegistry,
     workspaceDir: string,
+    /** Injectable for testing — defaults to a real GraphitiClient. */
+    graphiti?: GraphitiClient,
   ) {
+    this.graphiti = graphiti ?? new GraphitiClient();
     this.identityRegistry = new IdentityRegistry(workspaceDir);
   }
 
@@ -55,6 +58,7 @@ export class SkillDispatcherPlugin implements Plugin {
     }
     this.subscriptionIds.length = 0;
     this.bus = undefined;
+    this.identityRegistry.unwatch();
   }
 
   private async _dispatch(msg: BusMessage): Promise<void> {
