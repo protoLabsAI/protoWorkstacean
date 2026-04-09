@@ -216,7 +216,7 @@ describe("OnboardingPlugin — Step 1: validate", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "test-proj", title: "Test", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 500)); // full 9-step pipeline needs more than 100ms
+    await new Promise(r => setTimeout(r, 2000)); // full 9-step pipeline; generous for Docker
 
     const reply = findReply(published);
     expect(reply?.success).toBe(true);
@@ -270,7 +270,7 @@ describe("OnboardingPlugin — Step 2: idempotency", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "new-proj", title: "New", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 500)); // full 9-step pipeline needs more than 100ms
+    await new Promise(r => setTimeout(r, 2000)); // full 9-step pipeline; generous for Docker
 
     const reply = findReply(published);
     expect(reply?.success).toBe(true);
