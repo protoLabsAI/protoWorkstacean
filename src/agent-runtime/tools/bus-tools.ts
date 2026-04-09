@@ -15,10 +15,6 @@
 
 import { tool } from "@protolabsai/sdk";
 import { z } from "zod";
-import type { SdkMcpToolDefinition } from "@protolabsai/sdk";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyToolDef = SdkMcpToolDefinition<any>;
 
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -64,7 +60,7 @@ export interface BusToolsOptions {
  * Create all built-in bus tool definitions.
  * Call once at startup and register the returned array with ToolRegistry.
  */
-export function createBusTools(opts: BusToolsOptions = {}): AnyToolDef[] {
+export function createBusTools(opts: BusToolsOptions = {}) {
   const baseUrl = opts.baseUrl ?? "http://localhost:3000";
   const apiKey = opts.apiKey;
 
@@ -199,10 +195,7 @@ export function createBusTools(opts: BusToolsOptions = {}): AnyToolDef[] {
     },
   );
 
-  // Each tool is SdkMcpToolDefinition<SpecificSchema>. TypeScript's strict function
-  // parameter contravariance prevents direct assignment to AnyToolDef[], so cast here.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return [publishEvent, getWorldState, getIncidents, reportIncident, getCeremonies, runCeremony] as unknown as AnyToolDef[];
+  return [publishEvent, getWorldState, getIncidents, reportIncident, getCeremonies, runCeremony];
 }
 
 /**
