@@ -163,6 +163,21 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
+  const getProjects = tool(
+    "get_projects",
+    "List all registered projects from workspace/projects.yaml. Returns slug, title, " +
+      "GitHub repo, default branch, status, and assigned agents for each project.",
+    {},
+    async () => {
+      try {
+        const data = await apiGet(baseUrl, "/api/projects", apiKey);
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
   const getCeremonies = tool(
     "get_ceremonies",
     "List all configured ceremonies from workspace/ceremonies/*.yaml.",
@@ -196,7 +211,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
-  return [publishEvent, getWorldState, getIncidents, reportIncident, getCeremonies, runCeremony];
+  return [publishEvent, getWorldState, getIncidents, reportIncident, getProjects, getCeremonies, runCeremony];
 }
 
 /**
@@ -208,6 +223,7 @@ export const BUS_TOOL_NAMES = [
   "get_world_state",
   "get_incidents",
   "report_incident",
+  "get_projects",
   "get_ceremonies",
   "run_ceremony",
 ] as const;

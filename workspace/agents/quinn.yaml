@@ -26,6 +26,7 @@ systemPrompt: |
 tools:
   - publish_event
   - get_world_state
+  - get_projects
   - get_incidents
   - report_incident
 
