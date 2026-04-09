@@ -99,18 +99,30 @@ export class SkillDispatcherPlugin implements Plugin {
     // ── Memory enrichment ──────────────────────────────────────────────────────
     // Prepend user context from Graphiti for human-originating messages.
     // Cron/system events (no userId) are skipped.
+    // Two group IDs are queried: shared (user:{canonicalId}) and agent-scoped
+    // (agent:{agentName}:user:{canonicalId}) so each agent builds its own memory
+    // of the user on top of the shared cross-agent baseline.
     const sourceUserId = (msg.source as Record<string, unknown> | undefined)?.userId as string | undefined;
     const sourcePlatform = (msg.source as Record<string, unknown> | undefined)?.interface as string | undefined;
     const sourceChannelId = (msg.source as Record<string, unknown> | undefined)?.channelId as string | undefined;
 
     let rawContent = typeof payload.content === "string" ? payload.content : undefined;
+    const originalContent = rawContent; // preserved for episode storage — never includes context prefix
     let groupId: string | undefined;
+    let agentGroupId: string | undefined;
 
     if (sourceUserId && sourcePlatform && sourcePlatform !== "cron") {
       groupId = this.identityRegistry.groupId(sourcePlatform, sourceUserId);
+      const agentName = targets[0];
+      if (agentName) agentGroupId = `agent:${agentName}:${groupId}`;
+
       if (rawContent) {
-        const memoryContext = await this.graphiti.getContextBlock(groupId, rawContent).catch(() => "");
-        if (memoryContext) rawContent = `${memoryContext}\n${rawContent}`;
+        const [sharedCtx, agentCtx] = await Promise.all([
+          this.graphiti.getContextBlock(groupId, rawContent).catch(() => ""),
+          agentGroupId ? this.graphiti.getContextBlock(agentGroupId, rawContent).catch(() => "") : Promise.resolve(""),
+        ]);
+        const combined = [sharedCtx, agentCtx].filter(Boolean).join("");
+        if (combined) rawContent = `${combined}${rawContent}`;
       }
     }
     // ── End memory enrichment ─────────────────────────────────────────────────
@@ -159,20 +171,27 @@ export class SkillDispatcherPlugin implements Plugin {
         });
       }
 
-      // Store completed turn in Graphiti (fire-and-forget, non-blocking)
-      if (!result.isError && result.text && groupId && rawContent) {
+      // Store completed turn in Graphiti (fire-and-forget, non-blocking).
+      // Written to both the shared user group and the agent-scoped group so each
+      // agent accumulates its own relationship history with the user.
+      if (!result.isError && result.text && groupId && originalContent) {
         const identity = sourceUserId && sourcePlatform
           ? this.identityRegistry.resolve(sourcePlatform, sourceUserId)
           : null;
-        this.graphiti.addEpisode({
-          groupId,
-          userMessage: rawContent,
+        const episodeBase = {
+          userMessage: originalContent,
           agentMessage: result.text,
           userRole: identity?.displayName ?? sourceUserId,
           agentName: targets[0],
           channelId: sourceChannelId,
           platform: sourcePlatform,
-        }).catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode error:", err));
+        };
+        this.graphiti.addEpisode({ groupId, ...episodeBase })
+          .catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode (shared) error:", err));
+        if (agentGroupId) {
+          this.graphiti.addEpisode({ groupId: agentGroupId, ...episodeBase })
+            .catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode (agent) error:", err));
+        }
       }
 
       this._publishResponse(

@@ -15,6 +15,6 @@ users:
     admin: true
     memoryEnabled: true
     identities:
-      discord: ""       # paste discord snowflake ID here
-      github: ""        # github username
-      signal: ""        # E.164 phone
+      discord: ""       # paste discord snowflake ID here (Discord: Settings → Advanced → Developer Mode → right-click your avatar → Copy User ID)
+      github: "bioshazard"
+      signal: ""        # E.164 phone (+1xxxxxxxxxx)
