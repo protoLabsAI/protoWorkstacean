@@ -12,122 +12,40 @@ See also: [`explanation/world-engine-concepts.md`](../explanation/world-engine-c
 
 ## World State Schema
 
-The `WorldState` is the live snapshot of infrastructure, board, CI, and portfolio — maintained by `WorldStateCollectorPlugin`.
+`WorldStateEngine` is generic — it makes no assumptions about what domains exist. Domain data shape is entirely defined by the application via `workspace/domains.yaml`.
 
 ```typescript
+// Engine-level types only. Domain data is application-defined.
+
 interface WorldState {
-  timestamp: number;          // Unix ms — most recent update across all domains
-  domains: {
-    services?: WorldStateDomain<ServiceState>;
-    board?: WorldStateDomain<BoardState>;
-    ci?: WorldStateDomain<CIState>;
-    portfolio?: WorldStateDomain<PortfolioState>;
-  };
-  extensions: Record<string, unknown>;  // plugin-specific extensions
-  snapshotVersion: number;              // incremented on each knowledge.db write
+  domains: Record<string, WorldStateDomain<unknown>>;
+  snapshotVersion: number;   // incremented on each knowledge.db write
 }
 
-interface WorldStateDomain<T> {
+interface WorldStateDomain<T = unknown> {
   data: T;
-  metadata: {
-    collectedAt: number;   // Unix ms
-    domain: string;
-    tickNumber: number;
-    failed?: boolean;
-    errorMessage?: string;
-  };
+  metadata: WorldStateMetadata;
+}
+
+interface WorldStateMetadata {
+  collectedAt: number;   // Unix ms
+  domain: string;
+  tickNumber: number;
+  failed?: boolean;
+  errorMessage?: string;
 }
 ```
 
-### Domain schemas
+### Domain registration
 
-**`services` — infrastructure health (30 s tick)**
+Domains are registered via `workspace/domains.yaml` (see [Workspace Files](./workspace-files/) for schema). Each domain declares:
 
-```typescript
-interface ServiceState {
-  instances: ServiceInstance[];
-  totalHealthy: number;
-  totalDegraded: number;
-  totalDown: number;
-}
+- `name` — unique key in the world state map
+- `url` — HTTP endpoint to poll (env vars interpolated at poll time)
+- `intervalMs` — poll interval (default: 60 000 ms)
+- `headers` — optional request headers
 
-interface ServiceInstance {
-  name: string;
-  status: "healthy" | "degraded" | "down" | "unknown";
-  uptime?: number;       // seconds
-  lastChecked: number;   // Unix ms
-  meta?: Record<string, unknown>;
-}
-```
-
-**`board` — Plane project board (60 s tick)**
-
-```typescript
-interface BoardState {
-  projectSlug: string;
-  openIssues: number;
-  inProgress: number;
-  done: number;
-  issues: BoardIssue[];
-}
-
-interface BoardIssue {
-  id: string;
-  title: string;
-  status: string;
-  priority?: string;
-  assignee?: string;
-  updatedAt?: string;
-}
-```
-
-**`ci` — GitHub CI pipeline (5 min tick)**
-
-```typescript
-interface CIState {
-  repository: string;
-  runs: CIRun[];
-  successRate?: number;  // 0.0–1.0
-}
-
-interface CIRun {
-  id: string;
-  name: string;
-  status: "success" | "failure" | "pending" | "running" | "cancelled" | string;
-  branch: string;
-  startedAt?: string;
-  finishedAt?: string;
-  url?: string;
-}
-```
-
-**`portfolio` — workspace projects (15 min tick)**
-
-```typescript
-interface PortfolioState {
-  totalProjects: number;
-  activeProjects: number;
-  projects: PortfolioProject[];
-}
-
-interface PortfolioProject {
-  slug: string;
-  title: string;
-  github: string;
-  status: "active" | "archived" | "paused" | string;
-  agents: string[];
-  lastActivity?: string;
-}
-```
-
-### Multi-rate collector tick rates
-
-| Domain | Tick rate | Redis TTL |
-|--------|-----------|-----------|
-| `services` | 30 s | 60 s (2×) |
-| `board` | 60 s | 120 s (2×) |
-| `ci` | 5 min | 10 min (2×) |
-| `portfolio` | 15 min | 30 min (2×) |
+There are no built-in or hardcoded domain names. All domains are configuration.
 
 ### Redis sink
 
@@ -138,11 +56,11 @@ worldstate:{domain}:{collectedAt}   — timestamped snapshot
 worldstate:{domain}:latest          — stable "latest" key for polling
 ```
 
-TTL is 2× the domain tick rate. When Redis is unavailable, `WorldStateCollectorPlugin` falls back to an in-memory `Map`.
+TTL is 2× the domain's `intervalMs`. When Redis is unavailable, `WorldStateEngine` falls back to an in-memory `Map`.
 
 ### knowledge.db persistence
 
-`WorldStateCollectorPlugin` writes the full `WorldState` to `data/knowledge.db` (SQLite) every 5 minutes (configurable via `snapshotIntervalMs`). On startup it restores the latest snapshot. The last 50 snapshots are retained; older rows are pruned.
+`WorldStateEngine` writes the full `WorldState` to `data/knowledge.db` (SQLite) every 5 minutes (configurable via `snapshotIntervalMs`). On startup it restores the latest snapshot. The last 50 snapshots are retained; older rows are pruned.
 
 ---
 
