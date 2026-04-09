@@ -36,6 +36,11 @@ const dataDir = resolve(
 
 const bus = new InMemoryEventBus();
 
+// --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
+import { ChannelRegistry } from "../lib/channels/channel-registry.js";
+const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));
+channelRegistry.startWatching();
+
 // --- Shared ActionRegistry — populated from workspace/actions.yaml ---
 const actionRegistry = new ActionRegistry();
 
@@ -129,7 +134,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { RouterPlugin } = await import("./router/router-plugin.js");
-      return new RouterPlugin({ workspaceDir });
+      return new RouterPlugin({ workspaceDir, channelRegistry });
     },
   },
   {
@@ -137,7 +142,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => !!process.env.DISCORD_BOT_TOKEN,
     factory: async () => {
       const { DiscordPlugin } = await import("../lib/plugins/discord");
-      return new DiscordPlugin(workspaceDir, dataDir);
+      return new DiscordPlugin(workspaceDir, dataDir, channelRegistry);
     },
   },
   {
@@ -705,6 +710,37 @@ async function handleResolveIncident(req: Request, incidentId: string): Promise<
   return Response.json({ success: true, data: incidents[idx] });
 }
 
+// ── Channels API ──────────────────────────────────────────────────────────────
+
+function handleGetChannels(): Response {
+  return Response.json({ success: true, data: channelRegistry.getAll() });
+}
+
+async function handleAddChannel(req: Request): Promise<Response> {
+  if (API_KEY && req.headers.get("X-API-Key") !== API_KEY) {
+    return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 });
+  }
+
+  if (!body.id || !body.platform) {
+    return Response.json({ success: false, error: "id and platform are required" }, { status: 400 });
+  }
+
+  try {
+    channelRegistry.add(body as unknown as import("../lib/types/channels.js").Channel);
+    return Response.json({ success: true, data: body });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return Response.json({ success: false, error: msg }, { status: 409 });
+  }
+}
+
 function handleGetAgentSkills(agentName: string): Response {
   const agentsPath = join(workspaceDir, "agents.yaml");
   if (!existsSync(agentsPath)) {
@@ -762,6 +798,8 @@ const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
   { method: "GET",  path: "/api/incidents",            handler: () => handleGetIncidents() },
   { method: "POST", path: "/api/incidents",            handler: (req) => handleReportIncident(req) },
   { method: "POST", path: "/api/incidents/:id/resolve", handler: (req, p) => handleResolveIncident(req, p.id) },
+  { method: "GET",  path: "/api/channels",             handler: () => handleGetChannels() },
+  { method: "POST", path: "/api/channels",             handler: (req) => handleAddChannel(req) },
 ];
 
 Bun.serve({

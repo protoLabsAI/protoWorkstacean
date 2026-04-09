@@ -34,11 +34,18 @@ import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import { SkillResolver } from "./skill-resolver.ts";
 import { ProjectEnricher } from "./project-enricher.ts";
 import { loadAgentDefinitions } from "../agent-runtime/agent-definition-loader.ts";
+import type { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
 
 export interface RouterConfig {
   workspaceDir: string;
   /** Fallback skill when no hint or keyword matches. Default: ROUTER_DEFAULT_SKILL env var. */
   defaultSkill?: string;
+  /**
+   * Optional channel registry. When provided, inbound messages from a channel
+   * with an explicit agent assignment are routed directly to that agent without
+   * requiring a keyword match.
+   */
+  channelRegistry?: ChannelRegistry;
 }
 
 export class RouterPlugin implements Plugin {
@@ -144,6 +151,11 @@ export class RouterPlugin implements Plugin {
     const skillHint = workingPayload.skillHint as string | undefined;
     const content = workingPayload.content as string | undefined;
 
+    // Channel-based agent assignment — takes priority over keyword agent matching.
+    // If channels.yaml assigns this channel to a specific agent, prefer that.
+    const channelEntry = this.config.channelRegistry?.findByTopic(msg.topic);
+    const channelAgent = channelEntry?.agent;
+
     const match = this.resolver.resolve(skillHint, content);
 
     if (!match) {
@@ -155,6 +167,10 @@ export class RouterPlugin implements Plugin {
       return;
     }
 
+    // Build targets list: channel assignment wins, then keyword-matched agent name.
+    const agentName = channelAgent ?? match.agentName;
+    const targets = agentName ? [agentName] : [];
+
     const runId = crypto.randomUUID();
     const replyTopic =
       (workingMsg.reply?.topic) ??
@@ -162,7 +178,7 @@ export class RouterPlugin implements Plugin {
 
     console.log(
       `[router] ${msg.topic} → skill "${match.skill}" (via ${match.via})` +
-      (match.agentName ? ` [${match.agentName}]` : "") +
+      (agentName ? ` [${agentName}]` : "") +
       ` reply → ${replyTopic}`,
     );
 
@@ -179,6 +195,7 @@ export class RouterPlugin implements Plugin {
         skill: match.skill,
         content,
         prompt: content,
+        targets: targets.length ? targets : undefined,
         _routed: true,
         runId,
       },

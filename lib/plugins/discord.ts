@@ -19,6 +19,7 @@
  */
 
 import { readFileSync, existsSync, watchFile, unwatchFile, mkdirSync } from "node:fs";
+import type { ChannelRegistry } from "../channels/channel-registry.ts";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Database } from "bun:sqlite";
@@ -208,6 +209,11 @@ export class DiscordPlugin implements Plugin {
   // Per-agent Discord client pool (agentName → Client)
   private agentClients = new Map<string, Client>();
 
+  // correlationId → agentName — tracks which agent should reply for a pending message
+  private pendingAgents = new Map<string, string>();
+
+  private channelRegistry?: ChannelRegistry;
+
   // Runtime rate-limit state (built from config on install)
   private rateLimits = new Map<string, number[]>();
   private rateMaxMessages = 5;
@@ -218,9 +224,10 @@ export class DiscordPlugin implements Plugin {
   private rlDb: Database | null = null;
   private dataDir: string | null = null;
 
-  constructor(workspaceDir: string, dataDir?: string) {
+  constructor(workspaceDir: string, dataDir?: string, channelRegistry?: ChannelRegistry) {
     this.workspaceDir = workspaceDir;
     this.dataDir = dataDir ? resolve(dataDir) : null;
+    this.channelRegistry = channelRegistry;
   }
 
   install(bus: EventBus): void {
@@ -288,6 +295,12 @@ export class DiscordPlugin implements Plugin {
       const correlationId = makeId();
       pendingReplies.set(correlationId, { message });
 
+      // Track which agent should respond (from channels.yaml assignment)
+      const channelEntry = this.channelRegistry?.findByTopic(`message.inbound.discord.${message.channelId}`);
+      if (channelEntry?.agent) {
+        this.pendingAgents.set(correlationId, channelEntry.agent);
+      }
+
       const content = message.cleanContent
         .replace(/<@!?\d+>/g, "")
         .trim();
@@ -303,6 +316,7 @@ export class DiscordPlugin implements Plugin {
           content,
           isThread: message.channel.isThread(),
           guildId: message.guildId,
+          ...(channelEntry?.agent ? { agentId: channelEntry.agent } : {}),
         },
         source: { interface: "discord" as const, channelId: message.channelId, userId },
         reply: { topic: `message.outbound.discord.${message.channelId}` },
@@ -473,8 +487,9 @@ export class DiscordPlugin implements Plugin {
       const content = String(payload.content ?? "").slice(0, 2000) || "(no response)";
       const correlationId = msg.correlationId;
 
-      // Resolve agent-specific client if agentId is present
-      const agentId = payload.agentId as string | undefined;
+      // Resolve agent-specific client — payload.agentId wins, then pendingAgents map
+      const agentId = (payload.agentId as string | undefined)
+        ?? (correlationId ? this.pendingAgents.get(correlationId) : undefined);
       const agentClient = agentId ? this.agentClients.get(agentId) : undefined;
       if (agentId && !agentClient) {
         console.debug(`[discord] No pool client for agent "${agentId}" — falling back to bus client`);
@@ -485,6 +500,7 @@ export class DiscordPlugin implements Plugin {
         const pending = pendingReplies.get(correlationId);
         if (pending) {
           pendingReplies.delete(correlationId);
+          this.pendingAgents.delete(correlationId);
 
           if (pending.interaction) {
             // Slash command interactions always use the bus client
@@ -689,40 +705,52 @@ export class DiscordPlugin implements Plugin {
   }
 
   private _initAgentPool(): void {
-    const agents = loadAgentPoolDefs(this.workspaceDir);
+    // Sources: agents.yaml (legacy) + channels.yaml (preferred)
+    const agentsYamlEntries = loadAgentPoolDefs(this.workspaceDir)
+      .filter(a => a.discordBotTokenEnvKey)
+      .map(a => ({ name: a.name, tokenEnvKey: a.discordBotTokenEnvKey! }));
+
+    const channelEntries = this.channelRegistry
+      ? Array.from(this.channelRegistry.getDiscordBotTokenEnvs().entries())
+          .map(([name, tokenEnvKey]) => ({ name, tokenEnvKey }))
+      : [];
+
+    // Merge — channels.yaml wins on conflict
+    const byName = new Map<string, string>();
+    for (const { name, tokenEnvKey } of [...agentsYamlEntries, ...channelEntries]) {
+      byName.set(name, tokenEnvKey);
+    }
+
     let created = 0;
-
-    for (const agent of agents) {
-      if (!agent.discordBotTokenEnvKey) continue;
-
-      const token = process.env[agent.discordBotTokenEnvKey];
+    for (const [agentName, tokenEnvKey] of byName) {
+      const token = process.env[tokenEnvKey];
       if (!token) {
-        console.warn(`[discord] No token for agent "${agent.name}" (env: ${agent.discordBotTokenEnvKey}) — will use bus bot`);
+        console.warn(`[discord] No token for agent "${agentName}" (env: ${tokenEnvKey}) — will use bus bot`);
         continue;
       }
 
       try {
         const agentClient = new Client({
-          intents: [GatewayIntentBits.Guilds],
+          intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
         });
 
         agentClient.once(Events.ClientReady, c => {
-          console.log(`[discord] Agent client "${agent.name}" logged in as ${c.user.tag}`);
+          console.log(`[discord] Agent client "${agentName}" logged in as ${c.user.tag}`);
         });
 
         agentClient.login(token).catch(err => {
-          console.warn(`[discord] Agent client "${agent.name}" login failed:`, err);
-          this.agentClients.delete(agent.name);
+          console.warn(`[discord] Agent client "${agentName}" login failed:`, err);
+          this.agentClients.delete(agentName);
         });
 
-        this.agentClients.set(agent.name, agentClient);
+        this.agentClients.set(agentName, agentClient);
         created++;
       } catch (err) {
-        console.warn(`[discord] Failed to create client for agent "${agent.name}":`, err);
+        console.warn(`[discord] Failed to create client for agent "${agentName}":`, err);
       }
     }
 
-    console.log(`[discord] Agent client pool: ${created} client(s) initialized (${agents.length} agents total)`);
+    console.log(`[discord] Agent client pool: ${created} client(s) initialized (${byName.size} agents configured)`);
   }
 
   private _reloadAgentPool(): void {

@@ -4,6 +4,10 @@ title: Integrations
 
 protoWorkstacean connects to external services through **plugins** and runs agents through **runtimes**. Both are opt-in — a plugin only activates when its required env vars are set.
 
+## Communication channels
+
+[**Channels**](channels) is the single interface for adding, configuring, and routing all communication channels. One `workspace/channels.yaml` entry connects a platform channel to an agent and gives that agent its own bot identity.
+
 ## Platform integrations
 
 | Integration | Triggers | Env var that enables it |
