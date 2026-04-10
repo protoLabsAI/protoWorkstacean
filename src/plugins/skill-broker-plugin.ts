@@ -16,6 +16,7 @@ import { parse as parseYaml } from "yaml";
 import type { Plugin, EventBus } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import { A2AExecutor } from "../executor/executors/a2a-executor.ts";
+import { resolveEnvVars } from "../utils/env-interpolation.ts";
 
 interface AgentSkill {
   name: string;
@@ -48,7 +49,7 @@ export class SkillBrokerPlugin implements Plugin {
     for (const agent of agents) {
       const executor = new A2AExecutor({
         name: agent.name,
-        url: agent.url,
+        url: resolveEnvVars(agent.url, "skill-broker"),
         apiKeyEnv: agent.apiKeyEnv,
       });
 
