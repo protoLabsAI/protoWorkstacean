@@ -1,105 +1,41 @@
 ---
 import DashboardLayout from "../layouts/DashboardLayout.astro";
+import GoalStatus from "../components/GoalStatus.tsx";
+import OutcomesTable from "../components/OutcomesTable.tsx";
 ---
 
 <DashboardLayout title="Goals" activePage="goals">
-  <div class="page-header">
-    <h2>Active Goals</h2>
-    <p class="subtitle">GOAP declarative goals and their current status</p>
-  </div>
+  <div class="goals-page">
+    <section class="goals-section">
+      <GoalStatus client:load />
+    </section>
 
-  <div id="goals-container">
-    <div class="card">
-      <p class="placeholder-content">Loading goals…</p>
-    </div>
+    <div class="divider" />
+
+    <section class="outcomes-section">
+      <OutcomesTable client:load />
+    </section>
   </div>
 </DashboardLayout>
 
-<script>
-  async function loadGoals() {
-    const container = document.getElementById("goals-container");
-    if (!container) return;
-    try {
-      const res = await fetch("/api/world-state");
-      const data = await res.json();
-      const goals = data?.goals ?? data?.data?.goals ?? [];
-
-      if (!Array.isArray(goals) || goals.length === 0) {
-        container.innerHTML = `
-          <div class="card">
-            <p class="placeholder-content">No goals found</p>
-          </div>
-        `;
-        return;
-      }
-
-      container.innerHTML = goals
-        .map(
-          (g: Record<string, unknown>) => `
-          <div class="card goal-card">
-            <div class="goal-header">
-              <span class="goal-name">${g.name ?? g.id ?? "Unknown"}</span>
-              <span class="badge badge-blue">${g.status ?? "unknown"}</span>
-            </div>
-            ${g.description ? `<p class="goal-desc">${g.description}</p>` : ""}
-          </div>
-        `
-        )
-        .join("");
-    } catch {
-      container.innerHTML = `
-        <div class="card">
-          <p class="placeholder-content">Failed to load goals</p>
-        </div>
-      `;
-    }
-  }
-
-  loadGoals();
-  setInterval(loadGoals, 10000);
-</script>
-
 <style>
-  .page-header {
-    margin-bottom: 24px;
-  }
-
-  .page-header h2 {
-    font-size: 20px;
-    margin-bottom: 4px;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    font-size: 13px;
-  }
-
-  #goals-container {
+  .goals-page {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 0;
   }
 
-  .goal-card {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+  .goals-section {
+    padding-bottom: 32px;
   }
 
-  .goal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+  .divider {
+    height: 1px;
+    background: var(--border-default);
+    margin-bottom: 32px;
   }
 
-  .goal-name {
-    font-weight: 600;
-    font-size: 14px;
-  }
-
-  .goal-desc {
-    font-size: 13px;
-    color: var(--text-secondary);
+  .outcomes-section {
+    padding-bottom: 24px;
   }
 </style>
