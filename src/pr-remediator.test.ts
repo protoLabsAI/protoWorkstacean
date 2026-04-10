@@ -304,9 +304,11 @@ describe("PrRemediatorPlugin — fix_ci", () => {
     dispatch(bus, "pr.remediate.fix_ci");
     await flushMicrotasks();
     expect(dispatches.length).toBe(2);
-    const p0 = dispatches[0].payload as { skill: string; agentId: string; content: string };
+    const p0 = dispatches[0].payload as { skill: string; content: string; meta: { agentId: string; skillHint: string } };
     expect(p0.skill).toBe("bug_triage");
-    expect(p0.agentId).toBe("ava");
+    // skill-dispatcher routes by payload.meta.agentId, not top-level agentId
+    expect(p0.meta.agentId).toBe("ava");
+    expect(p0.meta.skillHint).toBe("bug_triage");
     expect(p0.content).toContain("#100");
     const p1 = dispatches[1].payload as { content: string };
     expect(p1.content).toContain("#300");
