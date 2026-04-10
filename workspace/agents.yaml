@@ -1,0 +1,19 @@
+# A2A Agent Registry — external agents reachable via JSON-RPC 2.0
+# SkillBrokerPlugin registers one A2AExecutor per agent.
+# URL values support ${ENV_VAR} interpolation.
+
+agents:
+  - name: ava
+    url: "${AVA_BASE_URL}/a2a"
+    apiKeyEnv: AVA_API_KEY
+    skills:
+      - name: sitrep
+        description: Situation report — board state, running agents, escalations
+      - name: board_health
+        description: Triage blocked features and board health issues
+      - name: auto_mode
+        description: Start or stop autonomous feature processing
+      - name: manage_feature
+        description: Manage feature lifecycle (unblock, assign, status change)
+      - name: bug_triage
+        description: Triage a bug and file it on the board
