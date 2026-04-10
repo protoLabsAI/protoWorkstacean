@@ -389,4 +389,152 @@ describe("PrRemediatorPlugin — world state tracking", () => {
     // promote: is auto-merge eligible → no HITL
     expect(hitlCaptured.length).toBe(0);
   });
+
+  // ── Loop protection ─────────────────────────────────────────────────────────
+
+  describe("loop protection", () => {
+    test("fix_ci: repeated triggers on the same PR dispatch only once while in-flight", async () => {
+      const bus = new InMemoryEventBus();
+      const plugin = new PrRemediatorPlugin();
+      plugin.install(bus);
+
+      pushWorldState(bus, [
+        makePr({ number: 100, ciStatus: "fail", readyToMerge: false }),
+      ]);
+
+      const captured = captureOn(bus, "agent.skill.request");
+
+      // Three triggers back-to-back — should only dispatch once.
+      dispatch(bus, "pr.remediate.fix_ci");
+      dispatch(bus, "pr.remediate.fix_ci");
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+
+      expect(captured.length).toBe(1);
+      plugin.uninstall();
+    });
+
+    test("fix_ci: a completed skill response frees the slot for a new dispatch", async () => {
+      const bus = new InMemoryEventBus();
+      const plugin = new PrRemediatorPlugin();
+      plugin.install(bus);
+
+      pushWorldState(bus, [
+        makePr({ number: 100, ciStatus: "fail", readyToMerge: false }),
+      ]);
+
+      const captured = captureOn(bus, "agent.skill.request");
+
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+      expect(captured.length).toBe(1);
+
+      // Simulate the skill completing — the remediator should clear its slot.
+      const firstCorrelationId = captured[0]!.correlationId;
+      bus.publish(`agent.skill.response.${firstCorrelationId}`, {
+        id: crypto.randomUUID(),
+        correlationId: firstCorrelationId,
+        topic: `agent.skill.response.${firstCorrelationId}`,
+        timestamp: Date.now(),
+        payload: { text: "done", isError: false, correlationId: firstCorrelationId },
+      });
+      await flushMicrotasks();
+
+      // Cooldown still applies after a completion — the next attempt must wait.
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+      expect(captured.length).toBe(1);
+
+      plugin.uninstall();
+    });
+
+    test("fix_ci: different PRs don't block each other", async () => {
+      const bus = new InMemoryEventBus();
+      const plugin = new PrRemediatorPlugin();
+      plugin.install(bus);
+
+      pushWorldState(bus, [
+        makePr({ number: 100, ciStatus: "fail", readyToMerge: false }),
+        makePr({ number: 200, ciStatus: "fail", readyToMerge: false }),
+      ]);
+
+      const captured = captureOn(bus, "agent.skill.request");
+
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+      // Both failing PRs dispatch concurrently — they're independent slots.
+      expect(captured.length).toBe(2);
+
+      // A second trigger finds both in-flight and dispatches nothing new.
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+      expect(captured.length).toBe(2);
+
+      plugin.uninstall();
+    });
+
+    test("in-flight entry clears when PR leaves the pipeline (merged/closed)", async () => {
+      const bus = new InMemoryEventBus();
+      const plugin = new PrRemediatorPlugin();
+      plugin.install(bus);
+
+      pushWorldState(bus, [
+        makePr({ number: 100, ciStatus: "fail", readyToMerge: false }),
+      ]);
+
+      const captured = captureOn(bus, "agent.skill.request");
+
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+      expect(captured.length).toBe(1);
+
+      // PR #100 is gone (merged/closed) — world state no longer lists it.
+      pushWorldState(bus, []);
+      // New PR appears with failing CI.
+      pushWorldState(bus, [
+        makePr({ number: 101, ciStatus: "fail", readyToMerge: false }),
+      ]);
+
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+      // PR #101 gets a fresh dispatch even though #100 is no longer blocking.
+      expect(captured.length).toBe(2);
+      expect(captured[1]!.payload).toHaveProperty("skill", "bug_triage");
+
+      plugin.uninstall();
+    });
+
+    test("address_feedback is guarded independently from fix_ci on the same PR", async () => {
+      const bus = new InMemoryEventBus();
+      const plugin = new PrRemediatorPlugin();
+      plugin.install(bus);
+
+      pushWorldState(bus, [
+        makePr({
+          number: 100,
+          ciStatus: "fail",
+          reviewState: "changes_requested",
+          readyToMerge: false,
+        }),
+      ]);
+
+      const captured = captureOn(bus, "agent.skill.request");
+
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+      expect(captured.length).toBe(1);
+
+      // address_feedback is a different remediation kind — not blocked by fix_ci.
+      dispatch(bus, "pr.remediate.address_feedback");
+      await flushMicrotasks();
+      expect(captured.length).toBe(2);
+
+      // But a second fix_ci on the same PR IS blocked.
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+      expect(captured.length).toBe(2);
+
+      plugin.uninstall();
+    });
+  });
 });
