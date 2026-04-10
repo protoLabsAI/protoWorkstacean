@@ -60,11 +60,12 @@ function deriveCiHealthStatus(data: CiHealthResponse): Pick<CardState, "metric" 
 }
 
 function derivePrPipelineStatus(data: PrPipelineResponse): Pick<CardState, "metric" | "status"> {
-  const { totalOpen = 0, conflicting = 0, stale = 0, failing = 0 } = data;
-  if (conflicting > 0 || failing > 0) {
-    return { metric: `${conflicting + failing} needs attention`, status: "red" };
+  const { totalOpen = 0, conflicting = 0, stale = 0, failingCi = 0, changesRequested = 0, readyToMerge = 0 } = data;
+  if (conflicting > 0 || failingCi > 0 || changesRequested > 0) {
+    return { metric: `${conflicting + failingCi + changesRequested} needs attention`, status: "red" };
   }
   if (stale > 0) return { metric: `${stale} stale`, status: "yellow" };
+  if (readyToMerge > 0) return { metric: `${readyToMerge} ready to merge`, status: "green" };
   return { metric: `${totalOpen} open`, status: "green" };
 }
 

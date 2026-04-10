@@ -257,6 +257,14 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    name: "pr-remediator",
+    condition: () => !!process.env.GITHUB_TOKEN,
+    factory: async () => {
+      const { PrRemediatorPlugin } = await import("../lib/plugins/pr-remediator.js");
+      return new PrRemediatorPlugin();
+    },
+  },
+  {
     name: "flow-monitor",
     condition: () => true,
     factory: async () => {

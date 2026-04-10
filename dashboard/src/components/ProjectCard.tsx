@@ -47,7 +47,7 @@ export default function ProjectCard({ project, ci, prs }: ProjectCardProps) {
   const openCount = prs.length;
   const conflicting = prs.filter((p) => p.mergeable === "dirty").length;
   const stale = prs.filter((p) => p.stale).length;
-  const failing = prs.filter((p) => !p.checksPass).length;
+  const failing = prs.filter((p) => p.ciStatus === "fail").length;
 
   const conclusionColor =
     ci?.latestConclusion === "success"
@@ -139,8 +139,14 @@ export default function ProjectCard({ project, ci, prs }: ProjectCardProps) {
                     <span class="badge badge-red">conflict</span>
                   )}
                   {pr.stale && <span class="badge badge-yellow">stale</span>}
-                  {!pr.checksPass && (
-                    <span class="badge badge-red">failing</span>
+                  {pr.ciStatus === "fail" && (
+                    <span class="badge badge-red">ci fail</span>
+                  )}
+                  {pr.reviewState === "changes_requested" && (
+                    <span class="badge badge-yellow">changes</span>
+                  )}
+                  {pr.readyToMerge && (
+                    <span class="badge badge-green">ready</span>
                   )}
                 </span>
                 <span class="pc-pr-date">{formatUpdatedAt(pr.updatedAt)}</span>
