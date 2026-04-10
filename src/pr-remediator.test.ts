@@ -321,11 +321,13 @@ describe("PrRemediatorPlugin — fix_ci", () => {
     expect(p0.projectSlug).toBe("protomaker");
     expect(p0.projectRepo).toBe("protoLabsAI/protoMaker");
     expect(p0.prNumber).toBe(100);
-    // Directive prompt: must demand start_auto_mode, not just create_feature
+    // Directive prompt: autonomous mode, must demand start_auto_mode + antagonistic review
     expect(p0.content).toContain("#100");
     expect(p0.content).toContain("protomaker");
     expect(p0.content).toContain("start_auto_mode");
-    expect(p0.content).toContain("REQUIRED STEPS");
+    expect(p0.content).toContain("fully autonomous mode");
+    expect(p0.content).toContain("Antagonistic review");
+    expect(p0.content).toContain("No permission checks");
 
     const p1 = dispatches[1].payload as { content: string; projectSlug: string };
     expect(p1.content).toContain("#300");
@@ -377,7 +379,8 @@ describe("PrRemediatorPlugin — address_feedback", () => {
     expect(p.content).toContain("#55");
     expect(p.content).toContain("CHANGES_REQUESTED");
     expect(p.content).toContain("start_auto_mode");
-    expect(p.content).toContain("REQUIRED STEPS");
+    expect(p.content).toContain("fully autonomous mode");
+    expect(p.content).toContain("Antagonistic review");
   });
 });
 
@@ -532,6 +535,74 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       // PR #101 gets a fresh dispatch even though #100 is no longer blocking.
       expect(captured.length).toBe(2);
       expect(captured[1]!.payload).toHaveProperty("skill", "bug_triage");
+
+      plugin.uninstall();
+    });
+
+    test("exhaustion emits a HITL escalation request (bottlenecks are growth opportunities)", async () => {
+      const bus = new InMemoryEventBus();
+      const plugin = new PrRemediatorPlugin();
+      plugin.install(bus);
+
+      pushWorldState(bus, [
+        makePr({ number: 999, ciStatus: "fail", title: "bug: stuck forever", readyToMerge: false }),
+      ]);
+
+      const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+      const skillCaptured = captureOn(bus, "agent.skill.request");
+
+      // Drive the in-flight entry directly to the exhausted state by firing
+      // MAX_ATTEMPTS_PER_PR dispatches with completion responses + TTL-expired
+      // cooldowns between them. Easier to drive the internal state by calling
+      // the public API than to simulate 15 minutes of wall-clock time.
+      //
+      // Each dispatch increments attempts; when attempts >= 3 on the next
+      // _shouldDispatch call, the entry is marked exhausted AND escalated.
+      for (let i = 0; i < 3; i++) {
+        dispatch(bus, "pr.remediate.fix_ci");
+        await flushMicrotasks();
+        // Simulate completion of each skill call so cooldown applies on next attempt
+        const latest = skillCaptured[skillCaptured.length - 1];
+        if (latest) {
+          bus.publish(`agent.skill.response.${latest.correlationId}`, {
+            id: crypto.randomUUID(),
+            correlationId: latest.correlationId,
+            topic: `agent.skill.response.${latest.correlationId}`,
+            timestamp: Date.now() - 10 * 60 * 1000, // backdate so cooldown passes
+            payload: { text: "done", isError: false, correlationId: latest.correlationId },
+          });
+          await flushMicrotasks();
+          // Backdate the in-flight entry so ATTEMPT_COOLDOWN_MS has passed
+          const inFlight = (plugin as unknown as { inFlight: Map<string, { completedAt?: number; startedAt: number }> }).inFlight;
+          for (const entry of inFlight.values()) {
+            if (entry.completedAt) entry.completedAt -= 10 * 60 * 1000;
+            entry.startedAt -= 10 * 60 * 1000;
+          }
+        }
+      }
+
+      // The fourth attempt (now exceeds MAX_ATTEMPTS_PER_PR) should trigger
+      // exhaustion + HITL escalation, NOT another dispatch.
+      const skillCountBefore = skillCaptured.length;
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+
+      expect(skillCaptured.length).toBe(skillCountBefore); // no new dispatch
+      expect(hitlCaptured.length).toBeGreaterThan(0);
+
+      const req = hitlCaptured[0]!.payload as HITLRequest;
+      expect(req.type).toBe("hitl_request");
+      expect(req.title).toContain("#999");
+      expect(req.title).toContain("fix_ci");
+      expect(req.summary).toContain("Remediation exhausted");
+      expect(req.summary).toContain("bug: stuck forever");
+      expect(req.summary).toContain("feature request");
+      expect(req.options).toEqual(["investigate", "mark_non_remediable", "manual_unblock"]);
+
+      // Subsequent triggers must NOT emit additional escalations (rate-limited)
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+      expect(hitlCaptured.length).toBe(1);
 
       plugin.uninstall();
     });
