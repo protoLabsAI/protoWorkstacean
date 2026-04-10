@@ -539,6 +539,74 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       plugin.uninstall();
     });
 
+    test("exhaustion emits a HITL escalation request (bottlenecks are growth opportunities)", async () => {
+      const bus = new InMemoryEventBus();
+      const plugin = new PrRemediatorPlugin();
+      plugin.install(bus);
+
+      pushWorldState(bus, [
+        makePr({ number: 999, ciStatus: "fail", title: "bug: stuck forever", readyToMerge: false }),
+      ]);
+
+      const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+      const skillCaptured = captureOn(bus, "agent.skill.request");
+
+      // Drive the in-flight entry directly to the exhausted state by firing
+      // MAX_ATTEMPTS_PER_PR dispatches with completion responses + TTL-expired
+      // cooldowns between them. Easier to drive the internal state by calling
+      // the public API than to simulate 15 minutes of wall-clock time.
+      //
+      // Each dispatch increments attempts; when attempts >= 3 on the next
+      // _shouldDispatch call, the entry is marked exhausted AND escalated.
+      for (let i = 0; i < 3; i++) {
+        dispatch(bus, "pr.remediate.fix_ci");
+        await flushMicrotasks();
+        // Simulate completion of each skill call so cooldown applies on next attempt
+        const latest = skillCaptured[skillCaptured.length - 1];
+        if (latest) {
+          bus.publish(`agent.skill.response.${latest.correlationId}`, {
+            id: crypto.randomUUID(),
+            correlationId: latest.correlationId,
+            topic: `agent.skill.response.${latest.correlationId}`,
+            timestamp: Date.now() - 10 * 60 * 1000, // backdate so cooldown passes
+            payload: { text: "done", isError: false, correlationId: latest.correlationId },
+          });
+          await flushMicrotasks();
+          // Backdate the in-flight entry so ATTEMPT_COOLDOWN_MS has passed
+          const inFlight = (plugin as unknown as { inFlight: Map<string, { completedAt?: number; startedAt: number }> }).inFlight;
+          for (const entry of inFlight.values()) {
+            if (entry.completedAt) entry.completedAt -= 10 * 60 * 1000;
+            entry.startedAt -= 10 * 60 * 1000;
+          }
+        }
+      }
+
+      // The fourth attempt (now exceeds MAX_ATTEMPTS_PER_PR) should trigger
+      // exhaustion + HITL escalation, NOT another dispatch.
+      const skillCountBefore = skillCaptured.length;
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+
+      expect(skillCaptured.length).toBe(skillCountBefore); // no new dispatch
+      expect(hitlCaptured.length).toBeGreaterThan(0);
+
+      const req = hitlCaptured[0]!.payload as HITLRequest;
+      expect(req.type).toBe("hitl_request");
+      expect(req.title).toContain("#999");
+      expect(req.title).toContain("fix_ci");
+      expect(req.summary).toContain("Remediation exhausted");
+      expect(req.summary).toContain("bug: stuck forever");
+      expect(req.summary).toContain("feature request");
+      expect(req.options).toEqual(["investigate", "mark_non_remediable", "manual_unblock"]);
+
+      // Subsequent triggers must NOT emit additional escalations (rate-limited)
+      dispatch(bus, "pr.remediate.fix_ci");
+      await flushMicrotasks();
+      expect(hitlCaptured.length).toBe(1);
+
+      plugin.uninstall();
+    });
+
     test("address_feedback is guarded independently from fix_ci on the same PR", async () => {
       const bus = new InMemoryEventBus();
       const plugin = new PrRemediatorPlugin();

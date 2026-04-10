@@ -155,6 +155,13 @@ interface InFlightEntry {
   attempts: number;
   /** Terminal state — further triggers are silently ignored until the PR leaves the pipeline. */
   exhausted: boolean;
+  /**
+   * True once a HITL escalation has been emitted for this exhausted entry.
+   * Prevents duplicate notifications on re-entry into the exhausted state
+   * (e.g. if the PR stays in the pipeline and the engine polls again). Reset
+   * when the entry is pruned because the PR left the pipeline.
+   */
+  escalated?: boolean;
 }
 
 // ── Allowlist: titles / authors that may auto-merge without HITL ─────────────
@@ -339,7 +346,15 @@ export class PrRemediatorPlugin implements Plugin {
     if (!entry) return { ok: true };
 
     if (entry.exhausted) {
-      return { ok: false, reason: `exhausted after ${entry.attempts} attempts` };
+      // Emit a HITL escalation once per exhaustion. Silent drops hide
+      // bottlenecks from the operational feedback loop — every stuck PR is
+      // a signal that the auto-remediation needs a new capability or that a
+      // human unblock is required. Rate-limited by the `escalated` flag.
+      if (!entry.escalated) {
+        entry.escalated = true;
+        this._emitStuckHitlEscalation(repo, number, kind, entry);
+      }
+      return { ok: false, reason: `exhausted after ${entry.attempts} attempts (HITL escalated)` };
     }
 
     const now = Date.now();
@@ -362,9 +377,78 @@ export class PrRemediatorPlugin implements Plugin {
 
     if (entry.attempts >= MAX_ATTEMPTS_PER_PR) {
       entry.exhausted = true;
-      return { ok: false, reason: `exhausted after ${entry.attempts} attempts` };
+      entry.escalated = true;
+      this._emitStuckHitlEscalation(repo, number, kind, entry);
+      return { ok: false, reason: `exhausted after ${entry.attempts} attempts (HITL escalated)` };
     }
     return { ok: true };
+  }
+
+  /**
+   * Emit a HITL request when a (PR, kind) tuple exhausts its attempt budget.
+   *
+   * This is the "bottlenecks are growth opportunities" escalation: every stuck
+   * remediation is a signal that the auto-remediation capability is missing
+   * something. Notifying a human via HITL both unblocks the immediate case
+   * AND creates a visible record that pattern analysis can turn into
+   * future improvements (new goals, new actions, new skills).
+   *
+   * The request goes to topic `hitl.request.pr.remediation_stuck.{correlationId}`
+   * which the HITL plugin routes to its registered renderers (Discord, etc).
+   */
+  private _emitStuckHitlEscalation(
+    repo: string,
+    number: number,
+    kind: RemediationKind,
+    entry: InFlightEntry,
+  ): void {
+    if (!this.bus) return;
+
+    const pr = (this.latestPrData?.prs ?? []).find((p) => p.repo === repo && p.number === number);
+    const correlationId = crypto.randomUUID();
+    const replyTopic = `hitl.response.pr.remediation_stuck.${correlationId}`;
+
+    const durationMs = Date.now() - entry.startedAt;
+    const durationMin = Math.round(durationMs / 60_000);
+
+    const request: HITLRequest = {
+      type: "hitl_request",
+      correlationId,
+      title: `PR remediation stuck: ${repo}#${number} (${kind})`,
+      summary: [
+        `**Remediation exhausted** — auto-retry budget consumed.`,
+        ``,
+        `**PR**: ${repo}#${number}${pr ? ` — ${pr.title}` : ""}`,
+        `**Kind**: \`${kind}\``,
+        `**Attempts**: ${entry.attempts} / ${MAX_ATTEMPTS_PER_PR} over ~${durationMin} min`,
+        pr ? `**Current CI**: \`${pr.ciStatus}\` · Review: \`${pr.reviewState}\` · Mergeable: \`${pr.mergeable}\`` : "",
+        `**Last correlationId**: \`${entry.correlationId}\``,
+        ``,
+        `The auto-remediation loop has dispatched ${kind} to Ava ${entry.attempts} times and the PR is still stuck. This is a bottleneck — either a new agent capability is needed, the root cause is outside Ava's reach, or a human merge / manual fix will break the cycle.`,
+        ``,
+        `**Treat every stuck PR as a feature request**: what would have unblocked this automatically? That's the next thing to build on the board.`,
+        ``,
+        `https://github.com/${repo}/pull/${number}`,
+      ].filter(Boolean).join("\n"),
+      options: ["investigate", "mark_non_remediable", "manual_unblock"],
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      replyTopic,
+    };
+
+    const topic = `hitl.request.pr.remediation_stuck.${correlationId}`;
+    this.bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic,
+      timestamp: Date.now(),
+      payload: request,
+    });
+
+    // Also log as a first-class ops signal so it shows up in log aggregation.
+    // "Every escalation is a feature-request signal" — don't bury this.
+    console.warn(
+      `[pr-remediator] STUCK → HITL escalation: ${repo}#${number} kind=${kind} attempts=${entry.attempts}/${MAX_ATTEMPTS_PER_PR} duration=${durationMin}min correlationId=${correlationId}`,
+    );
   }
 
   private _recordDispatch(
