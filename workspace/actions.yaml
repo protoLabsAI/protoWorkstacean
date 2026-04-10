@@ -281,7 +281,7 @@ actions:
       - path: "extensions.ava_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.blocked"
+      - path: "domains.ava_board.data.blocked_count"
         operator: gt
         value: 3
     effects: []
@@ -299,7 +299,7 @@ actions:
       - path: "extensions.ava_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.blocked"
+      - path: "domains.ava_board.data.blocked_count"
         operator: gt
         value: 3
     effects: []
@@ -319,7 +319,7 @@ actions:
       - path: "extensions.ava_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.backlog"
+      - path: "domains.ava_board.data.backlog_count"
         operator: gt
         value: 10
     effects: []
@@ -340,10 +340,10 @@ actions:
       - path: "extensions.ava_pipeline_available"
         operator: eq
         value: true
-      - path: "domains.ava_pipeline.data.runningCount"
+      - path: "domains.ava_pipeline.data.running_count"
         operator: eq
         value: 0
-      - path: "domains.ava_board.data.backlog"
+      - path: "domains.ava_board.data.backlog_count"
         operator: gt
         value: 0
     effects: []
