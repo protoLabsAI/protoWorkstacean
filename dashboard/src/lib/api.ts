@@ -199,15 +199,24 @@ export interface PrPipelineResponse {
   totalOpen: number;
   conflicting: number;
   stale: number;
-  failing: number;
+  failingCi: number;
+  changesRequested: number;
+  readyToMerge: number;
   prs: Array<{
     repo: string;
     number: number;
     title: string;
-    mergeable: string;
-    checksPass: boolean;
+    headSha: string;
+    author: string;
+    baseRef: string;
+    mergeable: "clean" | "dirty" | "blocked" | "unknown";
+    ciStatus: "pass" | "fail" | "pending" | "none";
+    reviewState: "approved" | "changes_requested" | "pending" | "none";
+    isDraft: boolean;
+    readyToMerge: boolean;
     updatedAt: string;
     stale: boolean;
+    labels: string[];
   }>;
 }
 

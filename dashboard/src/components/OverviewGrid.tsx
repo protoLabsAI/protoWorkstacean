@@ -60,11 +60,15 @@ function deriveCiHealthStatus(data: CiHealthResponse): Pick<CardState, "metric" 
 }
 
 function derivePrPipelineStatus(data: PrPipelineResponse): Pick<CardState, "metric" | "status"> {
-  const { totalOpen = 0, conflicting = 0, stale = 0, failing = 0 } = data;
-  if (conflicting > 0 || failing > 0) {
-    return { metric: `${conflicting + failing} needs attention`, status: "red" };
-  }
+  const { totalOpen = 0, stale = 0, readyToMerge = 0, prs = [] } = data;
+  // A single PR can be conflicting AND failingCi AND changesRequested — derive
+  // a unique count from the prs list to avoid double-counting aggregates.
+  const needsAttention = prs.filter(
+    (p) => p.mergeable === "dirty" || p.ciStatus === "fail" || p.reviewState === "changes_requested",
+  ).length;
+  if (needsAttention > 0) return { metric: `${needsAttention} needs attention`, status: "red" };
   if (stale > 0) return { metric: `${stale} stale`, status: "yellow" };
+  if (readyToMerge > 0) return { metric: `${readyToMerge} ready to merge`, status: "green" };
   return { metric: `${totalOpen} open`, status: "green" };
 }
 

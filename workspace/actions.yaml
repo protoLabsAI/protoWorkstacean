@@ -195,6 +195,62 @@ actions:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
 
+  # ── PR Remediation — closes the loop via PrRemediatorPlugin ───────────────
+
+  - id: action.pr_merge_ready
+    goalId: pr.mergeable_flushed
+    tier: tier_0
+    priority: 40
+    cost: 1
+    name: "Auto-merge ready PRs (dependabot / promote:) or escalate to HITL"
+    preconditions:
+      - path: "extensions.pr_pipeline_available"
+        operator: eq
+        value: true
+      - path: "domains.pr_pipeline.data.readyToMerge"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "pr.remediate.merge_ready"
+      fireAndForget: true
+
+  - id: action.pr_fix_ci
+    goalId: pr.no_failing_checks
+    tier: tier_0
+    priority: 35
+    cost: 1
+    name: "Dispatch Ava to investigate and remediate PRs with failing CI"
+    preconditions:
+      - path: "extensions.pr_pipeline_available"
+        operator: eq
+        value: true
+      - path: "domains.pr_pipeline.data.failingCi"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "pr.remediate.fix_ci"
+      fireAndForget: true
+
+  - id: action.pr_address_feedback
+    goalId: pr.no_changes_requested
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Dispatch Ava to address PR review feedback"
+    preconditions:
+      - path: "extensions.pr_pipeline_available"
+        operator: eq
+        value: true
+      - path: "domains.pr_pipeline.data.changesRequested"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "pr.remediate.address_feedback"
+      fireAndForget: true
+
   - id: alert.branch_drift
     goalId: branch.drift_low
     tier: tier_0

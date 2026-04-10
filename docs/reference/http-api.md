@@ -465,7 +465,7 @@ Each repo entry falls back to `{ successRate: 0, totalRuns: 0, ... }` if the Git
 
 ## GET /api/pr-pipeline
 
-Aggregate open-PR state across every project. **No envelope.**
+Aggregate open-PR state across every project. Each PR is fetched individually for reliable `mergeable_state`, with real CI status from the Check Runs API and review decision from the reviews API. **No envelope.**
 
 **Auth**: None (requires `GITHUB_TOKEN`)
 
@@ -475,24 +475,43 @@ Aggregate open-PR state across every project. **No envelope.**
   "totalOpen": 12,
   "conflicting": 1,
   "stale": 3,
-  "failing": 2,
+  "failingCi": 2,
+  "changesRequested": 1,
+  "readyToMerge": 4,
   "prs": [
     {
       "repo": "my-org/my-repo",
       "number": 42,
       "title": "feat: widget",
+      "headSha": "abc123...",
       "mergeable": "clean",
-      "checksPass": true,
+      "ciStatus": "pass",
+      "reviewState": "approved",
+      "isDraft": false,
+      "readyToMerge": true,
       "updatedAt": "2026-04-08T12:00:00Z",
-      "stale": false
+      "stale": false,
+      "labels": ["ready-to-merge"]
     }
   ]
 }
 ```
 
+Per-PR fields:
+- `mergeable` — `"clean" | "dirty" | "blocked" | "unknown"` (from individual PR endpoint — the list endpoint returns null)
+- `ciStatus` — `"pass" | "fail" | "pending" | "none"` (aggregated Check Runs on the head commit)
+- `reviewState` — `"approved" | "changes_requested" | "pending" | "none"` (latest review per reviewer)
+- `isDraft` — draft PRs are never `readyToMerge`
+- `readyToMerge` — `true` only if `!isDraft && mergeable === "clean" && ciStatus === "pass" && reviewState !== "changes_requested"`
+
+Aggregate counts:
+- `conflicting` — `mergeable === "dirty"`
 - `stale` — last update older than 7 days
-- `conflicting` — GitHub reports `mergeable_state === "dirty"`
-- `failing` — at least one review in `CHANGES_REQUESTED` state
+- `failingCi` — real CI failure (`ciStatus === "fail"`)
+- `changesRequested` — at least one reviewer blocking with `CHANGES_REQUESTED`
+- `readyToMerge` — green + mergeable + not blocked
+
+This is the source of truth consumed by the `pr_pipeline` world-state domain and the `PrRemediatorPlugin`. A cache or TTL of 2–5 min is recommended since each tick does `1 + 3N` GitHub API calls per repo.
 
 ---
 
