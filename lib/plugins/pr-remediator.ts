@@ -28,15 +28,20 @@
  * layer — this plugin does not loop on its own.
  *
  * Env:
- *   GITHUB_TOKEN  — required for merge API calls
- *   PR_REMEDIATOR_AUTO_MERGE  — "1" enables auto-merge (default off; dry-run mode)
+ *   QUINN_APP_ID / QUINN_APP_PRIVATE_KEY — GitHub App creds (preferred — has
+ *     pull_requests:write scoped per-installation)
+ *   GITHUB_TOKEN                         — PAT fallback when App creds absent
+ *   PR_REMEDIATOR_AUTO_MERGE             — "1" enables auto-merge (default
+ *     off; dry-run mode just logs)
  */
 
 import type { Plugin, EventBus, BusMessage, HITLRequest } from "../types.ts";
 import type { WorldState } from "../types/world-state.ts";
+import { makeGitHubAuth } from "../github-auth.ts";
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const AUTO_MERGE_ENABLED = process.env.PR_REMEDIATOR_AUTO_MERGE === "1";
+// Resolved at install() time — null when no GitHub credentials are present.
+const getGithubToken = makeGitHubAuth();
 
 // ── Allowlist: titles / authors that may auto-merge without HITL ─────────────
 
@@ -77,12 +82,15 @@ function isAutoMergeEligible(pr: PrDomainEntry): boolean {
 }
 
 async function ghMerge(repo: string, num: number): Promise<{ ok: boolean; status: number; error?: string }> {
-  if (!GITHUB_TOKEN) return { ok: false, status: 0, error: "GITHUB_TOKEN not set" };
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
   try {
+    const token = await getGithubToken(owner, repoName);
     const resp = await fetch(`https://api.github.com/repos/${repo}/pulls/${num}/merge`, {
       method: "PUT",
       headers: {
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "Content-Type": "application/json",
@@ -146,7 +154,7 @@ export class PrRemediatorPlugin implements Plugin {
     }));
 
     console.log(
-      `[pr-remediator] installed — auto-merge ${AUTO_MERGE_ENABLED ? "ENABLED" : "DRY-RUN"}, token ${GITHUB_TOKEN ? "set" : "MISSING"}`,
+      `[pr-remediator] installed — auto-merge ${AUTO_MERGE_ENABLED ? "ENABLED" : "DRY-RUN"}, auth ${getGithubToken ? "configured" : "MISSING"}`,
     );
   }
 
