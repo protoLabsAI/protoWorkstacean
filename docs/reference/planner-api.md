@@ -1,4 +1,7 @@
-# Planner API Reference
+---
+title: Planner API Reference
+---
+
 
 ## Entry Points
 

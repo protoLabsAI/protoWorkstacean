@@ -1,4 +1,7 @@
-# L2 Planner Architecture
+---
+title: L2 Planner Architecture
+---
+
 
 ## Overview
 

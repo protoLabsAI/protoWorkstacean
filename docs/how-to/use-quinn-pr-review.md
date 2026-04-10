@@ -1,4 +1,7 @@
-# How to Use Quinn for PR Review
+---
+title: How to Use Quinn for PR Review
+---
+
 
 _This is a how-to guide. It covers webhook setup, triggering PR review, and understanding Quinn's vector context pipeline._
 
