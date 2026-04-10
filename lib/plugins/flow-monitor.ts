@@ -1,4 +1,16 @@
 /**
+ * TODO(refactor): This file is 933 lines with 6 distinct metric computations.
+ * When next touching this file, decompose into:
+ *   lib/plugins/flow/metrics/velocity.ts
+ *   lib/plugins/flow/metrics/lead-time.ts
+ *   lib/plugins/flow/metrics/efficiency.ts
+ *   lib/plugins/flow/metrics/load.ts
+ *   lib/plugins/flow/metrics/distribution.ts
+ *   lib/plugins/flow/metrics/bottleneck.ts
+ *   lib/plugins/flow-monitor.ts — plugin shell that calls them
+ * Pattern: src/api/ decomposition (PR #73). Each metric = pure function,
+ * plugin holds state + scheduling, delegates computation.
+ *
  * FlowMonitorPlugin — continuous collection of 5 Flow Framework metrics.
  *
  * Metrics collected:

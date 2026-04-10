@@ -195,6 +195,24 @@ actions:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
 
+  - id: alert.branch_drift
+    goalId: branch.drift_low
+    tier: tier_0
+    priority: 15
+    cost: 0
+    name: "Alert when branch drift exceeds 30 commits"
+    preconditions:
+      - path: "extensions.branch_drift_available"
+        operator: eq
+        value: true
+      - path: "domains.branch_drift.data.maxDrift"
+        operator: gt
+        value: 30
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
   # ── Ava / protoMaker Studio ───────────────────────────────────────
 
   - id: alert.ava_board_blocked
