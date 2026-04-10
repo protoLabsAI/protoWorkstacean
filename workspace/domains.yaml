@@ -1,0 +1,25 @@
+# World Engine Domains — Global
+# Polled by WorldStateEngine on the configured interval.
+# Each domain becomes `domains.<name>` in world state.
+# URL and header values support ${ENV_VAR} interpolation.
+#
+# To integrate a new external app:
+#   1. Add domain entries here (polling endpoints)
+#   2. Add agent entry in agents.yaml (A2A skills)
+#   3. Add goals in goals.yaml (what "healthy" means)
+#   4. Add actions in actions.yaml (what to do when unhealthy)
+#   5. Set env vars (APP_BASE_URL, APP_API_KEY)
+
+domains:
+  # ── Ava (protoMaker Studio) ────────────────────────────────────────
+  - name: ava_board
+    url: "${AVA_BASE_URL}/api/world/board"
+    tickMs: 60000
+    headers:
+      X-API-Key: "${AVA_API_KEY}"
+
+  - name: ava_pipeline
+    url: "${AVA_BASE_URL}/api/world/agent-health"
+    tickMs: 60000
+    headers:
+      X-API-Key: "${AVA_API_KEY}"

@@ -43,3 +43,18 @@ goals:
     selector: "domains.agent_health.data.agentCount"
     min: 1
     description: "At least one agent must be registered"
+
+  # ── Ava / protoMaker Studio ──────────────────────────────────────
+  - id: ava.board_healthy
+    type: Threshold
+    severity: high
+    selector: "domains.ava_board.data.blocked_count"
+    max: 3
+    description: "No more than 3 features blocked simultaneously"
+
+  - id: ava.auto_mode_active
+    type: Invariant
+    severity: medium
+    selector: "domains.ava_pipeline.data.auto_mode"
+    operator: truthy
+    description: "Auto-mode should be running when backlog has work"
