@@ -72,43 +72,141 @@ export function createRoutes(ctx: ApiContext): Route[] {
 
   async function handleGetPrPipeline(): Promise<Response> {
     const repoList = repos();
-    if (!repoList.length) return Response.json({ totalOpen: 0, conflicting: 0, stale: 0, failing: 0, prs: [] });
+    if (!repoList.length) return Response.json({
+      totalOpen: 0, conflicting: 0, stale: 0, failingCi: 0,
+      changesRequested: 0, readyToMerge: 0, prs: [],
+    });
 
     const allPrs: Array<{
-      repo: string; number: number; title: string; mergeable: string;
-      checksPass: boolean; updatedAt: string; stale: boolean;
+      repo: string; number: number; title: string; headSha: string;
+      author: string;
+      baseRef: string;
+      mergeable: "clean" | "dirty" | "blocked" | "unknown";
+      ciStatus: "pass" | "fail" | "pending" | "none";
+      reviewState: "approved" | "changes_requested" | "pending" | "none";
+      isDraft: boolean;
+      readyToMerge: boolean;
+      updatedAt: string;
+      stale: boolean;
+      labels: string[];
     }> = [];
 
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
     for (const repo of repoList) {
-      try {
-        const data = await ghApi(`/repos/${repo}/pulls?state=open&per_page=30&sort=updated&direction=desc`) as Array<{
-          number: number; title: string; mergeable_state: string; updated_at: string;
-        }>;
-        for (const pr of data) {
-          const updatedMs = new Date(pr.updated_at).getTime();
-          const isStale = updatedMs < sevenDaysAgo;
-          let checksPass = true;
-          try {
-            const checks = await ghApi(`/repos/${repo}/pulls/${pr.number}/reviews`) as Array<{ state: string }>;
-            checksPass = !checks.some(r => r.state === "CHANGES_REQUESTED");
-          } catch { /* treat as passing */ }
-
-          allPrs.push({
-            repo, number: pr.number, title: pr.title,
-            mergeable: pr.mergeable_state,
-            checksPass, updatedAt: pr.updated_at, stale: isStale,
-          });
+      type PrListItem = {
+        number: number; title: string; updated_at: string; draft: boolean;
+        head: { sha: string };
+        base: { ref: string };
+        user: { login: string } | null;
+        labels: Array<{ name: string }>;
+      };
+      // Paginate through all open PRs — `per_page=100` (GitHub max) with a
+      // hard cap on pages to guard against runaway loops. For current projects
+      // this is effectively 1–2 pages, but the loop keeps the engine accurate
+      // when a repo has >100 open PRs (e.g. bulk dependabot backlogs).
+      const list: PrListItem[] = [];
+      const MAX_PAGES = 5;
+      let pageOk = true;
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        try {
+          const batch = await ghApi(
+            `/repos/${repo}/pulls?state=open&per_page=100&page=${page}&sort=updated&direction=desc`,
+          ) as PrListItem[];
+          if (batch.length === 0) break;
+          list.push(...batch);
+          if (batch.length < 100) break; // last page
+        } catch {
+          pageOk = false;
+          break;
         }
-      } catch { /* skip unreachable repos */ }
+      }
+      if (!pageOk) continue; // skip unreachable repo
+
+      // Fan out per-PR details in parallel — 3 calls each: mergeable, check-runs, reviews
+      const prDetails = await Promise.all(list.map(async (pr) => {
+        const updatedMs = new Date(pr.updated_at).getTime();
+        const isStale = updatedMs < sevenDaysAgo;
+
+        // 1. Reliable mergeable — requires individual PR fetch (list endpoint returns null)
+        let mergeable: "clean" | "dirty" | "blocked" | "unknown" = "unknown";
+        try {
+          const detail = await ghApi(`/repos/${repo}/pulls/${pr.number}`) as { mergeable_state?: string };
+          const state = detail.mergeable_state;
+          if (state === "clean") mergeable = "clean";
+          else if (state === "dirty") mergeable = "dirty";
+          else if (state === "blocked" || state === "behind" || state === "unstable") mergeable = "blocked";
+          // "unknown" when GitHub is still computing — retry next tick
+        } catch { /* leave unknown */ }
+
+        // 2. Real CI status via Check Runs API on the head commit
+        let ciStatus: "pass" | "fail" | "pending" | "none" = "none";
+        try {
+          const runs = await ghApi(`/repos/${repo}/commits/${pr.head.sha}/check-runs?per_page=50`) as {
+            total_count: number;
+            check_runs: Array<{ status: string; conclusion: string | null; name: string }>;
+          };
+          if (runs.total_count === 0) {
+            ciStatus = "none";
+          } else if (runs.check_runs.some(r => r.status !== "completed")) {
+            ciStatus = "pending";
+          } else if (runs.check_runs.some(r => r.conclusion === "failure" || r.conclusion === "timed_out" || r.conclusion === "action_required")) {
+            ciStatus = "fail";
+          } else {
+            ciStatus = "pass";
+          }
+        } catch { /* leave none */ }
+
+        // 3. Review decision — most-recent review per reviewer wins
+        let reviewState: "approved" | "changes_requested" | "pending" | "none" = "none";
+        try {
+          const reviews = await ghApi(`/repos/${repo}/pulls/${pr.number}/reviews`) as Array<{
+            state: string; user: { login: string } | null; submitted_at: string;
+          }>;
+          if (reviews.length > 0) {
+            // Collapse to most recent per reviewer
+            const latest = new Map<string, string>();
+            for (const r of reviews) {
+              const login = r.user?.login;
+              if (!login || r.state === "COMMENTED") continue;
+              latest.set(login, r.state);
+            }
+            const states = [...latest.values()];
+            if (states.includes("CHANGES_REQUESTED")) reviewState = "changes_requested";
+            else if (states.includes("APPROVED")) reviewState = "approved";
+            else reviewState = "pending";
+          }
+        } catch { /* leave none */ }
+
+        const readyToMerge =
+          !pr.draft &&
+          mergeable === "clean" &&
+          ciStatus === "pass" &&
+          reviewState !== "changes_requested";
+
+        return {
+          repo, number: pr.number, title: pr.title, headSha: pr.head.sha,
+          author: pr.user?.login ?? "unknown",
+          baseRef: pr.base.ref,
+          mergeable, ciStatus, reviewState,
+          isDraft: pr.draft,
+          readyToMerge,
+          updatedAt: pr.updated_at,
+          stale: isStale,
+          labels: (pr.labels ?? []).map(l => l.name),
+        };
+      }));
+
+      allPrs.push(...prDetails);
     }
 
     return Response.json({
       totalOpen: allPrs.length,
       conflicting: allPrs.filter(p => p.mergeable === "dirty").length,
       stale: allPrs.filter(p => p.stale).length,
-      failing: allPrs.filter(p => !p.checksPass).length,
+      failingCi: allPrs.filter(p => p.ciStatus === "fail").length,
+      changesRequested: allPrs.filter(p => p.reviewState === "changes_requested").length,
+      readyToMerge: allPrs.filter(p => p.readyToMerge).length,
       prs: allPrs,
     });
   }

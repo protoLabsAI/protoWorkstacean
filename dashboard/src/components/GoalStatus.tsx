@@ -2,18 +2,9 @@ import { useState, useEffect } from "preact/hooks";
 import GoalCard from "./GoalCard.tsx";
 import { evaluateGoal } from "../lib/goal-evaluator.ts";
 import type { Goal, EvalResult } from "../lib/goal-evaluator.ts";
+import { getGoals, getWorldState, peek, type WorldStateResponse } from "../lib/api";
 
 const POLL_INTERVAL_MS = 30_000;
-
-interface GoalsApiResponse {
-  success: boolean;
-  data: Goal[];
-}
-
-interface WorldStateApiResponse {
-  success: boolean;
-  data: unknown;
-}
 
 interface GoalWithResult {
   goal: Goal;
@@ -21,26 +12,29 @@ interface GoalWithResult {
 }
 
 export default function GoalStatus() {
-  const [items, setItems] = useState<GoalWithResult[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  // Seed from cache for instant render on revisit
+  const cachedGoals = peek<Goal[]>("/api/goals");
+  const cachedWs = peek<WorldStateResponse>("/api/world-state");
+  const seeded: GoalWithResult[] =
+    cachedGoals && cachedWs
+      ? (cachedGoals as Goal[]).map((g) => ({ goal: g, result: evaluateGoal(g, cachedWs) }))
+      : [];
 
-  async function fetchAndEvaluate() {
+  const [items, setItems] = useState<GoalWithResult[]>(seeded);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(seeded.length === 0);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(
+    seeded.length > 0 ? new Date() : null,
+  );
+
+  async function fetchAndEvaluate(force = false) {
     try {
-      const [goalsRes, wsRes] = await Promise.all([
-        fetch("/api/goals"),
-        fetch("/api/world-state"),
+      const [goalsData, worldState] = await Promise.all([
+        getGoals(),
+        getWorldState(force),
       ]);
 
-      if (!goalsRes.ok) throw new Error(`/api/goals: ${goalsRes.status}`);
-      if (!wsRes.ok) throw new Error(`/api/world-state: ${wsRes.status}`);
-
-      const goalsJson = (await goalsRes.json()) as GoalsApiResponse;
-      const wsJson = (await wsRes.json()) as WorldStateApiResponse;
-
-      const goals: Goal[] = Array.isArray(goalsJson.data) ? goalsJson.data : [];
-      const worldState = wsJson.data ?? null;
+      const goals: Goal[] = Array.isArray(goalsData) ? (goalsData as Goal[]) : [];
 
       const evaluated: GoalWithResult[] = goals.map((goal) => ({
         goal,
@@ -64,8 +58,8 @@ export default function GoalStatus() {
   }
 
   useEffect(() => {
-    fetchAndEvaluate();
-    const timer = setInterval(fetchAndEvaluate, POLL_INTERVAL_MS);
+    fetchAndEvaluate(true);
+    const timer = setInterval(() => fetchAndEvaluate(true), POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, []);
 

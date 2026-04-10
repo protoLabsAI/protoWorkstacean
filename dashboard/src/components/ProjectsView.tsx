@@ -1,54 +1,41 @@
 import { useState, useEffect } from "preact/hooks";
 import ProjectCard from "./ProjectCard.tsx";
 import type { ProjectEntry, CiProjectData, PrData } from "./ProjectCard.tsx";
+import {
+  getProjects,
+  getCiHealth,
+  getPrPipeline,
+  peek,
+  type CiHealthResponse,
+  type PrPipelineResponse,
+} from "../lib/api";
 
 const POLL_INTERVAL_MS = 60_000;
 
-interface ProjectsApiResponse {
-  success: boolean;
-  data: ProjectEntry[];
-}
-
-interface CiHealthResponse {
-  successRate: number;
-  totalRuns: number;
-  failedRuns: number;
-  projects: CiProjectData[];
-}
-
-interface PrPipelineResponse {
-  totalOpen: number;
-  conflicting: number;
-  stale: number;
-  failing: number;
-  prs: PrData[];
-}
-
 export default function ProjectsView() {
-  const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  const [ciHealth, setCiHealth] = useState<CiHealthResponse | null>(null);
-  const [prPipeline, setPrPipeline] = useState<PrPipelineResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  // Seed from cache
+  const cachedProjects = peek<ProjectEntry[]>("/api/projects");
+  const cachedCi = peek<CiHealthResponse>("/api/ci-health");
+  const cachedPr = peek<PrPipelineResponse>("/api/pr-pipeline");
 
-  async function fetchAll() {
+  const [projects, setProjects] = useState<ProjectEntry[]>(cachedProjects ?? []);
+  const [ciHealth, setCiHealth] = useState<CiHealthResponse | null>(cachedCi ?? null);
+  const [prPipeline, setPrPipeline] = useState<PrPipelineResponse | null>(cachedPr ?? null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(!(cachedProjects && cachedCi && cachedPr));
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(
+    cachedProjects && cachedCi && cachedPr ? new Date() : null,
+  );
+
+  async function fetchAll(force = false) {
     try {
-      const [projRes, ciRes, prRes] = await Promise.all([
-        fetch("/api/projects"),
-        fetch("/api/ci-health"),
-        fetch("/api/pr-pipeline"),
+      const [projData, ciJson, prJson] = await Promise.all([
+        getProjects(),
+        getCiHealth(force),
+        getPrPipeline(force),
       ]);
 
-      if (!projRes.ok) throw new Error(`/api/projects: ${projRes.status}`);
-      if (!ciRes.ok) throw new Error(`/api/ci-health: ${ciRes.status}`);
-      if (!prRes.ok) throw new Error(`/api/pr-pipeline: ${prRes.status}`);
-
-      const projJson = (await projRes.json()) as ProjectsApiResponse;
-      const ciJson = (await ciRes.json()) as CiHealthResponse;
-      const prJson = (await prRes.json()) as PrPipelineResponse;
-
-      setProjects(Array.isArray(projJson.data) ? projJson.data : []);
+      setProjects(Array.isArray(projData) ? (projData as ProjectEntry[]) : []);
       setCiHealth(ciJson);
       setPrPipeline(prJson);
       setError(null);
@@ -61,8 +48,8 @@ export default function ProjectsView() {
   }
 
   useEffect(() => {
-    fetchAll();
-    const timer = setInterval(fetchAll, POLL_INTERVAL_MS);
+    fetchAll(true);
+    const timer = setInterval(() => fetchAll(true), POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, []);
 
