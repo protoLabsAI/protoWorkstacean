@@ -1,22 +1,22 @@
 /**
- * Domain discovery — reads projects.yaml and loads per-project domain/goal/action configs.
+ * Domain discovery — loads domain and action configs from two sources:
  *
- * For each project entry that has a projectPath, this module looks for:
- *   {projectPath}/workspace/domains.yaml   — HTTP domain registrations
- *   {projectPath}/workspace/actions.yaml   — action definitions
+ *   1. workspace/domains.yaml          — global domains (external app integrations)
+ *   2. {projectPath}/workspace/domains.yaml — per-project domains
+ *   3. {projectPath}/workspace/actions.yaml — per-project actions
  *
- * Domain URLs support ${ENV_VAR} interpolation so that domains.yaml files can
- * avoid hardcoding hostnames:
+ * URL and header values support ${ENV_VAR} interpolation so YAML files can
+ * avoid hardcoding hostnames or secrets:
  *
  *   url: ${AVA_BASE_URL}/api/world/board   →  http://ava:3008/api/world/board
  *
- * NOTE: Discovery runs once at startup. Restart workstacean to pick up projects
- * added via onboard_project or manually edited projects.yaml entries.
+ * NOTE: Discovery runs once at startup. Restart workstacean to pick up changes.
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { resolveEnvVars } from "../utils/env-interpolation.ts";
 import type { WorldStateEngine } from "../../lib/plugins/world-state-engine.ts";
 import { createHttpCollector } from "../../lib/plugins/world-state-engine.ts";
 import type { ActionRegistry } from "../planner/action-registry.ts";
@@ -75,19 +75,14 @@ export interface DiscoveryResult {
   errors: string[];
 }
 
-/**
- * Interpolate ${ENV_VAR} placeholders in a URL string.
- * Unresolved variables are left as-is and a console.warn is emitted.
- */
-function resolveUrl(url: string): string {
-  return url.replace(/\$\{([^}]+)\}/g, (match, name: string) => {
-    const val = process.env[name];
-    if (val === undefined) {
-      console.warn(`[domain-discovery] Unresolved env var in URL: \${${name}} — set ${name} in your environment`);
-      return match; // leave unresolved so the error surfaces at poll time, not silently
-    }
-    return val;
-  });
+/** Resolve ${ENV_VAR} in all header values. */
+function resolveHeaders(
+  headers?: Record<string, string>,
+): Record<string, string> | undefined {
+  if (!headers) return undefined;
+  return Object.fromEntries(
+    Object.entries(headers).map(([k, v]) => [k, resolveEnvVars(v, "domain-discovery")]),
+  );
 }
 
 /**
@@ -99,6 +94,10 @@ export function discoverAndRegister(
   actionRegistry: ActionRegistry,
 ): DiscoveryResult {
   const result: DiscoveryResult = { domainsRegistered: [], actionsLoaded: 0, errors: [] };
+
+  // ── Load global workspace/domains.yaml (external app integrations) ─────────
+  const workspaceDir = dirname(projectsYamlPath);
+  _loadDomainsYaml(join(workspaceDir, "domains.yaml"), "global", engine, result);
 
   if (!existsSync(projectsYamlPath)) {
     return result;
@@ -114,8 +113,7 @@ export function discoverAndRegister(
     return result;
   }
 
-  // Deduplicate by projectPath — projects.yaml can have duplicate slugs (e.g. after
-  // re-onboarding). Use the first occurrence.
+  // Deduplicate by projectPath
   const seen = new Set<string>();
 
   for (const project of projects) {
@@ -126,30 +124,8 @@ export function discoverAndRegister(
 
     const slug = project.slug ?? projectPath;
 
-    // Load domains
-    const domainsPath = join(projectPath, "workspace", "domains.yaml");
-    if (existsSync(domainsPath)) {
-      try {
-        const raw = readFileSync(domainsPath, "utf8");
-        const parsed = parseYaml(raw) as DomainsYaml;
-        for (const domain of parsed.domains ?? []) {
-          if (!domain.name || !domain.url || !domain.tickMs) {
-            result.errors.push(`[${slug}] Invalid domain entry (missing name, url, or tickMs)`);
-            continue;
-          }
-          const resolvedUrl = resolveUrl(domain.url);
-          const collector = createHttpCollector(resolvedUrl, {
-            timeoutMs: domain.timeoutMs,
-            headers: domain.headers,
-          });
-          engine.registerDomain(domain.name, collector, domain.tickMs);
-          result.domainsRegistered.push(domain.name);
-        }
-        console.log(`[domain-discovery] ${slug}: registered ${parsed.domains?.length ?? 0} domain(s)`);
-      } catch (err) {
-        result.errors.push(`[${slug}] Failed to load domains.yaml: ${(err as Error).message}`);
-      }
-    }
+    // Load per-project domains
+    _loadDomainsYaml(join(projectPath, "workspace", "domains.yaml"), slug, engine, result);
 
     // Load actions
     const actionsPath = join(projectPath, "workspace", "actions.yaml");
@@ -200,4 +176,37 @@ export function discoverAndRegister(
   }
 
   return result;
+}
+
+// ── Shared domain loader ──────────────────────────────────────────────────────
+
+function _loadDomainsYaml(
+  path: string,
+  label: string,
+  engine: WorldStateEngine,
+  result: DiscoveryResult,
+): void {
+  if (!existsSync(path)) return;
+  try {
+    const raw = readFileSync(path, "utf8");
+    const parsed = parseYaml(raw) as DomainsYaml;
+    let count = 0;
+    for (const domain of parsed.domains ?? []) {
+      if (!domain.name || !domain.url) {
+        result.errors.push(`[${label}] Invalid domain entry (missing name or url)`);
+        continue;
+      }
+      const resolvedUrl = resolveEnvVars(domain.url, "domain-discovery");
+      const collector = createHttpCollector(resolvedUrl, {
+        timeoutMs: domain.timeoutMs,
+        headers: resolveHeaders(domain.headers),
+      });
+      engine.registerDomain(domain.name, collector, domain.tickMs ?? 60_000);
+      result.domainsRegistered.push(domain.name);
+      count++;
+    }
+    if (count > 0) console.log(`[domain-discovery] ${label}: registered ${count} domain(s)`);
+  } catch (err) {
+    result.errors.push(`[${label}] Failed to load domains.yaml: ${(err as Error).message}`);
+  }
 }

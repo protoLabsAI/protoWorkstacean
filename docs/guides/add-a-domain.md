@@ -136,6 +136,7 @@ If `metadata.failed` is `true`, check:
 
 ## Related
 
+- [Integrate an external app](./integrate-external-app) — end-to-end guide: domains + goals + actions + A2A agent
 - [Your first GOAP goal](../../tutorials/first-goap-goal) — use a domain in a goal selector
 - [Add goals and actions](./add-goals-and-actions) — reference for selectors and operators
 - [Explanation: world engine](../../explanation/world-engine) — design rationale

@@ -65,3 +65,18 @@ goals:
     selector: "domains.pr_pipeline.data.stale"
     max: 0
     description: "No PRs should be stale (>7 days without activity)"
+
+  # ── Ava / protoMaker Studio ──────────────────────────────────────
+  - id: ava.board_healthy
+    type: Threshold
+    severity: high
+    selector: "domains.ava_board.data.blocked_count"
+    max: 3
+    description: "No more than 3 features blocked simultaneously"
+
+  - id: ava.auto_mode_active
+    type: Invariant
+    severity: medium
+    selector: "domains.ava_pipeline.data.auto_mode"
+    operator: truthy
+    description: "Auto-mode should be running when backlog has work"
