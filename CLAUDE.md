@@ -21,6 +21,18 @@ If an API changes, update every call site. If a concept is replaced, delete the 
 - **World state is ground truth.** The GOAP loop polls durable HTTP domains, builds a world state snapshot, and evaluates declarative goals against it.
 - **Channels are declarative.** `workspace/channels.yaml` is the single place to add a communication channel. No code changes needed.
 
+## Git Workflow
+
+**Never push directly to `main`.** All changes flow through:
+
+1. **Feature branch** — branch from `dev`, implement, test locally (`bun test`)
+2. **PR to `dev`** — CI validates, code review, merge
+3. **PR from `dev` to `main`** — release gate, clean tested code only
+
+Branch naming: `feature/<short-description>` (auto-mode uses Automaker's naming convention).
+
+The Automaker `gitWorkflow.prBaseBranch` is set to `dev`. Auto-mode agents target `dev` automatically.
+
 ## Stack
 
 - Runtime: Bun
