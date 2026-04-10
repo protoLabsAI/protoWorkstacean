@@ -258,7 +258,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
   },
   {
     name: "pr-remediator",
-    condition: () => !!process.env.GITHUB_TOKEN,
+    condition: () => !!(process.env.QUINN_APP_PRIVATE_KEY || process.env.GITHUB_TOKEN),
     factory: async () => {
       const { PrRemediatorPlugin } = await import("../lib/plugins/pr-remediator.js");
       return new PrRemediatorPlugin();
