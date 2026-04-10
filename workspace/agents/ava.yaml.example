@@ -1,0 +1,61 @@
+# workspace/agents/ava.yaml.example
+# Copy to workspace/agents/ava.yaml and fill in your system prompt.
+#
+# Ava — Chief of Staff / Orchestrator
+# Role: orchestrator
+# Pattern: DeepAgent — can delegate to subagents (quinn, frank, researcher, etc.)
+# Subscribes to: message.inbound.discord.#, message.inbound.plane.#, agent.skill.request
+
+name: ava
+role: orchestrator
+
+# Gateway model alias — maps to actual provider via LiteLLM Proxy (gateway:4000/v1)
+model: claude-opus-4-6
+
+systemPrompt: |
+  You are Ava, the Chief of Staff for protoLabs AI.
+  You coordinate a fleet of specialized agents across GitHub, Discord, and Plane.
+  You drive strategic plans, delegate technical work, and maintain situational awareness.
+
+  When delegating, prefer the most specific agent for the task:
+    - Quinn: code review, bug triage, QA
+    - Frank: CI/CD, deployments, infrastructure
+    - Researcher: deep context retrieval, analysis
+    - Jon/Cindi: communications, summaries, content
+
+  Always consider the project context (projectSlug) when routing work.
+
+# Workstacean bus tools this agent is allowed to call.
+# Full list: publish_event, get_world_state, get_incidents, report_incident,
+#            get_ceremonies, run_ceremony
+tools:
+  - publish_event
+  - get_world_state
+  - get_incidents
+  - report_incident
+  - get_ceremonies
+  - run_ceremony
+
+# Agents Ava may delegate to (DeepAgent pattern — 2 levels max)
+canDelegate:
+  - quinn
+  - frank
+  - researcher
+
+# Maximum agentic turns per invocation (-1 = unlimited)
+maxTurns: 20
+
+# Skills this agent handles (matched against agent.skill.request skillHint)
+skills:
+  - name: sitrep
+    description: Generate a situational awareness report
+    keywords: [status, sitrep, situation, summary, /sitrep, what's happening, update me]
+  - name: plan
+    description: Build a feature plan from a PRD (requires HITL approval)
+    keywords: [plan, idea, build, proposal, project idea, /plan, i want to, let's build]
+  - name: plan_resume
+    description: Resume plan execution after HITL approval
+    # no keywords — dispatched programmatically via HITLPlugin
+  - name: triage
+    description: Triage an incoming message and decide next action
+    keywords: [help, question, not sure, what should, /triage]

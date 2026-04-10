@@ -1,0 +1,20 @@
+users:
+
+  # Add one entry per person. The `id` becomes the canonical group_id in Graphiti
+  # (e.g. "user:josh") so memory is shared across all their platform identities.
+  #
+  # Platform identity values:
+  #   discord: snowflake ID (right-click user → Copy User ID)
+  #   github:  username (no @)
+  #   signal:  E.164 phone number (+1xxxxxxxxxx)
+  #   slack:   member ID (Uxxxxxxxxxx)
+  #   plane:   user email
+
+  - id: josh
+    displayName: Josh
+    admin: true
+    memoryEnabled: true
+    identities:
+      discord: "249386616806834177"
+      github: "mabry1985"
+      signal: ""        # E.164 phone (+1xxxxxxxxxx)

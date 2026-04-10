@@ -1,0 +1,45 @@
+# World Engine Goals — Global
+# Per-project overrides: .automaker/projects/{slug}/goals.yaml
+#
+# Paths resolve against WorldState. After HTTP envelope unwrapping:
+#   domains.{name}.data.{field}  →  the actual domain payload
+#   extensions.{name}_available  →  boolean, set by engine on each tick
+
+goals:
+  - id: flow.efficiency_healthy
+    type: Threshold
+    severity: medium
+    selector: "domains.flow.data.efficiency.ratio"
+    min: 0.35
+    description: "Flow efficiency must stay >= 35%"
+
+  - id: flow.distribution_balanced
+    type: Distribution
+    severity: medium
+    description: "Work mix must have >= 40% features, <= 30% defects"
+    selector: "domains.flow.data.distribution.ratios"
+    distribution:
+      feature: 0.40
+      defect: 0.30
+    tolerance: 0.10
+
+  - id: services.discord_connected
+    type: Invariant
+    severity: high
+    selector: "domains.services.data.discord.connected"
+    operator: truthy
+    description: "Discord bot must be connected"
+
+  - id: security.no_open_incidents
+    type: Invariant
+    severity: critical
+    selector: "domains.security.data.openCount"
+    operator: falsy
+    description: "No open security incidents — all known issues must be resolved"
+
+  - id: agents.registered
+    type: Threshold
+    severity: high
+    selector: "domains.agent_health.data.agentCount"
+    min: 1
+    description: "At least one agent must be registered"

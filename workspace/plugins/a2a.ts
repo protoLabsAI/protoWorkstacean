@@ -13,7 +13,7 @@
  *   GITHUB_TOKEN   posts chained agent responses as GitHub comments
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, watchFile, unwatchFile } from "node:fs";
 import { createSign } from "node:crypto";
 import { parse } from "yaml";
 
@@ -208,6 +208,28 @@ function routeToAgent(skill: string | null, agents: AgentDef[]): AgentDef {
 
 // ── A2A protocol ────────────────────────────────────────────────────────────
 
+// Skills that involve multi-step orchestration (external APIs, agent chains).
+// These are dispatched fire-and-forget: workstacean acks immediately and the
+// agent posts back to the reply topic when done. No workstacean-side timeout.
+const FIRE_AND_FORGET_SKILLS = new Set([
+  "onboard_project",  // GitHub + Plane + Discord chain
+  "plan",             // SPARC PRD + antagonistic review
+  "plan_resume",      // checkpoint restore + feature creation
+  "deep_research",    // web + knowledge store traversal
+]);
+
+// In-flight guard: tracks currently-running fire-and-forget operations.
+// Key: `{agentName}:{skill}:{contentHash}` — prevents duplicate concurrent runs
+// when the same trigger fires multiple times (Discord retries, slash command re-click).
+// TTL of 10 min covers the longest expected operation.
+const inFlightFAF = new Map<string, number>();
+const FAF_TTL_MS = 10 * 60 * 1000;
+
+function fafKey(agentName: string, skill: string, content: string): string {
+  // Simple hash: agent + skill + first 120 chars of content (enough to distinguish)
+  return `${agentName}:${skill}:${content.slice(0, 120)}`;
+}
+
 async function callA2A(
   agent: AgentDef,
   content: string,
@@ -216,6 +238,7 @@ async function callA2A(
   source?: BusMessageSource,
   replyTopic?: string,
   extraMeta?: Record<string, unknown>,
+  timeoutMs: number | undefined = 120_000,
 ): Promise<string> {
   const apiKey = agent.apiKeyEnv ? (process.env[agent.apiKeyEnv] ?? "") : "";
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -239,7 +262,7 @@ async function callA2A(
         ...(Object.keys(metadata).length ? { metadata } : {}),
       },
     }),
-    signal: AbortSignal.timeout(120_000),
+    ...(timeoutMs !== undefined ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
   });
 
   const data = (await resp.json()) as {
@@ -253,7 +276,7 @@ async function callA2A(
     .flatMap(a => a.parts ?? [])
     .filter(p => p.kind === "text")
     .map(p => p.text ?? "")
-    .join("\n") || "(no response)";
+    .join("\n");
 }
 
 // ── Output helpers ──────────────────────────────────────────────────────────
@@ -404,6 +427,10 @@ async function runChain(
   }
 }
 
+// ── Skills handled locally (never forwarded to an external agent) ────────────
+
+const LOCAL_SKILLS = new Set(["memory_recall", "memory_store", "onboard_project"]);
+
 // ── Plugin ──────────────────────────────────────────────────────────────────
 
 export default {
@@ -412,7 +439,7 @@ export default {
   capabilities: ["a2a-routing"],
 
   install(bus: EventBus) {
-    const agents = loadAgents();
+    let agents = loadAgents();
 
     if (!agents.length) {
       console.error("[a2a] No agents loaded — check workspace/agents.yaml");
@@ -422,8 +449,25 @@ export default {
     console.log(`[a2a] Loaded ${agents.length} agents: ${agents.map(a => a.name).join(", ")}`);
     refreshSkills(agents).catch(console.error);
 
+    // ── Hot-reload agents.yaml ─────────────────────────────────────────────
+    watchFile(AGENTS_YAML, { interval: 5_000 }, () => {
+      const updated = loadAgents();
+      if (updated.length) {
+        agents = updated;
+        console.log(`[a2a] agents.yaml reloaded — ${agents.length} agent(s): ${agents.map(a => a.name).join(", ")}`);
+        refreshSkills(agents).catch(console.error);
+      } else {
+        console.warn("[a2a] agents.yaml reload produced no agents — keeping previous registry");
+      }
+    });
+
     // ── Inbound messages ──────────────────────────────────────────────────
     bus.subscribe("message.inbound.#", "a2a", async (msg: BusMessage) => {
+      // Skip topics handled by local plugins to prevent routing loops.
+      // message.inbound.onboard is consumed by OnboardingPlugin — if a2a
+      // re-published to it the handler would fire again, creating an infinite loop.
+      if (msg.topic === "message.inbound.onboard" || msg.topic.startsWith("message.inbound.onboard.")) return;
+
       const p = msg.payload as Record<string, unknown>;
       const content = String(p.content ?? "").trim();
       if (!content) return;
@@ -441,6 +485,56 @@ export default {
         return;
       }
 
+      // onboard_project: route to OnboardingPlugin via message.inbound.onboard.
+      // The Discord payload has { content, channel, sender } but OnboardingPlugin
+      // expects { slug, title, github }.  Normalise here by parsing the content
+      // string for an "owner/repo" token, then building the structured payload.
+      // If the format is unrecognisable, reply with a usage error instead of
+      // silently dropping — a no-op is worse than a visible failure.
+      if (skill === "onboard_project") {
+        console.log(`[a2a] "${content.slice(0, 60)}" → onboarding (local, skill: onboard_project)`);
+
+        // Extract the first "owner/repo" token from the raw content string.
+        const githubMatch = content.match(/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/);
+        if (!githubMatch) {
+          console.warn(`[a2a] onboard_project: no owner/repo found in "${content.slice(0, 80)}"`);
+          publishResponse(
+            bus,
+            outboundTopic,
+            msg.correlationId,
+            "Usage: `/onboard <owner>/<repo> [slug] [title]`\nExample: `/onboard protolabsai/my-project`",
+            p.channel,
+            "a2a",
+          );
+          return;
+        }
+
+        const github = githubMatch[1];
+        // Derive slug from owner/repo: replace "/" and non-alphanumeric chars with "-"
+        const derivedSlug = github.replace(/\//g, "-").replace(/[^A-Za-z0-9-]/g, "-").toLowerCase();
+        // Optional explicit slug/title tokens after the repo: "owner/repo my-slug My Title"
+        const rest = content.slice(content.indexOf(github) + github.length).trim();
+        const restTokens = rest.split(/\s+/).filter(Boolean);
+        const slug = restTokens[0] && !restTokens[0].includes("/") ? restTokens[0] : derivedSlug;
+        const title = restTokens.length > 1
+          ? restTokens.slice(restTokens[0] === slug ? 1 : 0).join(" ")
+          : github.split("/")[1].replace(/[-_]/g, " ");
+
+        const onboardTopic = "message.inbound.onboard";
+        bus.publish(onboardTopic, {
+          ...msg,
+          id: crypto.randomUUID(),
+          topic: onboardTopic,
+          payload: {
+            ...p,
+            slug,
+            title,
+            github,
+          },
+        });
+        return;
+      }
+
       console.log(`[a2a] "${content.slice(0, 60)}" → ${agent.name} (skill: ${skill ?? "default"})`);
 
       // Use the bus message's correlationId when present so Plane reply matching works
@@ -452,9 +546,52 @@ export default {
       if (p.planeIssueId) planeExtra.planeIssueId = p.planeIssueId;
       if (p.planeProjectId) planeExtra.planeProjectId = p.planeProjectId;
 
+      // Fire-and-forget for long-running skills: ack immediately, agent posts
+      // back to the reply topic when done. No workstacean-side timeout.
+      if (skill && FIRE_AND_FORGET_SKILLS.has(skill)) {
+        const key = fafKey(agent.name, skill, content);
+        const startedAt = inFlightFAF.get(key);
+        const isInFlight = startedAt && (Date.now() - startedAt < FAF_TTL_MS);
+
+        if (isInFlight) {
+          console.log(`[a2a] "${skill}" already in-flight — skipping duplicate`);
+          publishResponse(bus, outboundTopic, msg.correlationId,
+            `⏳ Already working on that — I'll post back when done.`, p.channel);
+          return;
+        }
+
+        console.log(`[a2a] "${skill}" is fire-and-forget — acking immediately`);
+        inFlightFAF.set(key, Date.now());
+        publishResponse(bus, outboundTopic, msg.correlationId,
+          `⏳ On it — this may take a few minutes. I'll post back when done.`, p.channel);
+        callA2A(agent, content, contextId, skill, msg.source, outboundTopic, planeExtra, undefined)
+          .then(response => {
+            inFlightFAF.delete(key);
+            publishResponse(bus, outboundTopic, msg.correlationId, response, p.channel);
+            if (agent.chain?.[skill]) {
+              runChain(bus, agents, agent, skill, content, response, outboundTopic, p.channel, p.github as GitHubContext | undefined).catch(console.error);
+            }
+          })
+          .catch(err => {
+            inFlightFAF.delete(key);
+            console.error(`[a2a] ${agent.name} async error:`, err);
+            publishResponse(bus, outboundTopic, msg.correlationId,
+              `⚠️ ${agent.name} hit an error: ${err instanceof Error ? err.message : String(err)}`, p.channel);
+          });
+        return;
+      }
+
       try {
         const response = await callA2A(agent, content, contextId, skill ?? undefined, msg.source, outboundTopic, planeExtra);
         publishResponse(bus, outboundTopic, msg.correlationId, response, p.channel, agent.name);
+
+        // If the inbound message carries a devChannelId (e.g. from a /report-bug slash
+        // command), also push the full response to that channel so it lands in #dev
+        // regardless of where the command was invoked. Same correlationId for e2e tracing.
+        const devChannelId = p.devChannelId as string | undefined;
+        if (devChannelId) {
+          publishResponse(bus, `message.outbound.discord.push.${devChannelId}`, msg.correlationId, response, devChannelId);
+        }
 
         if (skill && agent.chain?.[skill]) {
           await runChain(bus, agents, agent, skill, content, response, outboundTopic, p.channel, p.github as GitHubContext | undefined);
@@ -463,8 +600,8 @@ export default {
         console.error(`[a2a] ${agent.name} error:`, err);
         const isTimeout = err instanceof Error && err.name === "TimeoutError";
         const errMsg = isTimeout
-          ? "I'm still working on that — it's taking longer than expected. Check back in a moment or try again."
-          : "I'm having trouble connecting right now. Give me a sec.";
+          ? `⏱️ ${agent.name} is still working — check back in a moment or try again.`
+          : `⚠️ ${agent.name} encountered an error: ${err instanceof Error ? err.message : String(err)}`;
         publishResponse(bus, outboundTopic, msg.correlationId, errMsg, p.channel);
       }
     });
@@ -484,7 +621,7 @@ export default {
       try {
         const response = await callA2A(agent, content, `workstacean-cron-${cronId}`);
         const channel = String(p.channel ?? "");
-        if (channel) {
+        if (channel && response) {
           publishResponse(bus, `message.outbound.discord.push.${channel}`, msg.correlationId, response, channel, agent.name);
         }
       } catch (err) {
@@ -493,5 +630,7 @@ export default {
     });
   },
 
-  uninstall(_bus: EventBus) {},
+  uninstall(_bus: EventBus) {
+    unwatchFile(AGENTS_YAML);
+  },
 };

@@ -1,0 +1,72 @@
+{
+  "dashboard": {
+    "title": "L2 Planner Dashboard",
+    "description": "Monitors L2 hybrid planner performance, escalation rates, and learning flywheel progress",
+    "panels": [
+      {
+        "title": "L2 Invocation Rate",
+        "type": "timeseries",
+        "metric": "l2_invocation_count",
+        "description": "Number of L2 planner invocations over time"
+      },
+      {
+        "title": "Success Rate",
+        "type": "gauge",
+        "metric": "l2_success_rate",
+        "thresholds": {
+          "green": 0.8,
+          "yellow": 0.5,
+          "red": 0.0
+        }
+      },
+      {
+        "title": "Escalation Rate (L2 → L3)",
+        "type": "timeseries",
+        "metric": "escalation_rate",
+        "description": "Rate of escalations from L2 to L3 (human). Should decrease over time."
+      },
+      {
+        "title": "Confidence Distribution",
+        "type": "histogram",
+        "metric": "l2_confidence_distribution",
+        "description": "Distribution of L2 plan confidence scores"
+      },
+      {
+        "title": "Learned Rules Count",
+        "type": "stat",
+        "metric": "learned_rules_total",
+        "description": "Total number of rules in the learned rule registry"
+      },
+      {
+        "title": "Rules Promoted to L0",
+        "type": "stat",
+        "metric": "rules_promoted_to_l0",
+        "description": "Number of learned rules promoted to L0 deterministic planner"
+      },
+      {
+        "title": "Layer Distribution",
+        "type": "piechart",
+        "metric": "layer_distribution",
+        "description": "Breakdown of requests handled by each layer (L0/L1/L2/L3)"
+      },
+      {
+        "title": "Average Latency",
+        "type": "timeseries",
+        "metric": "l2_avg_latency_ms",
+        "description": "Average L2 planning latency in milliseconds"
+      },
+      {
+        "title": "P95 Latency",
+        "type": "timeseries",
+        "metric": "l2_p95_latency_ms",
+        "description": "95th percentile L2 planning latency"
+      },
+      {
+        "title": "Learning Flywheel Progress",
+        "type": "timeseries",
+        "metric": "escalation_rate",
+        "description": "Escalation rate over time — should trend downward as the system learns"
+      }
+    ]
+  }
+}

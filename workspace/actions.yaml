@@ -1,0 +1,117 @@
+# World Engine Actions — mapped to goals by goalId
+# Tier 0 = deterministic/free, Tier 1 = A* planned, Tier 2 = Ava LLM
+#
+# Every action that reads a domain must guard on extensions.{domain}_available.
+# The engine sets this flag on each successful/failed tick.
+
+actions:
+  - id: alert.efficiency_low
+    goalId: flow.efficiency_healthy
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert on low flow efficiency"
+    preconditions:
+      - path: "extensions.flow_available"
+        operator: eq
+        value: true
+      - path: "domains.flow.data.efficiency.ratio"
+        operator: lt
+        value: 0.35
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: alert.distribution_drift
+    goalId: flow.distribution_balanced
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert on work distribution drift"
+    preconditions:
+      - path: "extensions.flow_available"
+        operator: eq
+        value: true
+      - path: "domains.flow.data.distribution.ratios.feature"
+        operator: lt
+        value: 0.40
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: alert.security_incident
+    goalId: security.no_open_incidents
+    tier: tier_0
+    priority: 100
+    cost: 0
+    name: "Alert on open security incidents"
+    preconditions:
+      - path: "extensions.security_available"
+        operator: eq
+        value: true
+      - path: "domains.security.data.openCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: ceremony.security_triage
+    goalId: security.no_open_incidents
+    tier: tier_0
+    priority: 90
+    cost: 1
+    name: "Trigger security triage ceremony"
+    preconditions:
+      - path: "extensions.security_available"
+        operator: eq
+        value: true
+      - path: "domains.security.data.criticalCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "ceremony.security-triage.execute"
+      fireAndForget: true
+
+  - id: alert.discord_disconnected
+    goalId: services.discord_connected
+    tier: tier_0
+    priority: 50
+    cost: 0
+    name: "Alert when Discord bot disconnects"
+    preconditions:
+      - path: "extensions.services_available"
+        operator: eq
+        value: true
+      - path: "domains.services.data.discord.connected"
+        operator: eq
+        value: false
+      - path: "domains.services.data.discord.configured"
+        operator: eq
+        value: true
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: alert.no_agents
+    goalId: agents.registered
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert when no agents are registered"
+    preconditions:
+      - path: "extensions.agent_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_health.data.agentCount"
+        operator: lt
+        value: 1
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true

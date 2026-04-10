@@ -1,0 +1,23 @@
+# protoLabs Project Registry — source of truth for the full fleet
+# Consumed by: Workstacean (routing), Quinn (portfolio monitoring), protoMaker (project registration)
+# Served via GET /api/projects
+#
+# discord.dev.webhookEnv / discord.release.webhookEnv — name of the env var that holds the
+# webhook URL. Never commit webhook URLs directly; rotate any that were previously committed.
+
+projects:
+  - slug: your-org-your-repo
+    title: Your Project
+    team: dev
+    github: your-org/your-repo
+    repoUrl: "https://github.com/your-org/your-repo"
+    defaultBranch: main
+    status: active
+    agents: [ava, quinn]
+    discord:
+      dev:
+        channelId: ""
+        webhookEnv: DISCORD_WEBHOOK_YOURPROJECT_DEV
+      release:
+        channelId: ""
+        webhookEnv: DISCORD_WEBHOOK_YOURPROJECT_RELEASE

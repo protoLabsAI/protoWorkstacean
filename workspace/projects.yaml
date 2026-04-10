@@ -1,61 +1,51 @@
-# protoLabs Project Registry — source of truth for the full fleet
-# Consumed by: Workstacean (routing), Quinn (portfolio monitoring), protoMaker (project registration)
-# Served via GET /api/projects
-
 projects:
-  - slug: protolabsai-protomaker
-    title: protoMaker
-    team: dev
-    github: protoLabsAI/protoMaker
-    defaultBranch: main
-    status: active
-    agents: [ava, quinn, frank, matt, kai]
-    discord:
-      general: ""
-      updates: ""
-      dev: ""
 
-  - slug: protolabsai-quinn
-    title: Quinn
-    team: dev
-    github: protoLabsAI/quinn
-    defaultBranch: main
-    status: active
-    agents: [ava, quinn]
-    discord:
-      general: ""
-      dev: ""
-
-  - slug: protolabsai-protoui
-    title: protoUI
-    team: dev
-    github: protoLabsAI/protoUI
-    defaultBranch: main
-    status: active
-    agents: [ava, quinn, matt]
-    discord:
-      general: "1490601617567912050"
-      updates: "1490601619300286525"
-      dev: "1490601620927418428"
-
-  - slug: protolabsai-protocontent
-    title: protoContent
-    team: gtm
-    github: protoLabsAI/protoContent
-    defaultBranch: main
-    status: active
-    agents: [jon, cindi]
-    discord:
-      general: ""
-      dev: ""
-
-  - slug: protolabsai-protoworkstacean
+  - slug: protoworkstacean
     title: protoWorkstacean
     team: dev
     github: protoLabsAI/protoWorkstacean
+    repoUrl: "https://github.com/protoLabsAI/protoWorkstacean"
+    projectPath: /home/josh/dev/protoWorkstacean
+    defaultBranch: master
+    status: active
+    agents: [quinn]
+
+  - slug: protomaker
+    title: protoMaker
+    team: dev
+    github: protoLabsAI/protoMaker
+    repoUrl: "https://github.com/protoLabsAI/protoMaker"
+    projectPath: /home/josh/dev/labs/protoMaker
     defaultBranch: main
     status: active
-    agents: [ava, quinn, frank, kai]
-    discord:
-      general: ""
-      dev: ""
+    agents: [quinn]
+
+  - slug: protocli
+    title: protoCLI
+    team: dev
+    github: protoLabsAI/protoCLI
+    repoUrl: "https://github.com/protoLabsAI/protoCLI"
+    projectPath: /home/josh/dev/labs/protoCLI
+    defaultBranch: main
+    status: active
+    agents: [quinn]
+
+  - slug: mythxengine
+    title: mythxengine
+    team: dev
+    github: protoLabsAI/mythxengine
+    repoUrl: "https://github.com/protoLabsAI/mythxengine"
+    projectPath: /home/josh/dev/labs/mythxengine
+    defaultBranch: main
+    status: active
+    agents: [quinn]
+
+  - slug: rabbit-hole-io
+    title: rabbit-hole-io
+    team: dev
+    github: protoLabsAI/rabbit-hole.io
+    repoUrl: "https://github.com/protoLabsAI/rabbit-hole.io"
+    projectPath: /home/josh/dev/labs/rabbit-hole-io
+    defaultBranch: main
+    status: active
+    agents: [quinn]

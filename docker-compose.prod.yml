@@ -4,14 +4,67 @@ services:
       context: .
       target: release
     restart: unless-stopped
-    env_file: .env
+    ports:
+      - "8081:8080"   # Event viewer UI
+      - "8082:8082"   # GitHub webhook receiver
+      - "8083:8083"   # Plane webhook receiver
+      # Port 3000 (HTTP API) is on the Docker network only
+    volumes:
+      - ./workspace:/workspace   # bind-mount so agent YAMLs live in the repo
+      - workstacean-data:/data
     environment:
       - WORKSPACE_DIR=/workspace
       - DATA_DIR=/data
-    volumes:
-      - workspace:/workspace
-      - data:/data
+
+      # ── LLM ──────────────────────────────────────────────────────
+      # Set LLM_GATEWAY_URL to use the LiteLLM gateway (homelab).
+      # Leave unset to use native Anthropic API (ANTHROPIC_API_KEY).
+      - LLM_GATEWAY_URL=${LLM_GATEWAY_URL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+
+      # ── Discord ──────────────────────────────────────────────────
+      # Primary inbound bot — Quinn handles DMs and channel messages.
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN_QUINN:-}
+      # Per-agent pool — each token spins up one connected bot client.
+      - DISCORD_BOT_TOKEN_AVA=${DISCORD_BOT_TOKEN_AVA:-}
+      - DISCORD_BOT_TOKEN_QUINN=${DISCORD_BOT_TOKEN_QUINN:-}
+      - DISCORD_BOT_TOKEN_FRANK=${DISCORD_BOT_TOKEN_FRANK:-}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID:-1070606339363049492}
+      - DISCORD_DIGEST_CHANNEL=${DISCORD_DIGEST_CHANNEL:-1469080556720623699}
+      - DISCORD_WELCOME_CHANNEL=${DISCORD_WELCOME_CHANNEL:-}
+      - DISCORD_WEBHOOK_ALERTS=${DISCORD_WEBHOOK_ALERTS:-}
+
+      # ── DM routing ───────────────────────────────────────────────
+      # Route unmatched DMs to Quinn's chat skill for natural conversation.
+      - ROUTER_DM_DEFAULT_AGENT=quinn
+      - ROUTER_DM_DEFAULT_SKILL=chat
+
+      # ── Langfuse tracing ─────────────────────────────────────────
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL:-}
+
+      # ── Graphiti user memory ─────────────────────────────────────
+      - GRAPHITI_URL=${GRAPHITI_URL:-}
+
+      # ── GitHub ───────────────────────────────────────────────────
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+      - QUINN_APP_ID=${QUINN_APP_ID:-}
+      - QUINN_APP_PRIVATE_KEY=${QUINN_APP_PRIVATE_KEY:-}
+      - AVA_APP_ID=${AVA_APP_ID:-}
+      - AVA_APP_PRIVATE_KEY=${AVA_APP_PRIVATE_KEY:-}
+
+      # ── Plane ────────────────────────────────────────────────────
+      - PLANE_API_KEY=${PLANE_API_KEY:-}
+      - PLANE_WEBHOOK_SECRET=${PLANE_WEBHOOK_SECRET:-}
+      - PLANE_BASE_URL=${PLANE_BASE_URL:-}
+      - PLANE_WORKSPACE_SLUG=${PLANE_WORKSPACE_SLUG:-protolabsai}
+
+      # ── A2A external agents ──────────────────────────────────────
+      - AVA_API_KEY=${AVA_API_KEY:-}
+      - AVA_BASE_URL=${AVA_BASE_URL:-}
 
 volumes:
-  data:
-  workspace:
+  workstacean-data:

@@ -1,0 +1,9 @@
+id: daily-standup
+name: "Daily Fleet Standup"
+description: "Morning ceremony: board summary, active ceremonies, open PRs"
+schedule: "0 9 * * 1-5"
+skill: board_audit
+targets:
+  - ava
+notifyChannel: "1469195643590541353"
+enabled: true

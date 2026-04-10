@@ -1,0 +1,27 @@
+name: Release Notes
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  post-release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for git log
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Post release notes to Discord
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # DISCORD_WEBHOOK_URL is the canonical override — used because workspace/projects.yaml
+          # is gitignored and not present in CI checkouts.
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_PROTOWORKSTACEAN_RELEASE }}
+        run: node scripts/post-release-notes.mjs

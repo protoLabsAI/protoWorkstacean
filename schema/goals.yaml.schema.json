@@ -1,0 +1,152 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://protoworkstacean/schemas/goals.yaml.schema.json",
+  "title": "GoalsConfig",
+  "description": "Schema for goals.yaml configuration files used by GoalEvaluatorPlugin",
+  "type": "object",
+  "required": ["goals"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version (e.g. '1.0')"
+    },
+    "goals": {
+      "type": "array",
+      "description": "List of goal definitions — supports Invariant, Threshold, and Distribution types",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/definitions/InvariantGoal" },
+          { "$ref": "#/definitions/ThresholdGoal" },
+          { "$ref": "#/definitions/DistributionGoal" }
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "Severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"],
+      "description": "Violation severity level"
+    },
+    "BaseGoal": {
+      "type": "object",
+      "required": ["id", "type", "description"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique goal identifier",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Invariant", "Threshold", "Distribution"],
+          "description": "Goal evaluation type"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this goal enforces",
+          "minLength": 1
+        },
+        "severity": {
+          "$ref": "#/definitions/Severity"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this goal is active (default: true)"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Optional labels for filtering/grouping goals"
+        }
+      }
+    },
+    "InvariantGoal": {
+      "allOf": [
+        { "$ref": "#/definitions/BaseGoal" },
+        {
+          "type": "object",
+          "required": ["selector"],
+          "properties": {
+            "type": { "const": "Invariant" },
+            "selector": {
+              "type": "string",
+              "description": "Dot-notation path into world state (e.g. 'services.auth.status')"
+            },
+            "expected": {
+              "description": "Expected value (used with operator)"
+            },
+            "operator": {
+              "type": "string",
+              "enum": ["eq", "neq", "truthy", "falsy", "in", "not_in"],
+              "default": "truthy",
+              "description": "Comparison operator (default: truthy)"
+            }
+          }
+        }
+      ]
+    },
+    "ThresholdGoal": {
+      "allOf": [
+        { "$ref": "#/definitions/BaseGoal" },
+        {
+          "type": "object",
+          "required": ["selector"],
+          "properties": {
+            "type": { "const": "Threshold" },
+            "selector": {
+              "type": "string",
+              "description": "Dot-notation path resolving to a numeric value"
+            },
+            "min": {
+              "type": "number",
+              "description": "Minimum allowed value (inclusive)"
+            },
+            "max": {
+              "type": "number",
+              "description": "Maximum allowed value (inclusive)"
+            }
+          },
+          "anyOf": [
+            { "required": ["min"] },
+            { "required": ["max"] }
+          ]
+        }
+      ]
+    },
+    "DistributionGoal": {
+      "allOf": [
+        { "$ref": "#/definitions/BaseGoal" },
+        {
+          "type": "object",
+          "required": ["selector"],
+          "properties": {
+            "type": { "const": "Distribution" },
+            "selector": {
+              "type": "string",
+              "description": "Dot-notation path resolving to an array or object of values"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "Regex pattern — all values must match"
+            },
+            "distribution": {
+              "type": "object",
+              "description": "Expected distribution as { value: fraction } e.g. { 'active': 0.8 }",
+              "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+            },
+            "tolerance": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.1,
+              "description": "Allowed deviation from expected distribution fraction (default: 0.1)"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
