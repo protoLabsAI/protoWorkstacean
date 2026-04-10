@@ -114,11 +114,18 @@ function loadProjectPathMap(workspaceDir?: string): Map<string, string> {
  * Idempotent: the endpoint returns `alreadyRunning: true` when auto-mode
  * is already active for the project, so repeated calls are cheap.
  */
-async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; message: string }> {
+type KickStatus = "ok" | "not_configured" | "error";
+
+async function startAvaAutoMode(projectPath: string): Promise<{ status: KickStatus; message: string }> {
   const base = process.env.AVA_BASE_URL;
   const apiKey = process.env.AVA_API_KEY;
-  if (!base) return { ok: false, message: "AVA_BASE_URL not set" };
-  if (!apiKey) return { ok: false, message: "AVA_API_KEY not set" };
+  // "not_configured" is the distinct state for test / local-dev environments
+  // where Ava isn't plumbed in at all. Plugin treats this as a silent skip,
+  // distinct from "configured but the request failed" which is a loud alert.
+  if (!base || !apiKey) {
+    const missing = [!base && "AVA_BASE_URL", !apiKey && "AVA_API_KEY"].filter(Boolean).join(", ");
+    return { status: "not_configured", message: `${missing} not set (Ava integration disabled)` };
+  }
 
   try {
     const resp = await fetch(`${base}/api/auto-mode/start`, {
@@ -132,7 +139,7 @@ async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; mes
     });
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
-      return { ok: false, message: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+      return { status: "error", message: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
     }
     const data = (await resp.json()) as {
       success?: boolean;
@@ -140,11 +147,11 @@ async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; mes
       alreadyRunning?: boolean;
     };
     return {
-      ok: data.success === true,
+      status: data.success === true ? "ok" : "error",
       message: data.alreadyRunning ? "already running" : (data.message ?? "started"),
     };
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { status: "error", message: String(err) };
   }
 }
 
@@ -671,8 +678,13 @@ Critical rules:
       // calling the tool, so we fire it in parallel as an idempotent fallback.
       if (projectPath) {
         const res = await startAvaAutoMode(projectPath);
-        console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ${res.ok ? "ok" : "fail"} — ${res.message}`);
-        if (!res.ok) this._reportAutoModeKickFailure(projectSlug, pr.repo, pr.number, res.message);
+        if (res.status === "ok") {
+          console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ok — ${res.message}`);
+        } else if (res.status === "error") {
+          console.warn(`[pr-remediator] auto-mode kick for ${projectSlug}: fail — ${res.message}`);
+          this._reportAutoModeKickFailure(projectSlug, pr.repo, pr.number, res.message);
+        }
+        // "not_configured" = Ava integration disabled — skip silently.
       }
     }
   }
@@ -729,8 +741,13 @@ Critical rules:
       // Deterministic safety net — see _handleFixCi for rationale
       if (projectPath) {
         const res = await startAvaAutoMode(projectPath);
-        console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ${res.ok ? "ok" : "fail"} — ${res.message}`);
-        if (!res.ok) this._reportAutoModeKickFailure(projectSlug, pr.repo, pr.number, res.message);
+        if (res.status === "ok") {
+          console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ok — ${res.message}`);
+        } else if (res.status === "error") {
+          console.warn(`[pr-remediator] auto-mode kick for ${projectSlug}: fail — ${res.message}`);
+          this._reportAutoModeKickFailure(projectSlug, pr.repo, pr.number, res.message);
+        }
+        // "not_configured" = Ava integration disabled — skip silently.
       }
     }
   }
