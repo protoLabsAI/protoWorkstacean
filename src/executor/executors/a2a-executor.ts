@@ -16,7 +16,8 @@ export interface A2AAgentConfig {
   url: string;
   /** Environment variable name holding the API key. Optional. */
   apiKeyEnv?: string;
-  /** Request timeout in ms. Default: 110_000 (just under the 120s ceremony timeout). */
+  /** Request timeout in ms. Default: 300_000 (5 min — agent-driven chats with
+   * multiple tool calls routinely exceed 2 min). */
   timeoutMs?: number;
 }
 
@@ -64,7 +65,7 @@ export class A2AExecutor implements IExecutor {
       method: "POST",
       headers,
       body,
-      signal: AbortSignal.timeout(this.config.timeoutMs ?? 110_000),
+      signal: AbortSignal.timeout(this.config.timeoutMs ?? 300_000),
     });
 
     if (!resp.ok) {

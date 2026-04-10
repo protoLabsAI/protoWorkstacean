@@ -321,11 +321,13 @@ describe("PrRemediatorPlugin — fix_ci", () => {
     expect(p0.projectSlug).toBe("protomaker");
     expect(p0.projectRepo).toBe("protoLabsAI/protoMaker");
     expect(p0.prNumber).toBe(100);
-    // Directive prompt: must demand start_auto_mode, not just create_feature
+    // Directive prompt: autonomous mode, must demand start_auto_mode + antagonistic review
     expect(p0.content).toContain("#100");
     expect(p0.content).toContain("protomaker");
     expect(p0.content).toContain("start_auto_mode");
-    expect(p0.content).toContain("REQUIRED STEPS");
+    expect(p0.content).toContain("fully autonomous mode");
+    expect(p0.content).toContain("Antagonistic review");
+    expect(p0.content).toContain("No permission checks");
 
     const p1 = dispatches[1].payload as { content: string; projectSlug: string };
     expect(p1.content).toContain("#300");
@@ -377,7 +379,8 @@ describe("PrRemediatorPlugin — address_feedback", () => {
     expect(p.content).toContain("#55");
     expect(p.content).toContain("CHANGES_REQUESTED");
     expect(p.content).toContain("start_auto_mode");
-    expect(p.content).toContain("REQUIRED STEPS");
+    expect(p.content).toContain("fully autonomous mode");
+    expect(p.content).toContain("Antagonistic review");
   });
 });
 
