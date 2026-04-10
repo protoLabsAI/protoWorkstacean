@@ -1,0 +1,68 @@
+name: Back-merge main to dev
+
+# Purpose: prevent ancestry divergence between dev and main caused by squash
+# promotions. Every time main receives a squash-merge from a dev→main promotion
+# PR, dev loses sight of main's new commit. Without intervention, the NEXT
+# promotion PR hits phantom "add/add" conflicts in git because dev and main
+# have the same content but different ancestry. This workflow fixes that by
+# immediately merging main's new tip back into dev with `-X ours` — dev
+# already has the correct content via its own real commits, so we're only
+# acknowledging the squash commit as an ancestor for future merge-base
+# calculations.
+#
+# Prerequisite: `required_linear_history` must be DISABLED on dev (main stays
+# linear). Dev is the integration branch — merge commits there are expected.
+# If the push is rejected by protection, update dev's rules via:
+#   gh api -X PATCH repos/:owner/:repo/branches/dev/protection/required_linear_history \
+#     -f enabled=false
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  backmerge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: dev
+          # Default token — subject to branch protection. If this fails the
+          # job with "protected branch", either disable linear_history on dev
+          # (recommended — it's the integration branch) or swap to a PAT with
+          # bypass privileges.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch main
+        run: git fetch origin main
+
+      - name: Skip if main is already an ancestor of dev
+        id: check
+        run: |
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "main is already an ancestor of dev — nothing to back-merge"
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge main into dev (prefer dev on conflicts)
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          git merge origin/main -X ours --no-ff \
+            -m "Auto back-merge main → dev (post ${{ github.sha }})" \
+            -m "Triggered by .github/workflows/backmerge-main-to-dev.yml to prevent ancestry drift that would otherwise produce phantom conflicts on the next dev→main promotion PR. Dev already has the correct content via its original feature commits; this commit only acknowledges main's squash as an ancestor for future merge-base calculations."
+
+      - name: Push dev
+        if: steps.check.outputs.needed == 'true'
+        run: git push origin dev
