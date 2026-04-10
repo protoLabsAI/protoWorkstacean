@@ -195,6 +195,24 @@ actions:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
 
+  - id: alert.branch_drift
+    goalId: branch.drift_low
+    tier: tier_0
+    priority: 15
+    cost: 0
+    name: "Alert when branch drift exceeds 30 commits"
+    preconditions:
+      - path: "extensions.branch_drift_available"
+        operator: eq
+        value: true
+      - path: "domains.branch_drift.data.maxDrift"
+        operator: gt
+        value: 30
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
   # ── Ava / protoMaker Studio ───────────────────────────────────────
 
   - id: alert.ava_board_blocked
@@ -207,7 +225,7 @@ actions:
       - path: "extensions.ava_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.blocked_count"
+      - path: "domains.ava_board.data.blocked"
         operator: gt
         value: 3
     effects: []
@@ -225,7 +243,7 @@ actions:
       - path: "extensions.ava_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.blocked_count"
+      - path: "domains.ava_board.data.blocked"
         operator: gt
         value: 3
     effects: []
@@ -235,20 +253,46 @@ actions:
       agentId: ava
       fireAndForget: true
 
-  - id: alert.ava_auto_mode_off
-    goalId: ava.auto_mode_active
+  - id: alert.ava_backlog_piling
+    goalId: ava.backlog_not_piling
     tier: tier_0
-    priority: 10
+    priority: 15
     cost: 0
-    name: "Alert when auto-mode is disabled"
+    name: "Alert when backlog exceeds 10 features"
     preconditions:
-      - path: "extensions.ava_pipeline_available"
+      - path: "extensions.ava_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_pipeline.data.auto_mode"
-        operator: eq
-        value: false
+      - path: "domains.ava_board.data.backlog"
+        operator: gt
+        value: 10
     effects: []
     meta:
       topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: action.ava_start_auto_mode
+    goalId: ava.backlog_not_piling
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Dispatch Ava to start auto-mode when backlog has work"
+    preconditions:
+      - path: "extensions.ava_board_available"
+        operator: eq
+        value: true
+      - path: "extensions.ava_pipeline_available"
+        operator: eq
+        value: true
+      - path: "domains.ava_pipeline.data.runningCount"
+        operator: eq
+        value: 0
+      - path: "domains.ava_board.data.backlog"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "agent.skill.request"
+      skillHint: auto_mode
+      agentId: ava
       fireAndForget: true

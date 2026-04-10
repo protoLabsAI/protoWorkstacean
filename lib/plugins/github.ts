@@ -1,4 +1,11 @@
 /**
+ * TODO(refactor): This file is 664 lines mixing webhook handling + auto-triage
+ * + auth (GitHub App vs PAT). When next touching, consider splitting:
+ *   lib/plugins/github/webhook.ts — webhook signature verification + routing
+ *   lib/plugins/github/auto-triage.ts — issue auto-triage logic
+ *   lib/plugins/github/auth.ts — App vs PAT auth selection
+ *   lib/plugins/github.ts — plugin shell
+ *
  * GitHubPlugin — receives GitHub webhook events and routes @mentions to the bus.
  *
  * Inbound:

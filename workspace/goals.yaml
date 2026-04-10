@@ -66,17 +66,24 @@ goals:
     max: 0
     description: "No PRs should be stale (>7 days without activity)"
 
+  - id: branch.drift_low
+    type: Threshold
+    severity: medium
+    selector: "domains.branch_drift.data.maxDrift"
+    max: 30
+    description: "No project should have more than 30 commits of branch drift"
+
   # ── Ava / protoMaker Studio ──────────────────────────────────────
   - id: ava.board_healthy
     type: Threshold
     severity: high
-    selector: "domains.ava_board.data.blocked_count"
+    selector: "domains.ava_board.data.blocked"
     max: 3
     description: "No more than 3 features blocked simultaneously"
 
-  - id: ava.auto_mode_active
-    type: Invariant
+  - id: ava.backlog_not_piling
+    type: Threshold
     severity: medium
-    selector: "domains.ava_pipeline.data.auto_mode"
-    operator: truthy
-    description: "Auto-mode should be running when backlog has work"
+    selector: "domains.ava_board.data.backlog"
+    max: 10
+    description: "Backlog should not exceed 10 features — work is piling up"
