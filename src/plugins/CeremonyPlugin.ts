@@ -1,4 +1,13 @@
 /**
+ * TODO(refactor): This file is 514 lines mixing YAML loading + hot-reload +
+ * cron scheduling + skill dispatch + DB persistence. When next touching,
+ * consider splitting:
+ *   src/plugins/ceremony/loader.ts — YAML loading + hot-reload watcher
+ *   src/plugins/ceremony/scheduler.ts — cron scheduling + timer management
+ *   src/plugins/ceremony/dispatcher.ts — skill dispatch + outcome handling
+ *   src/plugins/ceremony/outcomes-db.ts — SQLite persistence
+ *   src/plugins/CeremonyPlugin.ts — plugin shell
+ *
  * CeremonyPlugin — fleet-wide ceremony scheduling and execution.
  *
  * Replaces hardcoded cron tasks with configurable, observable, and

@@ -1,4 +1,16 @@
 /**
+ * TODO(refactor): This file is 631 lines with 9 pipeline steps in one class.
+ * When next touching this file, decompose into:
+ *   lib/plugins/onboarding/steps/validate.ts
+ *   lib/plugins/onboarding/steps/plane-project.ts
+ *   lib/plugins/onboarding/steps/plane-webhook.ts
+ *   lib/plugins/onboarding/steps/github-webhook.ts
+ *   lib/plugins/onboarding/steps/discord-provision.ts
+ *   lib/plugins/onboarding/steps/projects-yaml.ts
+ *   lib/plugins/onboarding/steps/bus-notify.ts
+ *   lib/plugins/onboarding.ts — orchestrator (runs pipeline, handles rollback)
+ * Each step = { name, execute(ctx), rollback?(ctx) } interface.
+ *
  * OnboardingPlugin — deterministic 8-step project onboarding pipeline.
  *
  * Each step is idempotent: re-running for the same project slug is safe.
