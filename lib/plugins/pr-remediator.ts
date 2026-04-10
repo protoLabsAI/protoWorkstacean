@@ -82,6 +82,52 @@ function loadProjectPathMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? 
   return map;
 }
 
+/**
+ * Directly start auto-mode on Ava for a target project via HTTP — bypasses
+ * the LLM's unreliable tool-call adherence (observed: bug_triage skill
+ * narrates "starting it now" without actually invoking start_auto_mode).
+ *
+ * This is the deterministic safety net. Called after every successful
+ * fix_ci / address_feedback dispatch so the new feature actually gets
+ * picked up regardless of what the LLM says.
+ *
+ * Idempotent: the endpoint returns `alreadyRunning: true` when auto-mode
+ * is already active for the project, so repeated calls are cheap.
+ */
+async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; message: string }> {
+  const base = process.env.AVA_BASE_URL;
+  const apiKey = process.env.AVA_API_KEY;
+  if (!base) return { ok: false, message: "AVA_BASE_URL not set" };
+  if (!apiKey) return { ok: false, message: "AVA_API_KEY not set" };
+
+  try {
+    const resp = await fetch(`${base}/api/auto-mode/start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": apiKey,
+      },
+      body: JSON.stringify({ projectPath, maxConcurrency: 1 }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      return { ok: false, message: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+    }
+    const data = (await resp.json()) as {
+      success?: boolean;
+      message?: string;
+      alreadyRunning?: boolean;
+    };
+    return {
+      ok: data.success === true,
+      message: data.alreadyRunning ? "already running" : (data.message ?? "started"),
+    };
+  } catch (err) {
+    return { ok: false, message: String(err) };
+  }
+}
+
 // ── Loop protection ─────────────────────────────────────────────────────────
 // A remediation that hasn't completed in this window is assumed dead (the
 // agent crashed, the bus dropped the reply, etc.) and the slot is freed.
@@ -409,7 +455,7 @@ export class PrRemediatorPlugin implements Plugin {
 
   // ── fix_ci ─────────────────────────────────────────────────────────────────
 
-  private _handleFixCi(msg: BusMessage): void {
+  private async _handleFixCi(msg: BusMessage): Promise<void> {
     const failing = (this.latestPrData?.prs ?? []).filter((p) => p.ciStatus === "fail");
     if (failing.length === 0) {
       console.log("[pr-remediator] fix_ci fired but no PRs match ciStatus=fail");
@@ -455,12 +501,21 @@ Critical rules:
       if (correlationId) {
         this._recordDispatch(pr.repo, pr.number, "fix_ci", correlationId);
       }
+
+      // Deterministic safety net: kick off Ava's auto-mode on the target
+      // project directly via HTTP. The LLM skill is supposed to do this
+      // itself, but it reliably narrates "starting it now" without actually
+      // calling the tool, so we fire it in parallel as an idempotent fallback.
+      if (projectPath) {
+        const res = await startAvaAutoMode(projectPath);
+        console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ${res.ok ? "ok" : "fail"} — ${res.message}`);
+      }
     }
   }
 
   // ── address_feedback ───────────────────────────────────────────────────────
 
-  private _handleAddressFeedback(msg: BusMessage): void {
+  private async _handleAddressFeedback(msg: BusMessage): Promise<void> {
     const blocked = (this.latestPrData?.prs ?? []).filter((p) => p.reviewState === "changes_requested");
     if (blocked.length === 0) {
       console.log("[pr-remediator] address_feedback fired but no PRs match reviewState=changes_requested");
@@ -505,6 +560,12 @@ Critical rules:
       );
       if (correlationId) {
         this._recordDispatch(pr.repo, pr.number, "address_feedback", correlationId);
+      }
+
+      // Deterministic safety net — see _handleFixCi for rationale
+      if (projectPath) {
+        const res = await startAvaAutoMode(projectPath);
+        console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ${res.ok ? "ok" : "fail"} — ${res.message}`);
       }
     }
   }
