@@ -1,45 +1,16 @@
 ---
 import DashboardLayout from "../layouts/DashboardLayout.astro";
+import WorldStateViewer from "../components/WorldStateViewer.tsx";
 ---
 
 <DashboardLayout title="World State" activePage="world-state">
   <div class="page-header">
-    <h2>World State Snapshot</h2>
-    <p class="subtitle">Live GOAP world state from all registered domains</p>
+    <h2>World State</h2>
+    <p class="subtitle">Live GOAP world state from all registered domains — polls every 15s</p>
   </div>
 
-  <div id="world-state-container">
-    <div class="card">
-      <p class="placeholder-content">Loading world state…</p>
-    </div>
-  </div>
+  <WorldStateViewer client:load />
 </DashboardLayout>
-
-<script>
-  async function loadWorldState() {
-    const container = document.getElementById("world-state-container");
-    if (!container) return;
-    try {
-      const res = await fetch("/api/world-state");
-      const data = await res.json();
-      container.innerHTML = `
-        <div class="card">
-          <div class="card-title">Snapshot</div>
-          <pre>${JSON.stringify(data, null, 2)}</pre>
-        </div>
-      `;
-    } catch (err) {
-      container.innerHTML = `
-        <div class="card">
-          <p class="placeholder-content">Failed to load world state</p>
-        </div>
-      `;
-    }
-  }
-
-  loadWorldState();
-  setInterval(loadWorldState, 5000);
-</script>
 
 <style>
   .page-header {
