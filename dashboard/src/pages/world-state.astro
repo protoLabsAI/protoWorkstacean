@@ -1,0 +1,29 @@
+---
+import DashboardLayout from "../layouts/DashboardLayout.astro";
+import WorldStateViewer from "../components/WorldStateViewer.tsx";
+---
+
+<DashboardLayout title="World State" activePage="world-state">
+  <div class="page-header">
+    <h2>World State</h2>
+    <p class="subtitle">Live GOAP world state from all registered domains — polls every 15s</p>
+  </div>
+
+  <WorldStateViewer client:load />
+</DashboardLayout>
+
+<style>
+  .page-header {
+    margin-bottom: 24px;
+  }
+
+  .page-header h2 {
+    font-size: 20px;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+</style>
