@@ -115,3 +115,56 @@ actions:
     meta:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
+
+  - id: ceremony.service_health_discord
+    goalId: services.discord_connected
+    tier: tier_0
+    priority: 80
+    cost: 1
+    name: "Trigger service health ceremony for Discord disconnect"
+    preconditions:
+      - path: "extensions.services_available"
+        operator: eq
+        value: true
+      - path: "domains.services.data.discord.configured"
+        operator: eq
+        value: true
+      - path: "domains.services.data.discord.connected"
+        operator: eq
+        value: false
+    effects: []
+    meta:
+      topic: "ceremony.service-health.execute"
+      fireAndForget: true
+
+  - id: ceremony.service_health_gateway
+    goalId: services.discord_connected
+    tier: tier_0
+    priority: 70
+    cost: 1
+    name: "Trigger service health ceremony when service domain collection fails"
+    preconditions:
+      - path: "domains.services.metadata.failed"
+        operator: exists
+    effects: []
+    meta:
+      topic: "ceremony.service-health.execute"
+      fireAndForget: true
+
+  - id: ceremony.agent_health
+    goalId: agents.registered
+    tier: tier_0
+    priority: 80
+    cost: 1
+    name: "Trigger agent health ceremony when no agents are registered"
+    preconditions:
+      - path: "extensions.agent_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_health.data.agentCount"
+        operator: lt
+        value: 1
+    effects: []
+    meta:
+      topic: "ceremony.agent-health.execute"
+      fireAndForget: true
