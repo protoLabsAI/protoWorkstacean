@@ -178,6 +178,36 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
+  const getCiHealth = tool(
+    "get_ci_health",
+    "Get CI health across all registered projects — aggregate success rate, " +
+      "per-repo breakdown, recent workflow run conclusions.",
+    {},
+    async () => {
+      try {
+        const data = await apiGet(baseUrl, "/api/ci-health", apiKey);
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  const getPrPipeline = tool(
+    "get_pr_pipeline",
+    "Get open PR status across all registered projects — total open, " +
+      "conflicting, stale (>7d), failing checks, per-PR details.",
+    {},
+    async () => {
+      try {
+        const data = await apiGet(baseUrl, "/api/pr-pipeline", apiKey);
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
   const getOutcomes = tool(
     "get_outcomes",
     "Get GOAP action dispatch outcomes — success/failure rates and recent history. " +
@@ -226,7 +256,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
-  return [publishEvent, getWorldState, getIncidents, reportIncident, getProjects, getOutcomes, getCeremonies, runCeremony];
+  return [publishEvent, getWorldState, getIncidents, reportIncident, getProjects, getCiHealth, getPrPipeline, getOutcomes, getCeremonies, runCeremony];
 }
 
 /**
@@ -239,6 +269,8 @@ export const BUS_TOOL_NAMES = [
   "get_incidents",
   "report_incident",
   "get_projects",
+  "get_ci_health",
+  "get_pr_pipeline",
   "get_outcomes",
   "get_ceremonies",
   "run_ceremony",

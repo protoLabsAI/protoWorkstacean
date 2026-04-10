@@ -44,6 +44,28 @@ goals:
     min: 1
     description: "At least one agent must be registered"
 
+  # ── CI + PR Pipeline ─────────────────────────────────────────────
+  - id: ci.success_rate_healthy
+    type: Threshold
+    severity: high
+    selector: "domains.ci.data.successRate"
+    min: 0.70
+    description: "CI success rate across all projects must stay >= 70%"
+
+  - id: pr.no_conflicts
+    type: Threshold
+    severity: medium
+    selector: "domains.pr_pipeline.data.conflicting"
+    max: 0
+    description: "No open PRs should have merge conflicts"
+
+  - id: pr.no_stale
+    type: Threshold
+    severity: medium
+    selector: "domains.pr_pipeline.data.stale"
+    max: 0
+    description: "No PRs should be stale (>7 days without activity)"
+
   # ── Ava / protoMaker Studio ──────────────────────────────────────
   - id: ava.board_healthy
     type: Threshold
