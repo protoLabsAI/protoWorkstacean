@@ -41,6 +41,9 @@
  *     off; dry-run mode just logs)
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import type { Plugin, EventBus, BusMessage, HITLRequest } from "../types.ts";
 import type { WorldState } from "../types/world-state.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
@@ -48,6 +51,36 @@ import { makeGitHubAuth } from "../github-auth.ts";
 const AUTO_MERGE_ENABLED = process.env.PR_REMEDIATOR_AUTO_MERGE === "1";
 // Resolved at install() time — null when no GitHub credentials are present.
 const getGithubToken = makeGitHubAuth();
+
+/**
+ * Load `workspace/projects.yaml` and build a repo → projectPath lookup.
+ * Ava needs the full projectPath (not just a slug) to scope her
+ * create_feature / start_auto_mode tool calls to the right board.
+ * The map is loaded lazily on first use and cached per-process.
+ */
+let projectPathMapCache: Map<string, string> | null = null;
+function loadProjectPathMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? "workspace"): Map<string, string> {
+  if (projectPathMapCache) return projectPathMapCache;
+  const map = new Map<string, string>();
+  const yamlPath = join(workspaceDir, "projects.yaml");
+  if (!existsSync(yamlPath)) {
+    console.warn(`[pr-remediator] projects.yaml not found at ${yamlPath} — projectPath metadata will be empty`);
+    projectPathMapCache = map;
+    return map;
+  }
+  try {
+    const parsed = parseYaml(readFileSync(yamlPath, "utf8")) as {
+      projects?: Array<{ github?: string; projectPath?: string }>;
+    };
+    for (const p of parsed.projects ?? []) {
+      if (p.github && p.projectPath) map.set(p.github, p.projectPath);
+    }
+  } catch (err) {
+    console.warn(`[pr-remediator] failed to parse projects.yaml: ${String(err)}`);
+  }
+  projectPathMapCache = map;
+  return map;
+}
 
 // ── Loop protection ─────────────────────────────────────────────────────────
 // A remediation that hasn't completed in this window is assumed dead (the
@@ -389,29 +422,35 @@ export class PrRemediatorPlugin implements Plugin {
         continue;
       }
       const projectSlug = deriveProjectSlug(pr.repo);
-      console.log(`[pr-remediator] dispatching fix_ci for ${pr.repo}#${pr.number} (slug: ${projectSlug})`);
+      const projectPath = loadProjectPathMap().get(pr.repo);
+      console.log(`[pr-remediator] dispatching fix_ci for ${pr.repo}#${pr.number} (slug: ${projectSlug}, path: ${projectPath ?? "unknown"})`);
       const correlationId = this._dispatchToAva(
-        `PR ${pr.repo}#${pr.number} has failing CI on the **${projectSlug}** project — investigate and dispatch a fix.
+        `PR ${pr.repo}#${pr.number} has failing CI. **Autonomous remediation requested.**
 
-Project: ${projectSlug}  (github: ${pr.repo})
+Target project: ${projectSlug}  (github: ${pr.repo})${projectPath ? `\nProject path: ${projectPath}` : ""}
 PR: #${pr.number} — ${pr.title}
 Branch: ${pr.baseRef} ← head ${pr.headSha.slice(0, 7)}
 Author: ${pr.author}
 CI status: ${pr.ciStatus}
 Mergeable: ${pr.mergeable}
 
-REQUIRED STEPS — execute in order, do not stop until all are done:
+You are operating in **fully autonomous mode**. Do not ask for permission. Do not present menus. Do not produce analysis-only responses. Execute the following lifecycle end-to-end:
 
-1. Call \`check_pr_status\` with projectPath for the "${projectSlug}" project to confirm the failure and read the failing workflow name(s).
-2. Call \`get_pr_feedback\` to fetch any review comments and check logs.
-3. Call \`create_feature\` on the "${projectSlug}" project (NOT the default project — you must pass the correct projectPath) with a root-cause analysis and a clear "fix this" title.
-4. Call \`start_auto_mode\` on the "${projectSlug}" project so an agent immediately picks up the new feature and begins work.
-5. Reply with a one-line summary: "Filed feature <id> on ${projectSlug}, auto-mode started."
+1. **Triage** — call \`check_pr_status\` and \`get_pr_feedback\` on PR #${pr.number}; read the failing workflow(s).
+2. **Check for existing work** — call \`list_features\` on the target project. If a feature already exists for this PR (title or description references "#${pr.number}") AND it is in backlog or in_progress, skip to step 5 (monitor/review). If it is done, skip to step 6 (antagonistic review).
+3. **Assign** — if no existing feature, call \`create_feature\` on the target project (pass projectPath from the metadata) with: title "fix(ci): PR #${pr.number} — <one-line root cause>", status backlog, priority 2, description containing the RCA, failing workflow name, and direct link to the failing job.
+4. **Kick off** — call \`start_auto_mode\` on the target project (pass projectPath from the metadata) with maxConcurrency: 1 so an agent immediately picks up the new feature.
+5. **Respond "in progress"** — reply with a short summary in this exact shape: \`Assigned <featureId> on ${projectSlug}, auto-mode running. Will antagonistically review on completion.\`
+6. **Antagonistic review (if feature is done)** — when the fix feature's status is done AND the PR is updated with new commits: call \`check_pr_status\` again, then perform an adversarial review: look for regressions, incomplete fixes, hidden assumptions, mislocated tests, missing edge cases. If you find any — call \`get_pr_feedback\` to post a concrete change request and call \`update_feature\` to bounce the feature back to in_progress with the specific issues. If the review passes — call \`merge_pr\` to land it.
 
-Do NOT just file the ticket and stop — the ticket must be followed by \`start_auto_mode\` or nothing will actually happen. Only escalate via reply if one of the tool calls returns an unrecoverable error.`,
+Critical rules:
+- **No permission checks.** You are authorised to create features, start auto-mode, and merge PRs on the target project without asking.
+- **projectPath is required on every tool call** — read it from message metadata. Do NOT default to ava's own project.
+- **Idempotent** — if a prior dispatch already did step 3/4, do not duplicate. The remediator re-dispatches every ~5 min; use step 2 to reconcile state.
+- **Never produce an analysis-only reply.** If you cannot complete the steps, reply with exactly one line describing which tool call failed and why.`,
         "bug_triage",
         msg.correlationId,
-        { projectSlug, projectRepo: pr.repo, prNumber: pr.number },
+        { projectSlug, projectRepo: pr.repo, prNumber: pr.number, ...(projectPath ? { projectPath } : {}) },
       );
       if (correlationId) {
         this._recordDispatch(pr.repo, pr.number, "fix_ci", correlationId);
@@ -434,28 +473,35 @@ Do NOT just file the ticket and stop — the ticket must be followed by \`start_
         continue;
       }
       const projectSlug = deriveProjectSlug(pr.repo);
-      console.log(`[pr-remediator] dispatching address_feedback for ${pr.repo}#${pr.number} (slug: ${projectSlug})`);
+      const projectPath = loadProjectPathMap().get(pr.repo);
+      console.log(`[pr-remediator] dispatching address_feedback for ${pr.repo}#${pr.number} (slug: ${projectSlug}, path: ${projectPath ?? "unknown"})`);
       const correlationId = this._dispatchToAva(
-        `PR ${pr.repo}#${pr.number} on the **${projectSlug}** project has CHANGES_REQUESTED review feedback — address and resolve.
+        `PR ${pr.repo}#${pr.number} has CHANGES_REQUESTED review feedback. **Autonomous remediation requested.**
 
-Project: ${projectSlug}  (github: ${pr.repo})
+Target project: ${projectSlug}  (github: ${pr.repo})${projectPath ? `\nProject path: ${projectPath}` : ""}
 PR: #${pr.number} — ${pr.title}
 Branch: ${pr.baseRef}
 Author: ${pr.author}
 Mergeable: ${pr.mergeable}
 CI: ${pr.ciStatus}
 
-REQUIRED STEPS — execute in order, do not stop until all are done:
+You are operating in **fully autonomous mode**. Do not ask for permission. Do not present menus. Execute end-to-end:
 
-1. Call \`get_pr_feedback\` for PR #${pr.number} on the "${projectSlug}" project to fetch every unresolved review thread.
-2. Call \`create_feature\` on the "${projectSlug}" project (NOT the default project — you must pass the correct projectPath) with a summary of the feedback and a title like "Address review on PR #${pr.number}".
-3. Call \`start_auto_mode\` on the "${projectSlug}" project so an agent immediately picks up the new feature.
-4. Reply with a one-line summary: "Filed feature <id> on ${projectSlug}, auto-mode started."
+1. **Triage** — call \`get_pr_feedback\` on PR #${pr.number} to fetch every unresolved review thread.
+2. **Check for existing work** — call \`list_features\` on the target project. If a feature already exists for this review cycle, skip to step 5.
+3. **Assign** — call \`create_feature\` on the target project (pass projectPath from metadata) with title "address review: PR #${pr.number}" and a description listing each unresolved thread.
+4. **Kick off** — call \`start_auto_mode\` on the target project (pass projectPath from metadata).
+5. **Respond "in progress"** — reply with exactly: \`Assigned <featureId> on ${projectSlug}, auto-mode running. Will antagonistically review on completion.\`
+6. **Antagonistic review (when done)** — once the fix feature completes and the PR updates: review the new commits adversarially. Approve with \`merge_pr\` or bounce back with \`get_pr_feedback\` + \`update_feature\`.
 
-Do NOT just file the ticket and stop — the ticket must be followed by \`start_auto_mode\` or nothing will actually happen. Only escalate via reply if a tool call returns an unrecoverable error.`,
+Critical rules:
+- **No permission checks.** Authorised for full lifecycle including merge.
+- **projectPath from metadata on every tool call** — do NOT default to ava's project.
+- **Idempotent** — remediator re-dispatches every ~5 min; reconcile via \`list_features\`.
+- **Never produce an analysis-only reply.**`,
         "bug_triage",
         msg.correlationId,
-        { projectSlug, projectRepo: pr.repo, prNumber: pr.number },
+        { projectSlug, projectRepo: pr.repo, prNumber: pr.number, ...(projectPath ? { projectPath } : {}) },
       );
       if (correlationId) {
         this._recordDispatch(pr.repo, pr.number, "address_feedback", correlationId);
