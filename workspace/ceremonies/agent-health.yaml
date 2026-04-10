@@ -1,0 +1,12 @@
+id: agent-health
+name: "Agent Health Check"
+description: >
+  Triggered by world engine when no agents are registered (agentCount drops to 0).
+  Calls get_world_state to confirm the failure, posts a structured alert with
+  remediation steps, and logs if Discord is unreachable.
+schedule: "*/15 * * * *"
+skill: health_check
+targets:
+  - all
+notifyChannel: ""
+enabled: true
