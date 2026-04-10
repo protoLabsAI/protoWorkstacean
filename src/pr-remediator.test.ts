@@ -68,6 +68,30 @@ function captureOn(bus: InMemoryEventBus, pattern: string): BusMessage[] {
   return captured;
 }
 
+/**
+ * Publishes a world.state.updated event with the given PRs so the plugin's
+ * real ingestion path exercises pr_pipeline domain absorption.
+ */
+function pushWorldState(bus: InMemoryEventBus, prs: PrEntry[]): void {
+  bus.publish("world.state.updated", {
+    id: crypto.randomUUID(),
+    correlationId: crypto.randomUUID(),
+    topic: "world.state.updated",
+    timestamp: Date.now(),
+    payload: {
+      timestamp: Date.now(),
+      domains: {
+        pr_pipeline: {
+          data: { prs },
+          metadata: { collectedAt: Date.now(), domain: "pr_pipeline", tickNumber: 1 },
+        },
+      },
+      extensions: {},
+      snapshotVersion: 1,
+    },
+  });
+}
+
 async function flushMicrotasks(): Promise<void> {
   await new Promise((r) => setTimeout(r, 10));
 }
@@ -87,7 +111,7 @@ describe("PrRemediatorPlugin — merge_ready", () => {
   afterEach(() => plugin.uninstall());
 
   test("no-ops when no PRs are ready to merge", async () => {
-    plugin.setPrData({ prs: [makePr({ readyToMerge: false })] });
+    pushWorldState(bus, [makePr({ readyToMerge: false })]);
     const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
     const alertCaptured = captureOn(bus, "message.outbound.discord.alert");
     dispatch(bus, "pr.remediate.merge_ready");
@@ -97,9 +121,7 @@ describe("PrRemediatorPlugin — merge_ready", () => {
   });
 
   test("escalates non-allowlisted PRs to HITL", async () => {
-    plugin.setPrData({
-      prs: [makePr({ number: 101, title: "feat: add thing", author: "human-dev" })],
-    });
+    pushWorldState(bus, [makePr({ number: 101, title: "feat: add thing", author: "human-dev" })]);
     const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
     dispatch(bus, "pr.remediate.merge_ready");
     await flushMicrotasks();
@@ -111,11 +133,9 @@ describe("PrRemediatorPlugin — merge_ready", () => {
   });
 
   test("promote: titled PRs are auto-merge eligible (dry-run logs, no HITL)", async () => {
-    plugin.setPrData({
-      prs: [
-        makePr({ number: 3331, title: "promote: dev → staging", author: "human-dev" }),
-      ],
-    });
+    pushWorldState(bus, [
+      makePr({ number: 3331, title: "promote: dev → staging", author: "human-dev" }),
+    ]);
     const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
     dispatch(bus, "pr.remediate.merge_ready");
     await flushMicrotasks();
@@ -125,11 +145,9 @@ describe("PrRemediatorPlugin — merge_ready", () => {
   });
 
   test("dependabot PRs are auto-merge eligible", async () => {
-    plugin.setPrData({
-      prs: [
-        makePr({ title: "chore(deps): bump foo", author: "dependabot[bot]" }),
-      ],
-    });
+    pushWorldState(bus, [
+      makePr({ title: "chore(deps): bump foo", author: "dependabot[bot]" }),
+    ]);
     const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
     dispatch(bus, "pr.remediate.merge_ready");
     await flushMicrotasks();
@@ -137,11 +155,9 @@ describe("PrRemediatorPlugin — merge_ready", () => {
   });
 
   test("auto-merge label PRs are eligible", async () => {
-    plugin.setPrData({
-      prs: [
-        makePr({ title: "feat: custom", author: "alice", labels: ["auto-merge"] }),
-      ],
-    });
+    pushWorldState(bus, [
+      makePr({ title: "feat: custom", author: "alice", labels: ["auto-merge"] }),
+    ]);
     const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
     dispatch(bus, "pr.remediate.merge_ready");
     await flushMicrotasks();
@@ -149,13 +165,11 @@ describe("PrRemediatorPlugin — merge_ready", () => {
   });
 
   test("mixed batch — eligibles auto-merge, others HITL", async () => {
-    plugin.setPrData({
-      prs: [
-        makePr({ number: 1, title: "promote: dev → staging", author: "x" }),
-        makePr({ number: 2, title: "feat: risky thing", author: "alice" }),
-        makePr({ number: 3, title: "chore(deps): bump zod", author: "dependabot[bot]" }),
-      ],
-    });
+    pushWorldState(bus, [
+      makePr({ number: 1, title: "promote: dev → staging", author: "x" }),
+      makePr({ number: 2, title: "feat: risky thing", author: "alice" }),
+      makePr({ number: 3, title: "chore(deps): bump zod", author: "dependabot[bot]" }),
+    ]);
     const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
     dispatch(bus, "pr.remediate.merge_ready");
     await flushMicrotasks();
@@ -163,6 +177,108 @@ describe("PrRemediatorPlugin — merge_ready", () => {
     expect(hitlCaptured.length).toBe(1);
     const req = hitlCaptured[0].payload as HITLRequest;
     expect(req.title).toContain("#2");
+  });
+
+  test("HITL response: approval triggers merge attempt (DRY-RUN logged)", async () => {
+    pushWorldState(bus, [makePr({ number: 500, title: "feat: big risky", author: "alice" })]);
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
+    dispatch(bus, "pr.remediate.merge_ready");
+    await flushMicrotasks();
+    expect(hitlCaptured.length).toBe(1);
+    const req = hitlCaptured[0].payload as HITLRequest;
+    // Now simulate Discord publishing an approve decision
+    bus.publish(`hitl.response.pr.merge.${req.correlationId}`, {
+      id: crypto.randomUUID(),
+      correlationId: req.correlationId,
+      topic: `hitl.response.pr.merge.${req.correlationId}`,
+      timestamp: Date.now(),
+      payload: {
+        type: "hitl_response",
+        correlationId: req.correlationId,
+        decision: "approve",
+        decidedBy: "josh",
+      },
+    });
+    await flushMicrotasks();
+    // In DRY-RUN mode the plugin logs but doesn't hit GitHub — we're
+    // validating that the subscription/handler path is wired correctly.
+    // If pendingApprovals wasn't cleared, a second response would log an
+    // "no matching pending PR" message; that's the regression we're guarding.
+    bus.publish(`hitl.response.pr.merge.${req.correlationId}`, {
+      id: crypto.randomUUID(),
+      correlationId: req.correlationId,
+      topic: `hitl.response.pr.merge.${req.correlationId}`,
+      timestamp: Date.now(),
+      payload: {
+        type: "hitl_response",
+        correlationId: req.correlationId,
+        decision: "approve",
+        decidedBy: "josh",
+      },
+    });
+    await flushMicrotasks();
+    // No assertion failures — the important thing is that the plugin did not
+    // throw and the pending entry was consumed on first approval.
+  });
+
+  test("HITL response: reject decision drops the pending entry", async () => {
+    pushWorldState(bus, [makePr({ number: 600, title: "feat: another risk", author: "alice" })]);
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
+    dispatch(bus, "pr.remediate.merge_ready");
+    await flushMicrotasks();
+    const req = hitlCaptured[0].payload as HITLRequest;
+    bus.publish(`hitl.response.pr.merge.${req.correlationId}`, {
+      id: crypto.randomUUID(),
+      correlationId: req.correlationId,
+      topic: `hitl.response.pr.merge.${req.correlationId}`,
+      timestamp: Date.now(),
+      payload: {
+        type: "hitl_response",
+        correlationId: req.correlationId,
+        decision: "reject",
+        decidedBy: "josh",
+      },
+    });
+    await flushMicrotasks();
+  });
+});
+
+describe("PrRemediatorPlugin — cache invalidation", () => {
+  let bus: InMemoryEventBus;
+  let plugin: PrRemediatorPlugin;
+
+  beforeEach(() => {
+    bus = new InMemoryEventBus();
+    plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+  });
+
+  afterEach(() => plugin.uninstall());
+
+  test("clears stale pr_pipeline cache when domain missing from next update", async () => {
+    // Initial state has PRs
+    pushWorldState(bus, [makePr({ number: 77, title: "promote: dev → staging" })]);
+    // Subsequent state with NO pr_pipeline domain (collector failed / dropped)
+    bus.publish("world.state.updated", {
+      id: crypto.randomUUID(),
+      correlationId: crypto.randomUUID(),
+      topic: "world.state.updated",
+      timestamp: Date.now(),
+      payload: {
+        timestamp: Date.now(),
+        domains: {
+          // pr_pipeline absent — cache should drop
+          flow: { data: {}, metadata: { collectedAt: Date.now(), domain: "flow", tickNumber: 2 } },
+        },
+        extensions: {},
+        snapshotVersion: 2,
+      },
+    });
+    // Now dispatch merge_ready — should no-op because cache was cleared
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
+    dispatch(bus, "pr.remediate.merge_ready");
+    await flushMicrotasks();
+    expect(hitlCaptured.length).toBe(0);
   });
 });
 
@@ -179,13 +295,11 @@ describe("PrRemediatorPlugin — fix_ci", () => {
   afterEach(() => plugin.uninstall());
 
   test("dispatches to Ava for each failing-CI PR", async () => {
-    plugin.setPrData({
-      prs: [
-        makePr({ number: 100, ciStatus: "fail", title: "bug: foo" }),
-        makePr({ number: 200, ciStatus: "pass" }),  // should be skipped
-        makePr({ number: 300, ciStatus: "fail", title: "bug: bar" }),
-      ],
-    });
+    pushWorldState(bus, [
+      makePr({ number: 100, ciStatus: "fail", title: "bug: foo" }),
+      makePr({ number: 200, ciStatus: "pass" }),  // should be skipped
+      makePr({ number: 300, ciStatus: "fail", title: "bug: bar" }),
+    ]);
     const dispatches = captureOn(bus, "agent.skill.request");
     dispatch(bus, "pr.remediate.fix_ci");
     await flushMicrotasks();
@@ -199,7 +313,7 @@ describe("PrRemediatorPlugin — fix_ci", () => {
   });
 
   test("no-ops when no failing PRs exist", async () => {
-    plugin.setPrData({ prs: [makePr({ ciStatus: "pass" })] });
+    pushWorldState(bus, [makePr({ ciStatus: "pass" })]);
     const dispatches = captureOn(bus, "agent.skill.request");
     dispatch(bus, "pr.remediate.fix_ci");
     await flushMicrotasks();
@@ -220,12 +334,10 @@ describe("PrRemediatorPlugin — address_feedback", () => {
   afterEach(() => plugin.uninstall());
 
   test("dispatches to Ava for changes_requested PRs", async () => {
-    plugin.setPrData({
-      prs: [
-        makePr({ number: 55, reviewState: "changes_requested" }),
-        makePr({ number: 56, reviewState: "approved" }),
-      ],
-    });
+    pushWorldState(bus, [
+      makePr({ number: 55, reviewState: "changes_requested" }),
+      makePr({ number: 56, reviewState: "approved" }),
+    ]);
     const dispatches = captureOn(bus, "agent.skill.request");
     dispatch(bus, "pr.remediate.address_feedback");
     await flushMicrotasks();

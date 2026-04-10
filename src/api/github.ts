@@ -94,16 +94,34 @@ export function createRoutes(ctx: ApiContext): Route[] {
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
     for (const repo of repoList) {
-      let list: Array<{
+      type PrListItem = {
         number: number; title: string; updated_at: string; draft: boolean;
         head: { sha: string };
         base: { ref: string };
         user: { login: string } | null;
         labels: Array<{ name: string }>;
-      }>;
-      try {
-        list = await ghApi(`/repos/${repo}/pulls?state=open&per_page=30&sort=updated&direction=desc`) as typeof list;
-      } catch { continue; /* skip unreachable repo */ }
+      };
+      // Paginate through all open PRs — `per_page=100` (GitHub max) with a
+      // hard cap on pages to guard against runaway loops. For current projects
+      // this is effectively 1–2 pages, but the loop keeps the engine accurate
+      // when a repo has >100 open PRs (e.g. bulk dependabot backlogs).
+      const list: PrListItem[] = [];
+      const MAX_PAGES = 5;
+      let pageOk = true;
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        try {
+          const batch = await ghApi(
+            `/repos/${repo}/pulls?state=open&per_page=100&page=${page}&sort=updated&direction=desc`,
+          ) as PrListItem[];
+          if (batch.length === 0) break;
+          list.push(...batch);
+          if (batch.length < 100) break; // last page
+        } catch {
+          pageOk = false;
+          break;
+        }
+      }
+      if (!pageOk) continue; // skip unreachable repo
 
       // Fan out per-PR details in parallel — 3 calls each: mergeable, check-runs, reviews
       const prDetails = await Promise.all(list.map(async (pr) => {

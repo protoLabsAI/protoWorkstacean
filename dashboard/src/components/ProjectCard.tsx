@@ -24,10 +24,17 @@ export interface PrData {
   repo: string;
   number: number;
   title: string;
-  mergeable: string;
-  checksPass: boolean;
+  headSha: string;
+  author: string;
+  baseRef: string;
+  mergeable: "clean" | "dirty" | "blocked" | "unknown";
+  ciStatus: "pass" | "fail" | "pending" | "none";
+  reviewState: "approved" | "changes_requested" | "pending" | "none";
+  isDraft: boolean;
+  readyToMerge: boolean;
   updatedAt: string;
   stale: boolean;
+  labels: string[];
 }
 
 interface ProjectCardProps {

@@ -108,15 +108,24 @@ export class PrRemediatorPlugin implements Plugin {
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
   private latestPrData: PrDomainData | null = null;
+  /** Map correlationId → PR identity, so HITL response can find the PR to merge. */
+  private readonly pendingApprovals = new Map<string, { repo: string; number: number; title: string }>();
 
   install(bus: EventBus): void {
     this.bus = bus;
 
-    // Track the latest pr_pipeline snapshot from the world state engine
+    // Track the latest pr_pipeline snapshot from the world state engine.
+    // If a later update omits pr_pipeline (domain dropped / collector failed),
+    // clear the cache so stale PRs don't trigger bogus remediation.
     this.subscriptionIds.push(bus.subscribe("world.state.updated", this.name, (msg) => {
       const state = msg.payload as WorldState | undefined;
       const domain = state?.domains?.pr_pipeline;
-      if (domain?.data) this.latestPrData = domain.data as PrDomainData;
+      if (domain?.data) {
+        this.latestPrData = domain.data as PrDomainData;
+      } else if (state?.domains) {
+        // Domain missing from a valid state update — drop stale cache
+        this.latestPrData = null;
+      }
     }));
 
     // Remediation triggers
@@ -128,6 +137,12 @@ export class PrRemediatorPlugin implements Plugin {
     }));
     this.subscriptionIds.push(bus.subscribe("pr.remediate.address_feedback", this.name, (msg) => {
       void this._handleAddressFeedback(msg);
+    }));
+
+    // HITL response handler — fires when a human approves/rejects via Discord.
+    // On approve, execute the merge the plugin was waiting on.
+    this.subscriptionIds.push(bus.subscribe("hitl.response.pr.merge.#", this.name, (msg) => {
+      void this._handleHitlResponse(msg);
     }));
 
     console.log(
@@ -142,11 +157,7 @@ export class PrRemediatorPlugin implements Plugin {
     this.subscriptionIds.length = 0;
     this.bus = undefined;
     this.latestPrData = null;
-  }
-
-  /** Expose for tests — inject a snapshot directly. */
-  setPrData(data: PrDomainData): void {
-    this.latestPrData = data;
+    this.pendingApprovals.clear();
   }
 
   // ── merge_ready ────────────────────────────────────────────────────────────
@@ -255,6 +266,12 @@ Fetch the review comments via get_pr_feedback, address each point, and mark the 
       expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
       replyTopic,
     };
+    // Record the pending approval so the response handler can act on it
+    this.pendingApprovals.set(correlationId, {
+      repo: pr.repo,
+      number: pr.number,
+      title: pr.title,
+    });
     this.bus.publish(`hitl.request.pr.merge.${correlationId}`, {
       id: crypto.randomUUID(),
       correlationId,
@@ -264,6 +281,45 @@ Fetch the review comments via get_pr_feedback, address each point, and mark the 
       payload: request,
     });
     console.log(`[pr-remediator] HITL approval requested for ${pr.repo}#${pr.number}`);
+  }
+
+  /**
+   * Handle a human decision from HITL. Expected payload shape:
+   *   { type: "hitl_response", correlationId, decision: "approve" | "reject", ... }
+   * On "approve" we execute the merge; on "reject" we drop the pending entry.
+   */
+  private async _handleHitlResponse(msg: BusMessage): Promise<void> {
+    const response = msg.payload as {
+      type?: string;
+      correlationId?: string;
+      decision?: string;
+      decidedBy?: string;
+    };
+    if (response.type !== "hitl_response" || !response.correlationId) return;
+
+    const pending = this.pendingApprovals.get(response.correlationId);
+    if (!pending) {
+      console.log(`[pr-remediator] HITL response ${response.correlationId} — no matching pending PR (expired or duplicate)`);
+      return;
+    }
+    this.pendingApprovals.delete(response.correlationId);
+
+    if (response.decision !== "approve") {
+      console.log(`[pr-remediator] HITL rejected ${pending.repo}#${pending.number} by ${response.decidedBy ?? "unknown"}`);
+      return;
+    }
+
+    if (!AUTO_MERGE_ENABLED) {
+      console.log(`[pr-remediator] DRY-RUN — HITL approved ${pending.repo}#${pending.number}, would merge`);
+      return;
+    }
+
+    const result = await ghMerge(pending.repo, pending.number);
+    if (result.ok) {
+      console.log(`[pr-remediator] HITL-approved merge succeeded ${pending.repo}#${pending.number}`);
+    } else {
+      console.warn(`[pr-remediator] HITL-approved merge FAILED ${pending.repo}#${pending.number}: ${result.error}`);
+    }
   }
 
   private _dispatchToAva(content: string, skillHint: string, parentCorrelationId: string): void {
