@@ -1,0 +1,32 @@
+---
+import DashboardLayout from "../layouts/DashboardLayout.astro";
+---
+
+<DashboardLayout title="Overview" activePage="overview">
+  <div class="overview-grid">
+    <div class="card">
+      <div class="card-title">World State</div>
+      <p class="placeholder-content">Loading…</p>
+    </div>
+    <div class="card">
+      <div class="card-title">Services</div>
+      <p class="placeholder-content">Loading…</p>
+    </div>
+    <div class="card">
+      <div class="card-title">Active Goals</div>
+      <p class="placeholder-content">Loading…</p>
+    </div>
+    <div class="card">
+      <div class="card-title">Recent Events</div>
+      <p class="placeholder-content">Loading…</p>
+    </div>
+  </div>
+</DashboardLayout>
+
+<style>
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+</style>
