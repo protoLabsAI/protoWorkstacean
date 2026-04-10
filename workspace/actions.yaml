@@ -353,6 +353,76 @@ actions:
       agentId: ava
       fireAndForget: true
 
+  # ── Branch protection ─────────────────────────────────────────────
+
+  - id: alert.branch_bypass_actors
+    goalId: branch.main_hardened
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Alert on bypass actors in main ruleset"
+    preconditions:
+      - path: "domains.branch_protection.data.totalBypassActors"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: alert.branch_unprotected
+    goalId: branch.main_protected
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Alert on repos missing main branch ruleset"
+    preconditions:
+      - path: "domains.branch_protection.data.unprotectedRepoCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: alert.ci_main_red
+    goalId: ci.main_last_push_green
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Alert when latest push to any repo's main is red"
+    preconditions:
+      - path: "domains.ci.data.failingMainCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  # ── Branch drift remediation ──────────────────────────────────────
+  #
+  # Triggers a GitHub workflow_dispatch of each managed repo's auto
+  # back-merge workflows when dev/staging fall too far behind main.
+  # The pr-remediator plugin subscribes to this topic and drives the
+  # actual GitHub API calls. Idempotent — skipped if a backmerge is
+  # already in flight for the same repo.
+
+  - id: action.dispatch_backmerge
+    goalId: branch.drift_low
+    tier: tier_0
+    priority: 10
+    cost: 1
+    name: "Dispatch auto back-merge workflow when drift exceeds threshold"
+    preconditions:
+      - path: "domains.branch_drift.data.maxDrift"
+        operator: gt
+        value: 30
+    effects: []
+    meta:
+      topic: "pr.backmerge.dispatch"
+      fireAndForget: true
+
   # ── HITL routing health ───────────────────────────────────────────
   #
   # This alert bypasses the HITL plugin entirely — if the HITL routing

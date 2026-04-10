@@ -476,8 +476,9 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     engine.registerDomain("ci", createHttpCollector(`${base}/api/ci-health`), 300_000); // 5min — GitHub rate limits
     engine.registerDomain("pr_pipeline", createHttpCollector(`${base}/api/pr-pipeline`), 120_000); // 2min
     engine.registerDomain("branch_drift", createHttpCollector(`${base}/api/branch-drift`), 600_000); // 10min
+    engine.registerDomain("branch_protection", createHttpCollector(`${base}/api/branch-protection`), 600_000); // 10min — rulesets change rarely
     engine.registerDomain("hitl_queue", createHttpCollector(`${base}/api/hitl-queue`), 30_000); // 30s — catch routing holes fast
 
-    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, hitl_queue");
+    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue");
   }
 }

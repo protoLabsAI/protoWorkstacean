@@ -38,14 +38,23 @@ export function createRoutes(ctx: ApiContext): Route[] {
 
   async function handleGetCiHealth(): Promise<Response> {
     const repoList = repos();
-    if (!repoList.length) return Response.json({ successRate: 1, totalRuns: 0, failedRuns: 0, projects: [] });
+    if (!repoList.length) return Response.json({ successRate: 1, totalRuns: 0, failedRuns: 0, failingMainCount: 0, projects: [] });
 
-    const projects: Array<{ repo: string; successRate: number; totalRuns: number; failedRuns: number; latestConclusion: string | null }> = [];
+    const projects: Array<{
+      repo: string;
+      successRate: number;
+      totalRuns: number;
+      failedRuns: number;
+      latestConclusion: string | null;
+      mainBranchLastPushGreen: boolean;
+    }> = [];
     let totalAll = 0;
     let failedAll = 0;
+    let failingMainCount = 0;
 
     for (const repo of repoList) {
       try {
+        // Aggregate recent run health across all branches
         const data = await ghApi(`/repos/${repo}/actions/runs?per_page=10&status=completed`) as {
           workflow_runs?: Array<{ conclusion: string }>;
         };
@@ -54,20 +63,39 @@ export function createRoutes(ctx: ApiContext): Route[] {
         const rate = runs.length > 0 ? (runs.length - failed) / runs.length : 1;
         totalAll += runs.length;
         failedAll += failed;
+
+        // Targeted: is the latest push to the default branch green? This is the
+        // signal that actually blocks downstream promotion PRs — a red main is
+        // the single most expensive CI failure pattern we have (see today's
+        // PR #3328 dirty-prettier incident).
+        let mainBranchLastPushGreen = true;
+        try {
+          const repoMeta = await ghApi(`/repos/${repo}`) as { default_branch: string };
+          const mainRuns = await ghApi(
+            `/repos/${repo}/actions/runs?branch=${encodeURIComponent(repoMeta.default_branch)}&event=push&per_page=5&status=completed`,
+          ) as { workflow_runs?: Array<{ conclusion: string }> };
+          const latestMain = mainRuns.workflow_runs?.[0];
+          mainBranchLastPushGreen = !latestMain || latestMain.conclusion === "success" || latestMain.conclusion === "skipped";
+          if (!mainBranchLastPushGreen) failingMainCount += 1;
+        } catch {
+          // Keep optimistic default on lookup errors to avoid false positives.
+        }
+
         projects.push({
           repo,
           successRate: Math.round(rate * 100) / 100,
           totalRuns: runs.length,
           failedRuns: failed,
           latestConclusion: runs[0]?.conclusion ?? null,
+          mainBranchLastPushGreen,
         });
       } catch {
-        projects.push({ repo, successRate: 0, totalRuns: 0, failedRuns: 0, latestConclusion: null });
+        projects.push({ repo, successRate: 0, totalRuns: 0, failedRuns: 0, latestConclusion: null, mainBranchLastPushGreen: true });
       }
     }
 
     const successRate = totalAll > 0 ? Math.round(((totalAll - failedAll) / totalAll) * 100) / 100 : 1;
-    return Response.json({ successRate, totalRuns: totalAll, failedRuns: failedAll, projects });
+    return Response.json({ successRate, totalRuns: totalAll, failedRuns: failedAll, failingMainCount, projects });
   }
 
   async function handleGetPrPipeline(): Promise<Response> {
@@ -256,9 +284,105 @@ export function createRoutes(ctx: ApiContext): Route[] {
     return Response.json({ projects, maxDrift });
   }
 
+  async function handleGetBranchProtection(): Promise<Response> {
+    const repoList = repos();
+    if (!repoList.length) return Response.json({
+      totalBypassActors: 0,
+      unprotectedRepoCount: 0,
+      projects: [],
+    });
+
+    const projects: Array<{
+      repo: string;
+      defaultBranch: string;
+      hasRuleset: boolean;
+      bypassActorCount: number;
+      requiredChecks: string[];
+      requiresPullRequest: boolean;
+    }> = [];
+    let totalBypassActors = 0;
+    let unprotectedRepoCount = 0;
+
+    for (const repo of repoList) {
+      try {
+        const repoMeta = await ghApi(`/repos/${repo}`) as { default_branch: string };
+        const defaultBranch = repoMeta.default_branch;
+
+        // Rulesets scoped to the default branch
+        const rulesets = await ghApi(`/repos/${repo}/rulesets`) as Array<{
+          id: number;
+          enforcement?: string;
+          source_type?: string;
+        }>;
+        const active = (Array.isArray(rulesets) ? rulesets : []).filter(r => r.enforcement === "active");
+
+        // Aggregate across all active rulesets for this repo — any one of
+        // them could provide protection, so we union required checks and
+        // take the max bypass count as the "worst case".
+        let bypassActorCount = 0;
+        const requiredChecks = new Set<string>();
+        let requiresPullRequest = false;
+        let matchesDefaultBranch = false;
+
+        for (const r of active) {
+          try {
+            const detail = await ghApi(`/repos/${repo}/rulesets/${r.id}`) as {
+              bypass_actors?: unknown[];
+              rules?: Array<{ type: string; parameters?: { required_status_checks?: Array<{ context: string }> } }>;
+              conditions?: { ref_name?: { include?: string[] } };
+            };
+            const includes = detail.conditions?.ref_name?.include ?? [];
+            const appliesToDefault = includes.some(
+              p => p === `refs/heads/${defaultBranch}` || p === "~DEFAULT_BRANCH" || p === "~ALL",
+            );
+            if (!appliesToDefault) continue;
+            matchesDefaultBranch = true;
+
+            const bypass = (detail.bypass_actors ?? []).length;
+            if (bypass > bypassActorCount) bypassActorCount = bypass;
+
+            for (const rule of detail.rules ?? []) {
+              if (rule.type === "required_status_checks") {
+                for (const c of rule.parameters?.required_status_checks ?? []) requiredChecks.add(c.context);
+              }
+              if (rule.type === "pull_request") requiresPullRequest = true;
+            }
+          } catch { /* skip malformed rulesets */ }
+        }
+
+        if (!matchesDefaultBranch) {
+          unprotectedRepoCount += 1;
+        }
+        totalBypassActors += bypassActorCount;
+
+        projects.push({
+          repo,
+          defaultBranch,
+          hasRuleset: matchesDefaultBranch,
+          bypassActorCount,
+          requiredChecks: [...requiredChecks],
+          requiresPullRequest,
+        });
+      } catch {
+        unprotectedRepoCount += 1;
+        projects.push({
+          repo,
+          defaultBranch: "main",
+          hasRuleset: false,
+          bypassActorCount: 0,
+          requiredChecks: [],
+          requiresPullRequest: false,
+        });
+      }
+    }
+
+    return Response.json({ totalBypassActors, unprotectedRepoCount, projects });
+  }
+
   return [
-    { method: "GET", path: "/api/ci-health",    handler: () => handleGetCiHealth() },
-    { method: "GET", path: "/api/pr-pipeline",  handler: () => handleGetPrPipeline() },
-    { method: "GET", path: "/api/branch-drift", handler: () => handleGetBranchDrift() },
+    { method: "GET", path: "/api/ci-health",          handler: () => handleGetCiHealth() },
+    { method: "GET", path: "/api/pr-pipeline",        handler: () => handleGetPrPipeline() },
+    { method: "GET", path: "/api/branch-drift",       handler: () => handleGetBranchDrift() },
+    { method: "GET", path: "/api/branch-protection",  handler: () => handleGetBranchProtection() },
   ];
 }

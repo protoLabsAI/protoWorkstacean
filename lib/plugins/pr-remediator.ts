@@ -262,6 +262,48 @@ async function ghMerge(repo: string, num: number): Promise<{ ok: boolean; status
   }
 }
 
+/**
+ * Trigger a GitHub Actions workflow_dispatch event for the auto back-merge
+ * workflow on a repo's default branch. The workflow filename and the ref
+ * it runs on are both configurable via env so repos that use a different
+ * workflow name or run back-merge from dev (protoWorkstacean pattern) can
+ * still participate.
+ */
+async function ghDispatchBackmerge(
+  repo: string,
+  defaultBranch: string,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+
+  const workflowFile = process.env.BACKMERGE_WORKFLOW_FILE ?? "backmerge-from-main.yml";
+  const ref = process.env.BACKMERGE_WORKFLOW_REF ?? defaultBranch;
+
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(
+      `https://api.github.com/repos/${repo}/actions/workflows/${workflowFile}/dispatches`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ref }),
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    if (resp.ok || resp.status === 204) return { ok: true, status: resp.status };
+    const body = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: body.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
 export class PrRemediatorPlugin implements Plugin {
@@ -272,10 +314,15 @@ export class PrRemediatorPlugin implements Plugin {
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
   private latestPrData: PrDomainData | null = null;
+  private latestBranchDrift: { projects: Array<{ repo: string; devToMain?: number; devToStaging?: number | null; stagingToMain?: number | null; defaultBranch?: string }>; maxDrift: number } | null = null;
   /** Map correlationId → PR identity, so HITL response can find the PR to merge. */
   private readonly pendingApprovals = new Map<string, { repo: string; number: number; title: string }>();
   /** Map `${repo}#${number}:${kind}` → in-flight dispatch metadata. */
   private readonly inFlight = new Map<string, InFlightEntry>();
+  /** Repo → timestamp of last backmerge dispatch (cooldown). */
+  private readonly backmergeDispatchedAt = new Map<string, number>();
+  /** `slug:reason` → timestamp of last auto-mode kick alert (5-min dedupe). */
+  private readonly autoModeKickAlertsAt = new Map<string, number>();
 
   install(bus: EventBus): void {
     this.bus = bus;
@@ -285,15 +332,22 @@ export class PrRemediatorPlugin implements Plugin {
     // clear the cache so stale PRs don't trigger bogus remediation.
     this.subscriptionIds.push(bus.subscribe("world.state.updated", this.name, (msg) => {
       const state = msg.payload as WorldState | undefined;
-      const domain = state?.domains?.pr_pipeline;
-      if (domain?.data) {
-        this.latestPrData = domain.data as PrDomainData;
+      const prDomain = state?.domains?.pr_pipeline;
+      if (prDomain?.data) {
+        this.latestPrData = prDomain.data as PrDomainData;
         // Drop in-flight entries for PRs no longer in the pipeline (merged/closed).
         // This lets exhausted entries clear naturally without a timer.
         this._pruneInFlight();
       } else if (state?.domains) {
         // Domain missing from a valid state update — drop stale cache
         this.latestPrData = null;
+      }
+
+      const driftDomain = state?.domains?.branch_drift;
+      if (driftDomain?.data) {
+        this.latestBranchDrift = driftDomain.data as typeof this.latestBranchDrift;
+      } else if (state?.domains) {
+        this.latestBranchDrift = null;
       }
     }));
 
@@ -314,6 +368,9 @@ export class PrRemediatorPlugin implements Plugin {
     }));
     this.subscriptionIds.push(bus.subscribe("pr.remediate.address_feedback", this.name, (msg) => {
       void this._handleAddressFeedback(msg);
+    }));
+    this.subscriptionIds.push(bus.subscribe("pr.backmerge.dispatch", this.name, () => {
+      void this._handleBackmergeDispatch();
     }));
 
     // HITL response handler — fires when a human approves/rejects via Discord.
@@ -615,6 +672,7 @@ Critical rules:
       if (projectPath) {
         const res = await startAvaAutoMode(projectPath);
         console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ${res.ok ? "ok" : "fail"} — ${res.message}`);
+        if (!res.ok) this._reportAutoModeKickFailure(projectSlug, pr.repo, pr.number, res.message);
       }
     }
   }
@@ -672,11 +730,53 @@ Critical rules:
       if (projectPath) {
         const res = await startAvaAutoMode(projectPath);
         console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ${res.ok ? "ok" : "fail"} — ${res.message}`);
+        if (!res.ok) this._reportAutoModeKickFailure(projectSlug, pr.repo, pr.number, res.message);
       }
     }
   }
 
   // ── outbound helpers ───────────────────────────────────────────────────────
+
+  /**
+   * Raise a first-class ops signal when the deterministic Ava auto-mode kick
+   * fails. In normal operation this should NEVER happen — failure means one
+   * of:
+   *   - AVA_BASE_URL / AVA_API_KEY is missing or wrong in the environment
+   *   - Ava server is down or unreachable
+   *   - Ava's auto-mode endpoint is failing
+   *
+   * Without a loud signal, every remediation dispatch succeeds (feature filed
+   * on Ava's board) but Ava never starts working it, and the loop appears to
+   * run forever because the feature stays in `backlog`. Classic quiet-failure
+   * hole — surface it as a dedicated Discord alert so the misconfig is
+   * visible the moment it happens.
+   *
+   * Rate-limited per (projectSlug, reason) to avoid alert-spam when the same
+   * kick fails repeatedly within a short window.
+   */
+  private _reportAutoModeKickFailure(
+    projectSlug: string,
+    repo: string,
+    prNumber: number,
+    reason: string,
+  ): void {
+    if (!this.bus) return;
+    const key = `${projectSlug}:${reason}`;
+    const last = this.autoModeKickAlertsAt.get(key);
+    const now = Date.now();
+    if (last !== undefined && now - last < 5 * 60 * 1000) return; // 5-min dedupe
+    this.autoModeKickAlertsAt.set(key, now);
+
+    const text = `⚠️ Ava auto-mode kick FAILED for ${projectSlug} (${repo}#${prNumber}) — ${reason}. Remediation feature is filed on Ava's board but the agent loop won't pick it up until this is fixed.`;
+    this.bus.publish("message.outbound.discord.alert", {
+      id: crypto.randomUUID(),
+      correlationId: crypto.randomUUID(),
+      topic: "message.outbound.discord.alert",
+      timestamp: now,
+      payload: { content: text, severity: "high", source: "pr-remediator" },
+    });
+    console.warn(`[pr-remediator] ${text}`);
+  }
 
   private _emitHitlApproval(pr: PrDomainEntry, parentCorrelationId: string, note?: string): void {
     if (!this.bus) return;
@@ -722,6 +822,62 @@ Critical rules:
    *   { type: "hitl_response", correlationId, decision: "approve" | "reject", ... }
    * On "approve" we execute the merge; on "reject" we drop the pending entry.
    */
+  // ── backmerge ──────────────────────────────────────────────────────────────
+  //
+  // Dispatched when branch.drift_low fires. Iterates the current branch_drift
+  // snapshot, finds repos with devToMain > threshold, and triggers the GitHub
+  // Actions workflow_dispatch for their configured back-merge workflow. A 6h
+  // per-repo cooldown prevents re-dispatch if the workflow is already running
+  // or just finished.
+
+  private static readonly DRIFT_THRESHOLD = 30;
+  private static readonly BACKMERGE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+
+  private async _handleBackmergeDispatch(): Promise<void> {
+    const drift = this.latestBranchDrift;
+    if (!drift) {
+      console.log("[pr-remediator] backmerge dispatch fired but no branch_drift data cached");
+      return;
+    }
+
+    const candidates = drift.projects.filter((p) => {
+      const dev = p.devToMain ?? 0;
+      const stg = p.stagingToMain ?? 0;
+      return dev > PrRemediatorPlugin.DRIFT_THRESHOLD || stg > PrRemediatorPlugin.DRIFT_THRESHOLD;
+    });
+
+    if (candidates.length === 0) {
+      console.log(`[pr-remediator] backmerge dispatch fired but no repo exceeds drift threshold ${PrRemediatorPlugin.DRIFT_THRESHOLD}`);
+      return;
+    }
+
+    const now = Date.now();
+    for (const project of candidates) {
+      const last = this.backmergeDispatchedAt.get(project.repo);
+      if (last !== undefined && now - last < PrRemediatorPlugin.BACKMERGE_COOLDOWN_MS) {
+        const ageMin = Math.round((now - last) / 60_000);
+        console.log(`[pr-remediator] skip backmerge ${project.repo}: cooldown (dispatched ${ageMin}m ago)`);
+        continue;
+      }
+
+      this.backmergeDispatchedAt.set(project.repo, now);
+      const result = await ghDispatchBackmerge(project.repo, project.defaultBranch ?? "main");
+      if (result.ok) {
+        console.log(
+          `[pr-remediator] backmerge workflow dispatched: ${project.repo} (devToMain=${project.devToMain}, stagingToMain=${project.stagingToMain})`,
+        );
+      } else if (result.status === 404) {
+        console.log(
+          `[pr-remediator] backmerge skipped ${project.repo}: workflow not found (404) — repo has no auto back-merge configured`,
+        );
+      } else {
+        console.warn(
+          `[pr-remediator] backmerge dispatch failed ${project.repo}: ${result.status} ${result.error}`,
+        );
+      }
+    }
+  }
+
   private async _handleHitlResponse(msg: BusMessage): Promise<void> {
     const response = msg.payload as {
       type?: string;

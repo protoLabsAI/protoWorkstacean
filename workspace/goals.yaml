@@ -109,6 +109,34 @@ goals:
     max: 10
     description: "Backlog should not exceed 10 features — work is piling up"
 
+  # ── Branch protection (catches admin-bypass regressions) ───────
+  #
+  # PR #3328 landed on protoMaker main with failing Checks because the
+  # ruleset allowed admin bypass. These goals would have caught that the
+  # moment the ruleset regressed, and caught a red main before any
+  # promotion PR inherited the breakage through the merge ref.
+
+  - id: branch.main_hardened
+    type: Threshold
+    severity: critical
+    selector: "domains.branch_protection.data.totalBypassActors"
+    max: 0
+    description: "No managed repo's main branch ruleset should allow bypass actors"
+
+  - id: branch.main_protected
+    type: Threshold
+    severity: high
+    selector: "domains.branch_protection.data.unprotectedRepoCount"
+    max: 0
+    description: "Every managed repo must have an active ruleset protecting its default branch"
+
+  - id: ci.main_last_push_green
+    type: Threshold
+    severity: high
+    selector: "domains.ci.data.failingMainCount"
+    max: 0
+    description: "The latest push to any managed repo's main branch must have passing checks"
+
   # ── HITL routing health ─────────────────────────────────────────
   - id: hitl.no_unrendered_requests
     type: Threshold
