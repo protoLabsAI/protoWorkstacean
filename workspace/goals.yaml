@@ -43,3 +43,10 @@ goals:
     selector: "domains.agent_health.data.agentCount"
     min: 1
     description: "At least one agent must be registered"
+
+  - id: ci.success_rate_healthy
+    type: Threshold
+    severity: high
+    selector: "domains.ci.data.successRate"
+    min: 0.70
+    description: "CI success rate must stay >= 70% across all projects"

@@ -792,6 +792,98 @@ async function handleResolveIncident(req: Request, incidentId: string): Promise<
   return Response.json({ success: true, data: incidents[idx] });
 }
 
+// ── CI Health API ─────────────────────────────────────────────────────────────
+
+async function handleGetCiHealth(): Promise<Response> {
+  const projectsPath = join(workspaceDir, "projects.yaml");
+  if (!existsSync(projectsPath)) {
+    return Response.json({ successRate: 1, totalRuns: 0, failedRuns: 0, projects: [] });
+  }
+
+  let projects: Array<{ slug: string; github?: string; title?: string }>;
+  try {
+    const parsed = parseYaml(readFileSync(projectsPath, "utf8")) as {
+      projects?: Array<{ slug: string; github?: string; title?: string }>;
+    };
+    projects = parsed.projects ?? [];
+  } catch {
+    return Response.json({ success: false, error: "Failed to parse projects.yaml" }, { status: 500 });
+  }
+
+  const githubProjects = projects.filter(p => p.github);
+  const token = process.env.GITHUB_TOKEN;
+  const requestHeaders: Record<string, string> = {
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (token) requestHeaders["Authorization"] = `Bearer ${token}`;
+
+  let totalRuns = 0;
+  let failedRuns = 0;
+  const projectResults: Array<{
+    slug: string;
+    repo: string;
+    successRate: number;
+    totalRuns: number;
+    failedRuns: number;
+    error?: string;
+  }> = [];
+
+  for (const project of githubProjects) {
+    const repo = project.github!;
+    try {
+      const resp = await fetch(
+        `https://api.github.com/repos/${repo}/actions/runs?per_page=50`,
+        { headers: requestHeaders },
+      );
+      if (!resp.ok) {
+        projectResults.push({
+          slug: project.slug,
+          repo,
+          successRate: 0,
+          totalRuns: 0,
+          failedRuns: 0,
+          error: `HTTP ${resp.status}`,
+        });
+        continue;
+      }
+      const data = (await resp.json()) as {
+        workflow_runs?: Array<{ conclusion: string | null }>;
+      };
+      const runs = (data.workflow_runs ?? []).filter(r => r.conclusion !== null);
+      const failed = runs.filter(
+        r => r.conclusion !== "success" && r.conclusion !== "skipped",
+      );
+      const projectTotal = runs.length;
+      const projectFailed = failed.length;
+      totalRuns += projectTotal;
+      failedRuns += projectFailed;
+      const successRate =
+        projectTotal > 0 ? (projectTotal - projectFailed) / projectTotal : 1;
+      projectResults.push({
+        slug: project.slug,
+        repo,
+        successRate,
+        totalRuns: projectTotal,
+        failedRuns: projectFailed,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      projectResults.push({
+        slug: project.slug,
+        repo,
+        successRate: 0,
+        totalRuns: 0,
+        failedRuns: 0,
+        error: msg,
+      });
+    }
+  }
+
+  const successRate = totalRuns > 0 ? (totalRuns - failedRuns) / totalRuns : 1;
+  return Response.json({ successRate, totalRuns, failedRuns, projects: projectResults });
+}
+
 // ── Channels API ──────────────────────────────────────────────────────────────
 
 function handleGetChannels(): Response {
@@ -891,6 +983,7 @@ const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
   { method: "GET",  path: "/api/channels",             handler: () => handleGetChannels() },
   { method: "POST", path: "/api/channels",             handler: (req) => handleAddChannel(req) },
   { method: "GET",  path: "/api/hitl/pending",         handler: () => handleGetHITLPending() },
+  { method: "GET",  path: "/api/ci-health",            handler: () => handleGetCiHealth() },
 ];
 
 Bun.serve({
@@ -921,7 +1014,8 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     engine.registerDomain("services", createHttpCollector(`${base}/api/services`), 60_000);
     engine.registerDomain("agent_health", createHttpCollector(`${base}/api/agent-health`), 60_000);
     engine.registerDomain("security", createHttpCollector(`${base}/api/security-summary`), 60_000);
+    engine.registerDomain("ci", createHttpCollector(`${base}/api/ci-health`), 60_000);
 
-    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security (60s)");
+    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci (60s)");
   }
 }

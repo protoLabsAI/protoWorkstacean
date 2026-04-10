@@ -115,3 +115,21 @@ actions:
     meta:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
+
+  - id: ci.debug_failures
+    goalId: ci.success_rate_healthy
+    tier: tier_0
+    priority: 20
+    cost: 0
+    name: "Alert on CI failure rate"
+    preconditions:
+      - path: "extensions.ci_available"
+        operator: eq
+        value: true
+      - path: "domains.ci.data.successRate"
+        operator: lt
+        value: 0.70
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
