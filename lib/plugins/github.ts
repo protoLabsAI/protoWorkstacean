@@ -78,7 +78,7 @@ function loadConfig(workspaceDir: string): GitHubConfig {
 
   if (!existsSync(configPath)) {
     config = {
-      mentionHandle: "@quinn",
+      mentionHandle: "@protoquinn",
       skillHints: {
         issue_comment: "bug_triage",
         issues: "bug_triage",

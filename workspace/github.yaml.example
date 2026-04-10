@@ -1,0 +1,66 @@
+# ── GitHub integration config ────────────────────────────────────────────────
+#
+# Copy this to workspace/github.yaml and edit. Read by lib/plugins/github.ts
+# on install and hot-reloaded on file change. monitoredRepos is derived from
+# projects.yaml automatically — never listed here.
+
+# The bot handle admins use to mention in issue/PR comments. Case-insensitive.
+# Use a dedicated handle (e.g. @protoquinn) to avoid colliding with real
+# GitHub usernames.
+mentionHandle: "@protoquinn"
+
+# Admins whose @mentions are accepted by the trusted path. Non-admin
+# @mentions are ignored — untrusted authors must go through the autoTriage
+# pipeline below.
+admins:
+  - your-github-username
+
+# Per-event skill routing for the @mention path.
+skillHints:
+  issues: bug_triage
+  issue_comment: bug_triage
+  pull_request: pr_review
+  pull_request_review_comment: pr_review
+
+# ── Auto-triage pipeline ─────────────────────────────────────────────────────
+#
+# Fires on `issues.opened` / `issues.reopened` webhooks when the body does NOT
+# include a mentionHandle mention. The plugin checks GitHub org membership:
+#   - member of `orgName` → trustTier 3 (same as @mention path)
+#   - non-member          → trustTier 1 → body is sanitized against
+#                           injectionPatterns, truncated to size limits, then
+#                           routed to `skillHint` (bug_triage) on the bus.
+#
+# If sanitization matches `spamThreshold` or more injection patterns, the
+# issue is auto-closed as spam before reaching any agent.
+#
+# Without this, non-member issues are silently ignored by the system — they
+# appear on GitHub but no agent ever sees them.
+
+autoTriage:
+  enabled: true
+  orgName: your-github-org
+  events:
+    - issues
+  skillHint: bug_triage
+  monitoredRepos: [] # populated from projects.yaml at load time
+  sanitization:
+    maxBodyChars: 8000
+    maxLineLengthChars: 500
+    # Conservative regex list — matches common prompt-injection openers.
+    # Case-insensitive + multiline via the plugin's RegExp flags.
+    injectionPatterns:
+      - "ignore\\s+(all\\s+)?(previous|prior|above)\\s+(instructions|rules|prompts)"
+      - "disregard\\s+(all|any|the)\\s+(previous|prior|above)\\s+(instructions|rules|prompts)"
+      - "forget\\s+(everything|all)\\s+(you|i|we)\\s+(know|said|told)"
+      - "you\\s+are\\s+now\\s+(a|an)\\s+"
+      - "new\\s+(system|role|persona)\\s*:"
+      - "<\\|system\\|>"
+      - "```\\s*system"
+      - "(act|pretend|roleplay)\\s+as\\s+(if\\s+you\\s+are\\s+)?(a|an|the)"
+      - "reveal\\s+(your|the)\\s+(system\\s+)?prompt"
+      - "override\\s+(your|the)\\s+(instructions|rules|safety)"
+    # If >= this many patterns match, auto-close the issue as spam without
+    # dispatching to the agent. 2 is the default sweet spot — a single
+    # false-positive match still flows through to triage with redactions.
+    spamThreshold: 2

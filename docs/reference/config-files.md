@@ -251,7 +251,7 @@ commands:
 ## workspace/github.yaml
 
 ```yaml
-mentionHandle: "@quinn"       # case-insensitive handle to watch for
+mentionHandle: "@protoquinn"  # case-insensitive handle to watch for
 
 skillHints:
   issue_comment: bug_triage              # comment @mention on issue

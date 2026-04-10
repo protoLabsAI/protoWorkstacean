@@ -221,7 +221,7 @@ Quinn's LLM calls go through the system-wide `BudgetTracker` (`lib/plugins/budge
 ### Per-repo settings (`workspace/github.yaml`)
 
 ```yaml
-mentionHandle: "@quinn"
+mentionHandle: "@protoquinn"
 
 skillHints:
   pull_request: pr_review           # auto-review on PR open/sync
