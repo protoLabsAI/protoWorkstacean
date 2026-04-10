@@ -84,6 +84,21 @@ const AUTO_MERGE_AUTHORS = new Set(["dependabot[bot]", "renovate[bot]"]);
 const AUTO_MERGE_TITLE_PREFIXES = ["promote:", "chore(deps"];
 const AUTO_MERGE_LABEL = "auto-merge";
 
+/**
+ * Derive the workstacean/ava project slug from a GitHub `owner/repo` string.
+ * Matches the slugs in workspace/projects.yaml: lowercase repo name with dots
+ * replaced by dashes (e.g. `rabbit-hole.io` → `rabbit-hole-io`).
+ *
+ * Returns empty string if the repo slug is malformed — caller should fall
+ * back to including the full `owner/repo` in the message content so Ava
+ * can disambiguate via `list_projects` if needed.
+ */
+function deriveProjectSlug(repo: string): string {
+  const parts = repo.split("/");
+  if (parts.length !== 2 || !parts[1]) return "";
+  return parts[1].toLowerCase().replace(/\./g, "-");
+}
+
 // ── Domain data shape (mirrors src/api/github.ts handleGetPrPipeline) ────────
 
 interface PrDomainEntry {
@@ -373,22 +388,30 @@ export class PrRemediatorPlugin implements Plugin {
         console.log(`[pr-remediator] skip fix_ci ${pr.repo}#${pr.number}: ${gate.reason}`);
         continue;
       }
-      console.log(`[pr-remediator] dispatching fix_ci for ${pr.repo}#${pr.number}`);
+      const projectSlug = deriveProjectSlug(pr.repo);
+      console.log(`[pr-remediator] dispatching fix_ci for ${pr.repo}#${pr.number} (slug: ${projectSlug})`);
       const correlationId = this._dispatchToAva(
-        `PR ${pr.repo}#${pr.number} has failing CI — investigate and remediate.
+        `PR ${pr.repo}#${pr.number} has failing CI on the **${projectSlug}** project — investigate and dispatch a fix.
 
-Title: ${pr.title}
+Project: ${projectSlug}  (github: ${pr.repo})
+PR: #${pr.number} — ${pr.title}
 Branch: ${pr.baseRef} ← head ${pr.headSha.slice(0, 7)}
 Author: ${pr.author}
 CI status: ${pr.ciStatus}
 Mergeable: ${pr.mergeable}
 
-Read the failing workflow logs, identify the root cause, and either:
-- File a bug ticket on the board with the root cause analysis
-- Dispatch a fix to the owning agent via auto-mode
-- Escalate to HITL if the failure is outside agent capability.`,
+REQUIRED STEPS — execute in order, do not stop until all are done:
+
+1. Call \`check_pr_status\` with projectPath for the "${projectSlug}" project to confirm the failure and read the failing workflow name(s).
+2. Call \`get_pr_feedback\` to fetch any review comments and check logs.
+3. Call \`create_feature\` on the "${projectSlug}" project (NOT the default project — you must pass the correct projectPath) with a root-cause analysis and a clear "fix this" title.
+4. Call \`start_auto_mode\` on the "${projectSlug}" project so an agent immediately picks up the new feature and begins work.
+5. Reply with a one-line summary: "Filed feature <id> on ${projectSlug}, auto-mode started."
+
+Do NOT just file the ticket and stop — the ticket must be followed by \`start_auto_mode\` or nothing will actually happen. Only escalate via reply if one of the tool calls returns an unrecoverable error.`,
         "bug_triage",
         msg.correlationId,
+        { projectSlug, projectRepo: pr.repo, prNumber: pr.number },
       );
       if (correlationId) {
         this._recordDispatch(pr.repo, pr.number, "fix_ci", correlationId);
@@ -410,19 +433,29 @@ Read the failing workflow logs, identify the root cause, and either:
         console.log(`[pr-remediator] skip address_feedback ${pr.repo}#${pr.number}: ${gate.reason}`);
         continue;
       }
-      console.log(`[pr-remediator] dispatching address_feedback for ${pr.repo}#${pr.number}`);
+      const projectSlug = deriveProjectSlug(pr.repo);
+      console.log(`[pr-remediator] dispatching address_feedback for ${pr.repo}#${pr.number} (slug: ${projectSlug})`);
       const correlationId = this._dispatchToAva(
-        `PR ${pr.repo}#${pr.number} has CHANGES_REQUESTED review feedback — address and resolve.
+        `PR ${pr.repo}#${pr.number} on the **${projectSlug}** project has CHANGES_REQUESTED review feedback — address and resolve.
 
-Title: ${pr.title}
+Project: ${projectSlug}  (github: ${pr.repo})
+PR: #${pr.number} — ${pr.title}
 Branch: ${pr.baseRef}
 Author: ${pr.author}
 Mergeable: ${pr.mergeable}
 CI: ${pr.ciStatus}
 
-Fetch the review comments via get_pr_feedback, address each point, and mark the review threads resolved.`,
+REQUIRED STEPS — execute in order, do not stop until all are done:
+
+1. Call \`get_pr_feedback\` for PR #${pr.number} on the "${projectSlug}" project to fetch every unresolved review thread.
+2. Call \`create_feature\` on the "${projectSlug}" project (NOT the default project — you must pass the correct projectPath) with a summary of the feedback and a title like "Address review on PR #${pr.number}".
+3. Call \`start_auto_mode\` on the "${projectSlug}" project so an agent immediately picks up the new feature.
+4. Reply with a one-line summary: "Filed feature <id> on ${projectSlug}, auto-mode started."
+
+Do NOT just file the ticket and stop — the ticket must be followed by \`start_auto_mode\` or nothing will actually happen. Only escalate via reply if a tool call returns an unrecoverable error.`,
         "bug_triage",
         msg.correlationId,
+        { projectSlug, projectRepo: pr.repo, prNumber: pr.number },
       );
       if (correlationId) {
         this._recordDispatch(pr.repo, pr.number, "address_feedback", correlationId);
@@ -508,13 +541,22 @@ Fetch the review comments via get_pr_feedback, address each point, and mark the 
     }
   }
 
-  private _dispatchToAva(content: string, skillHint: string, parentCorrelationId: string): string | undefined {
+  private _dispatchToAva(
+    content: string,
+    skillHint: string,
+    parentCorrelationId: string,
+    extraMeta?: Record<string, unknown>,
+  ): string | undefined {
     if (!this.bus) return undefined;
     const correlationId = crypto.randomUUID();
     // NOTE: skill-dispatcher targets by `payload.meta.agentId`, NOT top-level
     // `payload.agentId`. Both Ava (a2a) and Quinn (proto-sdk) register
     // bug_triage, and without explicit targeting the dispatcher picks the
     // first-registered executor (Quinn — who is read-only and exits 53).
+    //
+    // A2AExecutor spreads the full payload into the JSON-RPC message metadata
+    // (src/executor/executors/a2a-executor.ts line 58 — `...req.payload`), so
+    // anything in extraMeta reaches Ava's A2A handler as message.metadata.
     this.bus.publish("agent.skill.request", {
       id: crypto.randomUUID(),
       correlationId,
@@ -525,6 +567,7 @@ Fetch the review comments via get_pr_feedback, address each point, and mark the 
         skill: skillHint,
         content,
         meta: { agentId: "ava", skillHint },
+        ...(extraMeta ?? {}),
       },
     });
     return correlationId;
