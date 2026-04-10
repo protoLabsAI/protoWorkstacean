@@ -1,0 +1,100 @@
+version: "1.0"
+
+goals:
+  # ── Invariant examples ────────────────────────────────────────────────────
+
+  - id: auth-service-healthy
+    type: Invariant
+    description: Auth service must always be in a healthy state
+    severity: critical
+    selector: services.auth.status
+    operator: eq
+    expected: "healthy"
+
+  - id: database-connected
+    type: Invariant
+    description: Database connection must be established
+    severity: critical
+    selector: database.connected
+    operator: truthy
+
+  - id: feature-flag-enabled
+    type: Invariant
+    description: New checkout feature flag must be enabled in production
+    severity: medium
+    selector: featureFlags.newCheckout
+    operator: truthy
+    tags: [feature-flags, checkout]
+
+  - id: environment-is-production
+    type: Invariant
+    description: Environment must be one of the expected values
+    severity: high
+    selector: system.environment
+    operator: in
+    expected: ["production", "staging"]
+
+  # ── Threshold examples ────────────────────────────────────────────────────
+
+  - id: cpu-usage-under-80
+    type: Threshold
+    description: CPU usage must stay below 80%
+    severity: high
+    selector: metrics.cpu.usagePercent
+    max: 80
+    tags: [performance, infrastructure]
+
+  - id: memory-within-bounds
+    type: Threshold
+    description: Memory usage must stay between 10% and 90%
+    severity: high
+    selector: metrics.memory.usagePercent
+    min: 10
+    max: 90
+
+  - id: error-rate-low
+    type: Threshold
+    description: API error rate must stay below 5%
+    severity: critical
+    selector: metrics.api.errorRatePercent
+    max: 5
+    tags: [reliability, api]
+
+  - id: active-agents-minimum
+    type: Threshold
+    description: At least 2 agents must be active at all times
+    severity: high
+    selector: agents.activeCount
+    min: 2
+
+  # ── Distribution examples ─────────────────────────────────────────────────
+
+  - id: agent-status-distribution
+    type: Distribution
+    description: Agent statuses should follow expected distribution
+    severity: medium
+    selector: agents.allStatuses
+    distribution:
+      active: 0.7
+      idle: 0.2
+      error: 0.1
+    tolerance: 0.15
+    tags: [agents, health]
+
+  - id: all-ids-are-uuids
+    type: Distribution
+    description: All resource IDs must be valid UUIDs
+    severity: high
+    selector: resources.ids
+    pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+  - id: log-levels-distribution
+    type: Distribution
+    description: Log level distribution should not be dominated by errors
+    severity: high
+    selector: logs.levelCounts
+    distribution:
+      info: 0.7
+      warn: 0.2
+      error: 0.1
+    tolerance: 0.2
