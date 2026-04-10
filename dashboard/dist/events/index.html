@@ -1,0 +1,256 @@
+<!DOCTYPE html><html lang="en" data-astro-cid-kqx5um5x> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Events — Workstacean</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><style>:root{--bg-canvas: #0d1117;--bg-default: #161b22;--bg-subtle: #21262d;--bg-inset: #010409;--border-default: #30363d;--border-muted: #21262d;--text-primary: #c9d1d9;--text-secondary: #8b949e;--text-link: #58a6ff;--text-success: #3fb950;--text-warning: #d29922;--text-danger: #f85149;--accent-fg: #58a6ff;--accent-emphasis: #1f6feb;--sidebar-width: 220px;--header-height: 56px}*,*:before,*:after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background-color:var(--bg-canvas);color:var(--text-primary);font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5}a{color:var(--text-link);text-decoration:none}a:hover{text-decoration:underline}code,pre{font-family:SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace;font-size:12px}pre{background:var(--bg-inset);padding:12px;border-radius:6px;overflow:auto;border:1px solid var(--border-default)}h1,h2,h3,h4{color:var(--text-primary);font-weight:600}.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:500}.badge-green{background:#3fb95026;color:var(--text-success)}.badge-yellow{background:#d2992226;color:var(--text-warning)}.badge-red{background:#f8514926;color:var(--text-danger)}.badge-blue{background:#58a6ff26;color:var(--accent-fg)}.card{background:var(--bg-default);border:1px solid var(--border-default);border-radius:6px;padding:16px}.card-title{font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}.placeholder-content{color:var(--text-secondary);font-style:italic;text-align:center;padding:48px 24px}.layout[data-astro-cid-kqx5um5x]{display:flex;height:100vh;overflow:hidden}.sidebar[data-astro-cid-kqx5um5x]{width:var(--sidebar-width);background:var(--bg-default);border-right:1px solid var(--border-default);display:flex;flex-direction:column;flex-shrink:0}.sidebar-logo[data-astro-cid-kqx5um5x]{display:flex;align-items:center;gap:10px;padding:16px;border-bottom:1px solid var(--border-muted);font-weight:600;font-size:15px}.logo-icon[data-astro-cid-kqx5um5x]{font-size:20px;color:var(--accent-fg)}.sidebar-nav[data-astro-cid-kqx5um5x]{display:flex;flex-direction:column;padding:8px 0;gap:2px}.nav-item[data-astro-cid-kqx5um5x]{display:block;padding:8px 16px;color:var(--text-secondary);border-radius:6px;margin:0 8px;font-size:13px;font-weight:500;transition:background .1s,color .1s}.nav-item[data-astro-cid-kqx5um5x]:hover{background:var(--bg-subtle);color:var(--text-primary);text-decoration:none}.nav-item--active[data-astro-cid-kqx5um5x],.nav-item--active[data-astro-cid-kqx5um5x]:hover{background:var(--accent-emphasis);color:#fff}.main-wrapper[data-astro-cid-kqx5um5x]{flex:1;display:flex;flex-direction:column;overflow:hidden}.header[data-astro-cid-kqx5um5x]{height:var(--header-height);background:var(--bg-default);border-bottom:1px solid var(--border-default);display:flex;align-items:center;justify-content:space-between;padding:0 24px;flex-shrink:0}.header-title[data-astro-cid-kqx5um5x]{font-size:16px;font-weight:600;color:var(--text-primary)}.header-status[data-astro-cid-kqx5um5x]{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary)}.status-dot[data-astro-cid-kqx5um5x]{width:8px;height:8px;border-radius:50%;flex-shrink:0}.status-dot--connected[data-astro-cid-kqx5um5x]{background:var(--text-success);box-shadow:0 0 4px var(--text-success)}.status-dot--connecting[data-astro-cid-kqx5um5x]{background:var(--text-warning);animation:pulse 1.5s ease-in-out infinite}.status-dot--disconnected[data-astro-cid-kqx5um5x]{background:var(--text-danger)}@keyframes pulse{0%,to{opacity:1}50%{opacity:.4}}.main-content[data-astro-cid-kqx5um5x]{flex:1;overflow-y:auto;padding:24px;background:var(--bg-canvas)}
+.content{display:flex;flex-direction:column;padding:0!important;overflow:hidden}
+</style></head> <body data-astro-cid-kqx5um5x> <div class="layout" data-astro-cid-kqx5um5x> <aside class="sidebar" data-astro-cid-kqx5um5x> <div class="sidebar-logo" data-astro-cid-kqx5um5x> <span class="logo-icon" data-astro-cid-kqx5um5x>⬡</span> <span class="logo-text" data-astro-cid-kqx5um5x>Workstacean</span> </div> <nav class="sidebar-nav" data-astro-cid-kqx5um5x> <a href="/" class="nav-item " data-astro-cid-kqx5um5x> Overview </a><a href="/world-state" class="nav-item " data-astro-cid-kqx5um5x> World State </a><a href="/events" class="nav-item nav-item--active" data-astro-cid-kqx5um5x> Events </a><a href="/goals" class="nav-item " data-astro-cid-kqx5um5x> Goals </a><a href="/projects" class="nav-item " data-astro-cid-kqx5um5x> Projects </a> </nav> </aside> <div class="main-wrapper" data-astro-cid-kqx5um5x> <header class="header" data-astro-cid-kqx5um5x> <h1 class="header-title" data-astro-cid-kqx5um5x>Events</h1> <div class="header-status" id="ws-status" data-astro-cid-kqx5um5x> <span class="status-dot status-dot--connecting" data-astro-cid-kqx5um5x></span> <span class="status-label" data-astro-cid-kqx5um5x>Connecting…</span> </div> </header> <main class="main-content" data-astro-cid-kqx5um5x>  <style>astro-island,astro-slot,astro-static-slot{display:contents}</style><script>(()=>{var e=async t=>{await(await t())()};(self.Astro||(self.Astro={})).load=e;window.dispatchEvent(new Event("astro:load"));})();</script><script>(()=>{var A=Object.defineProperty;var g=(i,o,a)=>o in i?A(i,o,{enumerable:!0,configurable:!0,writable:!0,value:a}):i[o]=a;var d=(i,o,a)=>g(i,typeof o!="symbol"?o+"":o,a);{let i={0:t=>m(t),1:t=>a(t),2:t=>new RegExp(t),3:t=>new Date(t),4:t=>new Map(a(t)),5:t=>new Set(a(t)),6:t=>BigInt(t),7:t=>new URL(t),8:t=>new Uint8Array(t),9:t=>new Uint16Array(t),10:t=>new Uint32Array(t),11:t=>Number.POSITIVE_INFINITY*t},o=t=>{let[l,e]=t;return l in i?i[l](e):void 0},a=t=>t.map(o),m=t=>typeof t!="object"||t===null?t:Object.fromEntries(Object.entries(t).map(([l,e])=>[l,o(e)]));class y extends HTMLElement{constructor(){super(...arguments);d(this,"Component");d(this,"hydrator");d(this,"hydrate",async()=>{var b;if(!this.hydrator||!this.isConnected)return;let e=(b=this.parentElement)==null?void 0:b.closest("astro-island[ssr]");if(e){e.addEventListener("astro:hydrate",this.hydrate,{once:!0});return}let c=this.querySelectorAll("astro-slot"),n={},h=this.querySelectorAll("template[data-astro-template]");for(let r of h){let s=r.closest(this.tagName);s!=null&&s.isSameNode(this)&&(n[r.getAttribute("data-astro-template")||"default"]=r.innerHTML,r.remove())}for(let r of c){let s=r.closest(this.tagName);s!=null&&s.isSameNode(this)&&(n[r.getAttribute("name")||"default"]=r.innerHTML)}let p;try{p=this.hasAttribute("props")?m(JSON.parse(this.getAttribute("props"))):{}}catch(r){let s=this.getAttribute("component-url")||"<unknown>",v=this.getAttribute("component-export");throw v&&(s+=` (export ${v})`),console.error(`[hydrate] Error parsing props for component ${s}`,this.getAttribute("props"),r),r}let u;await this.hydrator(this)(this.Component,p,n,{client:this.getAttribute("client")}),this.removeAttribute("ssr"),this.dispatchEvent(new CustomEvent("astro:hydrate"))});d(this,"unmount",()=>{this.isConnected||this.dispatchEvent(new CustomEvent("astro:unmount"))})}disconnectedCallback(){document.removeEventListener("astro:after-swap",this.unmount),document.addEventListener("astro:after-swap",this.unmount,{once:!0})}connectedCallback(){if(!this.hasAttribute("await-children")||document.readyState==="interactive"||document.readyState==="complete")this.childrenConnectedCallback();else{let e=()=>{document.removeEventListener("DOMContentLoaded",e),c.disconnect(),this.childrenConnectedCallback()},c=new MutationObserver(()=>{var n;((n=this.lastChild)==null?void 0:n.nodeType)===Node.COMMENT_NODE&&this.lastChild.nodeValue==="astro:end"&&(this.lastChild.remove(),e())});c.observe(this,{childList:!0}),document.addEventListener("DOMContentLoaded",e)}}async childrenConnectedCallback(){let e=this.getAttribute("before-hydration-url");e&&await import(e),this.start()}async start(){let e=JSON.parse(this.getAttribute("opts")),c=this.getAttribute("client");if(Astro[c]===void 0){window.addEventListener(`astro:${c}`,()=>this.start(),{once:!0});return}try{await Astro[c](async()=>{let n=this.getAttribute("renderer-url"),[h,{default:p}]=await Promise.all([import(this.getAttribute("component-url")),n?import(n):()=>()=>{}]),u=this.getAttribute("component-export")||"default";if(!u.includes("."))this.Component=h[u];else{this.Component=h;for(let f of u.split("."))this.Component=this.Component[f]}return this.hydrator=p,this.hydrate},e,this)}catch(n){console.error(`[astro-island] Error hydrating ${this.getAttribute("component-url")}`,n)}}attributeChangedCallback(){this.hydrate()}}d(y,"observedAttributes",["props"]),customElements.get("astro-island")||customElements.define("astro-island",y)}})();</script><astro-island uid="ZeCvIO" component-url="/_astro/EventStream.oSl60TRG.js" component-export="default" renderer-url="/_astro/client.BeWP0xB0.js" props="{&quot;data-astro-cid-ro7pgs3h&quot;:[0,true]}" ssr client="load" opts="{&quot;name&quot;:&quot;EventStream&quot;,&quot;value&quot;:true}" await-children><style>
+        .es-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          background: #161b22;
+          border-bottom: 1px solid #30363d;
+          padding: 10px 16px;
+          flex-shrink: 0;
+          flex-wrap: wrap;
+        }
+        .es-tabs {
+          display: flex;
+          gap: 2px;
+          background: #0d1117;
+          border-radius: 6px;
+          padding: 2px;
+        }
+        .es-tab {
+          padding: 4px 14px;
+          font-size: 12px;
+          border-radius: 4px;
+          cursor: pointer;
+          color: #8b949e;
+          border: none;
+          background: transparent;
+          font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+          transition: all 0.15s;
+        }
+        .es-tab:hover { color: #c9d1d9; }
+        .es-tab.active { background: #21262d; color: #c9d1d9; }
+
+        .status-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #f85149;
+          transition: background 0.2s;
+          flex-shrink: 0;
+        }
+        .status-dot.connected { background: #3fb950; }
+        .status-dot.connecting { background: #d29922; animation: es-pulse 1s infinite; }
+        @keyframes es-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        .es-status {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          padding: 4px 10px;
+          border-radius: 12px;
+          background: #21262d;
+          color: #c9d1d9;
+          font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+        }
+        .es-badge {
+          font-size: 11px;
+          background: #30363d;
+          padding: 2px 8px;
+          border-radius: 10px;
+          color: #8b949e;
+          font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+        }
+        .es-toolbar {
+          background: #161b22;
+          border-bottom: 1px solid #30363d;
+          padding: 8px 16px;
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          flex-shrink: 0;
+          flex-wrap: wrap;
+        }
+        .es-filter {
+          background: #0d1117;
+          border: 1px solid #30363d;
+          color: #c9d1d9;
+          padding: 6px 10px;
+          border-radius: 6px;
+          font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+          font-size: 13px;
+          width: 260px;
+          outline: none;
+        }
+        .es-filter:focus { border-color: #58a6ff; }
+        .es-filter::placeholder { color: #484f58; }
+        .es-btn {
+          background: #21262d;
+          border: 1px solid #30363d;
+          color: #c9d1d9;
+          padding: 6px 12px;
+          border-radius: 6px;
+          font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+          font-size: 12px;
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+        .es-btn:hover { background: #30363d; }
+        .es-btn.active { background: #1f6feb; border-color: #1f6feb; }
+        .es-btn.paused { background: #da3633; border-color: #da3633; }
+
+        .es-list {
+          flex: 1;
+          overflow: auto;
+          padding: 4px 0;
+          font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+        }
+        .es-list::-webkit-scrollbar { width: 8px; }
+        .es-list::-webkit-scrollbar-track { background: #0d1117; }
+        .es-list::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+
+        .es-empty {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          height: 200px;
+          color: #484f58;
+          gap: 8px;
+          font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+          font-size: 14px;
+        }
+
+        /* Event rows */
+        .event-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          padding: 8px 16px;
+          border-bottom: 1px solid #21262d;
+          cursor: pointer;
+          transition: background 0.1s;
+          overflow-x: auto;
+        }
+        .event-row:hover { background: #161b22; }
+        .event-time {
+          font-size: 11px;
+          color: #484f58;
+          white-space: nowrap;
+          min-width: 70px;
+          padding-top: 2px;
+        }
+        .event-topic {
+          font-size: 11px;
+          padding: 2px 6px;
+          border-radius: 4px;
+          white-space: nowrap;
+          font-weight: 500;
+          letter-spacing: 0.5px;
+        }
+        .event-topic.source-agent { background: #1a1932; color: #bc8cff; }
+        .event-topic.source-cli { background: #122d20; color: #3fb950; }
+        .event-topic.source-signal { background: #2d1f12; color: #d29922; }
+        .event-topic.source-echo { background: #1f2330; color: #79c0ff; }
+        .event-topic.source-scheduler { background: #2d1229; color: #f778ba; }
+        .event-topic.source-logger { background: #1a2332; color: #58a6ff; }
+        .event-topic.source-event-viewer { background: #2d2a12; color: #e3b341; }
+        .event-topic.source-default { background: #21262d; color: #8b949e; }
+        .event-preview {
+          font-size: 12px;
+          color: #8b949e;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          flex: 1;
+        }
+        .event-detail {
+          display: none;
+          padding: 0 16px 12px 98px;
+          background: #0d1117;
+          border-bottom: 1px solid #21262d;
+        }
+        .event-detail.open { display: block; }
+        .event-detail pre {
+          background: #161b22;
+          border: 1px solid #30363d;
+          border-radius: 6px;
+          padding: 12px;
+          font-size: 12px;
+          overflow: auto;
+          max-height: 400px;
+          color: #c9d1d9;
+          line-height: 1.5;
+        }
+        .event-detail-toolbar {
+          display: flex;
+          gap: 6px;
+          margin-bottom: 6px;
+        }
+        .detail-btn {
+          background: #21262d;
+          border: 1px solid #30363d;
+          color: #8b949e;
+          padding: 3px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+          cursor: pointer;
+          font-family: inherit;
+        }
+        .detail-btn:hover { background: #30363d; color: #c9d1d9; }
+
+        /* Log rows */
+        .log-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          padding: 4px 16px;
+          border-bottom: 1px solid #161b22;
+          cursor: pointer;
+          transition: background 0.1s;
+        }
+        .log-row:hover { background: #161b22; }
+        .log-level {
+          font-size: 10px;
+          padding: 1px 6px;
+          border-radius: 3px;
+          white-space: nowrap;
+          font-weight: 600;
+          text-transform: uppercase;
+          min-width: 44px;
+          text-align: center;
+        }
+        .log-level.log { background: #21262d; color: #8b949e; }
+        .log-level.debug { background: #1a2332; color: #58a6ff; }
+        .log-level.info { background: #122d20; color: #3fb950; }
+        .log-level.warn { background: #2d1f12; color: #d29922; }
+        .log-level.error { background: #2d1215; color: #f85149; }
+        .log-message {
+          font-size: 12px;
+          color: #6e7681;
+          flex: 1;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .log-detail {
+          display: none;
+          padding: 0 16px 12px 98px;
+          background: #0d1117;
+          border-bottom: 1px solid #161b22;
+        }
+        .log-detail.open { display: block; }
+        .log-detail pre {
+          background: #161b22;
+          border: 1px solid #30363d;
+          border-radius: 6px;
+          padding: 12px;
+          font-size: 12px;
+          overflow: auto;
+          max-height: 400px;
+          color: #c9d1d9;
+          line-height: 1.5;
+        }
+      </style><div class="es-header"><div class="es-tabs"><button class="es-tab active">Events</button><button class="es-tab">Logs</button></div><div class="es-status"><span class="status-dot connecting"></span>Connecting…</div><div class="es-badge">0 events</div></div><div class="es-toolbar"><input class="es-filter" type="text" placeholder="Filter by topic (e.g. agent.*)" value/><button class="es-btn">Clear</button><button class="es-btn">Pause</button><button class="es-btn active" title="Toggle auto-scroll">Auto-scroll</button></div><div class="es-list"><div class="es-empty"><p>Waiting for events…</p></div></div><!--astro:end--></astro-island>  </main> </div> </div> <script type="module">const c=document.getElementById("ws-status"),o=c?.querySelector(".status-dot"),s=c?.querySelector(".status-label");function n(t){!o||!s||(o.className=`status-dot status-dot--${t}`,s.textContent=t==="connected"?"Live":t==="connecting"?"Connecting…":"Disconnected")}function d(){const t=location.protocol==="https:"?"wss":"ws",e=new WebSocket(`${t}://${location.host}/ws`);e.addEventListener("open",()=>n("connected")),e.addEventListener("close",()=>{n("disconnected"),setTimeout(d,3e3)}),e.addEventListener("error",()=>n("disconnected"))}d();</script> </body> </html>

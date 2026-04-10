@@ -8,7 +8,7 @@ import { CLIPlugin } from "../lib/plugins/cli";
 import { SignalPlugin } from "../lib/plugins/signal";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { ActionRegistry } from "./planner/action-registry";
-import type { Plugin, BusMessage } from "../lib/types";
+import type { Plugin, } from "../lib/types";
 import type { Action } from "./planner/types/action";
 // --- Workspace config ---
 const workspaceDir = resolve(
