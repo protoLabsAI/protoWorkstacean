@@ -22,7 +22,7 @@ export class EventViewerPlugin implements Plugin {
 
   constructor(port: number = 8080) {
     this.port = port;
-    this.viewerDir = resolve(__dirname, "../../src/viewer");
+    this.viewerDir = resolve(__dirname, "../../dashboard/dist");
     this.workspaceDir = resolve(process.env.WORKSPACE_DIR || join(process.cwd(), "workspace"));
   }
 
@@ -51,6 +51,8 @@ export class EventViewerPlugin implements Plugin {
         if (url.pathname === "/api/consumers") return this.handleApiConsumers();
         if (url.pathname === "/api/projects") return this.handleApiProjects();
         if (url.pathname === "/api/agents") return this.handleApiAgents();
+
+        if (url.pathname.startsWith("/api/")) return this.proxyToMainServer(req, url);
 
         return this.serveStatic(url.pathname);
       },
@@ -134,6 +136,26 @@ export class EventViewerPlugin implements Plugin {
       return Response.json({ success: true, data: parsed[key] ?? [] });
     } catch (err) {
       return Response.json({ success: false, error: `Failed to parse ${filename}` }, { status: 500 });
+    }
+  }
+
+  private mainServerPort: number = parseInt(process.env.PORT || "3000", 10);
+
+  private async proxyToMainServer(req: Request, url: URL): Promise<Response> {
+    const target = `http://localhost:${this.mainServerPort}${url.pathname}${url.search}`;
+    try {
+      const proxyReq = new Request(target, {
+        method: req.method,
+        headers: req.headers,
+        body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
+      });
+      const res = await fetch(proxyReq);
+      const body = await res.arrayBuffer();
+      const headers = new Headers(res.headers);
+      headers.set("Access-Control-Allow-Origin", "*");
+      return new Response(body, { status: res.status, headers });
+    } catch {
+      return Response.json({ error: "Main server unavailable" }, { status: 502 });
     }
   }
 

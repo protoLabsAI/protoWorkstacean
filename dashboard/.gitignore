@@ -1,0 +1,15 @@
+# build output
+dist/
+.astro/
+
+# deps
+node_modules/
+
+# environment
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+bun.lock.bak

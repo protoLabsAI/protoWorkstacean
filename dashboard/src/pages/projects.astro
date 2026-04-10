@@ -1,0 +1,8 @@
+---
+import DashboardLayout from "../layouts/DashboardLayout.astro";
+import ProjectsView from "../components/ProjectsView.tsx";
+---
+
+<DashboardLayout title="Projects" activePage="projects">
+  <ProjectsView client:load />
+</DashboardLayout>

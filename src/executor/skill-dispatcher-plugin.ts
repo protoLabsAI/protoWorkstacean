@@ -68,11 +68,15 @@ export class SkillDispatcherPlugin implements Plugin {
       ?? (payload.meta as Record<string, unknown> | undefined)?.skillHint as string | undefined
       ?? "";
 
-    const targets: string[] = Array.isArray(payload.targets)
-      ? (payload.targets as string[])
-      : typeof (payload.meta as Record<string, unknown> | undefined)?.agentId === "string"
-        ? [(payload.meta as Record<string, unknown>).agentId as string]
-        : [];
+    let targets: string[] = [];
+    if (Array.isArray(payload.targets)) {
+      targets = payload.targets as string[];
+    } else {
+      const meta = payload.meta as Record<string, unknown> | undefined;
+      if (typeof meta?.agentId === "string") {
+        targets = [meta.agentId];
+      }
+    }
 
     const correlationId = msg.correlationId;
     const parentId = msg.id; // this message is the parent span

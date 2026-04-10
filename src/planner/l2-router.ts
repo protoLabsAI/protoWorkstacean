@@ -9,14 +9,13 @@
  *   4. Escalate to L3 (human-in-the-loop)
  */
 
-import type { Goal, L0Context, L1Result, NamedGoal, Plan, PlannerState, BudgetConfig } from "./types.ts";
+import type { Goal, L0Context, L1Result, NamedGoal, PlannerState, BudgetConfig } from "./types.ts";
 import type {
   FailureContext,
   L2Context,
   L2Result,
   RoutingConfig,
   RoutingDecision,
-  RoutingTarget,
 } from "./routing-interface.ts";
 import { DEFAULT_ROUTING_CONFIG } from "./routing-interface.ts";
 import { HybridPlanner } from "./hybrid-planner.ts";

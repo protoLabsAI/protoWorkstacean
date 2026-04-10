@@ -5,8 +5,6 @@
 
 import type { Plan, PlannerState, Goal } from "./types.ts";
 import { validatePlan } from "./plan-validator.ts";
-import { cloneState } from "./world-state.ts";
-import { applyEffects } from "./action.ts";
 
 /** Optimization result with before/after stats. */
 export interface OptimizationResult {
