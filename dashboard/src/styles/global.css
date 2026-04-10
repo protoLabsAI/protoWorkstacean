@@ -1,0 +1,121 @@
+/* GitHub dark palette #0d1117 */
+:root {
+  --bg-canvas: #0d1117;
+  --bg-default: #161b22;
+  --bg-subtle: #21262d;
+  --bg-inset: #010409;
+  --border-default: #30363d;
+  --border-muted: #21262d;
+  --text-primary: #c9d1d9;
+  --text-secondary: #8b949e;
+  --text-link: #58a6ff;
+  --text-success: #3fb950;
+  --text-warning: #d29922;
+  --text-danger: #f85149;
+  --accent-fg: #58a6ff;
+  --accent-emphasis: #1f6feb;
+  --sidebar-width: 220px;
+  --header-height: 56px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--text-link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+code,
+pre {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+}
+
+pre {
+  background: var(--bg-inset);
+  padding: 12px;
+  border-radius: 6px;
+  overflow: auto;
+  border: 1px solid var(--border-default);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.badge-green {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--text-success);
+}
+
+.badge-yellow {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--text-warning);
+}
+
+.badge-red {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--text-danger);
+}
+
+.badge-blue {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent-fg);
+}
+
+.card {
+  background: var(--bg-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 16px;
+}
+
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+.placeholder-content {
+  color: var(--text-secondary);
+  font-style: italic;
+  text-align: center;
+  padding: 48px 24px;
+}
