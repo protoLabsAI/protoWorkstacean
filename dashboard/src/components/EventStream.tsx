@@ -129,15 +129,60 @@ export default function EventStream() {
   return (
     <>
       <style>{`
+        .es-root {
+          display: flex;
+          flex-direction: column;
+          /* Fill the main-content area (which has its own overflow) */
+          min-height: calc(100vh - var(--header-height) - 48px);
+          margin: -24px;
+        }
+        .es-sticky {
+          position: sticky;
+          top: -24px;
+          z-index: 10;
+          background: linear-gradient(180deg, #161b22 0%, #12161d 100%);
+          border-bottom: 1px solid #30363d;
+          box-shadow: 0 4px 12px -8px rgba(0, 0, 0, 0.5);
+          backdrop-filter: blur(8px);
+        }
         .es-header {
           display: flex;
           align-items: center;
           gap: 12px;
-          background: #161b22;
-          border-bottom: 1px solid #30363d;
-          padding: 10px 16px;
-          flex-shrink: 0;
+          padding: 12px 20px 10px 20px;
           flex-wrap: wrap;
+          position: relative;
+        }
+        .es-header::before {
+          content: "";
+          position: absolute;
+          left: 20px;
+          top: 0;
+          width: 3px;
+          height: 100%;
+          background: linear-gradient(180deg, #58a6ff 0%, #1f6feb 100%);
+          border-radius: 0 0 2px 2px;
+          opacity: 0.8;
+        }
+        .es-header-title {
+          font-size: 13px;
+          font-weight: 600;
+          color: #c9d1d9;
+          letter-spacing: 0.3px;
+          text-transform: uppercase;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .es-header-title::before {
+          content: "◉";
+          color: #58a6ff;
+          font-size: 14px;
+          animation: es-pulse-dot 2s ease-in-out infinite;
+        }
+        @keyframes es-pulse-dot {
+          0%, 100% { opacity: 0.4; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.1); }
         }
         .es-tabs {
           display: flex;
@@ -145,9 +190,10 @@ export default function EventStream() {
           background: #0d1117;
           border-radius: 6px;
           padding: 2px;
+          border: 1px solid #21262d;
         }
         .es-tab {
-          padding: 4px 14px;
+          padding: 5px 16px;
           font-size: 12px;
           border-radius: 4px;
           cursor: pointer;
@@ -155,10 +201,15 @@ export default function EventStream() {
           border: none;
           background: transparent;
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+          font-weight: 500;
           transition: all 0.15s;
         }
         .es-tab:hover { color: #c9d1d9; }
-        .es-tab.active { background: #21262d; color: #c9d1d9; }
+        .es-tab.active {
+          background: #21262d;
+          color: #c9d1d9;
+          box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.2);
+        }
 
         .status-dot {
           width: 8px;
@@ -168,7 +219,10 @@ export default function EventStream() {
           transition: background 0.2s;
           flex-shrink: 0;
         }
-        .status-dot.connected { background: #3fb950; }
+        .status-dot.connected {
+          background: #3fb950;
+          box-shadow: 0 0 6px rgba(63, 185, 80, 0.6);
+        }
         .status-dot.connecting { background: #d29922; animation: es-pulse 1s infinite; }
         @keyframes es-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
@@ -182,23 +236,23 @@ export default function EventStream() {
           background: #21262d;
           color: #c9d1d9;
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+          border: 1px solid #30363d;
         }
         .es-badge {
           font-size: 11px;
           background: #30363d;
-          padding: 2px 8px;
+          padding: 3px 10px;
           border-radius: 10px;
-          color: #8b949e;
+          color: #c9d1d9;
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+          font-weight: 500;
+          margin-left: auto;
         }
         .es-toolbar {
-          background: #161b22;
-          border-bottom: 1px solid #30363d;
-          padding: 8px 16px;
+          padding: 8px 20px 12px 20px;
           display: flex;
           gap: 8px;
           align-items: center;
-          flex-shrink: 0;
           flex-wrap: wrap;
         }
         .es-filter {
@@ -383,78 +437,83 @@ export default function EventStream() {
         }
       `}</style>
 
-      <div class="es-header">
-        <div class="es-tabs">
-          <button
-            class={`es-tab${activeTab === "events" ? " active" : ""}`}
-            onClick={() => { setActiveTab("events"); setExpandedId(null); }}
-          >
-            Events
-          </button>
-          <button
-            class={`es-tab${activeTab === "logs" ? " active" : ""}`}
-            onClick={() => { setActiveTab("logs"); setExpandedId(null); }}
-          >
-            Logs
-          </button>
-        </div>
-        <div class="es-status">
-          <span class={dotClass} />
-          {statusLabel}
-        </div>
-        <div class="es-badge">
-          {filtered.length} {activeTab === "events" ? "events" : "logs"}
-        </div>
-      </div>
-
-      <div class="es-toolbar">
-        <input
-          class="es-filter"
-          type="text"
-          placeholder={activeTab === "events" ? "Filter by topic (e.g. agent.*)" : "Filter by topic (e.g. debug.*)"}
-          value={filter}
-          onInput={(e) => setFilter((e.target as HTMLInputElement).value)}
-        />
-        <button class="es-btn" onClick={clearActive}>Clear</button>
-        <button
-          class={`es-btn${isPaused ? " paused" : ""}`}
-          onClick={() => setIsPaused((p) => !p)}
-        >
-          {isPaused ? "Resume" : "Pause"}
-        </button>
-        <button
-          class={`es-btn${autoScroll ? " active" : ""}`}
-          onClick={() => setAutoScroll((a) => !a)}
-          title="Toggle auto-scroll"
-        >
-          Auto-scroll
-        </button>
-      </div>
-
-      <div class="es-list" ref={listRef} onScroll={handleScroll}>
-        {filtered.length === 0 ? (
-          <div class="es-empty">
-            <p>{items.length === 0 ? "Waiting for events…" : "No matches for current filter"}</p>
+      <div class="es-root">
+        <div class="es-sticky">
+          <div class="es-header">
+            <div class="es-header-title">Event Stream</div>
+            <div class="es-tabs">
+              <button
+                class={`es-tab${activeTab === "events" ? " active" : ""}`}
+                onClick={() => { setActiveTab("events"); setExpandedId(null); }}
+              >
+                Events
+              </button>
+              <button
+                class={`es-tab${activeTab === "logs" ? " active" : ""}`}
+                onClick={() => { setActiveTab("logs"); setExpandedId(null); }}
+              >
+                Logs
+              </button>
+            </div>
+            <div class="es-status">
+              <span class={dotClass} />
+              {statusLabel}
+            </div>
+            <div class="es-badge">
+              {filtered.length} {activeTab === "events" ? "events" : "logs"}
+            </div>
           </div>
-        ) : (
-          filtered.map((msg) =>
-            activeTab === "events" ? (
-              <EventRow
-                key={msg.id ?? msg.timestamp}
-                msg={msg}
-                isExpanded={expandedId === (msg.id ?? msg.timestamp)}
-                onClick={() => toggleExpanded(msg.id ?? msg.timestamp)}
-              />
-            ) : (
-              <LogRow
-                key={msg.id ?? msg.timestamp}
-                msg={msg}
-                isExpanded={expandedId === (msg.id ?? msg.timestamp)}
-                onClick={() => toggleExpanded(msg.id ?? msg.timestamp)}
-              />
+
+          <div class="es-toolbar">
+            <input
+              class="es-filter"
+              type="text"
+              placeholder={activeTab === "events" ? "Filter by topic (e.g. agent.*)" : "Filter by topic (e.g. debug.*)"}
+              value={filter}
+              onInput={(e) => setFilter((e.target as HTMLInputElement).value)}
+            />
+            <button class="es-btn" onClick={clearActive}>Clear</button>
+            <button
+              class={`es-btn${isPaused ? " paused" : ""}`}
+              onClick={() => setIsPaused((p) => !p)}
+            >
+              {isPaused ? "Resume" : "Pause"}
+            </button>
+            <button
+              class={`es-btn${autoScroll ? " active" : ""}`}
+              onClick={() => setAutoScroll((a) => !a)}
+              title="Toggle auto-scroll"
+            >
+              Auto-scroll
+            </button>
+          </div>
+        </div>
+
+        <div class="es-list" ref={listRef} onScroll={handleScroll}>
+          {filtered.length === 0 ? (
+            <div class="es-empty">
+              <p>{items.length === 0 ? "Waiting for events…" : "No matches for current filter"}</p>
+            </div>
+          ) : (
+            filtered.map((msg) =>
+              activeTab === "events" ? (
+                <EventRow
+                  key={msg.id ?? msg.timestamp}
+                  msg={msg}
+                  isExpanded={expandedId === (msg.id ?? msg.timestamp)}
+                  onClick={() => toggleExpanded(msg.id ?? msg.timestamp)}
+                />
+              ) : (
+                <LogRow
+                  key={msg.id ?? msg.timestamp}
+                  msg={msg}
+                  isExpanded={expandedId === (msg.id ?? msg.timestamp)}
+                  onClick={() => toggleExpanded(msg.id ?? msg.timestamp)}
+                />
+              )
             )
-          )
-        )}
+          )}
+        </div>
       </div>
     </>
   );
