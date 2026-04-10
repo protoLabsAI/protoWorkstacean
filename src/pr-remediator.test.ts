@@ -294,24 +294,43 @@ describe("PrRemediatorPlugin — fix_ci", () => {
 
   afterEach(() => plugin.uninstall());
 
-  test("dispatches to Ava for each failing-CI PR", async () => {
+  test("dispatches to Ava for each failing-CI PR with project targeting and directive prompt", async () => {
     pushWorldState(bus, [
-      makePr({ number: 100, ciStatus: "fail", title: "bug: foo" }),
-      makePr({ number: 200, ciStatus: "pass" }),  // should be skipped
-      makePr({ number: 300, ciStatus: "fail", title: "bug: bar" }),
+      makePr({ number: 100, ciStatus: "fail", title: "bug: foo", repo: "protoLabsAI/protoMaker" }),
+      makePr({ number: 200, ciStatus: "pass", repo: "protoLabsAI/protoMaker" }),  // should be skipped
+      makePr({ number: 300, ciStatus: "fail", title: "bug: bar", repo: "protoLabsAI/rabbit-hole.io" }),
     ]);
     const dispatches = captureOn(bus, "agent.skill.request");
     dispatch(bus, "pr.remediate.fix_ci");
     await flushMicrotasks();
     expect(dispatches.length).toBe(2);
-    const p0 = dispatches[0].payload as { skill: string; content: string; meta: { agentId: string; skillHint: string } };
+
+    const p0 = dispatches[0].payload as {
+      skill: string;
+      content: string;
+      meta: { agentId: string; skillHint: string };
+      projectSlug: string;
+      projectRepo: string;
+      prNumber: number;
+    };
     expect(p0.skill).toBe("bug_triage");
     // skill-dispatcher routes by payload.meta.agentId, not top-level agentId
     expect(p0.meta.agentId).toBe("ava");
     expect(p0.meta.skillHint).toBe("bug_triage");
+    // Project targeting — reaches Ava via A2AExecutor's `...req.payload` spread
+    expect(p0.projectSlug).toBe("protomaker");
+    expect(p0.projectRepo).toBe("protoLabsAI/protoMaker");
+    expect(p0.prNumber).toBe(100);
+    // Directive prompt: must demand start_auto_mode, not just create_feature
     expect(p0.content).toContain("#100");
-    const p1 = dispatches[1].payload as { content: string };
+    expect(p0.content).toContain("protomaker");
+    expect(p0.content).toContain("start_auto_mode");
+    expect(p0.content).toContain("REQUIRED STEPS");
+
+    const p1 = dispatches[1].payload as { content: string; projectSlug: string };
     expect(p1.content).toContain("#300");
+    // Verify slug derivation handles dotted repo names
+    expect(p1.projectSlug).toBe("rabbit-hole-io");
   });
 
   test("no-ops when no failing PRs exist", async () => {
@@ -335,19 +354,30 @@ describe("PrRemediatorPlugin — address_feedback", () => {
 
   afterEach(() => plugin.uninstall());
 
-  test("dispatches to Ava for changes_requested PRs", async () => {
+  test("dispatches to Ava for changes_requested PRs with project targeting", async () => {
     pushWorldState(bus, [
-      makePr({ number: 55, reviewState: "changes_requested" }),
-      makePr({ number: 56, reviewState: "approved" }),
+      makePr({ number: 55, reviewState: "changes_requested", repo: "protoLabsAI/protoMaker" }),
+      makePr({ number: 56, reviewState: "approved", repo: "protoLabsAI/protoMaker" }),
     ]);
     const dispatches = captureOn(bus, "agent.skill.request");
     dispatch(bus, "pr.remediate.address_feedback");
     await flushMicrotasks();
     expect(dispatches.length).toBe(1);
-    const p = dispatches[0].payload as { content: string; skill: string };
+    const p = dispatches[0].payload as {
+      content: string;
+      skill: string;
+      projectSlug: string;
+      projectRepo: string;
+      meta: { agentId: string };
+    };
     expect(p.skill).toBe("bug_triage");
+    expect(p.meta.agentId).toBe("ava");
+    expect(p.projectSlug).toBe("protomaker");
+    expect(p.projectRepo).toBe("protoLabsAI/protoMaker");
     expect(p.content).toContain("#55");
     expect(p.content).toContain("CHANGES_REQUESTED");
+    expect(p.content).toContain("start_auto_mode");
+    expect(p.content).toContain("REQUIRED STEPS");
   });
 });
 
