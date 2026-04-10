@@ -49,7 +49,7 @@ export interface AgentExecutorConfig {
 }
 
 export class AgentExecutor {
-  private readonly gatewayUrl: string;
+  private readonly gatewayUrl: string | undefined;
   private readonly gatewayApiKey: string | undefined;
 
   constructor(

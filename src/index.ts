@@ -619,7 +619,7 @@ function handleGetAgentHealth(): Response {
   for (const reg of registrations) {
     const name = reg.agentName ?? "_default";
     if (!agents[name]) agents[name] = { skills: [], executorType: reg.executor.type };
-    agents[name].skills.push(reg.skill);
+    if (reg.skill) agents[name].skills.push(reg.skill);
   }
 
   return Response.json({
