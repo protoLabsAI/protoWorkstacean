@@ -58,28 +58,48 @@ const getGithubToken = makeGitHubAuth();
  * create_feature / start_auto_mode tool calls to the right board.
  * The map is loaded lazily on first use and cached per-process.
  */
-let projectPathMapCache: Map<string, string> | null = null;
-function loadProjectPathMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? "workspace"): Map<string, string> {
-  if (projectPathMapCache) return projectPathMapCache;
-  const map = new Map<string, string>();
+interface ProjectMeta {
+  projectPath?: string;
+  devChannelId?: string;
+}
+let projectMetaCache: Map<string, ProjectMeta> | null = null;
+function loadProjectMetaMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? "workspace"): Map<string, ProjectMeta> {
+  if (projectMetaCache) return projectMetaCache;
+  const map = new Map<string, ProjectMeta>();
   const yamlPath = join(workspaceDir, "projects.yaml");
   if (!existsSync(yamlPath)) {
-    console.warn(`[pr-remediator] projects.yaml not found at ${yamlPath} — projectPath metadata will be empty`);
-    projectPathMapCache = map;
+    console.warn(`[pr-remediator] projects.yaml not found at ${yamlPath} — project metadata will be empty`);
+    projectMetaCache = map;
     return map;
   }
   try {
     const parsed = parseYaml(readFileSync(yamlPath, "utf8")) as {
-      projects?: Array<{ github?: string; projectPath?: string }>;
+      projects?: Array<{
+        github?: string;
+        projectPath?: string;
+        discord?: { dev?: { channelId?: string } };
+      }>;
     };
     for (const p of parsed.projects ?? []) {
-      if (p.github && p.projectPath) map.set(p.github, p.projectPath);
+      if (!p.github) continue;
+      map.set(p.github, {
+        projectPath: p.projectPath,
+        devChannelId: p.discord?.dev?.channelId,
+      });
     }
   } catch (err) {
     console.warn(`[pr-remediator] failed to parse projects.yaml: ${String(err)}`);
   }
-  projectPathMapCache = map;
+  projectMetaCache = map;
   return map;
+}
+function loadProjectPathMap(workspaceDir?: string): Map<string, string> {
+  const meta = loadProjectMetaMap(workspaceDir);
+  const out = new Map<string, string>();
+  for (const [repo, m] of meta) {
+    if (m.projectPath) out.set(repo, m.projectPath);
+  }
+  return out;
 }
 
 /**
@@ -407,6 +427,7 @@ export class PrRemediatorPlugin implements Plugin {
     const pr = (this.latestPrData?.prs ?? []).find((p) => p.repo === repo && p.number === number);
     const correlationId = crypto.randomUUID();
     const replyTopic = `hitl.response.pr.remediation_stuck.${correlationId}`;
+    const devChannelId = loadProjectMetaMap().get(repo)?.devChannelId;
 
     const durationMs = Date.now() - entry.startedAt;
     const durationMin = Math.round(durationMs / 60_000);
@@ -433,6 +454,7 @@ export class PrRemediatorPlugin implements Plugin {
       options: ["investigate", "mark_non_remediable", "manual_unblock"],
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       replyTopic,
+      sourceMeta: { interface: "discord", ...(devChannelId ? { channelId: devChannelId } : {}) },
     };
 
     const topic = `hitl.request.pr.remediation_stuck.${correlationId}`;
@@ -660,6 +682,7 @@ Critical rules:
     if (!this.bus) return;
     const correlationId = crypto.randomUUID();
     const replyTopic = `hitl.response.pr.merge.${correlationId}`;
+    const devChannelId = loadProjectMetaMap().get(pr.repo)?.devChannelId;
     const request: HITLRequest = {
       type: "hitl_request",
       correlationId,
@@ -675,6 +698,7 @@ Critical rules:
       options: ["approve", "reject"],
       expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
       replyTopic,
+      sourceMeta: { interface: "discord", ...(devChannelId ? { channelId: devChannelId } : {}) },
     };
     // Record the pending approval so the response handler can act on it
     this.pendingApprovals.set(correlationId, {

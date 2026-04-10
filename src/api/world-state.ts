@@ -17,6 +17,10 @@ interface ActionDispatcherAPI {
   getOutcomes(): { getAll(): unknown[]; summary(): unknown; getRecent(n: number): unknown[] };
 }
 
+interface HITLPluginAPI {
+  getQueueSnapshot(): { pendingCount: number; unrenderedCount: number };
+}
+
 function resolveGithubAuthType(): string | null {
   if (process.env.QUINN_APP_PRIVATE_KEY) return "app";
   if (process.env.GITHUB_TOKEN) return "token";
@@ -27,6 +31,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
   const wsEngine = ctx.plugins.find(p => p.name === "world-state-engine") as (WorldStateAPI & { name: string }) | undefined;
   const flowMonitor = ctx.plugins.find(p => p.name === "flow-monitor") as (FlowMonitorAPI & { name: string }) | undefined;
   const actionDispatcher = ctx.plugins.find(p => p.name === "action-dispatcher") as (ActionDispatcherAPI & { name: string }) | undefined;
+  const hitlPlugin = ctx.plugins.find(p => p.name === "hitl") as (HITLPluginAPI & { name: string }) | undefined;
 
   function handleGetWorldState(domain?: string): Response {
     if (!wsEngine) return Response.json({ success: false, error: "world-state-engine not available" }, { status: 503 });
@@ -94,6 +99,11 @@ export function createRoutes(ctx: ApiContext): Route[] {
     return Response.json({ summary: tracker.summary(), recent: tracker.getRecent(50) });
   }
 
+  function handleGetHitlQueue(): Response {
+    if (!hitlPlugin) return Response.json({ pendingCount: 0, unrenderedCount: 0 });
+    return Response.json(hitlPlugin.getQueueSnapshot());
+  }
+
   return [
     { method: "GET", path: "/api/world-state",          handler: () => handleGetWorldState() },
     { method: "GET", path: "/api/world-state/:domain",  handler: (_, p) => handleGetWorldState(p.domain) },
@@ -102,5 +112,6 @@ export function createRoutes(ctx: ApiContext): Route[] {
     { method: "GET", path: "/api/flow-metrics",         handler: () => handleGetFlowMetrics() },
     { method: "GET", path: "/api/flow-metrics/:metric", handler: (_, p) => handleGetFlowMetrics(p.metric) },
     { method: "GET", path: "/api/outcomes",             handler: () => handleGetOutcomes() },
+    { method: "GET", path: "/api/hitl-queue",           handler: () => handleGetHitlQueue() },
   ];
 }

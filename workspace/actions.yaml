@@ -352,3 +352,25 @@ actions:
       skillHint: auto_mode
       agentId: ava
       fireAndForget: true
+
+  # ── HITL routing health ───────────────────────────────────────────
+  #
+  # This alert bypasses the HITL plugin entirely — if the HITL routing
+  # itself is broken (the very thing this goal catches), sending an
+  # approval request through the broken path would fail silently too.
+  # Direct-to-Discord is the right escape hatch here.
+
+  - id: alert.hitl_routing_broken
+    goalId: hitl.no_unrendered_requests
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Direct Discord alert when HITL requests fall into hitl.pending (renderer missing)"
+    preconditions:
+      - path: "domains.hitl_queue.data.unrenderedCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
