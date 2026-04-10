@@ -115,3 +115,59 @@ actions:
     meta:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
+
+  # ── CI + PR Pipeline ─────────────────────────────────────────────
+
+  - id: alert.ci_failures
+    goalId: ci.success_rate_healthy
+    tier: tier_0
+    priority: 30
+    cost: 0
+    name: "Alert on CI failure rate"
+    preconditions:
+      - path: "extensions.ci_available"
+        operator: eq
+        value: true
+      - path: "domains.ci.data.successRate"
+        operator: lt
+        value: 0.70
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: alert.pr_conflicts
+    goalId: pr.no_conflicts
+    tier: tier_0
+    priority: 20
+    cost: 0
+    name: "Alert on PRs with merge conflicts"
+    preconditions:
+      - path: "extensions.pr_pipeline_available"
+        operator: eq
+        value: true
+      - path: "domains.pr_pipeline.data.conflicting"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: alert.pr_stale
+    goalId: pr.no_stale
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert on stale PRs"
+    preconditions:
+      - path: "extensions.pr_pipeline_available"
+        operator: eq
+        value: true
+      - path: "domains.pr_pipeline.data.stale"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true

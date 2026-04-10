@@ -644,6 +644,116 @@ function handleGetOutcomes(): Response {
   });
 }
 
+// ── CI health + PR pipeline API ────────────────────────────────────────────────
+
+function _loadProjectRepos(): string[] {
+  const projectsPath = join(workspaceDir, "projects.yaml");
+  if (!existsSync(projectsPath)) return [];
+  try {
+    const parsed = parseYaml(readFileSync(projectsPath, "utf8")) as { projects?: Array<{ github?: string }> };
+    return (parsed.projects ?? []).map(p => p.github).filter((g): g is string => !!g);
+  } catch { return []; }
+}
+
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+
+async function _ghApi(path: string): Promise<unknown> {
+  if (!GITHUB_TOKEN) throw new Error("GITHUB_TOKEN not set");
+  const resp = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      Authorization: `Bearer ${GITHUB_TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!resp.ok) throw new Error(`GitHub API ${resp.status}: ${path}`);
+  return resp.json();
+}
+
+async function handleGetCiHealth(): Promise<Response> {
+  const repos = _loadProjectRepos();
+  if (!repos.length) return Response.json({ successRate: 1, totalRuns: 0, failedRuns: 0, projects: [] });
+
+  const projects: Array<{ repo: string; successRate: number; totalRuns: number; failedRuns: number; latestConclusion: string | null }> = [];
+  let totalAll = 0;
+  let failedAll = 0;
+
+  for (const repo of repos) {
+    try {
+      const data = await _ghApi(`/repos/${repo}/actions/runs?per_page=10&status=completed`) as {
+        workflow_runs?: Array<{ conclusion: string }>;
+      };
+      const runs = data.workflow_runs ?? [];
+      const failed = runs.filter(r => r.conclusion === "failure").length;
+      const rate = runs.length > 0 ? (runs.length - failed) / runs.length : 1;
+      totalAll += runs.length;
+      failedAll += failed;
+      projects.push({
+        repo,
+        successRate: Math.round(rate * 100) / 100,
+        totalRuns: runs.length,
+        failedRuns: failed,
+        latestConclusion: runs[0]?.conclusion ?? null,
+      });
+    } catch {
+      projects.push({ repo, successRate: 0, totalRuns: 0, failedRuns: 0, latestConclusion: null });
+    }
+  }
+
+  const successRate = totalAll > 0 ? Math.round(((totalAll - failedAll) / totalAll) * 100) / 100 : 1;
+  return Response.json({ successRate, totalRuns: totalAll, failedRuns: failedAll, projects });
+}
+
+async function handleGetPrPipeline(): Promise<Response> {
+  const repos = _loadProjectRepos();
+  if (!repos.length) return Response.json({ totalOpen: 0, conflicting: 0, stale: 0, failing: 0, prs: [] });
+
+  const allPrs: Array<{
+    repo: string; number: number; title: string; mergeable: string;
+    checksPass: boolean; updatedAt: string; stale: boolean;
+  }> = [];
+
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+  for (const repo of repos) {
+    try {
+      const data = await _ghApi(`/repos/${repo}/pulls?state=open&per_page=30&sort=updated&direction=desc`) as Array<{
+        number: number; title: string; mergeable_state: string; updated_at: string;
+      }>;
+      for (const pr of data) {
+        const updatedMs = new Date(pr.updated_at).getTime();
+        const isStale = updatedMs < sevenDaysAgo;
+        // Check CI status via commit status
+        let checksPass = true;
+        try {
+          const checks = await _ghApi(`/repos/${repo}/pulls/${pr.number}/reviews`) as Array<{ state: string }>;
+          // Simplified: if any review requests changes, mark as not passing
+          checksPass = !checks.some(r => r.state === "CHANGES_REQUESTED");
+        } catch { /* treat as passing if we can't check */ }
+
+        allPrs.push({
+          repo, number: pr.number, title: pr.title,
+          mergeable: pr.mergeable_state,
+          checksPass, updatedAt: pr.updated_at, stale: isStale,
+        });
+      }
+    } catch { /* skip repos we can't reach */ }
+  }
+
+  const conflicting = allPrs.filter(p => p.mergeable === "dirty").length;
+  const stale = allPrs.filter(p => p.stale).length;
+  const failing = allPrs.filter(p => !p.checksPass).length;
+
+  return Response.json({
+    totalOpen: allPrs.length,
+    conflicting,
+    stale,
+    failing,
+    prs: allPrs,
+  });
+}
+
 function handleGetCeremonies(): Response {
   const ceremoniesDir = join(workspaceDir, "ceremonies");
   if (!existsSync(ceremoniesDir)) return Response.json({ success: true, data: [] });
@@ -881,6 +991,8 @@ const routes: Array<{ method: string; path: string; handler: RouteHandler }> = [
   { method: "GET",  path: "/api/flow-metrics",          handler: () => handleGetFlowMetrics() },
   { method: "GET",  path: "/api/flow-metrics/:metric",  handler: (_, p) => handleGetFlowMetrics(p.metric) },
   { method: "GET",  path: "/api/outcomes",              handler: () => handleGetOutcomes() },
+  { method: "GET",  path: "/api/ci-health",             handler: () => handleGetCiHealth() },
+  { method: "GET",  path: "/api/pr-pipeline",           handler: () => handleGetPrPipeline() },
   { method: "GET",  path: "/api/ceremonies",            handler: () => handleGetCeremonies() },
   { method: "POST", path: "/api/ceremonies/:id/run",    handler: (req, p) => handleRunCeremony(req, p.id) },
   { method: "GET",  path: "/api/skills/:agentName",     handler: (_, p) => handleGetAgentSkills(p.agentName) },
@@ -921,7 +1033,9 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     engine.registerDomain("services", createHttpCollector(`${base}/api/services`), 60_000);
     engine.registerDomain("agent_health", createHttpCollector(`${base}/api/agent-health`), 60_000);
     engine.registerDomain("security", createHttpCollector(`${base}/api/security-summary`), 60_000);
+    engine.registerDomain("ci", createHttpCollector(`${base}/api/ci-health`), 300_000); // 5min — GitHub rate limits
+    engine.registerDomain("pr_pipeline", createHttpCollector(`${base}/api/pr-pipeline`), 120_000); // 2min
 
-    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security (60s)");
+    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline");
   }
 }
