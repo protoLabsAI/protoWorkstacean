@@ -20,7 +20,7 @@ import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
-import { validateProjectEntry } from "../project-schema.ts";
+import { validateProjectEntry, channelIdOf } from "../project-schema.ts";
 
 // ── Internal types ────────────────────────────────────────────────────────────
 
@@ -62,8 +62,9 @@ function buildMapping(projectsPath: string): Map<string, ProjectMapping> {
     if (project.status === "archived" || project.status === "suspended") continue;
 
     // Resolve Discord channel: prefer dev, fall back to general
-    const discordChannelId =
-      (project.discord.dev?.trim() || project.discord.general?.trim()) ?? "";
+    const devId = channelIdOf(project.discord.dev).trim();
+    const generalId = channelIdOf(project.discord.general).trim();
+    const discordChannelId = devId || generalId;
 
     if (!discordChannelId) continue; // no Discord channel — skip
 

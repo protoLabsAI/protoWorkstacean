@@ -24,12 +24,36 @@ export const GoogleWorkspaceSchema = z.object({
 
 export type GoogleWorkspace = z.infer<typeof GoogleWorkspaceSchema>;
 
+/**
+ * A single Discord channel entry. Supports the legacy flat-string form
+ * (just a channelId) and the new object form that carries both channelId
+ * and an optional per-channel webhook URL for high-throughput paths
+ * that don't go through the bot.
+ */
+export const ProjectDiscordChannelSchema = z.union([
+  z.string(),
+  z.object({
+    channelId: z.string(),
+    webhook: z.string().optional(),
+  }),
+]);
+
+export type ProjectDiscordChannel = z.infer<typeof ProjectDiscordChannelSchema>;
+
+/** Extract a channelId regardless of whether the field is string or object. */
+export function channelIdOf(channel: ProjectDiscordChannel | undefined): string {
+  if (!channel) return "";
+  if (typeof channel === "string") return channel;
+  return channel.channelId;
+}
+
 export const ProjectDiscordSchema = z.object({
-  general: z.string().optional(),
-  updates: z.string().optional(),
-  dev: z.string(),        // required — may be empty string until channel is created
-  alerts: z.string().optional(),
-  releases: z.string().optional(),
+  general: ProjectDiscordChannelSchema.optional(),
+  updates: ProjectDiscordChannelSchema.optional(),
+  dev: ProjectDiscordChannelSchema,  // required — may be empty string until channel is created
+  alerts: ProjectDiscordChannelSchema.optional(),
+  releases: ProjectDiscordChannelSchema.optional(),
+  release: ProjectDiscordChannelSchema.optional(),
 });
 
 export const OnboardingStateSchema = z.object({

@@ -42,6 +42,7 @@ import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer, type TurnData } from "../conversation/conversation-tracer.ts";
 import { GraphitiClient } from "../memory/graphiti-client.ts";
 import { IdentityRegistry } from "../identity/identity-registry.ts";
+import { channelIdOf, type ProjectDiscordChannel } from "../project-schema.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -181,7 +182,11 @@ interface ProjectEntry {
   title: string;
   github?: string;
   status?: string;
-  discord?: { general?: string; updates?: string; dev?: string };
+  discord?: {
+    general?: ProjectDiscordChannel;
+    updates?: ProjectDiscordChannel;
+    dev?: ProjectDiscordChannel;
+  };
 }
 
 interface ProjectsYaml {
@@ -547,7 +552,7 @@ export class DiscordPlugin implements Plugin {
           const projects = loadProjectsDefs(this.workspaceDir);
           const project = projects.find(p => p.slug === projectSlug);
           if (project) {
-            devChannelId = project.discord?.dev || undefined;
+            devChannelId = channelIdOf(project.discord?.dev) || undefined;
             projectRepo = project.github || undefined;
           }
         }
