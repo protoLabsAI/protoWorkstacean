@@ -1,4 +1,7 @@
-# How to Set Up Google Workspace
+---
+title: How to Set Up Google Workspace
+---
+
 
 _This is a how-to guide. It covers OAuth2 credentials, the `google.yaml` configuration, and enabling Drive, Calendar, and Gmail integration._
 
