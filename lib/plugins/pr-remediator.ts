@@ -511,6 +511,10 @@ Fetch the review comments via get_pr_feedback, address each point, and mark the 
   private _dispatchToAva(content: string, skillHint: string, parentCorrelationId: string): string | undefined {
     if (!this.bus) return undefined;
     const correlationId = crypto.randomUUID();
+    // NOTE: skill-dispatcher targets by `payload.meta.agentId`, NOT top-level
+    // `payload.agentId`. Both Ava (a2a) and Quinn (proto-sdk) register
+    // bug_triage, and without explicit targeting the dispatcher picks the
+    // first-registered executor (Quinn — who is read-only and exits 53).
     this.bus.publish("agent.skill.request", {
       id: crypto.randomUUID(),
       correlationId,
@@ -519,9 +523,8 @@ Fetch the review comments via get_pr_feedback, address each point, and mark the 
       timestamp: Date.now(),
       payload: {
         skill: skillHint,
-        skillHint,
-        agentId: "ava",
         content,
+        meta: { agentId: "ava", skillHint },
       },
     });
     return correlationId;
