@@ -17,6 +17,14 @@ RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${
     curl -fsSL "https://github.com/docker/buildx/releases/download/v${BUILDX_VERSION}/buildx-v${BUILDX_VERSION}.linux-amd64" -o /usr/local/lib/docker/cli-plugins/docker-buildx && \
     chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 
+# build the dashboard Astro static site
+FROM oven/bun:1 AS dashboard-build
+WORKDIR /dashboard
+COPY dashboard/package.json ./
+RUN bun install
+COPY dashboard/ .
+RUN bun run build
+
 # install dependencies into temp directory
 # this will cache them and speed up future builds
 FROM base AS install
@@ -38,6 +46,7 @@ CMD ["bun", "run", "--watch", "src/index.ts"]
 FROM base AS release
 COPY --from=install /temp/prod/node_modules node_modules
 COPY . .
+COPY --from=dashboard-build /dashboard/dist dashboard/dist
 ENV NODE_ENV=production
 RUN bun test
 RUN mkdir -p data
