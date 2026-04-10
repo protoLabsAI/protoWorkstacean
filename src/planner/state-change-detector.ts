@@ -3,7 +3,7 @@
  * invalidate the current plan during execution.
  */
 
-import type { Action, Plan, PlannerState } from "./types.ts";
+import type { Plan, PlannerState } from "./types.ts";
 import { preconditionsMet } from "./action.ts";
 
 /** Describes a detected state change that affects the plan. */

@@ -505,6 +505,7 @@ async function handleOnboard(req: Request): Promise<Response> {
   const result = await new Promise<Record<string, unknown>>((resolve) => {
     const replyTopic = `onboard.result.${correlationId}`;
     let settled = false;
+    // biome-ignore lint/style/useConst: assigned in setTimeout below but referenced in subscribe callback (race window)
     let timer: ReturnType<typeof setTimeout>;
 
     const subId = bus.subscribe(replyTopic, "onboard-http", (msg: BusMessage) => {
@@ -573,6 +574,12 @@ function handleGetFlowMetrics(metric?: string): Response {
 
 // ── Services health API ────────────────────────────────────────────────────────
 
+function resolveGithubAuthType(): string | null {
+  if (process.env.QUINN_APP_PRIVATE_KEY) return "app";
+  if (process.env.GITHUB_TOKEN) return "token";
+  return null;
+}
+
 function handleGetServices(): Response {
   // Check Discord connectivity via runtime property (private in TS, accessible at runtime)
   const discord = allPlugins.find(p => p.name === "discord") as Record<string, unknown> | undefined;
@@ -587,7 +594,7 @@ function handleGetServices(): Response {
     },
     github: {
       configured: !!(process.env.GITHUB_TOKEN || process.env.QUINN_APP_PRIVATE_KEY),
-      authType: process.env.QUINN_APP_PRIVATE_KEY ? "app" : process.env.GITHUB_TOKEN ? "token" : null,
+      authType: resolveGithubAuthType(),
     },
     plane: {
       configured: !!process.env.PLANE_API_KEY,

@@ -7,7 +7,6 @@
  */
 
 import type { Action, Goal, PlannerState, StateValue } from "./types.ts";
-import { stateKey } from "./world-state.ts";
 import { preconditionsMet } from "./action.ts";
 
 /**

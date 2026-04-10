@@ -6,7 +6,7 @@
  * can use directly, eliminating future L2 invocations for the same pattern.
  */
 
-import type { Action, Plan, PlannerState, StatePredicate, StateTransform } from "../planner/types.ts";
+import type { PlannerState, } from "../planner/types.ts";
 import type { L2Result } from "../planner/routing-interface.ts";
 import type { LearnedRule } from "./rule-registry.ts";
 import { RuleExtractor, type RuleExtractionConfig } from "./rule-extractor.ts";

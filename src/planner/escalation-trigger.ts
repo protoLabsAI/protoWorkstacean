@@ -5,7 +5,7 @@
  * Borderline plans (within margin of threshold) are flagged for lightweight review.
  */
 
-import type { ConfidenceScore, L2Result, RoutingConfig } from "./routing-interface.ts";
+import type { ConfidenceScore, } from "./routing-interface.ts";
 import { DEFAULT_ROUTING_CONFIG } from "./routing-interface.ts";
 
 /** Result of an escalation evaluation. */

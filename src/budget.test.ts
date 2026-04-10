@@ -25,7 +25,6 @@ import { BudgetPlugin } from "../lib/plugins/budget.ts";
 import {
   MAX_PROJECT_BUDGET,
   MAX_DAILY_BUDGET,
-  TIER_CONFIG,
   MODEL_RATES,
   FALLBACK_COST_MULTIPLIER,
   type BudgetRequest,

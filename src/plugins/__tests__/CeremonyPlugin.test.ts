@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { InMemoryEventBus } from "../../../lib/bus.ts";
 import { CeremonyPlugin } from "../CeremonyPlugin.ts";
 import type { BusMessage } from "../../../lib/types.ts";
-import type { CeremonyExecutePayload, CeremonyCompletedPayload } from "../../events/ceremonyEvents.ts";
+import type { CeremonyExecutePayload, } from "../../events/ceremonyEvents.ts";
 
 const TEST_DIR = join(import.meta.dir, ".test-workspace-plugin");
 const TEST_DB = join(import.meta.dir, ".test-ceremony-plugin.db");
