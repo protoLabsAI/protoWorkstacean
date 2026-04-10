@@ -1,40 +1,24 @@
 import { useState, useEffect, useMemo } from "preact/hooks";
 import DomainCard from "./DomainCard.tsx";
-
-interface DomainMetadata {
-  collectedAt: number;
-  domain: string;
-  tickNumber: number;
-  failed?: boolean;
-  errorMessage?: string;
-}
-
-interface DomainEntry {
-  data: unknown;
-  metadata: DomainMetadata;
-}
-
-interface WorldStateResponse {
-  timestamp: number;
-  domains: Record<string, DomainEntry>;
-  extensions: Record<string, unknown>;
-  snapshotVersion: number;
-}
+import { getWorldState, peek, type WorldStateResponse } from "../lib/api";
 
 const POLL_INTERVAL = 15_000;
 
 export default function WorldStateViewer() {
-  const [worldState, setWorldState] = useState<WorldStateResponse | null>(null);
+  // Seed from cache if present — instant render on page revisit
+  const [worldState, setWorldState] = useState<WorldStateResponse | null>(
+    () => peek<WorldStateResponse>("/api/world-state") ?? null,
+  );
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(
+    worldState ? new Date() : null,
+  );
   const [filter, setFilter] = useState<string>("");
   const [selectedDomain, setSelectedDomain] = useState<string>("all");
 
-  async function fetchWorldState() {
+  async function fetchWorldState(force = false) {
     try {
-      const res = await fetch("/api/world-state");
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const data = (await res.json()) as WorldStateResponse;
+      const data = await getWorldState(force);
       setWorldState(data);
       setLastUpdated(new Date());
       setError(null);
@@ -44,8 +28,8 @@ export default function WorldStateViewer() {
   }
 
   useEffect(() => {
-    fetchWorldState();
-    const id = setInterval(fetchWorldState, POLL_INTERVAL);
+    fetchWorldState(true); // force on mount to refresh
+    const id = setInterval(() => fetchWorldState(true), POLL_INTERVAL);
     return () => clearInterval(id);
   }, []);
 
