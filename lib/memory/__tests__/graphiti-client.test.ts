@@ -17,7 +17,7 @@ function mockFetch(body: unknown, status = 200) {
 }
 
 function mockFetchThrow(error: Error) {
-  globalThis.fetch = (async () => { throw error; }) as typeof fetch;
+  globalThis.fetch = (async () => { throw error; }) as unknown as typeof fetch;
 }
 
 let lastFetchUrl = "";

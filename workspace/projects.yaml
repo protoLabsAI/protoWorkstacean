@@ -9,6 +9,13 @@ projects:
     defaultBranch: master
     status: active
     agents: [quinn]
+    discord:
+      dev:
+        channelId: "1490978896911405208"
+        webhook: "https://discord.com/api/webhooks/1491952333087834243/dyUlVYCTsAuFmTVrtNqQU-oUoBryijeV2cJ84OgiPenz8C9yNl4O-2MBFSJeJngJrCZZ"
+      release:
+        channelId: "1490978898568286329"
+        webhook: "https://discord.com/api/webhooks/1491952337567088731/HkkPa15mSNo5-NqUe4PjOQyviA1aPkjlsH36gtZrsb8lWLP3Mp-5iSZfAFeuquWe7vnZ"
 
   - slug: protomaker
     title: protoMaker
@@ -19,6 +26,13 @@ projects:
     defaultBranch: main
     status: active
     agents: [quinn]
+    discord:
+      dev:
+        channelId: "1469080556720623699"
+        webhook: "https://discord.com/api/webhooks/1491952339295277126/HuCK8CIePPDBiSg4RZgfF5cxeJDv4f334KKjqXyMo_9MEHIPXC03fUAunZZj8RuBNvuX"
+      release:
+        channelId: "1490893509337550859"
+        webhook: "https://discord.com/api/webhooks/1491952340796965005/NW3ZtY14kcF8NPYSHBNsiPEFPmu0-DawIXPakk5bUF7nd_YrLPjHbBqxGzorVSdmaXYf"
 
   - slug: protocli
     title: protoCLI
@@ -29,6 +43,13 @@ projects:
     defaultBranch: main
     status: active
     agents: [quinn]
+    discord:
+      dev:
+        channelId: "1490974556306014290"
+        webhook: "https://discord.com/api/webhooks/1491952343196111049/5bycseg2ED3feT22X_3ezY35Y81ZrjsGod101huZpjKNRHNRVFV-Y0j0_k5OhEA3QS8S"
+      release:
+        channelId: "1490974557920563312"
+        webhook: "https://discord.com/api/webhooks/1491952344529637546/vb278du2TSW_RvkpwOH5UHcS9d3UCJ5nMDtnj5A92bCG3piTa3o7AQk8GDqForiwZ74O"
 
   - slug: mythxengine
     title: mythxengine
@@ -39,6 +60,13 @@ projects:
     defaultBranch: main
     status: active
     agents: [quinn]
+    discord:
+      dev:
+        channelId: "1490978905371312179"
+        webhook: "https://discord.com/api/webhooks/1491952345528144005/2oDZenUiQnz2VhEIDEeNxTRPj3zzhokCY_KR0rtg-K2PHZ_fwcyD2NaBZVyxtTSVlMYg"
+      release:
+        channelId: "1490978906419761262"
+        webhook: "https://discord.com/api/webhooks/1491952347100876852/9DpUPDSRurXL18af1caqJY2oc8wflQ6j3xR0Gk9V8udeQWyewGFR-DUmyDLa7NEvM_iF"
 
   - slug: rabbit-hole-io
     title: rabbit-hole-io
@@ -49,3 +77,10 @@ projects:
     defaultBranch: main
     status: active
     agents: [quinn]
+    discord:
+      dev:
+        channelId: "1490978889596539093"
+        webhook: "https://discord.com/api/webhooks/1491952348451438624/oYmn561NtTU83ZU6nW2UfdPq7Q-Wft_sVM-KLUYWqyfLsbAAi8WlgN1MvJm8CbhiXAiv"
+      release:
+        channelId: "1490978891207282718"
+        webhook: "https://discord.com/api/webhooks/1491952349604872202/QOR15cx1UvzhrzluB5DrZiWv6zikuGFOixPtIuMUmaqO0rWk5tSdZe-zGgzJTMitFkiB"

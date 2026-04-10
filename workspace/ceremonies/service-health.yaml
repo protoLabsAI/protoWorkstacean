@@ -1,0 +1,13 @@
+id: service-health
+name: "Service Health Recovery"
+description: >
+  Triggered by world engine when a critical service (Discord bot or LLM gateway)
+  becomes unavailable. Calls get_world_state to confirm the failure, posts a
+  structured alert to the Discord alerts channel with remediation steps, and
+  falls back to logging if Discord itself is unreachable.
+schedule: "0 */4 * * *"
+skill: health_check
+targets:
+  - all
+notifyChannel: ""
+enabled: true

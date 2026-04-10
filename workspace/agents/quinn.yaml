@@ -27,6 +27,8 @@ tools:
   - publish_event
   - get_world_state
   - get_projects
+  - get_ci_health
+  - get_pr_pipeline
   - get_incidents
   - report_incident
   - get_outcomes
