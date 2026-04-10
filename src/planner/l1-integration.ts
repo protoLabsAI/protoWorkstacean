@@ -5,11 +5,8 @@
 
 import type {
   BudgetConfig,
-  Goal,
   L0Context,
   L1Result,
-  NamedGoal,
-  PlannerState,
 } from "./types.ts";
 import { ActionGraph } from "./action-graph.ts";
 import { AnytimePlanner } from "./anytime-planner.ts";

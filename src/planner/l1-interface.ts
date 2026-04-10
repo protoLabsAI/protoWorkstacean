@@ -5,8 +5,8 @@
  * and check if L1 can handle a request before invoking L2.
  */
 
-import type { Goal, PlannerState, Plan, BudgetConfig, L0Context, L1Result } from "./types.ts";
-import { L1Planner, type L1PlannerConfig } from "./l1-integration.ts";
+import type { Goal, PlannerState, BudgetConfig, L0Context, L1Result } from "./types.ts";
+import { L1Planner, } from "./l1-integration.ts";
 
 /** L1 capability check result. */
 export interface L1CapabilityResult {

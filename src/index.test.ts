@@ -56,7 +56,7 @@ describe("InMemoryEventBus", () => {
   });
 
   test("wildcard # matches nested topics", () => {
-    let received: string[] = [];
+    const received: string[] = [];
     bus.subscribe("message.#", "agent", (msg) => {
       received.push(msg.topic);
     });
@@ -92,7 +92,7 @@ describe("InMemoryEventBus", () => {
   });
 
   test("wildcard * matches single level", () => {
-    let received: string[] = [];
+    const received: string[] = [];
     bus.subscribe("message.*.signal.123", "test", (msg) => {
       received.push(msg.topic);
     });
@@ -128,7 +128,7 @@ describe("InMemoryEventBus", () => {
   });
 
   test("exact match works", () => {
-    let received: string[] = [];
+    const received: string[] = [];
     bus.subscribe("message.outbound.signal.#", "signal", (msg) => {
       received.push(msg.topic);
     });
@@ -231,7 +231,7 @@ describe("InMemoryEventBus", () => {
   });
 
   test("multiple handlers for same pattern", () => {
-    let results: string[] = [];
+    const results: string[] = [];
     bus.subscribe("message.test", "plugin1", () => {
       results.push("plugin1");
     });
@@ -296,7 +296,7 @@ describe("Topic matching edge cases", () => {
   });
 
   test("single level topic matches exactly", () => {
-    let received: string[] = [];
+    const received: string[] = [];
     bus.subscribe("message", "test", (msg) => {
       received.push(msg.topic);
     });
@@ -321,7 +321,7 @@ describe("Topic matching edge cases", () => {
   });
 
   test("# matches single level topic", () => {
-    let received: string[] = [];
+    const received: string[] = [];
     bus.subscribe("#", "test", (msg) => {
       received.push(msg.topic);
     });

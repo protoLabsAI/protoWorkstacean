@@ -731,11 +731,12 @@ export class FlowMonitorPlugin implements Plugin {
     const prevGoals = { ...this.goalState };
 
     const efficiencyStatus: GoalStatus = efficiency.healthy ? "satisfied" : "violated";
-    const distributionStatus: GoalStatus = distribution.total === 0
-      ? "pending"
-      : distribution.balanced
-        ? "satisfied"
-        : "violated";
+    let distributionStatus: GoalStatus;
+    if (distribution.total === 0) {
+      distributionStatus = "pending";
+    } else {
+      distributionStatus = distribution.balanced ? "satisfied" : "violated";
+    }
 
     this.goalState = {
       "flow.efficiency_healthy": efficiencyStatus,

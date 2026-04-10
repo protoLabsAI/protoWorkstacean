@@ -1,0 +1,75 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "files": {
+    "ignoreUnknown": true,
+    "ignore": [
+      "node_modules",
+      "dist",
+      "out",
+      "docs-site/.astro",
+      "docs-site/node_modules",
+      ".automaker",
+      "data",
+      "workspace/ceremonies",
+      "**/*.yaml",
+      "**/*.yml",
+      "**/*.md"
+    ]
+  },
+  "organizeImports": {
+    "enabled": false
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": false,
+      "complexity": {
+        "noUselessTernary": "error"
+      },
+      "style": {
+        "useConst": "error",
+        "useShorthandAssign": "error"
+      },
+      "correctness": {
+        "noUnusedImports": "warn",
+        "noConstAssign": "error",
+        "noUnreachable": "error"
+      },
+      "suspicious": {
+        "noConsoleLog": "off",
+        "noExplicitAny": "warn",
+        "noDoubleEquals": "error",
+        "noFallthroughSwitchClause": "error"
+      },
+      "nursery": {
+        "noNestedTernary": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "include": ["**/*.test.ts", "**/__tests__/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsoleLog": "off",
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "include": ["src/api/**", "lib/**", "src/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsoleLog": "off"
+          }
+        }
+      }
+    }
+  ]
+}

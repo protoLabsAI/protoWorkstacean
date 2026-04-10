@@ -17,6 +17,12 @@ interface ActionDispatcherAPI {
   getOutcomes(): { getAll(): unknown[]; summary(): unknown; getRecent(n: number): unknown[] };
 }
 
+function resolveGithubAuthType(): string | null {
+  if (process.env.QUINN_APP_PRIVATE_KEY) return "app";
+  if (process.env.GITHUB_TOKEN) return "token";
+  return null;
+}
+
 export function createRoutes(ctx: ApiContext): Route[] {
   const wsEngine = ctx.plugins.find(p => p.name === "world-state-engine") as (WorldStateAPI & { name: string }) | undefined;
   const flowMonitor = ctx.plugins.find(p => p.name === "flow-monitor") as (FlowMonitorAPI & { name: string }) | undefined;
@@ -47,7 +53,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
       },
       github: {
         configured: !!(process.env.GITHUB_TOKEN || process.env.QUINN_APP_PRIVATE_KEY),
-        authType: process.env.QUINN_APP_PRIVATE_KEY ? "app" : process.env.GITHUB_TOKEN ? "token" : null,
+        authType: resolveGithubAuthType(),
       },
       plane: {
         configured: !!process.env.PLANE_API_KEY,

@@ -5,23 +5,22 @@
  * confidence-based routing, and learning flywheel integration.
  */
 
-import type { Goal, PlannerState, NamedGoal, BudgetConfig, Plan } from "./types.ts";
+import type { Goal, PlannerState, NamedGoal, BudgetConfig, } from "./types.ts";
 import type { L2Result, RoutingConfig } from "./routing-interface.ts";
 import { DEFAULT_ROUTING_CONFIG } from "./routing-interface.ts";
-import { L2Router, type L2RouterConfig, type L3EscalationHandler } from "./l2-router.ts";
+import { L2Router, type L3EscalationHandler } from "./l2-router.ts";
 import { HybridPlanner } from "./hybrid-planner.ts";
 import { ActionGraph } from "./action-graph.ts";
 import type { A2AClient } from "./a2a-proposer.ts";
 import { NoOpA2AClient } from "./a2a-proposer.ts";
 import { L1Planner } from "./l1-integration.ts";
-import { TaskNetwork } from "./task-network.ts";
 import type { L0RuleMatcher } from "../matcher/l0-l1-bridge.ts";
 import { L0Interface } from "./l0-interface.ts";
 import { L1Interface } from "./l1-interface.ts";
 import { PlanConverter } from "../learning/plan-converter.ts";
 import { RuleRegistry } from "../learning/rule-registry.ts";
 import { PatternMatcher as LearnedPatternMatcher } from "../learning/pattern-matcher.ts";
-import { L2Metrics, type L2InvocationRecord } from "../monitoring/l2-metrics.ts";
+import { L2Metrics, } from "../monitoring/l2-metrics.ts";
 import { EscalationTracker } from "../monitoring/escalation-tracker.ts";
 
 /** Configuration for the L2-aware dispatcher. */

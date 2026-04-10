@@ -86,7 +86,8 @@ export class CeremonyNotifier {
     const color = STATUS_COLORS[outcome.status] ?? STATUS_COLORS.failure;
     const durationSec = (outcome.duration / 1000).toFixed(1);
     const ts = new Date(outcome.completedAt).toISOString();
-    const statusEmoji = outcome.status === "success" ? "✅" : outcome.status === "timeout" ? "⏱️" : "❌";
+    const EMOJI_BY_STATUS: Record<string, string> = { success: "✅", timeout: "⏱️" };
+    const statusEmoji = EMOJI_BY_STATUS[outcome.status] ?? "❌";
 
     const fields: Array<{ name: string; value: string; inline?: boolean }> = [
       { name: "Ceremony", value: `\`${outcome.ceremonyId}\``, inline: true },

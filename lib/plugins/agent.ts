@@ -178,7 +178,7 @@ export class AgentPlugin implements Plugin {
         const type = /^\d{4}-\d{2}-\d{2}T/.test(params.schedule) ? "once" : "cron";
 
         // Derive channel and recipient from the session's channelId
-        const sessionChannel = channelId.startsWith("signal:") ? "signal" : channelId.startsWith("cli") ? "cli" : "cli";
+        const sessionChannel = channelId.startsWith("signal:") ? "signal" : "cli";
         const channel = params.channel || sessionChannel;
         const recipient = channelId.startsWith("signal:") ? channelId.slice("signal:".length) : undefined;
 
@@ -376,11 +376,12 @@ export class AgentPlugin implements Plugin {
     if (!response) return;
 
     // Route reply based on channel — use recipient number for Signal, not "cron"
-    const replyTopic = channel === "signal" && recipient
-      ? `message.outbound.signal.${recipient}`
-      : channel === "signal"
-        ? `message.outbound.signal.cron`
-        : `message.outbound.${channel}`;
+    let replyTopic: string;
+    if (channel === "signal") {
+      replyTopic = recipient ? `message.outbound.signal.${recipient}` : `message.outbound.signal.cron`;
+    } else {
+      replyTopic = `message.outbound.${channel}`;
+    }
 
     const reply: BusMessage = {
       id: crypto.randomUUID(),

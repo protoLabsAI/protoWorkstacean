@@ -3,8 +3,6 @@ import { TOPICS } from "./topics.ts";
 import type {
   ActionDispatchPayload,
   ActionOutcomePayload,
-  ActionOscillationPayload,
-  ActionQueueFullPayload,
   PlannerEscalatePayload,
 } from "./action-events.ts";
 

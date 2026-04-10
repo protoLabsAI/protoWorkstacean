@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, test, expect, spyOn } from "bun:test";
 import { CeremonyNotifier } from "../CeremonyNotifier.ts";
 import type { CeremonyOutcome } from "../../../plugins/CeremonyPlugin.types.ts";
 
