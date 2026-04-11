@@ -1,4 +1,7 @@
-# How to Create a Ceremony (Scheduled Recurring Task)
+---
+title: How to Create a Ceremony (Scheduled Recurring Task)
+---
+
 
 _This is a how-to guide. It covers creating cron schedules via YAML, the bus, and the Pi SDK tool._
 

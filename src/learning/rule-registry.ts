@@ -5,7 +5,7 @@
  * promotion to L0 after sufficient successful executions.
  */
 
-import type { Action, PlannerState, StatePredicate, StateTransform } from "../planner/types.ts";
+import type { Action, PlannerState, StatePredicate, } from "../planner/types.ts";
 
 /** A learned rule derived from a successful L2 plan. */
 export interface LearnedRule {

@@ -14,7 +14,7 @@
  * diff-only review (no CODEBASE CONTEXT block).
  */
 
-import { parseDiff, chunkDiff } from "../diff/chunker.ts";
+import { parseDiff, } from "../diff/chunker.ts";
 import { extractAllSymbols } from "../diff/symbol-extractor.ts";
 import { retrieveAllPastPRDecisions } from "../qdrant/past-pr-retriever.ts";
 import { findAllSimilarPatterns } from "../qdrant/pattern-searcher.ts";

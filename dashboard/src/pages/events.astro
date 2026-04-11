@@ -1,5 +1,6 @@
 ---
 import DashboardLayout from "../layouts/DashboardLayout.astro";
+<<<<<<< HEAD
 ---
 
 <DashboardLayout title="Events" activePage="events">
@@ -177,5 +178,24 @@ import DashboardLayout from "../layouts/DashboardLayout.astro";
 
   .event-detail pre {
     margin-top: 6px;
+=======
+import EventStream from "../components/EventStream.tsx";
+---
+
+<DashboardLayout title="Events" activePage="events">
+  <EventStream client:load />
+</DashboardLayout>
+
+<style>
+  /* github dark theme: monospace font, #0d1117 background — applied via EventStream */
+  /* color-source topic badges (source-agent, source-cli, etc.) in EventStream.tsx */
+
+  /* Override layout content area to allow EventStream to fill height */
+  :global(.content) {
+    display: flex;
+    flex-direction: column;
+    padding: 0 !important;
+    overflow: hidden;
+>>>>>>> origin/main
   }
 </style>

@@ -7,7 +7,6 @@
  */
 
 import type { Action, CompositeTask, HierarchyLevel, PlannerState } from "./types.ts";
-import { isPrimitiveLevel } from "./hierarchy-levels.ts";
 
 /** A task in the network can be composite or primitive. */
 export type TaskEntry =

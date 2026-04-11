@@ -14,5 +14,8 @@ reviews:
     enabled: true
     drafts: false
     # Review PRs targeting dev (feature PRs) and main (dev→main promotion).
+    # main is in the list so promotion PRs get the required CodeRabbit
+    # status check without needing a manual "@coderabbitai review" comment.
     base_branches:
       - '^dev$'
+      - '^main$'

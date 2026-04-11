@@ -6,7 +6,7 @@
  */
 
 import type { RuleRegistry, RegistryStats } from "./rule-registry.ts";
-import type { L2Metrics, L2MetricsSummary } from "../monitoring/l2-metrics.ts";
+import type { L2Metrics, } from "../monitoring/l2-metrics.ts";
 import type { EscalationTracker } from "../monitoring/escalation-tracker.ts";
 
 /** Flywheel health metrics. */

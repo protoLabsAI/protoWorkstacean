@@ -1,5 +1,6 @@
 ---
 import DashboardLayout from "../layouts/DashboardLayout.astro";
+<<<<<<< HEAD
 ---
 
 <DashboardLayout title="Goals" activePage="goals">
@@ -101,5 +102,44 @@ import DashboardLayout from "../layouts/DashboardLayout.astro";
   .goal-desc {
     font-size: 13px;
     color: var(--text-secondary);
+=======
+import GoalStatus from "../components/GoalStatus.tsx";
+import OutcomesTable from "../components/OutcomesTable.tsx";
+---
+
+<DashboardLayout title="Goals" activePage="goals">
+  <div class="goals-page">
+    <section class="goals-section">
+      <GoalStatus client:load />
+    </section>
+
+    <div class="divider" />
+
+    <section class="outcomes-section">
+      <OutcomesTable client:load />
+    </section>
+  </div>
+</DashboardLayout>
+
+<style>
+  .goals-page {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .goals-section {
+    padding-bottom: 32px;
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border-default);
+    margin-bottom: 32px;
+  }
+
+  .outcomes-section {
+    padding-bottom: 24px;
+>>>>>>> origin/main
   }
 </style>

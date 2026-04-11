@@ -5,8 +5,8 @@
  * degrades performance.
  */
 
-import type { LearnedRule, RuleRegistry } from "./rule-registry.ts";
-import type { RuleVersioning, RuleVersion } from "./rule-versioning.ts";
+import type { RuleRegistry } from "./rule-registry.ts";
+import type { RuleVersioning, } from "./rule-versioning.ts";
 import type { RuleAuditor } from "./rule-auditor.ts";
 
 /** Migration result. */
