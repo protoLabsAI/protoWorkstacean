@@ -15,6 +15,7 @@
 
 import { tool } from "@protolabsai/sdk";
 import { z } from "zod";
+import { HttpClient } from "../../services/http-client.ts";
 
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -22,31 +23,6 @@ function ok(data: unknown) {
 
 function err(message: string) {
   return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
-}
-
-async function apiGet(baseUrl: string, path: string, apiKey?: string): Promise<unknown> {
-  const headers: Record<string, string> = {};
-  if (apiKey) headers["X-API-Key"] = apiKey;
-  const resp = await fetch(`${baseUrl}${path}`, { headers });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} ${await resp.text()}`);
-  return resp.json();
-}
-
-async function apiPost(
-  baseUrl: string,
-  path: string,
-  body: unknown,
-  apiKey?: string,
-): Promise<unknown> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (apiKey) headers["X-API-Key"] = apiKey;
-  const resp = await fetch(`${baseUrl}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} ${await resp.text()}`);
-  return resp.json();
 }
 
 export interface BusToolsOptions {
@@ -63,6 +39,10 @@ export interface BusToolsOptions {
 export function createBusTools(opts: BusToolsOptions = {}) {
   const baseUrl = opts.baseUrl ?? "http://localhost:3000";
   const apiKey = opts.apiKey;
+  const http = new HttpClient({
+    baseUrl,
+    ...(apiKey ? { auth: { type: "api-key" as const, key: apiKey } } : {}),
+  });
 
   const publishEvent = tool(
     "publish_event",
@@ -84,7 +64,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
           payload: projectSlug ? { ...payload, projectSlug } : payload,
           ...(projectSlug ? { source: { interface: "agent", projectSlug } } : {}),
         };
-        const data = await apiPost(baseUrl, "/publish", body, apiKey);
+        const data = await http.post("/publish", body);
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -108,7 +88,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     async ({ domain }) => {
       try {
         const path = domain ? `/api/world-state/${domain}` : "/api/world-state";
-        const data = await apiGet(baseUrl, path, apiKey);
+        const data = await http.get(path);
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -122,7 +102,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/incidents", apiKey);
+        const data = await http.get("/api/incidents");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -155,7 +135,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         if (description) body.description = description;
         if (affectedProjects) body.affectedProjects = affectedProjects;
         if (projectSlug) body.projectSlug = projectSlug;
-        const data = await apiPost(baseUrl, "/api/incidents", body, apiKey);
+        const data = await http.post("/api/incidents", body);
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -170,7 +150,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/projects", apiKey);
+        const data = await http.get("/api/projects");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -185,7 +165,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/ci-health", apiKey);
+        const data = await http.get("/api/ci-health");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -200,7 +180,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/pr-pipeline", apiKey);
+        const data = await http.get("/api/pr-pipeline");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -214,7 +194,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/branch-drift", apiKey);
+        const data = await http.get("/api/branch-drift");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -229,7 +209,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/outcomes", apiKey);
+        const data = await http.get("/api/outcomes");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -243,7 +223,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/ceremonies", apiKey);
+        const data = await http.get("/api/ceremonies");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -262,7 +242,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
     async ({ ceremonyId }) => {
       try {
-        const data = await apiPost(baseUrl, `/api/ceremonies/${ceremonyId}/run`, {}, apiKey);
+        const data = await http.post(`/api/ceremonies/${ceremonyId}/run`, {});
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));

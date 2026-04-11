@@ -1,4 +1,5 @@
 import type { GoalViolation } from "../types/goals.ts";
+import { HttpClient } from "../services/http-client.ts";
 
 interface LangfuseConfig {
   publicKey: string;
@@ -24,6 +25,7 @@ interface LangfuseEvent {
 export class LangfuseLogger {
   private config: LangfuseConfig | null;
   private buffer: LangfuseEvent[] = [];
+  private readonly http: HttpClient;
 
   constructor() {
     const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
@@ -36,6 +38,7 @@ export class LangfuseLogger {
     } else {
       this.config = { publicKey, secretKey, host };
     }
+    this.http = new HttpClient({ timeoutMs: 10_000 });
   }
 
   /** Log a goal violation event. Returns true if sent, false on error/fallback. */
@@ -124,19 +127,8 @@ export class LangfuseLogger {
     const { publicKey, secretKey, host } = this.config!;
     const credentials = btoa(`${publicKey}:${secretKey}`);
 
-    const resp = await fetch(`${host}/api/public/ingestion`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${credentials}`,
-      },
-      body: JSON.stringify({ batch: events }),
-      signal: AbortSignal.timeout(10_000),
+    await this.http.post(`${host}/api/public/ingestion`, { batch: events }, {
+      auth: { type: "basic", credentials },
     });
-
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      throw new Error(`Langfuse API error ${resp.status}: ${body}`);
-    }
   }
 }

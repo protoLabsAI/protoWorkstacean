@@ -7,8 +7,12 @@
  * Base URL: QDRANT_URL env var (default: http://qdrant:6333)
  */
 
+import { HttpClient } from "../http-client.ts";
+
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant:6333";
 const TIMEOUT_MS = 5_000;
+
+const http = new HttpClient({ timeoutMs: TIMEOUT_MS });
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -29,18 +33,6 @@ export interface QdrantCollectionConfig {
   distance?: "Cosine" | "Euclid" | "Dot";
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 // ── Collection management ──────────────────────────────────────────────────────
 
 /**
@@ -52,7 +44,7 @@ export async function ensureCollection(
   config: QdrantCollectionConfig,
 ): Promise<boolean> {
   try {
-    const res = await fetchWithTimeout(`${QDRANT_URL}/collections/${name}`, {
+    const res = await http.fetch(`${QDRANT_URL}/collections/${name}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -81,7 +73,7 @@ export async function ensureCollection(
  */
 export async function listCollections(): Promise<string[]> {
   try {
-    const res = await fetchWithTimeout(`${QDRANT_URL}/collections`, { method: "GET" });
+    const res = await http.fetch(`${QDRANT_URL}/collections`, { method: "GET" });
     if (!res.ok) return [];
     const data = await res.json() as { result?: { collections?: { name: string }[] } };
     return data.result?.collections?.map(c => c.name) ?? [];
@@ -102,7 +94,7 @@ export async function upsertPoints(
 ): Promise<boolean> {
   if (points.length === 0) return true;
   try {
-    const res = await fetchWithTimeout(`${QDRANT_URL}/collections/${collection}/points`, {
+    const res = await http.fetch(`${QDRANT_URL}/collections/${collection}/points`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ points }),
@@ -136,7 +128,7 @@ export async function searchPoints(
     };
     if (filter) body.filter = filter;
 
-    const res = await fetchWithTimeout(`${QDRANT_URL}/collections/${collection}/points/search`, {
+    const res = await http.fetch(`${QDRANT_URL}/collections/${collection}/points/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -159,7 +151,7 @@ export async function searchPoints(
  */
 export async function countPoints(collection: string): Promise<number> {
   try {
-    const res = await fetchWithTimeout(`${QDRANT_URL}/collections/${collection}/points/count`, {
+    const res = await http.fetch(`${QDRANT_URL}/collections/${collection}/points/count`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ exact: false }),
@@ -177,7 +169,7 @@ export async function countPoints(collection: string): Promise<number> {
  */
 export async function checkHealth(): Promise<boolean> {
   try {
-    const res = await fetchWithTimeout(`${QDRANT_URL}/healthz`, { method: "GET" });
+    const res = await http.fetch(`${QDRANT_URL}/healthz`, { method: "GET" });
     return res.ok;
   } catch {
     return false;

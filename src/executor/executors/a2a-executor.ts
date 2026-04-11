@@ -8,6 +8,7 @@
  */
 
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
+import { HttpClient } from "../../services/http-client.ts";
 
 export interface A2AAgentConfig {
   /** Agent name (for logging). */
@@ -23,8 +24,11 @@ export interface A2AAgentConfig {
 
 export class A2AExecutor implements IExecutor {
   readonly type = "a2a";
+  private readonly http: HttpClient;
 
-  constructor(private readonly config: A2AAgentConfig) {}
+  constructor(private readonly config: A2AAgentConfig) {
+    this.http = new HttpClient({ timeoutMs: config.timeoutMs ?? 300_000 });
+  }
 
   async execute(req: SkillRequest): Promise<SkillResult> {
     const apiKey = this.config.apiKeyEnv
@@ -61,11 +65,10 @@ export class A2AExecutor implements IExecutor {
       },
     });
 
-    const resp = await fetch(this.config.url, {
+    const resp = await this.http.fetch(this.config.url, {
       method: "POST",
       headers,
       body,
-      signal: AbortSignal.timeout(this.config.timeoutMs ?? 300_000),
     });
 
     if (!resp.ok) {

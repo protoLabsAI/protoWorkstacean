@@ -7,8 +7,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { Route, ApiContext } from "./types.ts";
+import { HttpClient } from "../services/http-client.ts";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+
+const ghHttp = new HttpClient({
+  baseUrl: "https://api.github.com",
+  timeoutMs: 15_000,
+  headers: {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  },
+});
 
 function loadProjectRepos(workspaceDir: string): string[] {
   const projectsPath = join(workspaceDir, "projects.yaml");
@@ -21,16 +31,7 @@ function loadProjectRepos(workspaceDir: string): string[] {
 
 async function ghApi(path: string): Promise<unknown> {
   if (!GITHUB_TOKEN) throw new Error("GITHUB_TOKEN not set");
-  const resp = await fetch(`https://api.github.com${path}`, {
-    headers: {
-      Authorization: `Bearer ${GITHUB_TOKEN}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!resp.ok) throw new Error(`GitHub API ${resp.status}: ${path}`);
-  return resp.json();
+  return ghHttp.get(path, { auth: { type: "bearer", token: GITHUB_TOKEN } });
 }
 
 export function createRoutes(ctx: ApiContext): Route[] {
