@@ -1083,7 +1083,11 @@ Critical rules:
       payload: {
         skill: skillHint,
         content,
-        meta: { agentId: "ava", skillHint },
+        // systemActor marks this as a bot-initiated dispatch for the
+        // memory layer — skill-dispatcher writes episodes to
+        // `system:pr-remediator` so the autonomous loop builds its own
+        // episodic history separate from user-chat memory.
+        meta: { agentId: "ava", skillHint, systemActor: "pr-remediator" },
         ...(extraMeta ?? {}),
       },
     });

@@ -105,6 +105,31 @@ export function createRoutes(ctx: ApiContext): Route[] {
     return Response.json(hitlPlugin.getQueueSnapshot());
   }
 
+  async function handleGetMemoryHealth(): Promise<Response> {
+    // Probes Graphiti's /healthcheck (200 = service up) and issues a
+    // trivial /search (detects vector-function / embedder / neo4j
+    // wiring issues that healthcheck alone doesn't catch). Exposed
+    // as the `memory` domain so memory.graphiti_healthy can alert
+    // when either side goes dark.
+    const url = process.env.GRAPHITI_URL ?? "http://graphiti:8000";
+    const result = { healthy: 0, searchOk: 0, error: "" };
+    try {
+      const hc = await fetch(`${url}/healthcheck`, { signal: AbortSignal.timeout(3_000) });
+      if (hc.ok) result.healthy = 1;
+      const search = await fetch(`${url}/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "health probe", group_ids: ["user:josh"], max_facts: 1 }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (search.ok) result.searchOk = 1;
+      else result.error = `search ${search.status}`;
+    } catch (err) {
+      result.error = err instanceof Error ? err.message : String(err);
+    }
+    return Response.json(result);
+  }
+
   function handleGetTelemetry(kind: "goal" | "action"): Response {
     if (!ctx.telemetry) return Response.json([]);
     return Response.json(ctx.telemetry.aggregate(kind));
@@ -126,6 +151,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
     { method: "GET", path: "/api/flow-metrics/:metric", handler: (_, p) => handleGetFlowMetrics(p.metric) },
     { method: "GET", path: "/api/outcomes",             handler: () => handleGetOutcomes() },
     { method: "GET", path: "/api/hitl-queue",           handler: () => handleGetHitlQueue() },
+    { method: "GET", path: "/api/memory-health",        handler: () => handleGetMemoryHealth() },
     { method: "GET", path: "/api/telemetry/goals",      handler: () => handleGetTelemetry("goal") },
     { method: "GET", path: "/api/telemetry/actions",    handler: () => handleGetTelemetry("action") },
     {

@@ -470,6 +470,38 @@ actions:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
 
+  # ── Memory / Graphiti health ──────────────────────────────────────
+
+  - id: alert.memory_down
+    goalId: memory.graphiti_healthy
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Alert when Graphiti healthcheck fails"
+    preconditions:
+      - path: "domains.memory.data.healthy"
+        operator: eq
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: alert.memory_search_broken
+    goalId: memory.search_working
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert when Graphiti search probe fails"
+    preconditions:
+      - path: "domains.memory.data.searchOk"
+        operator: eq
+        value: 0
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
   # ── HITL routing health ───────────────────────────────────────────
   #
   # This alert bypasses the HITL plugin entirely — if the HITL routing

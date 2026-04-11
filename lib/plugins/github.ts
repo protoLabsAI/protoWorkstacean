@@ -761,7 +761,11 @@ export class GitHubPlugin implements Plugin {
               skillHint: config.autoTriage.skillHint,
               trustTier,
               quarantine: { sanitized: false, patternsFound: [] },
-              meta: { agentId: "ava", skillHint: config.autoTriage.skillHint },
+              meta: {
+                agentId: "ava",
+                skillHint: config.autoTriage.skillHint,
+                systemActor: "auto-triage-sweep",
+              },
               projectSlug: meta?.slug,
               projectRepo: repoSlug,
               projectPath: meta?.projectPath,

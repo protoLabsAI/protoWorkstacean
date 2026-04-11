@@ -119,14 +119,21 @@ export class SkillDispatcherPlugin implements Plugin {
     );
 
     // ── Memory enrichment ──────────────────────────────────────────────────────
-    // Prepend user context from Graphiti for human-originating messages.
-    // Cron/system events (no userId) are skipped.
-    // Two group IDs are queried: shared (user:{canonicalId}) and agent-scoped
-    // (agent:{agentName}:user:{canonicalId}) so each agent builds its own memory
-    // of the user on top of the shared cross-agent baseline.
+    // Graphiti group id selection:
+    //   (a) human-originated: user:{canonicalId} via identityRegistry
+    //   (b) bot-initiated with meta.systemActor (pr-remediator / sweep /
+    //       ceremony / cron): system:{actor} — gives the autonomous loop
+    //       its own persistent memory of what it did, grouped by the
+    //       subsystem that triggered it
+    //   (c) fallthrough: no group — no write, no read
+    //
+    // For (a) we also compute an agent-scoped group so each agent
+    // accumulates its own relationship memory with the user on top of
+    // the shared cross-agent baseline.
     const sourceUserId = (msg.source as Record<string, unknown> | undefined)?.userId as string | undefined;
     const sourcePlatform = (msg.source as Record<string, unknown> | undefined)?.interface as string | undefined;
     const sourceChannelId = (msg.source as Record<string, unknown> | undefined)?.channelId as string | undefined;
+    const systemActor = (payload.meta as Record<string, unknown> | undefined)?.systemActor as string | undefined;
 
     let rawContent = typeof payload.content === "string" ? payload.content : undefined;
     const originalContent = rawContent; // preserved for episode storage — never includes context prefix
@@ -137,15 +144,21 @@ export class SkillDispatcherPlugin implements Plugin {
       groupId = this.identityRegistry.groupId(sourcePlatform, sourceUserId);
       const agentName = targets[0];
       if (agentName) agentGroupId = `agent:${agentName}:${groupId}`;
+    } else if (systemActor) {
+      // Bot-initiated dispatch — memory goes to a stable system-actor group
+      // so the autonomous loop builds its own episodic history. No
+      // agent-scoped split: it's already one subsystem writing, not a
+      // human talking to a specific agent.
+      groupId = `system:${systemActor}`;
+    }
 
-      if (rawContent) {
-        const [sharedCtx, agentCtx] = await Promise.all([
-          this.graphiti.getContextBlock(groupId, rawContent).catch(() => ""),
-          agentGroupId ? this.graphiti.getContextBlock(agentGroupId, rawContent).catch(() => "") : Promise.resolve(""),
-        ]);
-        const combined = [sharedCtx, agentCtx].filter(Boolean).join("");
-        if (combined) rawContent = `${combined}${rawContent}`;
-      }
+    if (groupId && rawContent) {
+      const [sharedCtx, agentCtx] = await Promise.all([
+        this.graphiti.getContextBlock(groupId, rawContent).catch(() => ""),
+        agentGroupId ? this.graphiti.getContextBlock(agentGroupId, rawContent).catch(() => "") : Promise.resolve(""),
+      ]);
+      const combined = [sharedCtx, agentCtx].filter(Boolean).join("");
+      if (combined) rawContent = `${combined}${rawContent}`;
     }
     // ── End memory enrichment ─────────────────────────────────────────────────
 
@@ -202,8 +215,14 @@ export class SkillDispatcherPlugin implements Plugin {
       }
 
       // Store completed turn in Graphiti (fire-and-forget, non-blocking).
-      // Written to both the shared user group and the agent-scoped group so each
-      // agent accumulates its own relationship history with the user.
+      //
+      // User-originated: written to the shared user group AND the
+      //   agent-scoped group so each agent accumulates its own relationship
+      //   history with the user on top of the cross-agent baseline.
+      //
+      // System-originated (bot-initiated, meta.systemActor set): written
+      //   only to the single system:{actor} group. No agent split —
+      //   systemActor IS the actor, no user involved.
       if (!result.isError && result.text && groupId && originalContent) {
         const identity = sourceUserId && sourcePlatform
           ? this.identityRegistry.resolve(sourcePlatform, sourceUserId)
@@ -211,10 +230,10 @@ export class SkillDispatcherPlugin implements Plugin {
         const episodeBase = {
           userMessage: originalContent,
           agentMessage: result.text,
-          userRole: identity?.displayName ?? sourceUserId,
+          userRole: identity?.displayName ?? sourceUserId ?? systemActor,
           agentName: targets[0],
           channelId: sourceChannelId,
-          platform: sourcePlatform,
+          platform: sourcePlatform ?? (systemActor ? "system" : undefined),
         };
         this.graphiti.addEpisode({ groupId, ...episodeBase })
           .catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode (shared) error:", err));

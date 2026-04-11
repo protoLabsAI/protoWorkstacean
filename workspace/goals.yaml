@@ -166,6 +166,29 @@ goals:
     max: 20
     description: "Unassigned Plane issues should not pile up — triage regularly"
 
+  # ── Memory / Graphiti health ────────────────────────────────────
+  #
+  # Graphiti is the episodic memory backend. Healthcheck catches the
+  # service being down; searchOk catches the deeper failure modes
+  # (Neo4j vector functions missing, embedder misconfigured, etc.)
+  # that passed healthcheck but broke retrieval. Both are critical
+  # because dispatch-time memory enrichment silently degrades if
+  # either is broken — the agent runs blind instead of erroring.
+
+  - id: memory.graphiti_healthy
+    type: Threshold
+    severity: critical
+    selector: "domains.memory.data.healthy"
+    min: 1
+    description: "Graphiti /healthcheck must return 200 — memory backend is the primary episodic store"
+
+  - id: memory.search_working
+    type: Threshold
+    severity: high
+    selector: "domains.memory.data.searchOk"
+    min: 1
+    description: "Graphiti /search must succeed — deeper wiring check (Neo4j vector fns + embedder)"
+
   # ── HITL routing health ─────────────────────────────────────────
   - id: hitl.no_unrendered_requests
     type: Threshold
