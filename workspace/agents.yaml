@@ -29,3 +29,20 @@ agents:
     skills:
       - name: chat
         description: Open-ended content + GTM dialogue with protoContent (Jon + Cindi)
+
+  # Quinn — standalone QA engineer (labs/quinn nanobot/LangGraph agent).
+  # Submits FORMAL GitHub reviews (APPROVE/REQUEST_CHANGES/COMMENT) via the
+  # pr_inspector tool, not narrative issue comments — closes the pr-remediator
+  # readyToMerge/changesRequested loop for non-safe-class PRs (task #73).
+  # Posts as @protoquinn[bot] via installation token minted in her entrypoint
+  # from QUINN_APP_ID + QUINN_APP_PRIVATE_KEY, refreshed every 45 min.
+  # In-process workspace/agents/quinn.yaml was retired to avoid name collision
+  # (executor registry was picking in-process before A2A). Uncovered: chat and
+  # security_triage — tracked as task #81.
+  - name: quinn
+    url: "${QUINN_BASE_URL}/a2a"
+    skills:
+      - name: pr_review
+        description: Review a pull request (CI, CodeRabbit threads, diff) and submit a formal APPROVE/REQUEST_CHANGES/COMMENT review via pr_inspector
+      - name: bug_triage
+        description: Triage a bug report, classify severity, file it on the Ava board via file_bug
