@@ -137,11 +137,21 @@ function parseEnv(): Env {
 }
 
 /**
- * Validated, immutable snapshot of all recognised environment variables.
- * Parsed once at module load — any misconfiguration exits the process immediately.
+ * Validated environment configuration.
+ *
+ * The schema is validated once at module load — any misconfiguration exits
+ * immediately (fail-fast). Subsequent reads go directly to `process.env` so
+ * that values set after module load (e.g. in tests) are always reflected.
  *
  * @example
  *   import { CONFIG } from "../config/env.ts";
  *   const token = CONFIG.DISCORD_BOT_TOKEN;
  */
-export const CONFIG = Object.freeze(parseEnv());
+// Validate once at startup.
+parseEnv();
+
+export const CONFIG = new Proxy({} as Env, {
+  get(_target, key: string) {
+    return process.env[key];
+  },
+}) as Readonly<Env>;
