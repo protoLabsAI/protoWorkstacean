@@ -210,19 +210,21 @@ function matchSkill(content: string, hint?: string): string | null {
 }
 
 function routeToAgent(skill: string | null, agents: AgentDef[]): AgentDef | null {
+  // Asymmetric fallback semantics — INTENTIONAL, do not "fix" to be symmetric:
+  //
+  //   explicit-skill + no claimant  → null   (caller skips and logs)
+  //   no-skill (free-form content)  → Ava   (Chief-of-Staff default)
+  //
+  // The split exists because a message with an explicit skill is a routing
+  // decision the sender has already made — falling back to a different agent
+  // silently misroutes (previously produced pr_review being answered by Ava
+  // despite not being in her agent card). But a message with no skill at all
+  // is free-form chat, and Ava is the correct default handler for that —
+  // she routes it further based on content. Keep the two paths distinct.
   if (skill) {
     const match = agents.find(a => a.skills.includes(skill));
-    if (match) return match;
-    // Skill is explicit but no registered A2A agent claims it — return null
-    // so the caller can escalate or skip. The previous behaviour of silently
-    // defaulting to Ava misrouted pr_review (an in-process proto-sdk skill on
-    // Quinn) to Ava, which then responded narratively because her LLM obliges
-    // any prompt regardless of its declared skill surface.
-    return null;
+    return match ?? null;
   }
-  // No skill at all — fall back to Ava as the Chief-of-Staff default for
-  // unstructured chat. This path is only reached for free-form content with
-  // no skillHint and no keyword match.
   return agents.find(a => a.name === "ava") ?? agents[0] ?? null;
 }
 
@@ -342,6 +344,23 @@ function reactToGitHubIssue(gh: GitHubContext, reaction: string): void {
 // ── Local memory skill handler ───────────────────────────────────────────────
 
 const MEMORY_SKILLS = new Set(["memory_recall", "memory_store"]);
+
+// ── Locally-owned skill surface ──────────────────────────────────────────────
+//
+// Single source of truth for which skills this plugin dispatches from the
+// `message.inbound.#` subscriber. The inbound handler's guard and the
+// downstream branches both read from this set, so there's no way for the
+// allowlist to drift from the actual handler logic. Any skill NOT in this
+// set falls through to the router + skill-dispatcher canonical path.
+//
+// When adding a skill to this plugin, add it to one of the source sets
+// (MEMORY_SKILLS or FIRE_AND_FORGET_SKILLS) — never hard-code a new string
+// here. onboard_project is already covered because it lives in
+// FIRE_AND_FORGET_SKILLS.
+const LOCALLY_OWNED_SKILLS = new Set<string>([
+  ...MEMORY_SKILLS,
+  ...FIRE_AND_FORGET_SKILLS,
+]);
 
 async function handleMemorySkill(
   bus: EventBus,
@@ -509,23 +528,22 @@ export default {
         ?? `message.outbound.${msg.topic.split(".").slice(1).join(".")}`;
 
       // ── Local ownership guard ──────────────────────────────────────────────
-      // This plugin owns three narrow paths:
-      //   1. MEMORY_SKILLS — handled inline via handleMemorySkill
-      //   2. onboard_project — forwarded to OnboardingPlugin
-      //   3. FIRE_AND_FORGET_SKILLS — ack-immediately orchestration skills
-      //      (plan / plan_resume / deep_research) that the router path does
-      //      not have an equivalent ack pattern for yet.
+      // This plugin only handles skills in LOCALLY_OWNED_SKILLS (memory ops +
+      // fire-and-forget orchestration, incl. onboard_project). Everything else
+      // — including skillHint-tagged webhooks like pr_review from github.ts —
+      // is the router + skill-dispatcher pipeline's responsibility. Without
+      // this guard the same inbound event triggers *both* plugins and the
+      // agent runs twice (observed on protoWorkstacean#104 as paired
+      // @protoquinn[bot] review comments).
       //
-      // Everything else — including skillHint-tagged webhooks like pr_review
-      // from github.ts — is the router + skill-dispatcher pipeline's
-      // responsibility. Without this guard the same inbound event triggers
-      // *both* plugins and the agent runs twice (observed on
-      // protoWorkstacean#104 as paired @protoquinn[bot] review comments).
-      const isLocallyOwned =
-        (skill && MEMORY_SKILLS.has(skill)) ||
-        skill === "onboard_project" ||
-        (skill && FIRE_AND_FORGET_SKILLS.has(skill));
-      if (!isLocallyOwned) return;
+      // TODO(#75 router-faf-dedup): the router path does NOT skip FAF skills,
+      // so onboard_project / plan / plan_resume / deep_research are still
+      // double-dispatched today — masked only by the inFlightFAF timing guard
+      // below. That mask is race-prone (two fast events can both clear the
+      // check before either sets it). Proper fix needs symmetric filters on
+      // both sides OR consolidating the ack-immediately pattern into
+      // skill-dispatcher so FAF skills can live entirely in the router path.
+      if (!skill || !LOCALLY_OWNED_SKILLS.has(skill)) return;
 
       const agent = routeToAgent(skill, agents);
       if (!agent) {
