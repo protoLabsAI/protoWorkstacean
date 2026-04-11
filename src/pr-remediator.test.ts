@@ -545,6 +545,9 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       expect(req.summary).toContain("bug: stuck forever");
       expect(req.summary).toContain("feature request");
       expect(req.options).toEqual(["investigate", "mark_non_remediable", "manual_unblock"]);
+      // sourceMeta.interface must be set so the HITL plugin can route to Discord.
+      // Previously missing → silent drops (7 PRs affected before the fix).
+      expect(req.sourceMeta?.interface).toBe("discord");
 
       // Subsequent triggers must NOT emit additional escalations (rate-limited)
       dispatch(bus, "pr.remediate.fix_ci");
