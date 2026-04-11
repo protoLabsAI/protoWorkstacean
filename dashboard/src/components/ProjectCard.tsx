@@ -24,12 +24,6 @@ export interface PrData {
   repo: string;
   number: number;
   title: string;
-<<<<<<< HEAD
-  mergeable: string;
-  checksPass: boolean;
-  updatedAt: string;
-  stale: boolean;
-=======
   headSha: string;
   author: string;
   baseRef: string;
@@ -41,7 +35,6 @@ export interface PrData {
   updatedAt: string;
   stale: boolean;
   labels: string[];
->>>>>>> origin/main
 }
 
 interface ProjectCardProps {
@@ -61,11 +54,7 @@ export default function ProjectCard({ project, ci, prs }: ProjectCardProps) {
   const openCount = prs.length;
   const conflicting = prs.filter((p) => p.mergeable === "dirty").length;
   const stale = prs.filter((p) => p.stale).length;
-<<<<<<< HEAD
-  const failing = prs.filter((p) => !p.checksPass).length;
-=======
   const failing = prs.filter((p) => p.ciStatus === "fail").length;
->>>>>>> origin/main
 
   const conclusionColor =
     ci?.latestConclusion === "success"
@@ -157,10 +146,6 @@ export default function ProjectCard({ project, ci, prs }: ProjectCardProps) {
                     <span class="badge badge-red">conflict</span>
                   )}
                   {pr.stale && <span class="badge badge-yellow">stale</span>}
-<<<<<<< HEAD
-                  {!pr.checksPass && (
-                    <span class="badge badge-red">failing</span>
-=======
                   {pr.ciStatus === "fail" && (
                     <span class="badge badge-red">ci fail</span>
                   )}
@@ -169,7 +154,6 @@ export default function ProjectCard({ project, ci, prs }: ProjectCardProps) {
                   )}
                   {pr.readyToMerge && (
                     <span class="badge badge-green">ready</span>
->>>>>>> origin/main
                   )}
                 </span>
                 <span class="pc-pr-date">{formatUpdatedAt(pr.updatedAt)}</span>
