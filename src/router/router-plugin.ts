@@ -36,6 +36,7 @@ import { ProjectEnricher } from "./project-enricher.ts";
 import { loadAgentDefinitions } from "../agent-runtime/agent-definition-loader.ts";
 import type { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
 import { TTLCache } from "../../lib/ttl-cache.ts";
+import { CONFIG } from "../config/env.ts";
 
 export interface RouterConfig {
   workspaceDir: string;
@@ -80,11 +81,11 @@ export class RouterPlugin implements Plugin {
   constructor(config: RouterConfig) {
     this.config = config;
     const defaultSkill =
-      config.defaultSkill ?? process.env.ROUTER_DEFAULT_SKILL;
+      config.defaultSkill ?? CONFIG.ROUTER_DEFAULT_SKILL;
     this.resolver = new SkillResolver(defaultSkill);
 
     const dmTimeoutSec = Math.round(
-      Number(process.env.DM_CONVERSATION_TIMEOUT_MS ?? 15 * 60_000) / 1000,
+      Number(CONFIG.DM_CONVERSATION_TIMEOUT_MS ?? 15 * 60_000) / 1000,
     );
     this.dmSessions = new TTLCache(dmTimeoutSec);
   }
@@ -189,8 +190,8 @@ export class RouterPlugin implements Plugin {
 
     if (isDM && !match && !storedSession) {
       // No keyword match and no active session — check DM default fallback.
-      const defaultAgent = process.env.ROUTER_DM_DEFAULT_AGENT;
-      const defaultSkill = process.env.ROUTER_DM_DEFAULT_SKILL ?? "chat";
+      const defaultAgent = CONFIG.ROUTER_DM_DEFAULT_AGENT;
+      const defaultSkill = CONFIG.ROUTER_DM_DEFAULT_SKILL ?? "chat";
       if (defaultAgent) {
         match = { skill: defaultSkill, agentName: defaultAgent, via: "default" };
       }

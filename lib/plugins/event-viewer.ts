@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import type { ServerWebSocket } from "bun";
 import type { Plugin, EventBus, BusMessage } from "../types";
+import { CONFIG } from "../../src/config/env.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -23,7 +24,7 @@ export class EventViewerPlugin implements Plugin {
   constructor(port: number = 8080) {
     this.port = port;
     this.viewerDir = resolve(__dirname, "../../dashboard/dist");
-    this.workspaceDir = resolve(process.env.WORKSPACE_DIR || join(process.cwd(), "workspace"));
+    this.workspaceDir = resolve(CONFIG.WORKSPACE_DIR || join(process.cwd(), "workspace"));
   }
 
   install(bus: EventBus): void {
@@ -89,7 +90,7 @@ export class EventViewerPlugin implements Plugin {
     const url = new URL(req.url);
     const topic = url.searchParams.get("topic");
     const limit = parseInt(url.searchParams.get("limit") || "100", 10);
-    const dataDir = process.env.DATA_DIR || resolve(process.cwd(), "data");
+    const dataDir = CONFIG.DATA_DIR || resolve(process.cwd(), "data");
     const { Database } = await import("bun:sqlite");
     const db = new Database(`${dataDir}/events.db`, { readonly: true });
 
@@ -139,7 +140,7 @@ export class EventViewerPlugin implements Plugin {
     }
   }
 
-  private mainServerPort: number = parseInt(process.env.PORT || "3000", 10);
+  private mainServerPort: number = parseInt(CONFIG.PORT || "3000", 10);
 
   private async proxyToMainServer(req: Request, url: URL): Promise<Response> {
     const target = `http://localhost:${this.mainServerPort}${url.pathname}${url.search}`;

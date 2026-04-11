@@ -7,7 +7,9 @@
  * Base URL: QDRANT_URL env var (default: http://qdrant:6333)
  */
 
-const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant:6333";
+import { CONFIG } from "../../config/env.ts";
+
+const QDRANT_URL = CONFIG.QDRANT_URL ?? "http://qdrant:6333";
 const TIMEOUT_MS = 5_000;
 
 // ── Types ──────────────────────────────────────────────────────────────────────

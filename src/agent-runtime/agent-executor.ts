@@ -19,6 +19,7 @@ import { query, createSdkMcpServer, isSDKResultMessage } from "@protolabsai/sdk"
 import type { SDKResultMessageSuccess } from "@protolabsai/sdk";
 import type { AgentDefinition } from "./types.ts";
 import type { ToolRegistry } from "./tool-registry.ts";
+import { CONFIG } from "../config/env.ts";
 
 export interface AgentRunOptions {
   /** The prompt / task to send to the agent. */
@@ -61,9 +62,9 @@ export class AgentExecutor {
     // SDK falls back to native Anthropic mode (ANTHROPIC_API_KEY). Avoids
     // hardwiring a container hostname that only exists in the homelab network.
     this.gatewayUrl =
-      config.gatewayUrl ?? process.env.LLM_GATEWAY_URL;
+      config.gatewayUrl ?? CONFIG.LLM_GATEWAY_URL;
     this.gatewayApiKey =
-      config.gatewayApiKey ?? process.env.OPENAI_API_KEY;
+      config.gatewayApiKey ?? CONFIG.OPENAI_API_KEY;
   }
 
   async run(opts: AgentRunOptions): Promise<AgentRunResult> {

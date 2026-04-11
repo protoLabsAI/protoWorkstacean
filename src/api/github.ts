@@ -7,8 +7,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { Route, ApiContext } from "./types.ts";
+import { CONFIG } from "../config/env.ts";
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_TOKEN = CONFIG.GITHUB_TOKEN;
 
 function loadProjectRepos(workspaceDir: string): string[] {
   const projectsPath = join(workspaceDir, "projects.yaml");

@@ -47,6 +47,7 @@ import { PlaneClient } from "../plane-client.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
 import { validateProjectEntry } from "../project-schema.ts";
 import { createDriveFolder } from "./google.ts";
+import { CONFIG } from "../../src/config/env.ts";
 
 // ── In-process write lock for projects.yaml ───────────────────────────────────
 // Serialises concurrent onboarding writes to prevent TOCTOU races when two
@@ -324,13 +325,13 @@ export class OnboardingPlugin implements Plugin {
 
   /** Step 3: Create Plane project. */
   private async _stepPlaneProject(req: OnboardRequest): Promise<StepResult & { projectId?: string }> {
-    const apiKey = process.env.PLANE_API_KEY;
+    const apiKey = CONFIG.PLANE_API_KEY;
     if (!apiKey) {
       return { status: "skip", detail: "PLANE_API_KEY not set" };
     }
 
-    const baseUrl = process.env.PLANE_BASE_URL ?? "http://ava:3002";
-    const workspaceSlug = process.env.PLANE_WORKSPACE_SLUG ?? "protolabsai";
+    const baseUrl = CONFIG.PLANE_BASE_URL ?? "http://ava:3002";
+    const workspaceSlug = CONFIG.PLANE_WORKSPACE_SLUG ?? "protolabsai";
     const client = new PlaneClient(baseUrl, workspaceSlug, apiKey);
 
     // Derive a short Plane identifier from the slug (max 12 chars, uppercase, alphanumeric)
@@ -360,21 +361,21 @@ export class OnboardingPlugin implements Plugin {
 
   /** Step 4: Register Plane webhook. */
   private async _stepPlaneWebhook(req: OnboardRequest): Promise<StepResult> {
-    const apiKey = process.env.PLANE_API_KEY;
+    const apiKey = CONFIG.PLANE_API_KEY;
     if (!apiKey) {
       return { status: "skip", detail: "PLANE_API_KEY not set" };
     }
 
-    const baseUrl = process.env.PLANE_BASE_URL ?? "http://ava:3002";
-    const workspaceSlug = process.env.PLANE_WORKSPACE_SLUG ?? "protolabsai";
-    const publicUrl = process.env.WORKSTACEAN_PUBLIC_URL;
+    const baseUrl = CONFIG.PLANE_BASE_URL ?? "http://ava:3002";
+    const workspaceSlug = CONFIG.PLANE_WORKSPACE_SLUG ?? "protolabsai";
+    const publicUrl = CONFIG.WORKSTACEAN_PUBLIC_URL;
 
     if (!publicUrl) {
       return { status: "skip", detail: "WORKSTACEAN_PUBLIC_URL not set — skipping Plane webhook registration" };
     }
 
     const webhookUrl = `${publicUrl}/webhooks/plane`;
-    const secret = process.env.PLANE_WEBHOOK_SECRET;
+    const secret = CONFIG.PLANE_WEBHOOK_SECRET;
     const client = new PlaneClient(baseUrl, workspaceSlug, apiKey);
 
     try {
@@ -398,14 +399,14 @@ export class OnboardingPlugin implements Plugin {
       return { status: "skip", detail: "No GitHub auth configured (QUINN_APP_ID or GITHUB_TOKEN required)" };
     }
 
-    const publicUrl = process.env.WORKSTACEAN_PUBLIC_URL;
+    const publicUrl = CONFIG.WORKSTACEAN_PUBLIC_URL;
     if (!publicUrl) {
       return { status: "skip", detail: "WORKSTACEAN_PUBLIC_URL not set — skipping GitHub webhook registration" };
     }
 
     const webhookUrl = `${publicUrl}/webhook/github`;
     const [owner, repo] = req.github.split("/");
-    const secret = process.env.GITHUB_WEBHOOK_SECRET;
+    const secret = CONFIG.GITHUB_WEBHOOK_SECRET;
 
     try {
       const token = await getToken(owner, repo);
@@ -431,7 +432,7 @@ export class OnboardingPlugin implements Plugin {
 
   /** Step 6: Create Drive folder for this project under the org root. */
   private async _stepDriveFolder(req: OnboardRequest): Promise<StepResult & { folderId?: string }> {
-    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REFRESH_TOKEN) {
+    if (!CONFIG.GOOGLE_CLIENT_ID || !CONFIG.GOOGLE_CLIENT_SECRET || !CONFIG.GOOGLE_REFRESH_TOKEN) {
       return { status: "skip", detail: "Google credentials not set — skipping Drive folder creation" };
     }
 

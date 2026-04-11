@@ -42,6 +42,7 @@ import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer, type TurnData } from "../conversation/conversation-tracer.ts";
 import { GraphitiClient } from "../memory/graphiti-client.ts";
 import { IdentityRegistry } from "../identity/identity-registry.ts";
+import { CONFIG } from "../../src/config/env.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -262,7 +263,7 @@ export class DiscordPlugin implements Plugin {
   }
 
   install(bus: EventBus): void {
-    if (!process.env.DISCORD_BOT_TOKEN) {
+    if (!CONFIG.DISCORD_BOT_TOKEN) {
       console.log("[discord] DISCORD_BOT_TOKEN not set — plugin disabled");
       return;
     }
@@ -616,7 +617,7 @@ export class DiscordPlugin implements Plugin {
 
     // ── Welcome new members ──────────────────────────────────────────────────
     this.client.on(Events.GuildMemberAdd, async member => {
-      const channelId = this.config.channels.welcome || process.env.DISCORD_WELCOME_CHANNEL;
+      const channelId = this.config.channels.welcome || CONFIG.DISCORD_WELCOME_CHANNEL;
       if (!channelId) return;
       const ch = member.guild.channels.cache.get(channelId) as TextChannel | undefined;
       await ch?.send(`Welcome to the protoLabs community, <@${member.id}>! 👋`).catch(() => {});
@@ -701,7 +702,7 @@ export class DiscordPlugin implements Plugin {
       const channelId = String(
         payload.channel ?? payload.recipient
           ?? this.config.channels.digest
-          ?? process.env.DISCORD_DIGEST_CHANNEL
+          ?? CONFIG.DISCORD_DIGEST_CHANNEL
           ?? ""
       );
       if (channelId) {
@@ -776,7 +777,7 @@ export class DiscordPlugin implements Plugin {
     });
 
     // ── Bus client login ────────────────────────────────────────────────────
-    this.client.login(process.env.DISCORD_BOT_TOKEN);
+    this.client.login(CONFIG.DISCORD_BOT_TOKEN);
 
     // ── Agent client pool initialization ────────────────────────────────────
     this._initAgentPool();
@@ -1049,7 +1050,7 @@ export class DiscordPlugin implements Plugin {
       return;
     }
 
-    const timeoutMs = Number(process.env.DM_CONVERSATION_TIMEOUT_MS ?? 15 * 60_000);
+    const timeoutMs = Number(CONFIG.DM_CONVERSATION_TIMEOUT_MS ?? 15 * 60_000);
     const conv = this.conversationManager.getOrCreate(message.channelId, userId, timeoutMs, agentName);
     const { conversationId, isNew, turnNumber } = conv;
 
@@ -1206,7 +1207,7 @@ export class DiscordPlugin implements Plugin {
   }
 
   private async _registerSlashCommands(): Promise<void> {
-    const guildId = process.env.DISCORD_GUILD_ID;
+    const guildId = CONFIG.DISCORD_GUILD_ID;
     if (!guildId) {
       console.log("[discord] DISCORD_GUILD_ID not set — skipping slash command registration");
       return;

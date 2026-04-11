@@ -34,6 +34,7 @@ import { sanitizeIssueBody } from "../sanitize.ts";
 import type { SanitizationConfig } from "../sanitize.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
 import { withCircuitBreaker } from "./circuit-breaker.ts";
+import { CONFIG } from "../../src/config/env.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -227,12 +228,12 @@ export class GitHubPlugin implements Plugin {
       return;
     }
 
-    const usingApp = !!(process.env.QUINN_APP_ID && process.env.QUINN_APP_PRIVATE_KEY);
+    const usingApp = !!(CONFIG.QUINN_APP_ID && CONFIG.QUINN_APP_PRIVATE_KEY);
     console.log(`[github] Auth: ${usingApp ? "GitHub App (quinn[bot])" : "PAT (GITHUB_TOKEN)"}`);
 
     this.config = loadConfig(this.workspaceDir);
-    const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? "";
-    const port = parseInt(process.env.GITHUB_WEBHOOK_PORT ?? "8082", 10);
+    const webhookSecret = CONFIG.GITHUB_WEBHOOK_SECRET ?? "";
+    const port = parseInt(CONFIG.GITHUB_WEBHOOK_PORT ?? "8082", 10);
 
     // ── Hot-reload github.yaml and projects.yaml ──────────────────────────────
     const configPath = join(this.workspaceDir, "github.yaml");

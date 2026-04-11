@@ -45,8 +45,9 @@ import { CeremonyYamlLoader } from "../loaders/ceremonyYamlLoader.ts";
 import { CeremonyOutcomesRepository } from "../knowledge/ceremonyOutcomes.ts";
 import { CeremonyStateExtension } from "../world/extensions/CeremonyStateExtension.ts";
 import { CeremonyNotifier } from "../integrations/discord/CeremonyNotifier.ts";
+import { CONFIG } from "../config/env.ts";
 
-const DEBUG = process.env.DEBUG === "1" || process.env.DEBUG === "true";
+const DEBUG = CONFIG.DEBUG === "1" || CONFIG.DEBUG === "true";
 const HOT_RELOAD_INTERVAL_MS = 5_000;
 const SKILL_DISPATCH_TIMEOUT_MS = 120_000; // 2 minutes
 

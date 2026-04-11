@@ -18,6 +18,7 @@ import { ProtoSdkExecutor } from "../executor/executors/proto-sdk-executor.ts";
 import { loadAgentDefinitions } from "./agent-definition-loader.ts";
 import { createBusTools } from "./tools/index.ts";
 import type { AgentExecutorConfig } from "./agent-executor.ts";
+import { CONFIG } from "../config/env.ts";
 
 export interface AgentRuntimeConfig extends AgentExecutorConfig {
   workspaceDir: string;
@@ -44,7 +45,7 @@ export class AgentRuntimePlugin implements Plugin {
     // Register all built-in workstacean tools
     const busTools = createBusTools({
       baseUrl: this.config.apiBaseUrl ?? "http://localhost:3000",
-      apiKey: this.config.apiKey ?? process.env.WORKSTACEAN_API_KEY,
+      apiKey: this.config.apiKey ?? CONFIG.WORKSTACEAN_API_KEY,
     });
     this.toolRegistry.registerAll(busTools);
 

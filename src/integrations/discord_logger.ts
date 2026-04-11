@@ -1,4 +1,5 @@
 import type { GoalViolation } from "../types/goals.ts";
+import { CONFIG } from "../config/env.ts";
 
 const SEVERITY_COLORS: Record<string, number> = {
   low: 0x3498db,      // blue
@@ -16,7 +17,7 @@ export class DiscordLogger {
   private webhookUrl: string | null;
 
   constructor(webhookUrl?: string) {
-    this.webhookUrl = webhookUrl ?? process.env.DISCORD_GOALS_WEBHOOK_URL ?? null;
+    this.webhookUrl = webhookUrl ?? CONFIG.DISCORD_GOALS_WEBHOOK_URL ?? null;
     if (!this.webhookUrl) {
       console.info("[discord-logger] DISCORD_GOALS_WEBHOOK_URL not set — using console fallback");
     }

@@ -11,6 +11,7 @@
  */
 
 import type { CeremonyOutcome } from "../../plugins/CeremonyPlugin.types.ts";
+import { CONFIG } from "../../config/env.ts";
 
 const STATUS_COLORS: Record<string, number> = {
   success: 0x2ecc71,  // green
@@ -22,7 +23,7 @@ export class CeremonyNotifier {
   private defaultWebhookUrl: string | null;
 
   constructor(webhookUrl?: string) {
-    this.defaultWebhookUrl = webhookUrl ?? process.env.DISCORD_CEREMONY_WEBHOOK_URL ?? null;
+    this.defaultWebhookUrl = webhookUrl ?? CONFIG.DISCORD_CEREMONY_WEBHOOK_URL ?? null;
     if (!this.defaultWebhookUrl) {
       console.info("[ceremony-notifier] DISCORD_CEREMONY_WEBHOOK_URL not set — using console fallback");
     }

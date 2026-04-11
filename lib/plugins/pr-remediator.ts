@@ -47,8 +47,9 @@ import { parse as parseYaml } from "yaml";
 import type { Plugin, EventBus, BusMessage, HITLRequest } from "../types.ts";
 import type { WorldState } from "../types/world-state.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
+import { CONFIG } from "../../src/config/env.ts";
 
-const AUTO_MERGE_ENABLED = process.env.PR_REMEDIATOR_AUTO_MERGE === "1";
+const AUTO_MERGE_ENABLED = CONFIG.PR_REMEDIATOR_AUTO_MERGE === "1";
 // Resolved at install() time — null when no GitHub credentials are present.
 const getGithubToken = makeGitHubAuth();
 
@@ -59,7 +60,7 @@ const getGithubToken = makeGitHubAuth();
  * The map is loaded lazily on first use and cached per-process.
  */
 let projectPathMapCache: Map<string, string> | null = null;
-function loadProjectPathMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? "workspace"): Map<string, string> {
+function loadProjectPathMap(workspaceDir: string = CONFIG.WORKSPACE_DIR ?? "workspace"): Map<string, string> {
   if (projectPathMapCache) return projectPathMapCache;
   const map = new Map<string, string>();
   const yamlPath = join(workspaceDir, "projects.yaml");
@@ -95,8 +96,8 @@ function loadProjectPathMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? 
  * is already active for the project, so repeated calls are cheap.
  */
 async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; message: string }> {
-  const base = process.env.AVA_BASE_URL;
-  const apiKey = process.env.AVA_API_KEY;
+  const base = CONFIG.AVA_BASE_URL;
+  const apiKey = CONFIG.AVA_API_KEY;
   if (!base) return { ok: false, message: "AVA_BASE_URL not set" };
   if (!apiKey) return { ok: false, message: "AVA_API_KEY not set" };
 

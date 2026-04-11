@@ -15,6 +15,8 @@
  *   endTrace()   — when conversation times out or is closed
  */
 
+import { CONFIG } from "../../src/config/env.ts";
+
 interface LangfuseConfig {
   publicKey: string;
   secretKey: string;
@@ -36,9 +38,9 @@ export class ConversationTracer {
   private config: LangfuseConfig | null;
 
   constructor() {
-    const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
-    const secretKey = process.env.LANGFUSE_SECRET_KEY;
-    const host = process.env.LANGFUSE_HOST ?? process.env.LANGFUSE_BASE_URL ?? "https://cloud.langfuse.com";
+    const publicKey = CONFIG.LANGFUSE_PUBLIC_KEY;
+    const secretKey = CONFIG.LANGFUSE_SECRET_KEY;
+    const host = CONFIG.LANGFUSE_HOST ?? CONFIG.LANGFUSE_BASE_URL ?? "https://cloud.langfuse.com";
 
     if (publicKey && secretKey) {
       this.config = { publicKey, secretKey, host };

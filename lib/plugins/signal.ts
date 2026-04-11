@@ -1,4 +1,5 @@
 import type { Plugin, EventBus, BusMessage } from "../types";
+import { CONFIG } from "../../src/config/env.ts";
 
 interface SignalEnvelope {
   envelope: {
@@ -33,8 +34,8 @@ export class SignalPlugin implements Plugin {
 
   install(bus: EventBus): void {
     this.bus = bus;
-    this.signalUrl = process.env.SIGNAL_URL;
-    this.signalNumber = process.env.SIGNAL_NUMBER;
+    this.signalUrl = CONFIG.SIGNAL_URL;
+    this.signalNumber = CONFIG.SIGNAL_NUMBER;
 
     if (!this.signalUrl || !this.signalNumber) {
       console.log("Signal not configured, skipping bridge");

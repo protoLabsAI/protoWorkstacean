@@ -10,10 +10,11 @@
  */
 
 import { ensureCollection } from "./client.ts";
+import { CONFIG } from "../../config/env.ts";
 
 // Vector dimension must match the configured Ollama embedding model.
 // nomic-embed-text produces 768-dimensional vectors.
-const VECTOR_SIZE = parseInt(process.env.QDRANT_VECTOR_SIZE ?? "768", 10);
+const VECTOR_SIZE = parseInt(CONFIG.QDRANT_VECTOR_SIZE ?? "768", 10);
 
 export const COLLECTION_PR_HISTORY = "quinn-pr-history";
 export const COLLECTION_CODE_PATTERNS = "quinn-code-patterns";

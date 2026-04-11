@@ -13,6 +13,8 @@
  *                DELETE /group/{group_id}, GET /healthcheck
  */
 
+import { CONFIG } from "../../src/config/env.ts";
+
 export interface GraphitiFact {
   uuid: string;
   name: string;
@@ -36,7 +38,7 @@ export class GraphitiClient {
   private readonly baseUrl: string;
 
   constructor() {
-    this.baseUrl = (process.env.GRAPHITI_URL ?? "http://graphiti:8000").replace(/\/$/, "");
+    this.baseUrl = (CONFIG.GRAPHITI_URL ?? "http://graphiti:8000").replace(/\/$/, "");
   }
 
   /**

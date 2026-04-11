@@ -4,6 +4,7 @@
  */
 
 import type { Route, ApiContext } from "./types.ts";
+import { CONFIG } from "../config/env.ts";
 
 interface WorldStateAPI {
   getWorldState(opts?: { domain?: string; maxAgeMs?: number }): unknown;
@@ -18,8 +19,8 @@ interface ActionDispatcherAPI {
 }
 
 function resolveGithubAuthType(): string | null {
-  if (process.env.QUINN_APP_PRIVATE_KEY) return "app";
-  if (process.env.GITHUB_TOKEN) return "token";
+  if (CONFIG.QUINN_APP_PRIVATE_KEY) return "app";
+  if (CONFIG.GITHUB_TOKEN) return "token";
   return null;
 }
 
@@ -47,28 +48,28 @@ export function createRoutes(ctx: ApiContext): Route[] {
 
     return Response.json({
       discord: {
-        configured: !!process.env.DISCORD_BOT_TOKEN,
+        configured: !!CONFIG.DISCORD_BOT_TOKEN,
         connected: discordReady,
         bot: discordReady ? discordClient?.user?.tag ?? null : null,
       },
       github: {
-        configured: !!(process.env.GITHUB_TOKEN || process.env.QUINN_APP_PRIVATE_KEY),
+        configured: !!(CONFIG.GITHUB_TOKEN || CONFIG.QUINN_APP_PRIVATE_KEY),
         authType: resolveGithubAuthType(),
       },
       plane: {
-        configured: !!process.env.PLANE_API_KEY,
-        baseUrl: process.env.PLANE_BASE_URL || null,
+        configured: !!CONFIG.PLANE_API_KEY,
+        baseUrl: CONFIG.PLANE_BASE_URL || null,
       },
       gateway: {
-        configured: !!process.env.LLM_GATEWAY_URL,
-        url: process.env.LLM_GATEWAY_URL || null,
+        configured: !!CONFIG.LLM_GATEWAY_URL,
+        url: CONFIG.LLM_GATEWAY_URL || null,
       },
       langfuse: {
-        configured: !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY),
+        configured: !!(CONFIG.LANGFUSE_PUBLIC_KEY && CONFIG.LANGFUSE_SECRET_KEY),
       },
       graphiti: {
-        configured: !!process.env.GRAPHITI_URL,
-        url: process.env.GRAPHITI_URL || null,
+        configured: !!CONFIG.GRAPHITI_URL,
+        url: CONFIG.GRAPHITI_URL || null,
       },
     });
   }

@@ -7,8 +7,10 @@
  * Model:    OLLAMA_EMBED_MODEL env var (default: nomic-embed-text)
  */
 
-const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://ollama:11434";
-const EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL ?? "nomic-embed-text";
+import { CONFIG } from "../../config/env.ts";
+
+const OLLAMA_URL = CONFIG.OLLAMA_URL ?? "http://ollama:11434";
+const EMBED_MODEL = CONFIG.OLLAMA_EMBED_MODEL ?? "nomic-embed-text";
 const TIMEOUT_MS = 30_000; // embeddings can take a few seconds
 
 interface OllamaEmbedResponse {

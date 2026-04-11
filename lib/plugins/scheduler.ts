@@ -3,8 +3,9 @@ import { join, resolve } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 import * as YAML from "yaml";
 import type { Plugin, EventBus, BusMessage } from "../types";
+import { CONFIG } from "../../src/config/env.ts";
 
-const DEBUG = process.env.DEBUG === "1" || process.env.DEBUG === "true";
+const DEBUG = CONFIG.DEBUG === "1" || CONFIG.DEBUG === "true";
 
 function debug(...args: unknown[]): void {
   if (DEBUG) {
@@ -54,7 +55,7 @@ export class SchedulerPlugin implements Plugin {
 
   constructor(dataDir: string) {
     this.cronsDir = join(resolve(dataDir), "crons");
-    this.defaultTimezone = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    this.defaultTimezone = CONFIG.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   }
 
   install(bus: EventBus): void {

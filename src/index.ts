@@ -10,16 +10,17 @@ import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { ActionRegistry } from "./planner/action-registry";
 import type { Plugin, } from "../lib/types";
 import type { Action } from "./planner/types/action";
+import { CONFIG } from "./config/env.ts";
 // --- Workspace config ---
 const workspaceDir = resolve(
-  process.env.WORKSPACE_DIR || join(process.cwd(), "workspace")
+  CONFIG.WORKSPACE_DIR || join(process.cwd(), "workspace")
 );
 if (!existsSync(workspaceDir)) {
   mkdirSync(workspaceDir, { recursive: true });
 }
 
 const dataDir = resolve(
-  process.env.DATA_DIR || join(process.cwd(), "data")
+  CONFIG.DATA_DIR || join(process.cwd(), "data")
 );
 
 const bus = new InMemoryEventBus();
@@ -108,7 +109,7 @@ interface PluginRegistryEntry {
   factory: () => Promise<Plugin>;
 }
 
-const enabledBuiltins = (process.env.ENABLED_PLUGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const enabledBuiltins = (CONFIG.ENABLED_PLUGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
 // Shared ExecutorRegistry — populated by AgentRuntimePlugin + SkillBrokerPlugin,
 // consumed by SkillDispatcherPlugin (sole agent.skill.request subscriber).
@@ -127,7 +128,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
   },
   {
     name: "discord",
-    condition: () => !!process.env.DISCORD_BOT_TOKEN,
+    condition: () => !!CONFIG.DISCORD_BOT_TOKEN,
     factory: async () => {
       const { DiscordPlugin } = await import("../lib/plugins/discord");
       return new DiscordPlugin(workspaceDir, dataDir, channelRegistry, hitlPlugin);
@@ -135,7 +136,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
   },
   {
     name: "github",
-    condition: () => !!(process.env.GITHUB_TOKEN || process.env.GITHUB_APP_ID),
+    condition: () => !!(CONFIG.GITHUB_TOKEN || CONFIG.GITHUB_APP_ID),
     factory: async () => {
       const { GitHubPlugin } = await import("../lib/plugins/github");
       return new GitHubPlugin(workspaceDir);
@@ -167,7 +168,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
   },
   {
     name: "event-viewer",
-    condition: () => !process.env.DISABLE_EVENT_VIEWER,
+    condition: () => !CONFIG.DISABLE_EVENT_VIEWER,
     factory: async () => {
       const { EventViewerPlugin } = await import("../lib/plugins/event-viewer");
       return new EventViewerPlugin();
@@ -198,8 +199,8 @@ const pluginRegistry: PluginRegistryEntry[] = [
       return new AgentRuntimePlugin(
         {
           workspaceDir,
-          apiBaseUrl: `http://localhost:${process.env.WORKSTACEAN_HTTP_PORT ?? "3000"}`,
-          apiKey: process.env.WORKSTACEAN_API_KEY,
+          apiBaseUrl: `http://localhost:${CONFIG.WORKSTACEAN_HTTP_PORT ?? "3000"}`,
+          apiKey: CONFIG.WORKSTACEAN_API_KEY,
         },
         executorRegistry,
       );
@@ -258,7 +259,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
   },
   {
     name: "pr-remediator",
-    condition: () => !!(process.env.QUINN_APP_PRIVATE_KEY || process.env.GITHUB_TOKEN),
+    condition: () => !!(CONFIG.QUINN_APP_PRIVATE_KEY || CONFIG.GITHUB_TOKEN),
     factory: async () => {
       const { PrRemediatorPlugin } = await import("../lib/plugins/pr-remediator.js");
       return new PrRemediatorPlugin();
@@ -428,8 +429,8 @@ const cli = corePlugins.find((p) => p.name === "cli") as CLIPlugin;
 cli?.showPrompt();
 
 // --- HTTP API server (POST /publish, GET /health, GET /api/*) ---
-const HTTP_PORT = parseInt(process.env.WORKSTACEAN_HTTP_PORT || "3000", 10);
-const API_KEY = process.env.WORKSTACEAN_API_KEY;
+const HTTP_PORT = parseInt(CONFIG.WORKSTACEAN_HTTP_PORT || "3000", 10);
+const API_KEY = CONFIG.WORKSTACEAN_API_KEY;
 
 // ── API routes (modular) ──────────────────────────────────────────────────────
 import { createAllRoutes, matchPath } from "./api/index.ts";

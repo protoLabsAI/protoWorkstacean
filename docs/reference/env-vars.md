@@ -4,6 +4,18 @@ title: Environment Variables
 
 All environment variables recognised by protoWorkstacean, their defaults, and which plugin or subsystem reads them.
 
+## Central schema
+
+All env vars are declared in `src/config/env.ts` and validated once at startup via Zod.
+The validated singleton is exported as `CONFIG`:
+
+```typescript
+import { CONFIG } from "./config/env.ts";
+const token = CONFIG.DISCORD_BOT_TOKEN; // string | undefined
+```
+
+If validation fails (e.g. a type mismatch), the process exits immediately with a clear error listing each failing variable and the reason. Do not read `process.env` directly outside `src/config/env.ts`.
+
 ## Core / HTTP
 
 | Variable | Default | Plugin | Description |

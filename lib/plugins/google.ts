@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { withCircuitBreaker } from "./circuit-breaker.ts";
+import { CONFIG } from "../../src/config/env.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -85,9 +86,9 @@ let _tokenState: TokenState | null = null;
  * Exported so OnboardingPlugin can reuse the same token cache.
  */
 export async function getGoogleAccessToken(): Promise<string | null> {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+  const clientId = CONFIG.GOOGLE_CLIENT_ID;
+  const clientSecret = CONFIG.GOOGLE_CLIENT_SECRET;
+  const refreshToken = CONFIG.GOOGLE_REFRESH_TOKEN;
 
   if (!clientId || !clientSecret || !refreshToken) return null;
 
@@ -222,7 +223,7 @@ export class GooglePlugin implements Plugin {
   }
 
   install(bus: EventBus): void {
-    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REFRESH_TOKEN) {
+    if (!CONFIG.GOOGLE_CLIENT_ID || !CONFIG.GOOGLE_CLIENT_SECRET || !CONFIG.GOOGLE_REFRESH_TOKEN) {
       console.log("[google] GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN not set — plugin disabled");
       return;
     }

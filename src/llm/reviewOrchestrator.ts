@@ -15,6 +15,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { CONFIG } from "../config/env.ts";
 import { parsePatch } from "../diff/parsePatch.ts";
 import { validateComments } from "../diff/validateComments.ts";
 import { buildSummaryPrompt, buildInlineReviewPrompt } from "./promptBuilder.ts";
@@ -166,7 +167,7 @@ export async function review(
   prNumber: number,
   getToken: (owner: string, repo: string) => Promise<string>,
 ): Promise<ReviewResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = CONFIG.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for PR review");
   }

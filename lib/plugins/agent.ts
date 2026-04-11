@@ -12,8 +12,9 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import * as YAML from "yaml";
 import type { Plugin, EventBus, BusMessage } from "../types";
+import { CONFIG } from "../../src/config/env.ts";
 
-const DEBUG = process.env.DEBUG === "1" || process.env.DEBUG === "true";
+const DEBUG = CONFIG.DEBUG === "1" || CONFIG.DEBUG === "true";
 
 function debug(...args: unknown[]): void {
   if (DEBUG) {
@@ -121,7 +122,7 @@ export class AgentPlugin implements Plugin {
 
     // Set up auth storage with API key for local models
     this.authStorage = AuthStorage.inMemory({
-      "local-llm": { type: "api_key", key: process.env.OPENAI_API_KEY || "sk-dummy" }
+      "local-llm": { type: "api_key", key: CONFIG.OPENAI_API_KEY || "sk-dummy" }
     });
 
     // Set up model registry with local models.json if it exists

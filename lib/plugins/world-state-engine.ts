@@ -36,6 +36,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import type { WorldState, WorldStateDomain, WorldStateSnapshot } from "../types/world-state.ts";
+import { CONFIG } from "../../src/config/env.ts";
 
 // ── Domain registration ───────────────────────────────────────────────────────
 
@@ -392,7 +393,7 @@ export class WorldStateEngine implements Plugin {
   // ── Initialization ─────────────────────────────────────────────────────────
 
   private _initRedis(): void {
-    const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
+    const redisUrl = CONFIG.REDIS_URL ?? "redis://localhost:6379";
 
     // @ts-ignore — ioredis is an optional peer dependency
     import("ioredis")
@@ -417,9 +418,9 @@ export class WorldStateEngine implements Plugin {
   }
 
   private _initLangfuse(): void {
-    const secretKey = process.env.LANGFUSE_SECRET_KEY;
-    const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
-    const baseUrl = process.env.LANGFUSE_BASE_URL ?? "https://cloud.langfuse.com";
+    const secretKey = CONFIG.LANGFUSE_SECRET_KEY;
+    const publicKey = CONFIG.LANGFUSE_PUBLIC_KEY;
+    const baseUrl = CONFIG.LANGFUSE_BASE_URL ?? "https://cloud.langfuse.com";
 
     if (!secretKey || !publicKey) {
       console.warn("[world-state-engine] Langfuse keys not set — tracing disabled");

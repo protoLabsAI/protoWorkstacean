@@ -1,4 +1,5 @@
 import type { GoalViolation } from "../types/goals.ts";
+import { CONFIG } from "../config/env.ts";
 
 interface LangfuseConfig {
   publicKey: string;
@@ -26,9 +27,9 @@ export class LangfuseLogger {
   private buffer: LangfuseEvent[] = [];
 
   constructor() {
-    const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
-    const secretKey = process.env.LANGFUSE_SECRET_KEY;
-    const host = process.env.LANGFUSE_HOST ?? "https://cloud.langfuse.com";
+    const publicKey = CONFIG.LANGFUSE_PUBLIC_KEY;
+    const secretKey = CONFIG.LANGFUSE_SECRET_KEY;
+    const host = CONFIG.LANGFUSE_HOST ?? "https://cloud.langfuse.com";
 
     if (!publicKey || !secretKey) {
       console.info("[langfuse] LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY not set — using console fallback");

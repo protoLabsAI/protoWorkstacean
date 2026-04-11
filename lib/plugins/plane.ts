@@ -19,6 +19,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { PlaneClient } from "../plane-client.ts";
+import { CONFIG } from "../../src/config/env.ts";
 
 // ── Plane webhook types ──────────────────────────────────────────────────────
 
@@ -116,11 +117,11 @@ export class PlanePlugin implements Plugin {
   }
 
   install(bus: EventBus): void {
-    const webhookSecret = process.env.PLANE_WEBHOOK_SECRET ?? "";
-    const apiKey = process.env.PLANE_API_KEY ?? "";
-    const baseUrl = process.env.PLANE_BASE_URL ?? "http://ava:3002";
-    const workspaceSlug = process.env.PLANE_WORKSPACE_SLUG ?? "protolabsai";
-    const port = parseInt(process.env.PLANE_WEBHOOK_PORT ?? "8083", 10);
+    const webhookSecret = CONFIG.PLANE_WEBHOOK_SECRET ?? "";
+    const apiKey = CONFIG.PLANE_API_KEY ?? "";
+    const baseUrl = CONFIG.PLANE_BASE_URL ?? "http://ava:3002";
+    const workspaceSlug = CONFIG.PLANE_WORKSPACE_SLUG ?? "protolabsai";
+    const port = parseInt(CONFIG.PLANE_WEBHOOK_PORT ?? "8083", 10);
 
     if (!webhookSecret) {
       console.warn("[plane] PLANE_WEBHOOK_SECRET not set — signature verification disabled (dev mode)");

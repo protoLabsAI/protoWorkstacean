@@ -11,6 +11,7 @@
  */
 
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
+import { CONFIG } from "../../src/config/env.ts";
 
 const SEVERITY_COLORS: Record<string, number> = {
   high: 0xED4245,    // Red
@@ -34,7 +35,7 @@ export class WorldEngineAlertPlugin implements Plugin {
     });
     this.subscriptionIds.push(subId);
 
-    const webhookConfigured = !!process.env.DISCORD_WEBHOOK_ALERTS;
+    const webhookConfigured = !!CONFIG.DISCORD_WEBHOOK_ALERTS;
     console.log(
       `[world-engine-alert] Plugin installed — alerts webhook ${webhookConfigured ? "configured" : "NOT configured (set DISCORD_WEBHOOK_ALERTS)"}`,
     );
@@ -51,7 +52,7 @@ export class WorldEngineAlertPlugin implements Plugin {
   }
 
   private async _handleAlert(msg: BusMessage): Promise<void> {
-    const webhookUrl = process.env.DISCORD_WEBHOOK_ALERTS;
+    const webhookUrl = CONFIG.DISCORD_WEBHOOK_ALERTS;
     if (!webhookUrl) {
       console.warn("[world-engine-alert] DISCORD_WEBHOOK_ALERTS not set — alert dropped");
       return;

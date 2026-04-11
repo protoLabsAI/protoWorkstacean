@@ -13,6 +13,7 @@
 
 import type { BudgetState } from "../types/budget.ts";
 import { MAX_PROJECT_BUDGET, MAX_DAILY_BUDGET } from "../types/budget.ts";
+import { CONFIG } from "../../src/config/env.ts";
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -27,8 +28,8 @@ export interface DiscordAlertConfig {
 }
 
 const DEFAULT_CONFIG: DiscordAlertConfig = {
-  webhookUrl: process.env.DISCORD_BUDGET_WEBHOOK_URL ?? "",
-  opsWebhookUrl: process.env.DISCORD_OPS_WEBHOOK_URL ?? "",
+  webhookUrl: CONFIG.DISCORD_BUDGET_WEBHOOK_URL ?? "",
+  opsWebhookUrl: CONFIG.DISCORD_OPS_WEBHOOK_URL ?? "",
   thresholds: [0.5, 0.8],
   maxRetries: 7,
   initialBackoffMs: 1000,

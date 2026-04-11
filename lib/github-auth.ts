@@ -12,6 +12,7 @@
  */
 
 import { createSign } from "node:crypto";
+import { CONFIG } from "../src/config/env.ts";
 
 export class GitHubAppAuth {
   private cache = new Map<string, { token: string; exp: number }>();
@@ -74,13 +75,13 @@ export class GitHubAppAuth {
  * Returns null if no auth is configured.
  */
 export function makeGitHubAuth(): ((owner: string, repo: string) => Promise<string>) | null {
-  const appId = process.env.QUINN_APP_ID;
-  const privateKey = process.env.QUINN_APP_PRIVATE_KEY;
+  const appId = CONFIG.QUINN_APP_ID;
+  const privateKey = CONFIG.QUINN_APP_PRIVATE_KEY;
   if (appId && privateKey) {
     const app = new GitHubAppAuth(appId, privateKey);
     return (owner, repo) => app.getToken(owner, repo);
   }
-  const pat = process.env.GITHUB_TOKEN;
+  const pat = CONFIG.GITHUB_TOKEN;
   if (pat) return () => Promise.resolve(pat);
   return null;
 }
