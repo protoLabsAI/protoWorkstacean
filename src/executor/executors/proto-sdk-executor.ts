@@ -36,6 +36,11 @@ export class ProtoSdkExecutor implements IExecutor {
       text: result.text,
       isError: result.isError,
       correlationId: req.correlationId,
+      data: {
+        usage: result.usage,
+        numTurns: result.numTurns,
+        stopReason: result.stopReason,
+      },
     };
   }
 
