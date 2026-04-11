@@ -191,11 +191,11 @@ interface InFlightEntry {
   escalated?: boolean;
 }
 
-// ── Allowlist: titles / authors that may auto-merge without HITL ─────────────
-
-const AUTO_MERGE_AUTHORS = new Set(["dependabot[bot]", "renovate[bot]"]);
-const AUTO_MERGE_TITLE_PREFIXES = ["promote:", "chore(deps"];
-const AUTO_MERGE_LABEL = "auto-merge";
+// No author/title allowlist — readyToMerge semantics (passing CI + approved
+// review) are the authorization gate. Anything that reaches the merge path
+// has already passed both, so there's no class of PR that needs a separate
+// "can this merge itself?" check. The HITL ask survives only as an
+// error-path fallback when ghMerge() fails.
 
 /**
  * Derive the workstacean/ava project slug from a GitHub `owner/repo` string.
@@ -234,15 +234,6 @@ interface PrDomainData {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function isAutoMergeEligible(pr: PrDomainEntry): boolean {
-  if (AUTO_MERGE_AUTHORS.has(pr.author)) return true;
-  if (pr.labels.includes(AUTO_MERGE_LABEL)) return true;
-  for (const prefix of AUTO_MERGE_TITLE_PREFIXES) {
-    if (pr.title.startsWith(prefix)) return true;
-  }
-  return false;
-}
 
 async function ghMerge(repo: string, num: number): Promise<{ ok: boolean; status: number; error?: string }> {
   if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)" };
@@ -613,26 +604,28 @@ export class PrRemediatorPlugin implements Plugin {
         continue;
       }
 
-      if (isAutoMergeEligible(pr)) {
-        if (!AUTO_MERGE_ENABLED) {
-          console.log(`[pr-remediator] DRY-RUN — would auto-merge ${pr.repo}#${pr.number} (${pr.author})`);
-          continue;
-        }
-        // Claim the slot before the network call so a concurrent trigger
-        // can't race into the same merge. The correlationId is synthetic
-        // since no skill dispatch happens — the entry clears on pipeline prune.
-        this._recordDispatch(pr.repo, pr.number, "merge_ready", `merge-${crypto.randomUUID()}`);
-        const result = await ghMerge(pr.repo, pr.number);
-        if (result.ok) {
-          console.log(`[pr-remediator] auto-merged ${pr.repo}#${pr.number}`);
-          this._publishAlert(`Auto-merged ${pr.repo}#${pr.number}`, pr);
-        } else {
-          console.warn(`[pr-remediator] auto-merge failed ${pr.repo}#${pr.number}: ${result.error}`);
-          this._emitHitlApproval(pr, msg.correlationId, `Auto-merge failed (${result.status}): ${result.error}`);
-        }
+      if (!AUTO_MERGE_ENABLED) {
+        console.log(`[pr-remediator] DRY-RUN — would auto-merge ${pr.repo}#${pr.number} (${pr.author})`);
+        continue;
+      }
+
+      // readyToMerge already enforces: not draft, clean mergeable, CI pass,
+      // approved review. There's no additional gate — every ready PR merges.
+      // Claim the slot before the network call so a concurrent trigger
+      // can't race into the same merge.
+      this._recordDispatch(pr.repo, pr.number, "merge_ready", `merge-${crypto.randomUUID()}`);
+      const result = await ghMerge(pr.repo, pr.number);
+      if (result.ok) {
+        console.log(`[pr-remediator] auto-merged ${pr.repo}#${pr.number}`);
+        this._publishAlert(`Auto-merged ${pr.repo}#${pr.number}`, pr);
       } else {
-        this._recordDispatch(pr.repo, pr.number, "merge_ready", `hitl-${crypto.randomUUID()}`);
-        this._emitHitlApproval(pr, msg.correlationId);
+        // Error-path fallback: the PR was ready but the merge API call
+        // failed (rare — e.g. branch protection changed between the
+        // readiness check and the merge, network glitch). Escalate to
+        // HITL so an operator can look. This is the only remaining
+        // _emitHitlApproval call site.
+        console.warn(`[pr-remediator] auto-merge failed ${pr.repo}#${pr.number}: ${result.error}`);
+        this._emitHitlApproval(pr, msg.correlationId, `Auto-merge failed (${result.status}): ${result.error}`);
       }
     }
   }

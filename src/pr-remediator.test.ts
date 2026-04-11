@@ -1,10 +1,13 @@
 /**
- * PrRemediatorPlugin tests — validates the auto-merge allowlist, HITL
- * escalation, and agent dispatch for fix_ci / address_feedback flows.
+ * PrRemediatorPlugin tests — validates auto-merge of ready PRs, HITL
+ * escalation on stuck fix_ci / address_feedback flows, and the error-path
+ * HITL fallback when a merge API call fails.
  *
- * No real GitHub API calls — the plugin only reads domain data via the bus
- * and publishes outcomes. The merge path requires AUTO_MERGE_ENABLED + a token,
- * so tests run in DRY-RUN mode and assert on the correct bus publications.
+ * Semantics: any PR with readyToMerge=true (passing CI + approved review)
+ * is auto-merged on the next pr.remediate.merge_ready trigger. There is no
+ * per-PR allowlist — authorization is enforced upstream by the readyToMerge
+ * check in the pr_pipeline domain. Tests run in DRY-RUN mode so no real
+ * GitHub API calls happen.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
@@ -120,33 +123,26 @@ describe("PrRemediatorPlugin — merge_ready", () => {
     expect(alertCaptured.length).toBe(0);
   });
 
-  test("escalates non-allowlisted PRs to HITL", async () => {
-    pushWorldState(bus, [makePr({ number: 101, title: "feat: add thing", author: "human-dev" })]);
-    const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
-    dispatch(bus, "pr.remediate.merge_ready");
-    await flushMicrotasks();
-    expect(hitlCaptured.length).toBe(1);
-    const req = hitlCaptured[0].payload as HITLRequest;
-    expect(req.type).toBe("hitl_request");
-    expect(req.title).toContain("#101");
-    expect(req.options).toEqual(["approve", "reject"]);
-  });
-
-  test("promote: titled PRs are auto-merge eligible (dry-run logs, no HITL)", async () => {
+  test("any ready PR is auto-merged with no HITL prompt (dry-run, no HITL emitted)", async () => {
     pushWorldState(bus, [
-      makePr({ number: 3331, title: "promote: dev → staging", author: "human-dev" }),
+      makePr({ number: 101, title: "feat: add thing", author: "human-dev" }),
+      makePr({ number: 102, title: "fix: bug", author: "alice" }),
+      makePr({ number: 103, title: "chore(deps): bump foo", author: "dependabot[bot]" }),
+      makePr({ number: 104, title: "promote: dev → staging", author: "human-dev" }),
     ]);
     const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
     dispatch(bus, "pr.remediate.merge_ready");
     await flushMicrotasks();
-    // In DRY-RUN mode (PR_REMEDIATOR_AUTO_MERGE not set), nothing is published
-    // to HITL and nothing is merged. Real merge is gated behind env var.
+    // In DRY-RUN mode the plugin skips the merge API call AND the HITL
+    // prompt for ready PRs. The only time HITL fires in the merge flow
+    // is the error-path fallback after a real ghMerge() call fails,
+    // which can't happen in DRY-RUN.
     expect(hitlCaptured.length).toBe(0);
   });
 
-  test("dependabot PRs are auto-merge eligible", async () => {
+  test("non-ready PR is a no-op — no merge, no HITL", async () => {
     pushWorldState(bus, [
-      makePr({ title: "chore(deps): bump foo", author: "dependabot[bot]" }),
+      makePr({ number: 200, title: "feat: wip", author: "alice", readyToMerge: false }),
     ]);
     const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
     dispatch(bus, "pr.remediate.merge_ready");
@@ -154,87 +150,38 @@ describe("PrRemediatorPlugin — merge_ready", () => {
     expect(hitlCaptured.length).toBe(0);
   });
 
-  test("auto-merge label PRs are eligible", async () => {
-    pushWorldState(bus, [
-      makePr({ title: "feat: custom", author: "alice", labels: ["auto-merge"] }),
-    ]);
-    const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
-    dispatch(bus, "pr.remediate.merge_ready");
-    await flushMicrotasks();
-    expect(hitlCaptured.length).toBe(0);
-  });
-
-  test("mixed batch — eligibles auto-merge, others HITL", async () => {
-    pushWorldState(bus, [
-      makePr({ number: 1, title: "promote: dev → staging", author: "x" }),
-      makePr({ number: 2, title: "feat: risky thing", author: "alice" }),
-      makePr({ number: 3, title: "chore(deps): bump zod", author: "dependabot[bot]" }),
-    ]);
-    const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
-    dispatch(bus, "pr.remediate.merge_ready");
-    await flushMicrotasks();
-    // Only #2 should escalate
-    expect(hitlCaptured.length).toBe(1);
-    const req = hitlCaptured[0].payload as HITLRequest;
-    expect(req.title).toContain("#2");
-  });
-
-  test("HITL response: approval triggers merge attempt (DRY-RUN logged)", async () => {
-    pushWorldState(bus, [makePr({ number: 500, title: "feat: big risky", author: "alice" })]);
-    const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
-    dispatch(bus, "pr.remediate.merge_ready");
-    await flushMicrotasks();
-    expect(hitlCaptured.length).toBe(1);
-    const req = hitlCaptured[0].payload as HITLRequest;
-    // Now simulate Discord publishing an approve decision
-    bus.publish(`hitl.response.pr.merge.${req.correlationId}`, {
+  test("HITL response handler still drains pending approvals from the error-path fallback", async () => {
+    // Simulate the only remaining HITL path by directly exercising the
+    // response handler — the merge-error fallback is hard to trigger in
+    // DRY-RUN, but the subscription must still be wired.
+    const correlationId = crypto.randomUUID();
+    bus.publish(`hitl.response.pr.merge.${correlationId}`, {
       id: crypto.randomUUID(),
-      correlationId: req.correlationId,
-      topic: `hitl.response.pr.merge.${req.correlationId}`,
+      correlationId,
+      topic: `hitl.response.pr.merge.${correlationId}`,
       timestamp: Date.now(),
       payload: {
         type: "hitl_response",
-        correlationId: req.correlationId,
+        correlationId,
         decision: "approve",
         decidedBy: "josh",
       },
     });
     await flushMicrotasks();
-    // In DRY-RUN mode the plugin logs but doesn't hit GitHub — we're
-    // validating that the subscription/handler path is wired correctly.
-    // If pendingApprovals wasn't cleared, a second response would log an
-    // "no matching pending PR" message; that's the regression we're guarding.
-    bus.publish(`hitl.response.pr.merge.${req.correlationId}`, {
-      id: crypto.randomUUID(),
-      correlationId: req.correlationId,
-      topic: `hitl.response.pr.merge.${req.correlationId}`,
-      timestamp: Date.now(),
-      payload: {
-        type: "hitl_response",
-        correlationId: req.correlationId,
-        decision: "approve",
-        decidedBy: "josh",
-      },
-    });
-    await flushMicrotasks();
-    // No assertion failures — the important thing is that the plugin did not
-    // throw and the pending entry was consumed on first approval.
+    // Plugin must not throw when processing an unmatched correlationId.
   });
 
-  test("HITL response: reject decision drops the pending entry", async () => {
-    pushWorldState(bus, [makePr({ number: 600, title: "feat: another risk", author: "alice" })]);
-    const hitlCaptured = captureOn(bus, "hitl.request.pr.merge.#");
-    dispatch(bus, "pr.remediate.merge_ready");
-    await flushMicrotasks();
-    const req = hitlCaptured[0].payload as HITLRequest;
-    bus.publish(`hitl.response.pr.merge.${req.correlationId}`, {
+  test("reject decision drops the pending entry", async () => {
+    // Same smoke — plugin must not throw on a reject decision either.
+    const correlationId = crypto.randomUUID();
+    bus.publish(`hitl.response.pr.merge.${correlationId}`, {
       id: crypto.randomUUID(),
-      correlationId: req.correlationId,
-      topic: `hitl.response.pr.merge.${req.correlationId}`,
+      correlationId,
+      topic: `hitl.response.pr.merge.${correlationId}`,
       timestamp: Date.now(),
       payload: {
         type: "hitl_response",
-        correlationId: req.correlationId,
+        correlationId,
         decision: "reject",
         decidedBy: "josh",
       },

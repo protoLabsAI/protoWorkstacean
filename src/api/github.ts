@@ -206,11 +206,22 @@ export function createRoutes(ctx: ApiContext): Route[] {
           }
         } catch { /* leave none */ }
 
+        // Ready to merge requires:
+        //   - not a draft
+        //   - clean mergeable status (no conflicts / not blocked by branch rules)
+        //   - CI passing
+        //   - an explicit approving review (NOT merely "no changes requested")
+        //
+        // The last condition is the tight one. A PR with zero reviews used to
+        // qualify as ready, which is how human-authored PRs were slipping
+        // through into the HITL approval prompt. Tight semantics: if a human
+        // (or CodeRabbit, in auto-approve mode) hasn't explicitly approved,
+        // don't merge. Tests + explicit approval are both mandatory.
         const readyToMerge =
           !pr.draft &&
           mergeable === "clean" &&
           ciStatus === "pass" &&
-          reviewState !== "changes_requested";
+          reviewState === "approved";
 
         return {
           repo, number: pr.number, title: pr.title, headSha: pr.head.sha,
