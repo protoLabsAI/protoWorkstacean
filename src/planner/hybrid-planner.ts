@@ -12,10 +12,10 @@
  *   5. Return L2Result with plan + confidence
  */
 
-import type { Goal, Plan, PlannerState, Action, ValidationResult } from "./types.ts";
-import type { L2Context, L2Result, CandidatePlan, RoutingConfig, ConfidenceScore } from "./routing-interface.ts";
+import type { Plan, PlannerState, ValidationResult } from "./types.ts";
+import type { L2Context, L2Result, CandidatePlan, RoutingConfig, } from "./routing-interface.ts";
 import { DEFAULT_ROUTING_CONFIG } from "./routing-interface.ts";
-import { A2AProposer, type A2AClient, NoOpA2AClient } from "./a2a-proposer.ts";
+import { A2AProposer, type A2AClient, } from "./a2a-proposer.ts";
 import { AStarValidator, type AStarValidatorConfig } from "./astar-validator.ts";
 import { ConfidenceScorer } from "./confidence-scorer.ts";
 import { EscalationTrigger } from "./escalation-trigger.ts";

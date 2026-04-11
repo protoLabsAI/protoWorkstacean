@@ -8,7 +8,6 @@ import { validatePlan, validateNoSideEffects } from "../plan-validator.ts";
 import { ReplanManager } from "../replan-manager.ts";
 import { HTNDecomposer } from "../htn-decomposer.ts";
 import { TaskNetwork } from "../task-network.ts";
-import { L1Planner } from "../l1-integration.ts";
 import { L0L1Bridge } from "../../matcher/l0-l1-bridge.ts";
 import type { L0RuleMatcher } from "../../matcher/l0-l1-bridge.ts";
 import type { PlannerState, CompositeTask } from "../types.ts";

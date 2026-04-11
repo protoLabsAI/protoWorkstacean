@@ -495,9 +495,13 @@ export class DiscordPlugin implements Plugin {
 
         if (entry) this.pendingHITLMessages.delete(correlationId);
 
-        const color = decision === "approve" ? 0x22c55e
-          : decision === "reject"  ? 0xef4444
-          : 0x6b7280;
+        const COLOR_APPROVE = 0x22c55e;
+        const COLOR_REJECT = 0xef4444;
+        const COLOR_NEUTRAL = 0x6b7280;
+        let color: number;
+        if (decision === "approve") color = COLOR_APPROVE;
+        else if (decision === "reject") color = COLOR_REJECT;
+        else color = COLOR_NEUTRAL;
         const label = decision.charAt(0).toUpperCase() + decision.slice(1);
         const decidedEmbed = new EmbedBuilder()
           .setTitle(interaction.message.embeds[0]?.title ?? "Decision recorded")
@@ -1008,11 +1012,12 @@ export class DiscordPlugin implements Plugin {
 
   private _buildHITLButtons(request: HITLRequest): ActionRowBuilder<ButtonBuilder> {
     const row = new ActionRowBuilder<ButtonBuilder>();
+    const STYLE_BY_OPTION: Record<string, ButtonStyle> = {
+      approve: ButtonStyle.Success,
+      reject: ButtonStyle.Danger,
+    };
     for (const option of request.options) {
-      const style =
-        option === "approve" ? ButtonStyle.Success :
-        option === "reject"  ? ButtonStyle.Danger  :
-                               ButtonStyle.Secondary;
+      const style = STYLE_BY_OPTION[option] ?? ButtonStyle.Secondary;
       row.addComponents(
         new ButtonBuilder()
           .setCustomId(`hitl:${option}:${request.correlationId}`)

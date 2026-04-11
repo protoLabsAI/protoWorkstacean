@@ -208,6 +208,20 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
+  const getBranchDrift = tool(
+    "get_branch_drift",
+    "Get branch drift across all registered projects — commits ahead between dev, staging, and main.",
+    {},
+    async () => {
+      try {
+        const data = await apiGet(baseUrl, "/api/branch-drift", apiKey);
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
   const getOutcomes = tool(
     "get_outcomes",
     "Get GOAP action dispatch outcomes — success/failure rates and recent history. " +
@@ -256,7 +270,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
-  return [publishEvent, getWorldState, getIncidents, reportIncident, getProjects, getCiHealth, getPrPipeline, getOutcomes, getCeremonies, runCeremony];
+  return [publishEvent, getWorldState, getIncidents, reportIncident, getProjects, getCiHealth, getPrPipeline, getBranchDrift, getOutcomes, getCeremonies, runCeremony];
 }
 
 /**
@@ -271,6 +285,7 @@ export const BUS_TOOL_NAMES = [
   "get_projects",
   "get_ci_health",
   "get_pr_pipeline",
+  "get_branch_drift",
   "get_outcomes",
   "get_ceremonies",
   "run_ceremony",

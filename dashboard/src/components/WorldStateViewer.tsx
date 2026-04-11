@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "preact/hooks";
 import DomainCard from "./DomainCard.tsx";
+<<<<<<< HEAD
 
 interface DomainMetadata {
   collectedAt: number;
@@ -20,10 +21,14 @@ interface WorldStateResponse {
   extensions: Record<string, unknown>;
   snapshotVersion: number;
 }
+=======
+import { getWorldState, peek, type WorldStateResponse } from "../lib/api";
+>>>>>>> origin/main
 
 const POLL_INTERVAL = 15_000;
 
 export default function WorldStateViewer() {
+<<<<<<< HEAD
   const [worldState, setWorldState] = useState<WorldStateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -35,6 +40,22 @@ export default function WorldStateViewer() {
       const res = await fetch("/api/world-state");
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = (await res.json()) as WorldStateResponse;
+=======
+  // Seed from cache if present — instant render on page revisit
+  const [worldState, setWorldState] = useState<WorldStateResponse | null>(
+    () => peek<WorldStateResponse>("/api/world-state") ?? null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(
+    worldState ? new Date() : null,
+  );
+  const [filter, setFilter] = useState<string>("");
+  const [selectedDomain, setSelectedDomain] = useState<string>("all");
+
+  async function fetchWorldState(force = false) {
+    try {
+      const data = await getWorldState(force);
+>>>>>>> origin/main
       setWorldState(data);
       setLastUpdated(new Date());
       setError(null);
@@ -44,8 +65,13 @@ export default function WorldStateViewer() {
   }
 
   useEffect(() => {
+<<<<<<< HEAD
     fetchWorldState();
     const id = setInterval(fetchWorldState, POLL_INTERVAL);
+=======
+    fetchWorldState(true); // force on mount to refresh
+    const id = setInterval(() => fetchWorldState(true), POLL_INTERVAL);
+>>>>>>> origin/main
     return () => clearInterval(id);
   }, []);
 

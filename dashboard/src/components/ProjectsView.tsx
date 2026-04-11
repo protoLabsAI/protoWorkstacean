@@ -1,6 +1,7 @@
 import { useState, useEffect } from "preact/hooks";
 import ProjectCard from "./ProjectCard.tsx";
 import type { ProjectEntry, CiProjectData, PrData } from "./ProjectCard.tsx";
+<<<<<<< HEAD
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -49,6 +50,43 @@ export default function ProjectsView() {
       const prJson = (await prRes.json()) as PrPipelineResponse;
 
       setProjects(Array.isArray(projJson.data) ? projJson.data : []);
+=======
+import {
+  getProjects,
+  getCiHealth,
+  getPrPipeline,
+  peek,
+  type CiHealthResponse,
+  type PrPipelineResponse,
+} from "../lib/api";
+
+const POLL_INTERVAL_MS = 60_000;
+
+export default function ProjectsView() {
+  // Seed from cache
+  const cachedProjects = peek<ProjectEntry[]>("/api/projects");
+  const cachedCi = peek<CiHealthResponse>("/api/ci-health");
+  const cachedPr = peek<PrPipelineResponse>("/api/pr-pipeline");
+
+  const [projects, setProjects] = useState<ProjectEntry[]>(cachedProjects ?? []);
+  const [ciHealth, setCiHealth] = useState<CiHealthResponse | null>(cachedCi ?? null);
+  const [prPipeline, setPrPipeline] = useState<PrPipelineResponse | null>(cachedPr ?? null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(!(cachedProjects && cachedCi && cachedPr));
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(
+    cachedProjects && cachedCi && cachedPr ? new Date() : null,
+  );
+
+  async function fetchAll(force = false) {
+    try {
+      const [projData, ciJson, prJson] = await Promise.all([
+        getProjects(),
+        getCiHealth(force),
+        getPrPipeline(force),
+      ]);
+
+      setProjects(Array.isArray(projData) ? (projData as ProjectEntry[]) : []);
+>>>>>>> origin/main
       setCiHealth(ciJson);
       setPrPipeline(prJson);
       setError(null);
@@ -61,8 +99,13 @@ export default function ProjectsView() {
   }
 
   useEffect(() => {
+<<<<<<< HEAD
     fetchAll();
     const timer = setInterval(fetchAll, POLL_INTERVAL_MS);
+=======
+    fetchAll(true);
+    const timer = setInterval(() => fetchAll(true), POLL_INTERVAL_MS);
+>>>>>>> origin/main
     return () => clearInterval(timer);
   }, []);
 

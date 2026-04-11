@@ -2,6 +2,7 @@ import { useState, useEffect } from "preact/hooks";
 import GoalCard from "./GoalCard.tsx";
 import { evaluateGoal } from "../lib/goal-evaluator.ts";
 import type { Goal, EvalResult } from "../lib/goal-evaluator.ts";
+<<<<<<< HEAD
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -15,12 +16,19 @@ interface WorldStateApiResponse {
   data: unknown;
 }
 
+=======
+import { getGoals, getWorldState, peek, type WorldStateResponse } from "../lib/api";
+
+const POLL_INTERVAL_MS = 30_000;
+
+>>>>>>> origin/main
 interface GoalWithResult {
   goal: Goal;
   result: EvalResult;
 }
 
 export default function GoalStatus() {
+<<<<<<< HEAD
   const [items, setItems] = useState<GoalWithResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,6 +49,31 @@ export default function GoalStatus() {
 
       const goals: Goal[] = Array.isArray(goalsJson.data) ? goalsJson.data : [];
       const worldState = wsJson.data ?? null;
+=======
+  // Seed from cache for instant render on revisit
+  const cachedGoals = peek<Goal[]>("/api/goals");
+  const cachedWs = peek<WorldStateResponse>("/api/world-state");
+  const seeded: GoalWithResult[] =
+    cachedGoals && cachedWs
+      ? (cachedGoals as Goal[]).map((g) => ({ goal: g, result: evaluateGoal(g, cachedWs) }))
+      : [];
+
+  const [items, setItems] = useState<GoalWithResult[]>(seeded);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(seeded.length === 0);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(
+    seeded.length > 0 ? new Date() : null,
+  );
+
+  async function fetchAndEvaluate(force = false) {
+    try {
+      const [goalsData, worldState] = await Promise.all([
+        getGoals(),
+        getWorldState(force),
+      ]);
+
+      const goals: Goal[] = Array.isArray(goalsData) ? (goalsData as Goal[]) : [];
+>>>>>>> origin/main
 
       const evaluated: GoalWithResult[] = goals.map((goal) => ({
         goal,
@@ -64,8 +97,13 @@ export default function GoalStatus() {
   }
 
   useEffect(() => {
+<<<<<<< HEAD
     fetchAndEvaluate();
     const timer = setInterval(fetchAndEvaluate, POLL_INTERVAL_MS);
+=======
+    fetchAndEvaluate(true);
+    const timer = setInterval(() => fetchAndEvaluate(true), POLL_INTERVAL_MS);
+>>>>>>> origin/main
     return () => clearInterval(timer);
   }, []);
 

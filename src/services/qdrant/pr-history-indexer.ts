@@ -76,7 +76,7 @@ function hashString(s: string): number {
   let h = 5381;
   for (let i = 0; i < s.length; i++) {
     h = ((h << 5) + h) ^ s.charCodeAt(i);
-    h = h >>> 0; // keep unsigned 32-bit
+    h >>>= 0; // keep unsigned 32-bit
   }
   return h;
 }

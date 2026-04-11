@@ -10,7 +10,7 @@ import { HTNDecomposer } from "../htn-decomposer.ts";
 import { MemoCache, memoizeHeuristic } from "../memo-cache.ts";
 import { StateCache } from "../state-cache.ts";
 import { clusterGoals } from "../optimization.ts";
-import type { PlannerState, CompositeTask, SearchNode } from "../types.ts";
+import type { PlannerState, SearchNode } from "../types.ts";
 
 describe("edge cases — empty goals", () => {
   test("goal already satisfied returns empty plan", () => {
