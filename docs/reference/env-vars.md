@@ -108,6 +108,14 @@ Agents can declare their own Discord bot tokens via `discordBotTokenEnvKey` in `
 | `QDRANT_VECTOR_SIZE` | _(none)_ | Quinn context | Embedding vector dimensions (must match the embed model). |
 | `REDIS_URL` | _(none)_ | Quinn context | Redis URL for caching embeddings or session state. |
 
+## Episodic memory (Graphiti)
+
+| Variable | Default | Plugin | Description |
+|----------|---------|--------|-------------|
+| `GRAPHITI_URL` | `http://graphiti:8000` | SkillDispatcherPlugin, world-state `memory` domain | Base URL of the Graphiti sidecar. If unreachable, memory enrichment is skipped silently (the message is still processed). |
+
+Graphiti itself (running as a sidecar) reads additional env vars — see [User Memory (Graphiti)](../integrations/memory.md) for the full list, including the required `text-embedding-3-small` and `gpt-4.1-nano` gateway aliases.
+
 ## Signal (optional integration)
 
 | Variable | Default | Plugin | Description |

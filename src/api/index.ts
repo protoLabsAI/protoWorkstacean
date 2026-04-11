@@ -11,6 +11,7 @@ import { createRoutes as worldStateRoutes } from "./world-state.ts";
 import { createRoutes as githubRoutes } from "./github.ts";
 import { createRoutes as incidentRoutes } from "./incidents.ts";
 import { createRoutes as operationRoutes } from "./operations.ts";
+import { createRoutes as planeRoutes } from "./plane.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
@@ -21,5 +22,6 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...worldStateRoutes(ctx),
     ...githubRoutes(ctx),
     ...incidentRoutes(ctx),
+    ...planeRoutes(ctx),
   ];
 }

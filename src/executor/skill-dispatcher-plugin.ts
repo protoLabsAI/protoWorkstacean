@@ -19,6 +19,20 @@ import type { SkillRequest } from "./types.ts";
 import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 
+/**
+ * Classify a skill name into a flow item type for distribution tracking.
+ * Keeps flow.distribution_balanced honest: bug_triage is defect work, not
+ * feature work. Previously everything was hard-coded to "feature" which
+ * drove the distribution to 100% features and permanently violated the
+ * goal regardless of reality.
+ */
+function classifyFlowType(skill: string): "feature" | "defect" | "risk" | "debt" {
+  if (skill.includes("bug") || skill.includes("triage_issue") || skill.includes("fix")) return "defect";
+  if (skill.includes("security") || skill.includes("incident")) return "risk";
+  if (skill.includes("review") || skill.includes("refactor") || skill.includes("cleanup")) return "debt";
+  return "feature";
+}
+
 export class SkillDispatcherPlugin implements Plugin {
   readonly name = "skill-dispatcher";
   readonly description = "Sole agent.skill.request subscriber — resolves executor and dispatches";
@@ -105,14 +119,22 @@ export class SkillDispatcherPlugin implements Plugin {
     );
 
     // ── Memory enrichment ──────────────────────────────────────────────────────
-    // Prepend user context from Graphiti for human-originating messages.
-    // Cron/system events (no userId) are skipped.
-    // Two group IDs are queried: shared (user:{canonicalId}) and agent-scoped
-    // (agent:{agentName}:user:{canonicalId}) so each agent builds its own memory
-    // of the user on top of the shared cross-agent baseline.
+    // Graphiti group id selection (alphanumeric/dash/underscore only — colons
+    // crash graphiti's ingestion worker silently):
+    //   (a) human-originated: user_{canonicalId} via identityRegistry
+    //   (b) bot-initiated with meta.systemActor (pr-remediator / sweep /
+    //       ceremony / cron): system_{actor} — gives the autonomous loop
+    //       its own persistent memory of what it did, grouped by the
+    //       subsystem that triggered it
+    //   (c) fallthrough: no group — no write, no read
+    //
+    // For (a) we also compute an agent-scoped group so each agent
+    // accumulates its own relationship memory with the user on top of
+    // the shared cross-agent baseline.
     const sourceUserId = (msg.source as Record<string, unknown> | undefined)?.userId as string | undefined;
     const sourcePlatform = (msg.source as Record<string, unknown> | undefined)?.interface as string | undefined;
     const sourceChannelId = (msg.source as Record<string, unknown> | undefined)?.channelId as string | undefined;
+    const systemActor = (payload.meta as Record<string, unknown> | undefined)?.systemActor as string | undefined;
 
     let rawContent = typeof payload.content === "string" ? payload.content : undefined;
     const originalContent = rawContent; // preserved for episode storage — never includes context prefix
@@ -122,16 +144,25 @@ export class SkillDispatcherPlugin implements Plugin {
     if (sourceUserId && sourcePlatform && sourcePlatform !== "cron") {
       groupId = this.identityRegistry.groupId(sourcePlatform, sourceUserId);
       const agentName = targets[0];
-      if (agentName) agentGroupId = `agent:${agentName}:${groupId}`;
+      // agent_{agent}__{user_...} — double underscore separates the two
+      // identity segments unambiguously. Single-underscore would collide
+      // with the user_{platform}_{id} fallback.
+      if (agentName) agentGroupId = `agent_${agentName}__${groupId}`;
+    } else if (systemActor) {
+      // Bot-initiated dispatch — memory goes to a stable system-actor group
+      // so the autonomous loop builds its own episodic history. No
+      // agent-scoped split: it's already one subsystem writing, not a
+      // human talking to a specific agent.
+      groupId = `system_${systemActor}`;
+    }
 
-      if (rawContent) {
-        const [sharedCtx, agentCtx] = await Promise.all([
-          this.graphiti.getContextBlock(groupId, rawContent).catch(() => ""),
-          agentGroupId ? this.graphiti.getContextBlock(agentGroupId, rawContent).catch(() => "") : Promise.resolve(""),
-        ]);
-        const combined = [sharedCtx, agentCtx].filter(Boolean).join("");
-        if (combined) rawContent = `${combined}${rawContent}`;
-      }
+    if (groupId && rawContent) {
+      const [sharedCtx, agentCtx] = await Promise.all([
+        this.graphiti.getContextBlock(groupId, rawContent).catch(() => ""),
+        agentGroupId ? this.graphiti.getContextBlock(agentGroupId, rawContent).catch(() => "") : Promise.resolve(""),
+      ]);
+      const combined = [sharedCtx, agentCtx].filter(Boolean).join("");
+      if (combined) rawContent = `${combined}${rawContent}`;
     }
     // ── End memory enrichment ─────────────────────────────────────────────────
 
@@ -149,7 +180,7 @@ export class SkillDispatcherPlugin implements Plugin {
     const dispatchedAt = Date.now();
     this._publishFlowEvent("flow.item.created", {
       id: flowItemId,
-      type: "feature",
+      type: classifyFlowType(skill),
       status: "active",
       stage: "dispatched",
       createdAt: dispatchedAt,
@@ -188,8 +219,14 @@ export class SkillDispatcherPlugin implements Plugin {
       }
 
       // Store completed turn in Graphiti (fire-and-forget, non-blocking).
-      // Written to both the shared user group and the agent-scoped group so each
-      // agent accumulates its own relationship history with the user.
+      //
+      // User-originated: written to the shared user group AND the
+      //   agent-scoped group so each agent accumulates its own relationship
+      //   history with the user on top of the cross-agent baseline.
+      //
+      // System-originated (bot-initiated, meta.systemActor set): written
+      //   only to the single system_{actor} group. No agent split —
+      //   systemActor IS the actor, no user involved.
       if (!result.isError && result.text && groupId && originalContent) {
         const identity = sourceUserId && sourcePlatform
           ? this.identityRegistry.resolve(sourcePlatform, sourceUserId)
@@ -197,10 +234,10 @@ export class SkillDispatcherPlugin implements Plugin {
         const episodeBase = {
           userMessage: originalContent,
           agentMessage: result.text,
-          userRole: identity?.displayName ?? sourceUserId,
+          userRole: identity?.displayName ?? sourceUserId ?? systemActor,
           agentName: targets[0],
           channelId: sourceChannelId,
-          platform: sourcePlatform,
+          platform: sourcePlatform ?? (systemActor ? "system" : undefined),
         };
         this.graphiti.addEpisode({ groupId, ...episodeBase })
           .catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode (shared) error:", err));

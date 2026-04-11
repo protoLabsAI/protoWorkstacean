@@ -7,7 +7,7 @@ Receives GitHub webhook events and routes `@mention` comments to the agent fleet
 ## How It Works
 
 ```
-@quinn comment on issue/PR
+@protoquinn comment on issue/PR
   → GitHub sends POST /webhook/github
     → GitHubPlugin validates HMAC-SHA256 signature
       → Publishes message.inbound.github.{owner}.{repo}.{event}.{number}
@@ -35,7 +35,7 @@ Place a `github.yaml` in your workspace directory (default: `workspace/github.ya
 
 ```yaml
 # Handle to watch for in comments. Case-insensitive match.
-mentionHandle: "@quinn"
+mentionHandle: "@protoquinn"
 
 # Skill routed to per GitHub event type.
 # Becomes the skillHint on the bus message — tells RouterPlugin which agent to call.

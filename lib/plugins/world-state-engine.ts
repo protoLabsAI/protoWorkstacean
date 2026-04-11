@@ -206,6 +206,36 @@ export class WorldStateEngine implements Plugin {
     );
   }
 
+  /**
+   * Remove any domain entries in the restored state that have no matching
+   * registration. Call this once after all registerDomain() calls have
+   * finished (either immediately in startup if all registrations are
+   * synchronous, or via a short deferred timer). Without this, domains
+   * removed from yaml or renamed stay in the snapshot forever as stale
+   * data — /api/world-state shows both the old and new name, actions
+   * and goals can match the wrong one, etc.
+   *
+   * Also clears the matching extensions.<name>_available flag so stale
+   * availability signals don't linger.
+   */
+  pruneOrphanDomains(): void {
+    const registered = new Set(this.domains.keys());
+    const current = Object.keys(this.worldState.domains);
+    const orphans: string[] = [];
+    for (const name of current) {
+      if (!registered.has(name)) {
+        delete this.worldState.domains[name];
+        delete this.worldState.extensions[`${name}_available`];
+        orphans.push(name);
+      }
+    }
+    if (orphans.length > 0) {
+      console.log(
+        `[world-state-engine] Pruned ${orphans.length} orphan domain(s) from restored snapshot: ${orphans.join(", ")}`,
+      );
+    }
+  }
+
   uninstall(): void {
     for (const reg of this.domains.values()) {
       if (reg.timer) clearInterval(reg.timer);

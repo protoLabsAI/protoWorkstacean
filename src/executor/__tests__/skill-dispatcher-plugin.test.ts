@@ -231,8 +231,8 @@ describe("SkillDispatcherPlugin — memory enrichment", () => {
 
     const calls = (graphiti.getContextBlock as ReturnType<typeof mock>).mock.calls as [string, string][];
     const groupIds = calls.map(c => c[0]);
-    expect(groupIds).toContain("user:discord_111222333");         // shared (no users.yaml in /tmp)
-    expect(groupIds).toContain("agent:ava:user:discord_111222333"); // agent-scoped
+    expect(groupIds).toContain("user_discord_111222333");                  // shared (no users.yaml in /tmp)
+    expect(groupIds).toContain("agent_ava__user_discord_111222333"); // agent-scoped
   });
 
   it("prepends context block to content when Graphiti returns facts", async () => {
@@ -295,8 +295,8 @@ describe("SkillDispatcherPlugin — memory enrichment", () => {
 
     const episodeCalls = (graphiti.addEpisode as ReturnType<typeof mock>).mock.calls as [{ groupId: string }][];
     const storedGroups = episodeCalls.map(c => c[0].groupId);
-    expect(storedGroups).toContain("user:discord_111222333");
-    expect(storedGroups).toContain("agent:ava:user:discord_111222333");
+    expect(storedGroups).toContain("user_discord_111222333");
+    expect(storedGroups).toContain("agent_ava__user_discord_111222333");
   });
 
   it("does NOT store episode when result.isError is true", async () => {

@@ -22,6 +22,7 @@ import { DispatchQueue } from "../dispatcher/dispatch-queue.ts";
 import { OutcomeTracker } from "../dispatcher/outcome-tracker.ts";
 import { applyEffects } from "../planner/state-updater.ts";
 import { StateRollbackRegistry } from "../planner/state-rollback.ts";
+import type { TelemetryService } from "../telemetry/telemetry-service.ts";
 
 export interface ActionDispatcherConfig {
   wipLimit: number;
@@ -46,7 +47,10 @@ export class ActionDispatcherPlugin implements Plugin {
   /** Pending action timeouts: correlationId → timer. */
   private readonly pendingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(private readonly config: ActionDispatcherConfig) {
+  constructor(
+    private readonly config: ActionDispatcherConfig,
+    private readonly telemetry?: TelemetryService,
+  ) {
     this.queue = new DispatchQueue({ wipLimit: config.wipLimit });
     this.outcomes = new OutcomeTracker();
   }
@@ -109,6 +113,10 @@ export class ActionDispatcherPlugin implements Plugin {
     const payload = msg.payload as ActionDispatchPayload;
     const { action, correlationId } = payload;
     const startedAt = Date.now();
+
+    // Telemetry: this action was selected and is entering dispatch.
+    // Counted even when queued by WIP — they still get dispatched later.
+    this.telemetry?.bump("action", action.id, "dispatched");
 
     // Try to dispatch immediately; queue if at WIP limit
     const dispatched = this.queue.tryDispatch(action, correlationId, msg.correlationId);
@@ -270,16 +278,20 @@ export class ActionDispatcherPlugin implements Plugin {
     }
 
     // Record outcome
+    const status: "success" | "failure" | "timeout" = success
+      ? "success"
+      : (error?.includes("Timeout") ? "timeout" : "failure");
     this.outcomes.record({
       correlationId,
       actionId: action.id,
       goalId: action.goalId,
-      status: success ? "success" : (error?.includes("Timeout") ? "timeout" : "failure"),
+      status,
       startedAt,
       completedAt,
       durationMs: completedAt - startedAt,
       error,
     });
+    this.telemetry?.bump("action", action.id, status);
 
     // Publish outcome event
     const outcomePayload: ActionOutcomePayload = {

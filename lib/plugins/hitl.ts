@@ -48,6 +48,14 @@ const renderers = new Map<string, HITLRenderer>();
 
 const pendingRequests = new Map<string, HITLRequest>();
 
+/**
+ * CorrelationIds of requests that arrived without a matching renderer —
+ * they were published to hitl.pending but no channel can render them. A
+ * routing hole. Exposed via the hitl_queue domain so a goal can alert on
+ * it (see workspace/goals.yaml#hitl.no_unrendered_requests).
+ */
+const unrenderedCorrelationIds = new Set<string>();
+
 // ── A2A call to Ava for plan_resume ──────────────────────────────────────────
 
 async function callPlanResume(agent: AgentDef, response: HITLResponse): Promise<void> {
@@ -108,6 +116,18 @@ export class HITLPlugin implements Plugin {
   }
 
   /**
+   * Queue snapshot for the world-state `hitl_queue` domain.
+   * - pendingCount: all pending (rendered + unrendered)
+   * - unrenderedCount: pending that had no matching renderer (routing hole)
+   */
+  getQueueSnapshot(): { pendingCount: number; unrenderedCount: number } {
+    return {
+      pendingCount: pendingRequests.size,
+      unrenderedCount: unrenderedCorrelationIds.size,
+    };
+  }
+
+  /**
    * Register a HITLRenderer for an interface.
    * Call this from your plugin's install() before any HITLRequests arrive.
    */
@@ -127,6 +147,7 @@ export class HITLPlugin implements Plugin {
       for (const [correlationId, req] of pendingRequests) {
         if (new Date(req.expiresAt).getTime() <= now) {
           pendingRequests.delete(correlationId);
+          unrenderedCorrelationIds.delete(correlationId);
           console.log(`[hitl] Expired HITLRequest (${correlationId})`);
           bus.publish(`hitl.expired.${correlationId}`, {
             id: crypto.randomUUID(),
@@ -173,7 +194,8 @@ export class HITLPlugin implements Plugin {
       const renderer = renderers.get(iface);
 
       if (!renderer) {
-        console.warn(`[hitl] No renderer for interface "${iface}" — publishing to hitl.pending`);
+        unrenderedCorrelationIds.add(req.correlationId);
+        console.warn(`[hitl] No renderer for interface "${iface}" — publishing to hitl.pending (correlationId=${req.correlationId}, unrendered=${unrenderedCorrelationIds.size})`);
         bus.publish(`hitl.pending.${req.correlationId}`, {
           id: crypto.randomUUID(),
           correlationId: req.correlationId,
@@ -199,6 +221,7 @@ export class HITLPlugin implements Plugin {
       const pending = pendingRequests.get(resp.correlationId);
       if (pending) {
         pendingRequests.delete(resp.correlationId);
+        unrenderedCorrelationIds.delete(resp.correlationId);
       } else {
         console.warn(`[hitl] No pending request for correlationId ${resp.correlationId} — processing anyway`);
       }

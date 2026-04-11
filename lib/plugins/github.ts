@@ -45,6 +45,10 @@ interface AutoTriageConfig {
   /** Derived at runtime from projects.yaml — not read from github.yaml. */
   monitoredRepos: string[];
   sanitization: SanitizationConfig;
+  /** Label that identifies "needs triage" issues during sweep (default: "status: needs-triage"). */
+  sweepLabel?: string;
+  /** Run a sweep 30s after plugin install. Default true. */
+  sweepOnStartup?: boolean;
 }
 
 interface GitHubConfig {
@@ -72,13 +76,42 @@ function deriveMonitoredRepos(workspaceDir: string): string[] {
   }
 }
 
+/**
+ * Load per-repo project metadata (slug + absolute projectPath) for the triage
+ * sweep. Ava's bug_triage skill refuses to run without an authoritative
+ * projectPath; the sweep grabs it from projects.yaml and threads it into the
+ * synthetic inbound event payload.
+ */
+function loadProjectMetaForSweep(
+  workspaceDir: string,
+): Map<string, { slug: string; projectPath: string | undefined }> {
+  const map = new Map<string, { slug: string; projectPath: string | undefined }>();
+  const projectsPath = join(workspaceDir, "projects.yaml");
+  if (!existsSync(projectsPath)) return map;
+  try {
+    const raw = readFileSync(projectsPath, "utf8");
+    const data = parseYaml(raw) as {
+      projects?: Array<{ slug?: string; github?: string; projectPath?: string; status?: string }>;
+    };
+    for (const p of data.projects ?? []) {
+      if (!p.github || !p.slug) continue;
+      if (p.status === "archived" || p.status === "suspended") continue;
+      map.set(p.github, { slug: p.slug, projectPath: p.projectPath });
+    }
+  } catch {
+    // ignore — sweep will proceed without projectPath (dispatches will error
+    // on Ava's side, surfaced via skill-dispatcher error logs)
+  }
+  return map;
+}
+
 function loadConfig(workspaceDir: string): GitHubConfig {
   const configPath = join(workspaceDir, "github.yaml");
   let config: GitHubConfig;
 
   if (!existsSync(configPath)) {
     config = {
-      mentionHandle: "@quinn",
+      mentionHandle: "@protoquinn",
       skillHints: {
         issue_comment: "bug_triage",
         issues: "bug_triage",
@@ -252,6 +285,34 @@ export class GitHubPlugin implements Plugin {
     watchFile(configPath, { interval: 5_000 }, reloadConfig);
     // Also watch projects.yaml so monitoredRepos updates when projects are onboarded.
     watchFile(projectsPath, { interval: 5_000 }, reloadConfig);
+
+    // ── Triage sweep: on-demand + startup ────────────────────────────────────
+    //
+    // Webhooks only fire for new events, so issues opened before the plugin
+    // was running (or before autoTriage was enabled) never get triaged. This
+    // handler walks every monitored repo's open issues and dispatches any
+    // with the `status: needs-triage` label as synthetic inbound events —
+    // the same shape the webhook handler produces. The bug_triage skill is
+    // idempotent on Ava's side (it checks for existing board features by
+    // issue number), so re-sweeping is safe.
+    //
+    // Invoke from the bus with `github.triage.sweep` (any payload) or it
+    // fires automatically on plugin install when autoTriage.enabled is true
+    // and autoTriage.sweepOnStartup !== false.
+    bus.subscribe("github.triage.sweep", "github", () => {
+      void this._runTriageSweep(bus, getToken).catch(err =>
+        console.error("[github] triage sweep error:", err),
+      );
+    });
+
+    if (this.config.autoTriage?.enabled && this.config.autoTriage?.sweepOnStartup !== false) {
+      // Small delay so Ava has time to connect before the sweep fires
+      setTimeout(() => {
+        void this._runTriageSweep(bus, getToken).catch(err =>
+          console.error("[github] startup triage sweep error:", err),
+        );
+      }, 30_000);
+    }
 
     // ── Outbound: post comment back to GitHub ────────────────────────────────
     bus.subscribe("message.outbound.github.#", "github-outbound", async (msg: BusMessage) => {
@@ -579,6 +640,156 @@ export class GitHubPlugin implements Plugin {
         console.error("[github] Auto-triage error:", err);
       }
     })();
+  }
+
+  /**
+   * Walk every monitored repo's open issues and re-dispatch any with the
+   * sweep label as synthetic inbound events. Runs on install and on the
+   * `github.triage.sweep` bus topic. Idempotent on the Ava side — the
+   * bug_triage skill checks for existing board features by issue number.
+   *
+   * Per-repo failures are swallowed with a warn so one broken repo can't
+   * poison the sweep for the others.
+   */
+  private async _runTriageSweep(
+    bus: EventBus,
+    getToken: (owner: string, repo: string) => Promise<string>,
+  ): Promise<void> {
+    const config = this.config;
+    if (!config.autoTriage?.enabled) {
+      console.log("[github] triage sweep skipped — autoTriage disabled");
+      return;
+    }
+
+    const repos = config.autoTriage.monitoredRepos ?? [];
+    const sweepLabel = config.autoTriage.sweepLabel ?? "status: needs-triage";
+    const projectMeta = loadProjectMetaForSweep(this.workspaceDir);
+    console.log(`[github] triage sweep starting — ${repos.length} repo(s), label="${sweepLabel}"`);
+
+    let dispatched = 0;
+    let scanned = 0;
+
+    for (const repoSlug of repos) {
+      const [owner, repo] = repoSlug.split("/");
+      if (!owner || !repo) continue;
+
+      let token: string;
+      try {
+        token = await getToken(owner, repo);
+      } catch (err) {
+        console.warn(`[github] triage sweep: no token for ${repoSlug}: ${err instanceof Error ? err.message : err}`);
+        continue;
+      }
+
+      try {
+        const qs = new URLSearchParams({
+          state: "open",
+          labels: sweepLabel,
+          per_page: "100",
+        });
+        const res = await withCircuitBreaker("github-api", () =>
+          fetch(`https://api.github.com/repos/${repoSlug}/issues?${qs}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github+json",
+              "User-Agent": "protoWorkstacean/1.0",
+              "X-GitHub-Api-Version": "2022-11-28",
+            },
+          }),
+        );
+        if (!res.ok) {
+          console.warn(`[github] triage sweep: ${repoSlug} list failed ${res.status}`);
+          continue;
+        }
+        const items = (await res.json()) as Array<{
+          number: number;
+          title: string;
+          body: string | null;
+          user?: { login?: string };
+          html_url: string;
+          pull_request?: unknown;
+          labels?: Array<{ name: string }>;
+        }>;
+
+        const issues = items.filter(i => !i.pull_request);
+        scanned += issues.length;
+
+        const meta = projectMeta.get(repoSlug);
+        for (const issue of issues) {
+          const number = issue.number;
+          const author = issue.user?.login ?? "unknown";
+          // Sanitize untrusted submissions the same way _handleAutoTriage does.
+          // Trust tier is pessimistic for sweeps — we re-check org membership.
+          const isMember = await this._checkOrgMembership(
+            config.autoTriage.orgName,
+            author,
+            token,
+          );
+          const trustTier = isMember ? 3 : 1;
+
+          let body = issue.body ?? "";
+          if (trustTier < 3) {
+            const sanitized = sanitizeIssueBody(body, config.autoTriage.sanitization);
+            body = sanitized.body;
+            if (sanitized.patternsFound.length >= config.autoTriage.sanitization.spamThreshold) {
+              console.log(`[github] triage sweep: ${repoSlug}#${number} flagged as spam — skipping dispatch`);
+              continue;
+            }
+          }
+
+          const content = [
+            `Auto-triage sweep — issues.opened on ${repoSlug}#${number}`,
+            `Title: ${issue.title}`,
+            `Author: @${author} (trust tier: ${trustTier})`,
+            `URL: ${issue.html_url}`,
+            ``,
+            body.slice(0, 4000),
+          ].join("\n");
+
+          const topic = `message.inbound.github.${owner}.${repo}.issues.${number}`;
+          const replyTopic = `message.outbound.github.${owner}.${repo}.${number}`;
+
+          bus.publish(topic, {
+            id: `sweep-${repoSlug}-${number}-${Date.now()}`,
+            correlationId: crypto.randomUUID(),
+            topic,
+            timestamp: Date.now(),
+            payload: {
+              sender: author,
+              channel: `${repoSlug}#${number}`,
+              content,
+              skillHint: config.autoTriage.skillHint,
+              trustTier,
+              quarantine: { sanitized: false, patternsFound: [] },
+              meta: {
+                agentId: "ava",
+                skillHint: config.autoTriage.skillHint,
+                systemActor: "auto-triage-sweep",
+              },
+              projectSlug: meta?.slug,
+              projectRepo: repoSlug,
+              projectPath: meta?.projectPath,
+              prNumber: number,
+              github: {
+                event: "issues",
+                action: "opened",
+                owner,
+                repo,
+                number,
+                title: issue.title,
+                url: issue.html_url,
+              },
+            },
+            reply: { topic: replyTopic },
+          });
+          dispatched += 1;
+        }
+      } catch (err) {
+        console.warn(`[github] triage sweep ${repoSlug} error:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    console.log(`[github] triage sweep complete — scanned ${scanned} issue(s), dispatched ${dispatched}`);
   }
 
   private async _checkOrgMembership(

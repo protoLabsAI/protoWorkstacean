@@ -8,7 +8,8 @@ users:
   #   github:  username (no @)
   #   signal:  E.164 phone number (+1xxxxxxxxxx)
   #   slack:   member ID (Uxxxxxxxxxx)
-  #   plane:   user email
+  #   plane:   member UUID (from /api/v1/workspaces/{slug}/members/, NOT email —
+  #            plane webhook payloads carry activity.actor.id which is the UUID)
 
   - id: josh
     displayName: Josh
@@ -17,4 +18,5 @@ users:
     identities:
       discord: "249386616806834177"
       github: "mabry1985"
+      plane: "98de077d-fcdc-4708-93dc-3f2cde045f38"
       signal: ""        # E.164 phone (+1xxxxxxxxxx)

@@ -26,6 +26,7 @@ projects:
     defaultBranch: main
     status: active
     agents: [quinn]
+    planeProjectId: fe0a95b6-63a9-4a78-a0eb-36bad44228f2
     discord:
       dev:
         channelId: "1469080556720623699"

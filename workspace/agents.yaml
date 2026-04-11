@@ -17,3 +17,15 @@ agents:
         description: Manage feature lifecycle (unblock, assign, status change)
       - name: bug_triage
         description: Triage a bug and file it on the board
+
+  # protoContent — autonomous GTM content engine (Jon + Cindi).
+  # Reaches the homelab LiteLLM gateway for all LLM calls; read-only MCP
+  # bridge into protoLabs Studio for product context. Skills are still TBD;
+  # start with chat so we can dispatch ad-hoc content work before wiring the
+  # full Jon/Cindi skill surface in task #72.
+  - name: protocontent
+    url: "${PROTOCONTENT_BASE_URL}/a2a"
+    apiKeyEnv: PROTOCONTENT_A2A_KEY
+    skills:
+      - name: chat
+        description: Open-ended content + GTM dialogue with protoContent (Jon + Cindi)

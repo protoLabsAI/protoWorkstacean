@@ -98,13 +98,108 @@ goals:
   - id: ava.board_healthy
     type: Threshold
     severity: high
-    selector: "domains.ava_board.data.blocked"
+    selector: "domains.ava_board.data.blocked_count"
     max: 3
     description: "No more than 3 features blocked simultaneously"
 
   - id: ava.backlog_not_piling
     type: Threshold
     severity: medium
-    selector: "domains.ava_board.data.backlog"
+    selector: "domains.ava_board.data.backlog_count"
     max: 10
     description: "Backlog should not exceed 10 features — work is piling up"
+
+  # ── Branch protection (catches admin-bypass regressions) ───────
+  #
+  # PR #3328 landed on protoMaker main with failing Checks because the
+  # ruleset allowed admin bypass. These goals would have caught that the
+  # moment the ruleset regressed, and caught a red main before any
+  # promotion PR inherited the breakage through the merge ref.
+
+  - id: branch.main_hardened
+    type: Threshold
+    severity: critical
+    selector: "domains.branch_protection.data.totalBypassActors"
+    max: 0
+    description: "No managed repo's main branch ruleset should allow bypass actors"
+
+  - id: branch.main_protected
+    type: Threshold
+    severity: high
+    selector: "domains.branch_protection.data.unprotectedRepoCount"
+    max: 0
+    description: "Every managed repo must have an active ruleset protecting its default branch"
+
+  - id: ci.main_last_push_green
+    type: Threshold
+    severity: high
+    selector: "domains.ci.data.failingMainCount"
+    max: 0
+    description: "The latest push to any managed repo's main branch must have passing checks"
+
+  # ── Plane board health ──────────────────────────────────────────
+  #
+  # These goals watch the rollup surfaced by /api/plane-board. Each
+  # managed project that has a planeProjectId contributes to the
+  # counters. Selectors target the top-level rollup; per-project
+  # detail is available via domains.plane.data.projects[*] for
+  # future scope-aware actions.
+
+  - id: plane.no_urgent_stale
+    type: Threshold
+    severity: critical
+    selector: "domains.plane.data.urgentOpen"
+    max: 5
+    description: "No more than 5 urgent-priority Plane issues should be open at once"
+
+  - id: plane.no_stale_backlog
+    type: Threshold
+    severity: high
+    selector: "domains.plane.data.staleOpen"
+    max: 10
+    description: "No more than 10 Plane issues should be open longer than 14 days"
+
+  - id: plane.unassigned_not_piling
+    type: Threshold
+    severity: medium
+    selector: "domains.plane.data.unassignedOpen"
+    max: 20
+    description: "Unassigned Plane issues should not pile up — triage regularly"
+
+  # ── Memory / Graphiti health ────────────────────────────────────
+  #
+  # Graphiti is the episodic memory backend. Healthcheck catches the
+  # service being down; searchOk catches the deeper failure modes
+  # (Neo4j vector functions missing, embedder misconfigured, etc.)
+  # that passed healthcheck but broke retrieval. Both are critical
+  # because dispatch-time memory enrichment silently degrades if
+  # either is broken — the agent runs blind instead of erroring.
+
+  - id: memory.graphiti_healthy
+    type: Threshold
+    severity: critical
+    selector: "domains.memory.data.healthy"
+    min: 1
+    description: "Graphiti /healthcheck must return 200 — memory backend is the primary episodic store"
+
+  - id: memory.search_working
+    type: Threshold
+    severity: high
+    selector: "domains.memory.data.searchOk"
+    min: 1
+    description: "Graphiti /search must succeed — deeper wiring check (Neo4j vector fns + embedder)"
+
+  # ── HITL routing health ─────────────────────────────────────────
+  - id: hitl.no_unrendered_requests
+    type: Threshold
+    severity: critical
+    selector: "domains.hitl_queue.data.unrenderedCount"
+    max: 0
+    description: "No HITL request should sit in hitl.pending — if one does, a renderer is missing and notifications are being silently dropped"
+
+  - id: hitl.queue_not_piling
+    type: Threshold
+    severity: medium
+    selector: "domains.hitl_queue.data.pendingCount"
+    max: 10
+    description: "HITL pending queue should not exceed 10 — escalations are piling up faster than humans can clear them"

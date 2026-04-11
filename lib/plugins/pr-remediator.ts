@@ -58,28 +58,48 @@ const getGithubToken = makeGitHubAuth();
  * create_feature / start_auto_mode tool calls to the right board.
  * The map is loaded lazily on first use and cached per-process.
  */
-let projectPathMapCache: Map<string, string> | null = null;
-function loadProjectPathMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? "workspace"): Map<string, string> {
-  if (projectPathMapCache) return projectPathMapCache;
-  const map = new Map<string, string>();
+interface ProjectMeta {
+  projectPath?: string;
+  devChannelId?: string;
+}
+let projectMetaCache: Map<string, ProjectMeta> | null = null;
+function loadProjectMetaMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? "workspace"): Map<string, ProjectMeta> {
+  if (projectMetaCache) return projectMetaCache;
+  const map = new Map<string, ProjectMeta>();
   const yamlPath = join(workspaceDir, "projects.yaml");
   if (!existsSync(yamlPath)) {
-    console.warn(`[pr-remediator] projects.yaml not found at ${yamlPath} — projectPath metadata will be empty`);
-    projectPathMapCache = map;
+    console.warn(`[pr-remediator] projects.yaml not found at ${yamlPath} — project metadata will be empty`);
+    projectMetaCache = map;
     return map;
   }
   try {
     const parsed = parseYaml(readFileSync(yamlPath, "utf8")) as {
-      projects?: Array<{ github?: string; projectPath?: string }>;
+      projects?: Array<{
+        github?: string;
+        projectPath?: string;
+        discord?: { dev?: { channelId?: string } };
+      }>;
     };
     for (const p of parsed.projects ?? []) {
-      if (p.github && p.projectPath) map.set(p.github, p.projectPath);
+      if (!p.github) continue;
+      map.set(p.github, {
+        projectPath: p.projectPath,
+        devChannelId: p.discord?.dev?.channelId,
+      });
     }
   } catch (err) {
     console.warn(`[pr-remediator] failed to parse projects.yaml: ${String(err)}`);
   }
-  projectPathMapCache = map;
+  projectMetaCache = map;
   return map;
+}
+function loadProjectPathMap(workspaceDir?: string): Map<string, string> {
+  const meta = loadProjectMetaMap(workspaceDir);
+  const out = new Map<string, string>();
+  for (const [repo, m] of meta) {
+    if (m.projectPath) out.set(repo, m.projectPath);
+  }
+  return out;
 }
 
 /**
@@ -94,11 +114,18 @@ function loadProjectPathMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? 
  * Idempotent: the endpoint returns `alreadyRunning: true` when auto-mode
  * is already active for the project, so repeated calls are cheap.
  */
-async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; message: string }> {
+type KickStatus = "ok" | "not_configured" | "error";
+
+async function startAvaAutoMode(projectPath: string): Promise<{ status: KickStatus; message: string }> {
   const base = process.env.AVA_BASE_URL;
   const apiKey = process.env.AVA_API_KEY;
-  if (!base) return { ok: false, message: "AVA_BASE_URL not set" };
-  if (!apiKey) return { ok: false, message: "AVA_API_KEY not set" };
+  // "not_configured" is the distinct state for test / local-dev environments
+  // where Ava isn't plumbed in at all. Plugin treats this as a silent skip,
+  // distinct from "configured but the request failed" which is a loud alert.
+  if (!base || !apiKey) {
+    const missing = [!base && "AVA_BASE_URL", !apiKey && "AVA_API_KEY"].filter(Boolean).join(", ");
+    return { status: "not_configured", message: `${missing} not set (Ava integration disabled)` };
+  }
 
   try {
     const resp = await fetch(`${base}/api/auto-mode/start`, {
@@ -112,7 +139,7 @@ async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; mes
     });
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
-      return { ok: false, message: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+      return { status: "error", message: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
     }
     const data = (await resp.json()) as {
       success?: boolean;
@@ -120,11 +147,11 @@ async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; mes
       alreadyRunning?: boolean;
     };
     return {
-      ok: data.success === true,
+      status: data.success === true ? "ok" : "error",
       message: data.alreadyRunning ? "already running" : (data.message ?? "started"),
     };
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { status: "error", message: String(err) };
   }
 }
 
@@ -164,11 +191,11 @@ interface InFlightEntry {
   escalated?: boolean;
 }
 
-// ── Allowlist: titles / authors that may auto-merge without HITL ─────────────
-
-const AUTO_MERGE_AUTHORS = new Set(["dependabot[bot]", "renovate[bot]"]);
-const AUTO_MERGE_TITLE_PREFIXES = ["promote:", "chore(deps"];
-const AUTO_MERGE_LABEL = "auto-merge";
+// No author/title allowlist — readyToMerge semantics (passing CI + approved
+// review) are the authorization gate. Anything that reaches the merge path
+// has already passed both, so there's no class of PR that needs a separate
+// "can this merge itself?" check. The HITL ask survives only as an
+// error-path fallback when ghMerge() fails.
 
 /**
  * Derive the workstacean/ava project slug from a GitHub `owner/repo` string.
@@ -208,15 +235,6 @@ interface PrDomainData {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function isAutoMergeEligible(pr: PrDomainEntry): boolean {
-  if (AUTO_MERGE_AUTHORS.has(pr.author)) return true;
-  if (pr.labels.includes(AUTO_MERGE_LABEL)) return true;
-  for (const prefix of AUTO_MERGE_TITLE_PREFIXES) {
-    if (pr.title.startsWith(prefix)) return true;
-  }
-  return false;
-}
-
 async function ghMerge(repo: string, num: number): Promise<{ ok: boolean; status: number; error?: string }> {
   if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)" };
   const [owner, repoName] = repo.split("/");
@@ -242,7 +260,121 @@ async function ghMerge(repo: string, num: number): Promise<{ ok: boolean; status
   }
 }
 
+/**
+ * Submit an APPROVED review on a PR as Quinn. Used by the auto-approve
+ * path for structurally-safe PR classes (dependabot/renovate, promote,
+ * chore(deps) where the content is either machine-generated or already
+ * reviewed upstream.
+ *
+ * GitHub rejects review submissions on your own PRs (422 Unprocessable),
+ * so this path only ever runs for PRs opened by a different identity
+ * than Quinn — the safe classes above are all opened by dependabot,
+ * renovate, or human users, so that constraint is naturally satisfied.
+ */
+async function ghApprove(repo: string, num: number): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(`https://api.github.com/repos/${repo}/pulls/${num}/reviews`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        event: "APPROVE",
+        body: "Auto-approved by Quinn: safe PR class (dependabot/renovate/promote/chore(deps)) with passing CI.",
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (resp.ok) return { ok: true, status: resp.status };
+    const body = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: body.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
+/**
+ * Is this PR in a class that Quinn can auto-approve?
+ *
+ *   - dependabot / renovate authors (automated dep bumps)
+ *   - "promote:" title prefix (release pipeline — content already reviewed)
+ *   - "chore(deps" title prefix (manual dep bump)
+ *
+ * All three classes are structurally safe: they either contain no
+ * hand-written code (dep bumps) or are re-promoting content that's
+ * already passed review on the upstream branch.
+ */
+const AUTO_APPROVE_AUTHORS = new Set(["dependabot[bot]", "renovate[bot]"]);
+const AUTO_APPROVE_TITLE_PREFIXES = ["promote:", "chore(deps"];
+
+function isAutoApproveClass(pr: PrDomainEntry): boolean {
+  if (AUTO_APPROVE_AUTHORS.has(pr.author)) return true;
+  for (const prefix of AUTO_APPROVE_TITLE_PREFIXES) {
+    if (pr.title.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/**
+ * Trigger a GitHub Actions workflow_dispatch event for the auto back-merge
+ * workflow on a repo's default branch. The workflow filename and the ref
+ * it runs on are both configurable via env so repos that use a different
+ * workflow name or run back-merge from dev (protoWorkstacean pattern) can
+ * still participate.
+ */
+async function ghDispatchBackmerge(
+  repo: string,
+  defaultBranch: string,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+
+  const workflowFile = process.env.BACKMERGE_WORKFLOW_FILE ?? "backmerge-from-main.yml";
+  const ref = process.env.BACKMERGE_WORKFLOW_REF ?? defaultBranch;
+
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(
+      `https://api.github.com/repos/${repo}/actions/workflows/${workflowFile}/dispatches`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ref }),
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    if (resp.ok || resp.status === 204) return { ok: true, status: resp.status };
+    const body = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: body.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
 // ── Plugin ───────────────────────────────────────────────────────────────────
+
+type BranchDriftData = {
+  projects: Array<{
+    repo: string;
+    devToMain?: number;
+    devToStaging?: number | null;
+    stagingToMain?: number | null;
+    defaultBranch?: string;
+  }>;
+  maxDrift: number;
+};
 
 export class PrRemediatorPlugin implements Plugin {
   readonly name = "pr-remediator";
@@ -252,10 +384,17 @@ export class PrRemediatorPlugin implements Plugin {
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
   private latestPrData: PrDomainData | null = null;
+  private latestBranchDrift: BranchDriftData | null = null;
   /** Map correlationId → PR identity, so HITL response can find the PR to merge. */
   private readonly pendingApprovals = new Map<string, { repo: string; number: number; title: string }>();
   /** Map `${repo}#${number}:${kind}` → in-flight dispatch metadata. */
   private readonly inFlight = new Map<string, InFlightEntry>();
+  /** Repo → timestamp of last backmerge dispatch (cooldown). */
+  private readonly backmergeDispatchedAt = new Map<string, number>();
+  /** `slug:reason` → timestamp of last auto-mode kick alert (5-min dedupe). */
+  private readonly autoModeKickAlertsAt = new Map<string, number>();
+  /** `repo#number` → timestamp of last auto-approve attempt (avoid re-submitting on every tick while GitHub catches up). */
+  private readonly autoApprovedAt = new Map<string, number>();
 
   install(bus: EventBus): void {
     this.bus = bus;
@@ -265,15 +404,28 @@ export class PrRemediatorPlugin implements Plugin {
     // clear the cache so stale PRs don't trigger bogus remediation.
     this.subscriptionIds.push(bus.subscribe("world.state.updated", this.name, (msg) => {
       const state = msg.payload as WorldState | undefined;
-      const domain = state?.domains?.pr_pipeline;
-      if (domain?.data) {
-        this.latestPrData = domain.data as PrDomainData;
+      const prDomain = state?.domains?.pr_pipeline;
+      if (prDomain?.data) {
+        this.latestPrData = prDomain.data as PrDomainData;
         // Drop in-flight entries for PRs no longer in the pipeline (merged/closed).
         // This lets exhausted entries clear naturally without a timer.
         this._pruneInFlight();
+        // Auto-approve any safe-class PR that's CI-passing but still waiting
+        // on a review — Quinn submits an APPROVED review, next world state
+        // tick flips readyToMerge, _handleMergeReady auto-merges.
+        void this._runAutoApprovePass().catch(err =>
+          console.error("[pr-remediator] auto-approve pass error:", err),
+        );
       } else if (state?.domains) {
         // Domain missing from a valid state update — drop stale cache
         this.latestPrData = null;
+      }
+
+      const driftDomain = state?.domains?.branch_drift;
+      if (driftDomain?.data) {
+        this.latestBranchDrift = driftDomain.data as BranchDriftData;
+      } else if (state?.domains) {
+        this.latestBranchDrift = null;
       }
     }));
 
@@ -294,6 +446,9 @@ export class PrRemediatorPlugin implements Plugin {
     }));
     this.subscriptionIds.push(bus.subscribe("pr.remediate.address_feedback", this.name, (msg) => {
       void this._handleAddressFeedback(msg);
+    }));
+    this.subscriptionIds.push(bus.subscribe("pr.backmerge.dispatch", this.name, () => {
+      void this._handleBackmergeDispatch();
     }));
 
     // HITL response handler — fires when a human approves/rejects via Discord.
@@ -404,9 +559,24 @@ export class PrRemediatorPlugin implements Plugin {
   ): void {
     if (!this.bus) return;
 
+    // Suppress escalations for PRs that have left the pipeline (closed /
+    // merged) between the attempts hitting MAX_ATTEMPTS_PER_PR and the
+    // escalation firing. latestPrData is the cached pr_pipeline snapshot;
+    // if the PR is no longer in it, the remediation is moot — no point
+    // asking a human to unstick a closed PR. Silently drop and clear the
+    // in-flight entry so it doesn't linger.
     const pr = (this.latestPrData?.prs ?? []).find((p) => p.repo === repo && p.number === number);
+    if (!pr) {
+      console.log(
+        `[pr-remediator] suppressing stuck HITL escalation for ${repo}#${number} — PR no longer in pipeline (closed/merged)`,
+      );
+      this.inFlight.delete(this._inFlightKey(repo, number, kind));
+      return;
+    }
+
     const correlationId = crypto.randomUUID();
     const replyTopic = `hitl.response.pr.remediation_stuck.${correlationId}`;
+    const devChannelId = loadProjectMetaMap().get(repo)?.devChannelId;
 
     const durationMs = Date.now() - entry.startedAt;
     const durationMin = Math.round(durationMs / 60_000);
@@ -433,6 +603,7 @@ export class PrRemediatorPlugin implements Plugin {
       options: ["investigate", "mark_non_remediable", "manual_unblock"],
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       replyTopic,
+      sourceMeta: { interface: "discord", ...(devChannelId ? { channelId: devChannelId } : {}) },
     };
 
     const topic = `hitl.request.pr.remediation_stuck.${correlationId}`;
@@ -497,6 +668,59 @@ export class PrRemediatorPlugin implements Plugin {
     }
   }
 
+  // ── auto-approve (dependabot / promote / chore(deps) ─────────────────────
+  //
+  // CodeRabbit doesn't submit APPROVED reviews on clean PRs (verified
+  // empirically — see the audit of recent PRs across all managed repos),
+  // which means the tightened readyToMerge = "approved review" check was
+  // leaving safe-class PRs stuck forever. This pass closes the gap: Quinn
+  // submits an APPROVED review on every PR whose author/title marks it as
+  // structurally safe, whose CI is passing, and whose review state is
+  // still pending/none.
+  //
+  // The pass is rate-limited per PR via autoApprovedAt — GitHub takes a
+  // few seconds to reflect the new review, and the world state domain
+  // polls every couple of minutes, so we skip any PR approved in the last
+  // 10 minutes to avoid double-posting while the state catches up.
+
+  private static readonly AUTO_APPROVE_COOLDOWN_MS = 10 * 60 * 1000;
+
+  private async _runAutoApprovePass(): Promise<void> {
+    if (!AUTO_MERGE_ENABLED) return; // same env gate as the merge path
+    const prs = this.latestPrData?.prs ?? [];
+    const now = Date.now();
+
+    for (const pr of prs) {
+      if (!isAutoApproveClass(pr)) continue;
+      if (pr.ciStatus !== "pass") continue;
+      if (pr.reviewState === "approved") continue;
+      if (pr.reviewState === "changes_requested") continue; // don't override real feedback
+      if (pr.isDraft) continue;
+
+      const key = `${pr.repo}#${pr.number}`;
+      const lastApproval = this.autoApprovedAt.get(key);
+      if (lastApproval !== undefined && now - lastApproval < PrRemediatorPlugin.AUTO_APPROVE_COOLDOWN_MS) {
+        continue;
+      }
+
+      this.autoApprovedAt.set(key, now);
+      const result = await ghApprove(pr.repo, pr.number);
+      if (result.ok) {
+        console.log(`[pr-remediator] auto-approved ${key} (class=${AUTO_APPROVE_AUTHORS.has(pr.author) ? pr.author : "title-prefix"})`);
+      } else if (result.status === 422) {
+        // Usually "Can not approve your own pull request" — Quinn opened it.
+        // Drop the cooldown entry so we don't rapidly re-attempt; set it far
+        // in the future instead.
+        this.autoApprovedAt.set(key, now + 24 * 60 * 60 * 1000);
+        console.log(`[pr-remediator] skip auto-approve ${key}: 422 (likely Quinn-authored PR)`);
+      } else {
+        console.warn(`[pr-remediator] auto-approve failed ${key}: ${result.status} ${result.error}`);
+        // Drop cooldown so we retry on next tick after a real failure.
+        this.autoApprovedAt.delete(key);
+      }
+    }
+  }
+
   // ── merge_ready ────────────────────────────────────────────────────────────
 
   private async _handleMergeReady(msg: BusMessage): Promise<void> {
@@ -513,26 +737,28 @@ export class PrRemediatorPlugin implements Plugin {
         continue;
       }
 
-      if (isAutoMergeEligible(pr)) {
-        if (!AUTO_MERGE_ENABLED) {
-          console.log(`[pr-remediator] DRY-RUN — would auto-merge ${pr.repo}#${pr.number} (${pr.author})`);
-          continue;
-        }
-        // Claim the slot before the network call so a concurrent trigger
-        // can't race into the same merge. The correlationId is synthetic
-        // since no skill dispatch happens — the entry clears on pipeline prune.
-        this._recordDispatch(pr.repo, pr.number, "merge_ready", `merge-${crypto.randomUUID()}`);
-        const result = await ghMerge(pr.repo, pr.number);
-        if (result.ok) {
-          console.log(`[pr-remediator] auto-merged ${pr.repo}#${pr.number}`);
-          this._publishAlert(`Auto-merged ${pr.repo}#${pr.number}`, pr);
-        } else {
-          console.warn(`[pr-remediator] auto-merge failed ${pr.repo}#${pr.number}: ${result.error}`);
-          this._emitHitlApproval(pr, msg.correlationId, `Auto-merge failed (${result.status}): ${result.error}`);
-        }
+      if (!AUTO_MERGE_ENABLED) {
+        console.log(`[pr-remediator] DRY-RUN — would auto-merge ${pr.repo}#${pr.number} (${pr.author})`);
+        continue;
+      }
+
+      // readyToMerge already enforces: not draft, clean mergeable, CI pass,
+      // approved review. There's no additional gate — every ready PR merges.
+      // Claim the slot before the network call so a concurrent trigger
+      // can't race into the same merge.
+      this._recordDispatch(pr.repo, pr.number, "merge_ready", `merge-${crypto.randomUUID()}`);
+      const result = await ghMerge(pr.repo, pr.number);
+      if (result.ok) {
+        console.log(`[pr-remediator] auto-merged ${pr.repo}#${pr.number}`);
+        this._publishAlert(`Auto-merged ${pr.repo}#${pr.number}`, pr);
       } else {
-        this._recordDispatch(pr.repo, pr.number, "merge_ready", `hitl-${crypto.randomUUID()}`);
-        this._emitHitlApproval(pr, msg.correlationId);
+        // Error-path fallback: the PR was ready but the merge API call
+        // failed (rare — e.g. branch protection changed between the
+        // readiness check and the merge, network glitch). Escalate to
+        // HITL so an operator can look. This is the only remaining
+        // _emitHitlApproval call site.
+        console.warn(`[pr-remediator] auto-merge failed ${pr.repo}#${pr.number}: ${result.error}`);
+        this._emitHitlApproval(pr, msg.correlationId, `Auto-merge failed (${result.status}): ${result.error}`);
       }
     }
   }
@@ -592,7 +818,13 @@ Critical rules:
       // calling the tool, so we fire it in parallel as an idempotent fallback.
       if (projectPath) {
         const res = await startAvaAutoMode(projectPath);
-        console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ${res.ok ? "ok" : "fail"} — ${res.message}`);
+        if (res.status === "ok") {
+          console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ok — ${res.message}`);
+        } else if (res.status === "error") {
+          console.warn(`[pr-remediator] auto-mode kick for ${projectSlug}: fail — ${res.message}`);
+          this._reportAutoModeKickFailure(projectSlug, pr.repo, pr.number, res.message);
+        }
+        // "not_configured" = Ava integration disabled — skip silently.
       }
     }
   }
@@ -649,17 +881,65 @@ Critical rules:
       // Deterministic safety net — see _handleFixCi for rationale
       if (projectPath) {
         const res = await startAvaAutoMode(projectPath);
-        console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ${res.ok ? "ok" : "fail"} — ${res.message}`);
+        if (res.status === "ok") {
+          console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ok — ${res.message}`);
+        } else if (res.status === "error") {
+          console.warn(`[pr-remediator] auto-mode kick for ${projectSlug}: fail — ${res.message}`);
+          this._reportAutoModeKickFailure(projectSlug, pr.repo, pr.number, res.message);
+        }
+        // "not_configured" = Ava integration disabled — skip silently.
       }
     }
   }
 
   // ── outbound helpers ───────────────────────────────────────────────────────
 
+  /**
+   * Raise a first-class ops signal when the deterministic Ava auto-mode kick
+   * fails. In normal operation this should NEVER happen — failure means one
+   * of:
+   *   - AVA_BASE_URL / AVA_API_KEY is missing or wrong in the environment
+   *   - Ava server is down or unreachable
+   *   - Ava's auto-mode endpoint is failing
+   *
+   * Without a loud signal, every remediation dispatch succeeds (feature filed
+   * on Ava's board) but Ava never starts working it, and the loop appears to
+   * run forever because the feature stays in `backlog`. Classic quiet-failure
+   * hole — surface it as a dedicated Discord alert so the misconfig is
+   * visible the moment it happens.
+   *
+   * Rate-limited per (projectSlug, reason) to avoid alert-spam when the same
+   * kick fails repeatedly within a short window.
+   */
+  private _reportAutoModeKickFailure(
+    projectSlug: string,
+    repo: string,
+    prNumber: number,
+    reason: string,
+  ): void {
+    if (!this.bus) return;
+    const key = `${projectSlug}:${reason}`;
+    const last = this.autoModeKickAlertsAt.get(key);
+    const now = Date.now();
+    if (last !== undefined && now - last < 5 * 60 * 1000) return; // 5-min dedupe
+    this.autoModeKickAlertsAt.set(key, now);
+
+    const text = `⚠️ Ava auto-mode kick FAILED for ${projectSlug} (${repo}#${prNumber}) — ${reason}. Remediation feature is filed on Ava's board but the agent loop won't pick it up until this is fixed.`;
+    this.bus.publish("message.outbound.discord.alert", {
+      id: crypto.randomUUID(),
+      correlationId: crypto.randomUUID(),
+      topic: "message.outbound.discord.alert",
+      timestamp: now,
+      payload: { content: text, severity: "high", source: "pr-remediator" },
+    });
+    console.warn(`[pr-remediator] ${text}`);
+  }
+
   private _emitHitlApproval(pr: PrDomainEntry, parentCorrelationId: string, note?: string): void {
     if (!this.bus) return;
     const correlationId = crypto.randomUUID();
     const replyTopic = `hitl.response.pr.merge.${correlationId}`;
+    const devChannelId = loadProjectMetaMap().get(pr.repo)?.devChannelId;
     const request: HITLRequest = {
       type: "hitl_request",
       correlationId,
@@ -675,6 +955,7 @@ Critical rules:
       options: ["approve", "reject"],
       expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
       replyTopic,
+      sourceMeta: { interface: "discord", ...(devChannelId ? { channelId: devChannelId } : {}) },
     };
     // Record the pending approval so the response handler can act on it
     this.pendingApprovals.set(correlationId, {
@@ -698,6 +979,62 @@ Critical rules:
    *   { type: "hitl_response", correlationId, decision: "approve" | "reject", ... }
    * On "approve" we execute the merge; on "reject" we drop the pending entry.
    */
+  // ── backmerge ──────────────────────────────────────────────────────────────
+  //
+  // Dispatched when branch.drift_low fires. Iterates the current branch_drift
+  // snapshot, finds repos with devToMain > threshold, and triggers the GitHub
+  // Actions workflow_dispatch for their configured back-merge workflow. A 6h
+  // per-repo cooldown prevents re-dispatch if the workflow is already running
+  // or just finished.
+
+  private static readonly DRIFT_THRESHOLD = 30;
+  private static readonly BACKMERGE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+
+  private async _handleBackmergeDispatch(): Promise<void> {
+    const drift = this.latestBranchDrift;
+    if (!drift) {
+      console.log("[pr-remediator] backmerge dispatch fired but no branch_drift data cached");
+      return;
+    }
+
+    const candidates = drift.projects.filter((p) => {
+      const dev = p.devToMain ?? 0;
+      const stg = p.stagingToMain ?? 0;
+      return dev > PrRemediatorPlugin.DRIFT_THRESHOLD || stg > PrRemediatorPlugin.DRIFT_THRESHOLD;
+    });
+
+    if (candidates.length === 0) {
+      console.log(`[pr-remediator] backmerge dispatch fired but no repo exceeds drift threshold ${PrRemediatorPlugin.DRIFT_THRESHOLD}`);
+      return;
+    }
+
+    const now = Date.now();
+    for (const project of candidates) {
+      const last = this.backmergeDispatchedAt.get(project.repo);
+      if (last !== undefined && now - last < PrRemediatorPlugin.BACKMERGE_COOLDOWN_MS) {
+        const ageMin = Math.round((now - last) / 60_000);
+        console.log(`[pr-remediator] skip backmerge ${project.repo}: cooldown (dispatched ${ageMin}m ago)`);
+        continue;
+      }
+
+      this.backmergeDispatchedAt.set(project.repo, now);
+      const result = await ghDispatchBackmerge(project.repo, project.defaultBranch ?? "main");
+      if (result.ok) {
+        console.log(
+          `[pr-remediator] backmerge workflow dispatched: ${project.repo} (devToMain=${project.devToMain}, stagingToMain=${project.stagingToMain})`,
+        );
+      } else if (result.status === 404) {
+        console.log(
+          `[pr-remediator] backmerge skipped ${project.repo}: workflow not found (404) — repo has no auto back-merge configured`,
+        );
+      } else {
+        console.warn(
+          `[pr-remediator] backmerge dispatch failed ${project.repo}: ${result.status} ${result.error}`,
+        );
+      }
+    }
+  }
+
   private async _handleHitlResponse(msg: BusMessage): Promise<void> {
     const response = msg.payload as {
       type?: string;
@@ -757,7 +1094,11 @@ Critical rules:
       payload: {
         skill: skillHint,
         content,
-        meta: { agentId: "ava", skillHint },
+        // systemActor marks this as a bot-initiated dispatch for the
+        // memory layer — skill-dispatcher writes episodes to
+        // `system_pr-remediator` so the autonomous loop builds its own
+        // episodic history separate from user-chat memory.
+        meta: { agentId: "ava", skillHint, systemActor: "pr-remediator" },
         ...(extraMeta ?? {}),
       },
     });

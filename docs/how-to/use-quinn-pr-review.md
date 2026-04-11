@@ -30,7 +30,7 @@ Quinn reviews pull requests and issues via GitHub webhook. It uses codebase-wide
 
 ```yaml
 # workspace/github.yaml
-mentionHandle: "@quinn"   # case-insensitive
+mentionHandle: "@protoquinn"   # case-insensitive
 
 skillHints:
   issue_comment: bug_triage              # @mention in a comment on an issue
@@ -98,7 +98,7 @@ When a PR is opened or synchronized, and `pull_request` is in the webhook event 
 Leave a comment on any issue or PR:
 
 ```
-@quinn please review this PR — focus on the auth changes
+@protoquinn please review this PR — focus on the auth changes
 ```
 
 Quinn responds with a review comment posted as `protoquinn[bot]`.
