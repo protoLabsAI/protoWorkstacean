@@ -1,6 +1,4 @@
 import { useState, useEffect } from "preact/hooks";
-<<<<<<< HEAD
-=======
 import {
   getServices,
   getAgentHealth,
@@ -17,7 +15,6 @@ import {
   type FlowMetricsResponse,
   type SecuritySummaryResponse,
 } from "../lib/api";
->>>>>>> origin/main
 
 type Status = "green" | "yellow" | "red" | "loading";
 
@@ -29,72 +26,6 @@ interface CardState {
 
 const POLL_INTERVAL = 30_000;
 
-<<<<<<< HEAD
-function deriveServicesStatus(data: unknown): Pick<CardState, "metric" | "status"> {
-  if (!data || typeof data !== "object") return { metric: "Unknown", status: "loading" };
-  const entries = Object.values(data as Record<string, { status?: string }>);
-  if (entries.length === 0) return { metric: "No services", status: "yellow" };
-  const down = entries.filter((s) => s?.status === "down").length;
-  const degraded = entries.filter((s) => s?.status === "degraded").length;
-  if (down > 0) return { metric: `${down} down`, status: "red" };
-  if (degraded > 0) return { metric: `${degraded} degraded`, status: "yellow" };
-  return { metric: `${entries.length} healthy`, status: "green" };
-}
-
-function deriveAgentHealthStatus(data: unknown): Pick<CardState, "metric" | "status"> {
-  if (!data || typeof data !== "object") return { metric: "Unknown", status: "loading" };
-  const agents = (data as { agents?: Array<{ status?: string }> }).agents ?? [];
-  if (agents.length === 0) return { metric: "None registered", status: "red" };
-  const active = agents.filter((a) => a?.status === "active" || a?.status === "idle" || a?.status === "registered").length;
-  const errored = agents.filter((a) => a?.status === "error").length;
-  if (errored === agents.length) return { metric: `${errored} errors`, status: "red" };
-  return { metric: `${active} / ${agents.length} online`, status: errored > 0 ? "yellow" : "green" };
-}
-
-function deriveCiHealthStatus(data: unknown): Pick<CardState, "metric" | "status"> {
-  if (!data || typeof data !== "object") return { metric: "Unknown", status: "loading" };
-  const projects = (data as { projects?: Array<{ successRate?: number }> }).projects ?? [];
-  if (projects.length === 0) return { metric: "No data", status: "yellow" };
-  const avg = projects.reduce((sum, p) => sum + (p?.successRate ?? 0), 0) / projects.length;
-  const pct = Math.round(avg * 100);
-  if (avg >= 0.8) return { metric: `${pct}% pass rate`, status: "green" };
-  if (avg >= 0.5) return { metric: `${pct}% pass rate`, status: "yellow" };
-  return { metric: `${pct}% pass rate`, status: "red" };
-}
-
-function derivePrPipelineStatus(data: unknown): Pick<CardState, "metric" | "status"> {
-  if (!data || typeof data !== "object") return { metric: "Unknown", status: "loading" };
-  const { open = 0, failed = 0 } = data as { open?: number; failed?: number };
-  if (failed > 0) return { metric: `${failed} failed`, status: "red" };
-  if (open > 5) return { metric: `${open} open`, status: "yellow" };
-  return { metric: `${open} open`, status: "green" };
-}
-
-function deriveFlowMetricsStatus(data: unknown): Pick<CardState, "metric" | "status"> {
-  if (!data || typeof data !== "object") return { metric: "Unknown", status: "loading" };
-  const { eventsPerMinute = 0, totalEvents = 0 } = data as {
-    eventsPerMinute?: number;
-    totalEvents?: number;
-  };
-  const epm = typeof eventsPerMinute === "number" ? eventsPerMinute : 0;
-  return {
-    metric: `${epm.toFixed(1)} ev/min (${totalEvents} total)`,
-    status: epm > 0 ? "green" : "yellow",
-  };
-}
-
-function deriveSecurityStatus(data: unknown): Pick<CardState, "metric" | "status"> {
-  if (!data || typeof data !== "object") return { metric: "Unknown", status: "loading" };
-  const d = data as { openIncidents?: number; incidents?: unknown[] };
-  const count = d.openIncidents ?? d.incidents?.length ?? 0;
-  if (count === 0) return { metric: "No incidents", status: "green" };
-  return { metric: `${count} open`, status: "red" };
-}
-
-function deriveHitlStatus(data: unknown): Pick<CardState, "metric" | "status"> {
-  if (!data || typeof data !== "object") return { metric: "Unknown", status: "loading" };
-  const pending = (data as { pending?: unknown[] }).pending ?? [];
-=======
 function deriveServicesStatus(data: ServicesResponse): Pick<CardState, "metric" | "status"> {
   // Services response: { discord: { configured, connected }, github: { configured, ... }, ... }
   const services = Object.entries(data).filter(([, v]) => v && typeof v === "object");
@@ -160,23 +91,12 @@ function deriveSecurityStatus(data: SecuritySummaryResponse): Pick<CardState, "m
 
 function deriveHitlStatus(data: { data?: unknown[] }): Pick<CardState, "metric" | "status"> {
   const pending = Array.isArray(data?.data) ? data.data : [];
->>>>>>> origin/main
   const count = pending.length;
   if (count === 0) return { metric: "None pending", status: "green" };
   if (count <= 3) return { metric: `${count} pending`, status: "yellow" };
   return { metric: `${count} pending`, status: "red" };
 }
 
-<<<<<<< HEAD
-async function fetchCard(
-  endpoint: string,
-  derive: (data: unknown) => Pick<CardState, "metric" | "status">
-): Promise<Pick<CardState, "metric" | "status">> {
-  try {
-    const res = await fetch(endpoint);
-    if (!res.ok) throw new Error(`${res.status}`);
-    const data = await res.json();
-=======
 interface CardFetcher {
   label: string;
   endpoint: string;
@@ -191,27 +111,12 @@ async function safeFetch<T>(
 ): Promise<Pick<CardState, "metric" | "status">> {
   try {
     const data = await loader(force);
->>>>>>> origin/main
     return derive(data);
   } catch {
     return { metric: "Error", status: "red" };
   }
 }
 
-<<<<<<< HEAD
-const CARD_CONFIGS: Array<{
-  label: string;
-  endpoint: string;
-  derive: (data: unknown) => Pick<CardState, "metric" | "status">;
-}> = [
-  { label: "Service Connectivity", endpoint: "/api/services", derive: deriveServicesStatus },
-  { label: "Agent Health", endpoint: "/api/agent-health", derive: deriveAgentHealthStatus },
-  { label: "CI Success Rate", endpoint: "/api/ci-health", derive: deriveCiHealthStatus },
-  { label: "PR Pipeline", endpoint: "/api/pr-pipeline", derive: derivePrPipelineStatus },
-  { label: "Flow Metrics", endpoint: "/api/flow-metrics", derive: deriveFlowMetricsStatus },
-  { label: "Security Summary", endpoint: "/api/security-summary", derive: deriveSecurityStatus },
-  { label: "Pending HITL", endpoint: "/api/hitl/pending", derive: deriveHitlStatus },
-=======
 const CARD_CONFIGS: CardFetcher[] = [
   {
     label: "Service Connectivity",
@@ -276,7 +181,6 @@ const CARD_CONFIGS: CardFetcher[] = [
       return cached ? deriveHitlStatus(cached) : null;
     },
   },
->>>>>>> origin/main
 ];
 
 function HealthCardView({ label, metric, status }: CardState) {
@@ -332,24 +236,6 @@ function HealthCardView({ label, metric, status }: CardState) {
 }
 
 export default function OverviewGrid() {
-<<<<<<< HEAD
-  const [cards, setCards] = useState<CardState[]>(
-    CARD_CONFIGS.map((c) => ({ label: c.label, metric: "Loading…", status: "loading" as Status }))
-  );
-
-  async function refresh() {
-    const results = await Promise.all(
-      CARD_CONFIGS.map((c) => fetchCard(c.endpoint, c.derive))
-    );
-    setCards(
-      CARD_CONFIGS.map((c, i) => ({ label: c.label, ...results[i] }))
-    );
-  }
-
-  useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, POLL_INTERVAL);
-=======
   // Seed from cache instantly so page revisits render immediately
   const [cards, setCards] = useState<CardState[]>(() =>
     CARD_CONFIGS.map((c) => {
@@ -370,7 +256,6 @@ export default function OverviewGrid() {
   useEffect(() => {
     refresh(true); // force on mount to get fresh data
     const id = setInterval(() => refresh(true), POLL_INTERVAL);
->>>>>>> origin/main
     return () => clearInterval(id);
   }, []);
 

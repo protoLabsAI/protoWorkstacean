@@ -1,56 +1,6 @@
 import { useState, useEffect } from "preact/hooks";
 import ProjectCard from "./ProjectCard.tsx";
 import type { ProjectEntry, CiProjectData, PrData } from "./ProjectCard.tsx";
-<<<<<<< HEAD
-
-const POLL_INTERVAL_MS = 60_000;
-
-interface ProjectsApiResponse {
-  success: boolean;
-  data: ProjectEntry[];
-}
-
-interface CiHealthResponse {
-  successRate: number;
-  totalRuns: number;
-  failedRuns: number;
-  projects: CiProjectData[];
-}
-
-interface PrPipelineResponse {
-  totalOpen: number;
-  conflicting: number;
-  stale: number;
-  failing: number;
-  prs: PrData[];
-}
-
-export default function ProjectsView() {
-  const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  const [ciHealth, setCiHealth] = useState<CiHealthResponse | null>(null);
-  const [prPipeline, setPrPipeline] = useState<PrPipelineResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
-  async function fetchAll() {
-    try {
-      const [projRes, ciRes, prRes] = await Promise.all([
-        fetch("/api/projects"),
-        fetch("/api/ci-health"),
-        fetch("/api/pr-pipeline"),
-      ]);
-
-      if (!projRes.ok) throw new Error(`/api/projects: ${projRes.status}`);
-      if (!ciRes.ok) throw new Error(`/api/ci-health: ${ciRes.status}`);
-      if (!prRes.ok) throw new Error(`/api/pr-pipeline: ${prRes.status}`);
-
-      const projJson = (await projRes.json()) as ProjectsApiResponse;
-      const ciJson = (await ciRes.json()) as CiHealthResponse;
-      const prJson = (await prRes.json()) as PrPipelineResponse;
-
-      setProjects(Array.isArray(projJson.data) ? projJson.data : []);
-=======
 import {
   getProjects,
   getCiHealth,
@@ -86,7 +36,6 @@ export default function ProjectsView() {
       ]);
 
       setProjects(Array.isArray(projData) ? (projData as ProjectEntry[]) : []);
->>>>>>> origin/main
       setCiHealth(ciJson);
       setPrPipeline(prJson);
       setError(null);
@@ -99,13 +48,8 @@ export default function ProjectsView() {
   }
 
   useEffect(() => {
-<<<<<<< HEAD
-    fetchAll();
-    const timer = setInterval(fetchAll, POLL_INTERVAL_MS);
-=======
     fetchAll(true);
     const timer = setInterval(() => fetchAll(true), POLL_INTERVAL_MS);
->>>>>>> origin/main
     return () => clearInterval(timer);
   }, []);
 
