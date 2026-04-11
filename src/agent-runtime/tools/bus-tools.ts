@@ -15,13 +15,21 @@
 
 import { tool } from "@protolabsai/sdk";
 import { z } from "zod";
+import type { BusToolError } from "../../../lib/types/bus-tools.js";
 
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
-function err(message: string) {
-  return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
+function err(error: BusToolError) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify({ error }, null, 2) }],
+    isError: true,
+  };
+}
+
+function toError(code: string, e: unknown): BusToolError {
+  return { code, message: e instanceof Error ? e.message : String(e) };
 }
 
 async function apiGet(baseUrl: string, path: string, apiKey?: string): Promise<unknown> {
@@ -87,7 +95,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiPost(baseUrl, "/publish", body, apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("PUBLISH_EVENT_FAILED", e));
       }
     },
   );
@@ -111,7 +119,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiGet(baseUrl, path, apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("GET_WORLD_STATE_FAILED", e));
       }
     },
   );
@@ -125,7 +133,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiGet(baseUrl, "/api/incidents", apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("GET_INCIDENTS_FAILED", e));
       }
     },
   );
@@ -158,7 +166,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiPost(baseUrl, "/api/incidents", body, apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("REPORT_INCIDENT_FAILED", e));
       }
     },
   );
@@ -173,7 +181,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiGet(baseUrl, "/api/projects", apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("GET_PROJECTS_FAILED", e));
       }
     },
   );
@@ -188,7 +196,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiGet(baseUrl, "/api/ci-health", apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("GET_CI_HEALTH_FAILED", e));
       }
     },
   );
@@ -203,7 +211,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiGet(baseUrl, "/api/pr-pipeline", apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("GET_PR_PIPELINE_FAILED", e));
       }
     },
   );
@@ -217,7 +225,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiGet(baseUrl, "/api/branch-drift", apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("GET_BRANCH_DRIFT_FAILED", e));
       }
     },
   );
@@ -232,7 +240,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiGet(baseUrl, "/api/outcomes", apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("GET_OUTCOMES_FAILED", e));
       }
     },
   );
@@ -246,7 +254,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiGet(baseUrl, "/api/ceremonies", apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("GET_CEREMONIES_FAILED", e));
       }
     },
   );
@@ -265,7 +273,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
         const data = await apiPost(baseUrl, `/api/ceremonies/${ceremonyId}/run`, {}, apiKey);
         return ok(data);
       } catch (e) {
-        return err(e instanceof Error ? e.message : String(e));
+        return err(toError("RUN_CEREMONY_FAILED", e));
       }
     },
   );
