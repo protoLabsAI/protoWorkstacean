@@ -129,6 +129,8 @@ export default function EventStream() {
   return (
     <>
       <style>{`
+<<<<<<< HEAD
+=======
         .es-root {
           display: flex;
           flex-direction: column;
@@ -145,10 +147,18 @@ export default function EventStream() {
           box-shadow: 0 4px 12px -8px rgba(0, 0, 0, 0.5);
           backdrop-filter: blur(8px);
         }
+>>>>>>> origin/main
         .es-header {
           display: flex;
           align-items: center;
           gap: 12px;
+<<<<<<< HEAD
+          background: #161b22;
+          border-bottom: 1px solid #30363d;
+          padding: 10px 16px;
+          flex-shrink: 0;
+          flex-wrap: wrap;
+=======
           padding: 12px 20px 10px 20px;
           flex-wrap: wrap;
           position: relative;
@@ -183,6 +193,7 @@ export default function EventStream() {
         @keyframes es-pulse-dot {
           0%, 100% { opacity: 0.4; transform: scale(1); }
           50% { opacity: 1; transform: scale(1.1); }
+>>>>>>> origin/main
         }
         .es-tabs {
           display: flex;
@@ -190,10 +201,16 @@ export default function EventStream() {
           background: #0d1117;
           border-radius: 6px;
           padding: 2px;
+<<<<<<< HEAD
+        }
+        .es-tab {
+          padding: 4px 14px;
+=======
           border: 1px solid #21262d;
         }
         .es-tab {
           padding: 5px 16px;
+>>>>>>> origin/main
           font-size: 12px;
           border-radius: 4px;
           cursor: pointer;
@@ -201,6 +218,12 @@ export default function EventStream() {
           border: none;
           background: transparent;
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+<<<<<<< HEAD
+          transition: all 0.15s;
+        }
+        .es-tab:hover { color: #c9d1d9; }
+        .es-tab.active { background: #21262d; color: #c9d1d9; }
+=======
           font-weight: 500;
           transition: all 0.15s;
         }
@@ -210,6 +233,7 @@ export default function EventStream() {
           color: #c9d1d9;
           box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.2);
         }
+>>>>>>> origin/main
 
         .status-dot {
           width: 8px;
@@ -219,10 +243,14 @@ export default function EventStream() {
           transition: background 0.2s;
           flex-shrink: 0;
         }
+<<<<<<< HEAD
+        .status-dot.connected { background: #3fb950; }
+=======
         .status-dot.connected {
           background: #3fb950;
           box-shadow: 0 0 6px rgba(63, 185, 80, 0.6);
         }
+>>>>>>> origin/main
         .status-dot.connecting { background: #d29922; animation: es-pulse 1s infinite; }
         @keyframes es-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
@@ -236,11 +264,29 @@ export default function EventStream() {
           background: #21262d;
           color: #c9d1d9;
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+<<<<<<< HEAD
+=======
           border: 1px solid #30363d;
+>>>>>>> origin/main
         }
         .es-badge {
           font-size: 11px;
           background: #30363d;
+<<<<<<< HEAD
+          padding: 2px 8px;
+          border-radius: 10px;
+          color: #8b949e;
+          font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+        }
+        .es-toolbar {
+          background: #161b22;
+          border-bottom: 1px solid #30363d;
+          padding: 8px 16px;
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          flex-shrink: 0;
+=======
           padding: 3px 10px;
           border-radius: 10px;
           color: #c9d1d9;
@@ -253,6 +299,7 @@ export default function EventStream() {
           display: flex;
           gap: 8px;
           align-items: center;
+>>>>>>> origin/main
           flex-wrap: wrap;
         }
         .es-filter {
@@ -437,6 +484,80 @@ export default function EventStream() {
         }
       `}</style>
 
+<<<<<<< HEAD
+      <div class="es-header">
+        <div class="es-tabs">
+          <button
+            class={`es-tab${activeTab === "events" ? " active" : ""}`}
+            onClick={() => { setActiveTab("events"); setExpandedId(null); }}
+          >
+            Events
+          </button>
+          <button
+            class={`es-tab${activeTab === "logs" ? " active" : ""}`}
+            onClick={() => { setActiveTab("logs"); setExpandedId(null); }}
+          >
+            Logs
+          </button>
+        </div>
+        <div class="es-status">
+          <span class={dotClass} />
+          {statusLabel}
+        </div>
+        <div class="es-badge">
+          {filtered.length} {activeTab === "events" ? "events" : "logs"}
+        </div>
+      </div>
+
+      <div class="es-toolbar">
+        <input
+          class="es-filter"
+          type="text"
+          placeholder={activeTab === "events" ? "Filter by topic (e.g. agent.*)" : "Filter by topic (e.g. debug.*)"}
+          value={filter}
+          onInput={(e) => setFilter((e.target as HTMLInputElement).value)}
+        />
+        <button class="es-btn" onClick={clearActive}>Clear</button>
+        <button
+          class={`es-btn${isPaused ? " paused" : ""}`}
+          onClick={() => setIsPaused((p) => !p)}
+        >
+          {isPaused ? "Resume" : "Pause"}
+        </button>
+        <button
+          class={`es-btn${autoScroll ? " active" : ""}`}
+          onClick={() => setAutoScroll((a) => !a)}
+          title="Toggle auto-scroll"
+        >
+          Auto-scroll
+        </button>
+      </div>
+
+      <div class="es-list" ref={listRef} onScroll={handleScroll}>
+        {filtered.length === 0 ? (
+          <div class="es-empty">
+            <p>{items.length === 0 ? "Waiting for events…" : "No matches for current filter"}</p>
+          </div>
+        ) : (
+          filtered.map((msg) =>
+            activeTab === "events" ? (
+              <EventRow
+                key={msg.id ?? msg.timestamp}
+                msg={msg}
+                isExpanded={expandedId === (msg.id ?? msg.timestamp)}
+                onClick={() => toggleExpanded(msg.id ?? msg.timestamp)}
+              />
+            ) : (
+              <LogRow
+                key={msg.id ?? msg.timestamp}
+                msg={msg}
+                isExpanded={expandedId === (msg.id ?? msg.timestamp)}
+                onClick={() => toggleExpanded(msg.id ?? msg.timestamp)}
+              />
+            )
+          )
+        )}
+=======
       <div class="es-root">
         <div class="es-sticky">
           <div class="es-header">
@@ -514,6 +635,7 @@ export default function EventStream() {
             )
           )}
         </div>
+>>>>>>> origin/main
       </div>
     </>
   );
