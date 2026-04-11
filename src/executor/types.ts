@@ -1,3 +1,5 @@
+import type { ExtendedUsage } from "@protolabsai/sdk";
+
 /**
  * Executor layer types — the contract between SkillDispatcherPlugin and all executor implementations.
  *
@@ -37,8 +39,12 @@ export interface SkillResult {
   isError: boolean;
   /** Propagated trace ID. */
   correlationId: string;
-  /** Optional structured data returned by function/workflow executors. */
-  data?: unknown;
+  /** Optional structured metrics returned by executors. */
+  data?: {
+    usage?: ExtendedUsage;
+    numTurns?: number;
+    stopReason?: string;
+  };
 }
 
 // ── Executor interface ────────────────────────────────────────────────────────
