@@ -16,6 +16,7 @@
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "./executor-registry.ts";
 import type { SkillRequest } from "./types.ts";
+import type { AgentSkillRequestPayload, FlowItemPayload } from "../event-bus/payloads.ts";
 import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 
@@ -76,20 +77,17 @@ export class SkillDispatcherPlugin implements Plugin {
   }
 
   private async _dispatch(msg: BusMessage): Promise<void> {
-    const payload = (msg.payload ?? {}) as Record<string, unknown>;
+    const payload = (msg.payload ?? {}) as AgentSkillRequestPayload;
 
-    const skill = (payload.skill as string | undefined)
-      ?? (payload.meta as Record<string, unknown> | undefined)?.skillHint as string | undefined
+    const skill = payload.skill
+      ?? (typeof payload.meta?.skillHint === "string" ? payload.meta.skillHint : undefined)
       ?? "";
 
     let targets: string[] = [];
     if (Array.isArray(payload.targets)) {
-      targets = payload.targets as string[];
-    } else {
-      const meta = payload.meta as Record<string, unknown> | undefined;
-      if (typeof meta?.agentId === "string") {
-        targets = [meta.agentId];
-      }
+      targets = payload.targets;
+    } else if (typeof payload.meta?.agentId === "string") {
+      targets = [payload.meta.agentId];
     }
 
     const correlationId = msg.correlationId;
@@ -131,10 +129,14 @@ export class SkillDispatcherPlugin implements Plugin {
     // For (a) we also compute an agent-scoped group so each agent
     // accumulates its own relationship memory with the user on top of
     // the shared cross-agent baseline.
-    const sourceUserId = (msg.source as Record<string, unknown> | undefined)?.userId as string | undefined;
-    const sourcePlatform = (msg.source as Record<string, unknown> | undefined)?.interface as string | undefined;
-    const sourceChannelId = (msg.source as Record<string, unknown> | undefined)?.channelId as string | undefined;
-    const systemActor = (payload.meta as Record<string, unknown> | undefined)?.systemActor as string | undefined;
+    const sourceUserId: string | undefined =
+      typeof msg.source?.userId === "string" ? msg.source.userId : undefined;
+    const sourcePlatform: string | undefined =
+      typeof msg.source?.interface === "string" ? msg.source.interface : undefined;
+    const sourceChannelId: string | undefined =
+      typeof msg.source?.channelId === "string" ? msg.source.channelId : undefined;
+    const systemActor: string | undefined =
+      typeof payload.meta?.systemActor === "string" ? payload.meta.systemActor : undefined;
 
     let rawContent = typeof payload.content === "string" ? payload.content : undefined;
     const originalContent = rawContent; // preserved for episode storage — never includes context prefix
@@ -173,7 +175,7 @@ export class SkillDispatcherPlugin implements Plugin {
       correlationId,
       parentId,
       replyTopic,
-      payload: payload as Record<string, unknown>,
+      payload,
     };
 
     const flowItemId = `skill-${correlationId}`;
@@ -277,11 +279,11 @@ export class SkillDispatcherPlugin implements Plugin {
     }
   }
 
-  private _publishFlowEvent(topic: string, item: Record<string, unknown>): void {
+  private _publishFlowEvent(topic: string, item: FlowItemPayload): void {
     if (!this.bus) return;
     this.bus.publish(topic, {
       id: crypto.randomUUID(),
-      correlationId: item.id as string,
+      correlationId: item.id,
       topic,
       timestamp: Date.now(),
       payload: item,

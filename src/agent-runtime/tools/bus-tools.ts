@@ -131,11 +131,13 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
     async ({ title, severity, description, affectedProjects, projectSlug }) => {
       try {
-        const body: Record<string, unknown> = { title, severity };
-        if (description) body.description = description;
-        if (affectedProjects) body.affectedProjects = affectedProjects;
-        if (projectSlug) body.projectSlug = projectSlug;
-        const data = await http.post("/api/incidents", body);
+        const data = await http.post("/api/incidents", {
+          title,
+          severity,
+          ...(description ? { description } : {}),
+          ...(affectedProjects ? { affectedProjects } : {}),
+          ...(projectSlug ? { projectSlug } : {}),
+        });
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
