@@ -140,11 +140,23 @@ interface GitHubContext {
 
 const AGENTS_YAML = process.env.AGENTS_YAML ?? "/workspace/agents.yaml";
 
+function interpolateEnv(value: string): string {
+  // agents.yaml uses ${ENV_VAR} syntax for url/apiKeyEnv. The other consumers
+  // (skill-broker, domain-discovery) resolve these via a shared helper; this
+  // plugin had been reading them raw, which made fetch() choke on literal
+  // "${AVA_BASE_URL}/a2a" strings.
+  return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_m, name) => process.env[name] ?? "");
+}
+
 function loadAgents(): AgentDef[] {
   try {
     const raw = readFileSync(AGENTS_YAML, "utf-8");
     const cfg = parse(raw) as { agents?: AgentDef[] };
-    return cfg.agents ?? [];
+    const agents = cfg.agents ?? [];
+    for (const a of agents) {
+      if (typeof a.url === "string") a.url = interpolateEnv(a.url);
+    }
+    return agents;
   } catch (e) {
     console.error("[a2a] Failed to load agents.yaml:", e);
     return [];
@@ -469,6 +481,17 @@ export default {
       if (msg.topic === "message.inbound.onboard" || msg.topic.startsWith("message.inbound.onboard.")) return;
 
       const p = msg.payload as Record<string, unknown>;
+
+      // Skip messages that already carry an explicit agent target via
+      // meta.agentId — those go through skill-dispatcher → A2AExecutor with
+      // full projectPath metadata. If this plugin also handles them, both
+      // paths fire for the same inbound event, producing the double-triage
+      // pattern tracked in protoMaker#3300. The skill-dispatcher is the
+      // canonical owner for explicitly-targeted dispatches; this plugin
+      // remains the fallback for keyword-matched, untargeted content.
+      const meta = p.meta as { agentId?: string } | undefined;
+      if (meta?.agentId) return;
+
       const content = String(p.content ?? "").trim();
       if (!content) return;
 
@@ -541,10 +564,18 @@ export default {
       // end-to-end (plane plugin stores pendingIssues keyed by "plane-{issueId}").
       const contextId = msg.correlationId || `workstacean-${channelKey}`;
 
-      // Forward Plane context so the plan skill can update the originating issue
+      // Forward Plane context so the plan skill can update the originating issue.
+      // Forward project context so Ava's bug_triage / manage_feature skills
+      // have an authoritative projectPath (they refuse to run without it,
+      // emitting "metadata.projectPath missing — cannot target project
+      // tools without an authoritative path").
       const planeExtra: Record<string, unknown> = {};
       if (p.planeIssueId) planeExtra.planeIssueId = p.planeIssueId;
       if (p.planeProjectId) planeExtra.planeProjectId = p.planeProjectId;
+      if (typeof p.projectPath === "string") planeExtra.projectPath = p.projectPath;
+      if (typeof p.projectSlug === "string") planeExtra.projectSlug = p.projectSlug;
+      if (typeof p.projectRepo === "string") planeExtra.projectRepo = p.projectRepo;
+      if (typeof p.prNumber === "number") planeExtra.prNumber = p.prNumber;
 
       // Fire-and-forget for long-running skills: ack immediately, agent posts
       // back to the reply topic when done. No workstacean-side timeout.

@@ -44,6 +44,12 @@ autoTriage:
     - issues
   skillHint: bug_triage
   monitoredRepos: [] # populated from projects.yaml at load time
+  # Startup sweep: walk every monitored repo's open issues with the sweep
+  # label on plugin install and dispatch any as synthetic inbound events.
+  # Closes the "webhooks don't replay history" hole. Can also be triggered
+  # on-demand by publishing to the github.triage.sweep bus topic.
+  sweepOnStartup: true
+  sweepLabel: "status: needs-triage"
   sanitization:
     maxBodyChars: 8000
     maxLineLengthChars: 500
