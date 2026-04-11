@@ -72,6 +72,13 @@ export class ToolRegistry {
     return Array.from(this.tools.keys());
   }
 
+  /**
+   * Return tool names from declaredTools that are not registered.
+   */
+  validateAgentTools(_agentName: string, declaredTools: string[]): string[] {
+    return declaredTools.filter(name => !this.tools.has(name));
+  }
+
   get size(): number {
     return this.tools.size;
   }
