@@ -209,13 +209,23 @@ function matchSkill(content: string, hint?: string): string | null {
   return null;
 }
 
-function routeToAgent(skill: string | null, agents: AgentDef[]): AgentDef {
+function routeToAgent(skill: string | null, agents: AgentDef[]): AgentDef | null {
+  // Asymmetric fallback semantics — INTENTIONAL, do not "fix" to be symmetric:
+  //
+  //   explicit-skill + no claimant  → null   (caller skips and logs)
+  //   no-skill (free-form content)  → Ava   (Chief-of-Staff default)
+  //
+  // The split exists because a message with an explicit skill is a routing
+  // decision the sender has already made — falling back to a different agent
+  // silently misroutes (previously produced pr_review being answered by Ava
+  // despite not being in her agent card). But a message with no skill at all
+  // is free-form chat, and Ava is the correct default handler for that —
+  // she routes it further based on content. Keep the two paths distinct.
   if (skill) {
     const match = agents.find(a => a.skills.includes(skill));
-    if (match) return match;
+    return match ?? null;
   }
-  // Default: Ava (Chief of Staff — she delegates further)
-  return agents.find(a => a.name === "ava") ?? agents[0];
+  return agents.find(a => a.name === "ava") ?? agents[0] ?? null;
 }
 
 // ── A2A protocol ────────────────────────────────────────────────────────────
@@ -334,6 +344,23 @@ function reactToGitHubIssue(gh: GitHubContext, reaction: string): void {
 // ── Local memory skill handler ───────────────────────────────────────────────
 
 const MEMORY_SKILLS = new Set(["memory_recall", "memory_store"]);
+
+// ── Locally-owned skill surface ──────────────────────────────────────────────
+//
+// Single source of truth for which skills this plugin dispatches from the
+// `message.inbound.#` subscriber. The inbound handler's guard and the
+// downstream branches both read from this set, so there's no way for the
+// allowlist to drift from the actual handler logic. Any skill NOT in this
+// set falls through to the router + skill-dispatcher canonical path.
+//
+// When adding a skill to this plugin, add it to one of the source sets
+// (MEMORY_SKILLS or FIRE_AND_FORGET_SKILLS) — never hard-code a new string
+// here. onboard_project is already covered because it lives in
+// FIRE_AND_FORGET_SKILLS.
+const LOCALLY_OWNED_SKILLS = new Set<string>([
+  ...MEMORY_SKILLS,
+  ...FIRE_AND_FORGET_SKILLS,
+]);
 
 async function handleMemorySkill(
   bus: EventBus,
@@ -497,9 +524,36 @@ export default {
 
       const channelKey = String(p.channel ?? msg.topic.split(".").slice(2).join("-"));
       const skill = matchSkill(content, p.skillHint as string | undefined);
-      const agent = routeToAgent(skill, agents);
       const outboundTopic = msg.reply?.topic
         ?? `message.outbound.${msg.topic.split(".").slice(1).join(".")}`;
+
+      // ── Local ownership guard ──────────────────────────────────────────────
+      // This plugin only handles skills in LOCALLY_OWNED_SKILLS (memory ops +
+      // fire-and-forget orchestration, incl. onboard_project). Everything else
+      // — including skillHint-tagged webhooks like pr_review from github.ts —
+      // is the router + skill-dispatcher pipeline's responsibility. Without
+      // this guard the same inbound event triggers *both* plugins and the
+      // agent runs twice (observed on protoWorkstacean#104 as paired
+      // @protoquinn[bot] review comments).
+      //
+      // TODO(#75 router-faf-dedup): the router path does NOT skip FAF skills,
+      // so onboard_project / plan / plan_resume / deep_research are still
+      // double-dispatched today — masked only by the inFlightFAF timing guard
+      // below. That mask is race-prone (two fast events can both clear the
+      // check before either sets it). Proper fix needs symmetric filters on
+      // both sides OR consolidating the ack-immediately pattern into
+      // skill-dispatcher so FAF skills can live entirely in the router path.
+      if (!skill || !LOCALLY_OWNED_SKILLS.has(skill)) return;
+
+      const agent = routeToAgent(skill, agents);
+      if (!agent) {
+        // routeToAgent now returns null when an explicit skill has no A2A
+        // claimant (was previously silently defaulting to Ava). For locally-
+        // owned skills this should never happen — but log it if it does so
+        // we don't silently drop.
+        console.warn(`[a2a] no registered agent for locally-owned skill "${skill}" — skipping`);
+        return;
+      }
 
       // Memory skills are handled locally — never forwarded to an external agent
       if (skill && MEMORY_SKILLS.has(skill)) {
@@ -646,6 +700,10 @@ export default {
       const cronId = msg.topic.replace("cron.", "");
       const skill = matchSkill(content, p.skillHint as string | undefined);
       const agent = routeToAgent(skill, agents);
+      if (!agent) {
+        console.warn(`[a2a-cron] ${cronId} — no agent claims skill "${skill}" — dropping`);
+        return;
+      }
 
       console.log(`[a2a-cron] ${cronId} → ${agent.name}`);
 
