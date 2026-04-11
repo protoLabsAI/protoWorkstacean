@@ -6,9 +6,7 @@
  */
 
 import type {
-  Action,
   Goal,
-  Plan,
   PlannerState,
   SearchConfig,
   SearchNode,
@@ -18,7 +16,6 @@ import type { ActionGraph } from "./action-graph.ts";
 import type { HeuristicFn } from "./heuristic.ts";
 import { stateKey } from "./world-state.ts";
 import { reconstructPlan, partialPlan, emptyPlan } from "./plan.ts";
-import { applyEffects } from "./action.ts";
 
 /**
  * Min-heap priority queue for SearchNodes, ordered by fScore.

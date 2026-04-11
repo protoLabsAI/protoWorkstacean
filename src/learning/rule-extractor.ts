@@ -5,8 +5,8 @@
  * rule conditions for the RuleRegistry.
  */
 
-import type { Action, Plan, PlannerState, StatePredicate } from "../planner/types.ts";
-import type { L2Result, ConfidenceScore } from "../planner/routing-interface.ts";
+import type { Plan, PlannerState, StatePredicate } from "../planner/types.ts";
+import type { L2Result, } from "../planner/routing-interface.ts";
 import type { LearnedRule } from "./rule-registry.ts";
 
 /** Configuration for rule extraction. */

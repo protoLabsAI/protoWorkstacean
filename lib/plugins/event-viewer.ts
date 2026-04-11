@@ -22,7 +22,7 @@ export class EventViewerPlugin implements Plugin {
 
   constructor(port: number = 8080) {
     this.port = port;
-    this.viewerDir = resolve(__dirname, "../../src/viewer");
+    this.viewerDir = resolve(__dirname, "../../dashboard/dist");
     this.workspaceDir = resolve(process.env.WORKSPACE_DIR || join(process.cwd(), "workspace"));
   }
 
@@ -51,6 +51,8 @@ export class EventViewerPlugin implements Plugin {
         if (url.pathname === "/api/consumers") return this.handleApiConsumers();
         if (url.pathname === "/api/projects") return this.handleApiProjects();
         if (url.pathname === "/api/agents") return this.handleApiAgents();
+
+        if (url.pathname.startsWith("/api/")) return this.proxyToMainServer(req, url);
 
         return this.serveStatic(url.pathname);
       },
@@ -137,32 +139,73 @@ export class EventViewerPlugin implements Plugin {
     }
   }
 
-  private async serveStatic(pathname: string): Promise<Response> {
-    if (pathname === "/" || pathname === "/index.html")
-      return this.serveFile("index.html", "text/html");
+  private mainServerPort: number = parseInt(process.env.PORT || "3000", 10);
 
-    const safePath = pathname.replace(/\.\./g, "");
-    const ext = safePath.split(".").pop()?.toLowerCase() || "";
+  private async proxyToMainServer(req: Request, url: URL): Promise<Response> {
+    const target = `http://localhost:${this.mainServerPort}${url.pathname}${url.search}`;
+    try {
+      const proxyReq = new Request(target, {
+        method: req.method,
+        headers: req.headers,
+        body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
+      });
+      const res = await fetch(proxyReq);
+      const body = await res.arrayBuffer();
+      const headers = new Headers(res.headers);
+      headers.set("Access-Control-Allow-Origin", "*");
+      return new Response(body, { status: res.status, headers });
+    } catch {
+      return Response.json({ error: "Main server unavailable" }, { status: 502 });
+    }
+  }
+
+  private async serveStatic(pathname: string): Promise<Response> {
+    if (pathname === "/" || pathname === "/index.html") {
+      return this.serveFile("index.html", "text/html");
+    }
+
+    // Strip leading slash and any path-traversal attempts
+    const safePath = pathname.replace(/^\/+/, "").replace(/\.\./g, "");
+
+    // MIME map for recognised extensions
     const mimes: Record<string, string> = {
+      html: "text/html",
       css: "text/css",
       js: "application/javascript",
       svg: "image/svg+xml",
       png: "image/png",
       ico: "image/x-icon",
+      json: "application/json",
+      woff: "font/woff",
+      woff2: "font/woff2",
     };
+
+    // If the path has an extension, try it directly
+    const ext = safePath.split(".").pop()?.toLowerCase() || "";
+    if (ext && mimes[ext]) {
+      return this.serveFile(safePath, mimes[ext]);
+    }
+
+    // Astro builds directory-based routes: /world-state → dist/world-state/index.html
+    const directResp = await this.serveFile(`${safePath}/index.html`, "text/html");
+    if (directResp.status !== 404) return directResp;
+
+    // Fallback: try the raw path (for extensionless assets)
     return this.serveFile(safePath, mimes[ext] || "application/octet-stream");
   }
 
   private async serveFile(path: string, contentType: string): Promise<Response> {
     try {
       const resolved = resolve(this.viewerDir, path);
+      const viewerRoot = resolve(this.viewerDir);
       // Path traversal guard: resolved path must stay within viewerDir
-      if (!resolved.startsWith(resolve(this.viewerDir))) {
+      if (!resolved.startsWith(viewerRoot)) {
         return new Response("Forbidden", { status: 403 });
       }
       const file = Bun.file(resolved);
-      if (await file.exists())
+      if (await file.exists()) {
         return new Response(file, { headers: { "Content-Type": contentType } });
+      }
     } catch {}
     return new Response("Not found", { status: 404 });
   }

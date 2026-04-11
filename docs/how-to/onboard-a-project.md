@@ -1,4 +1,7 @@
-# How to Onboard a Project
+---
+title: How to Onboard a Project
+---
+
 
 _This is a how-to guide. It assumes the workstacean container is running and you have Ava configured in `workspace/agents.yaml`._
 

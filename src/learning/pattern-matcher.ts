@@ -5,7 +5,7 @@
  * before invoking the full hybrid planner.
  */
 
-import type { PlannerState, Goal, Plan } from "../planner/types.ts";
+import type { PlannerState, Plan } from "../planner/types.ts";
 import type { LearnedRule } from "./rule-registry.ts";
 import { RuleRegistry } from "./rule-registry.ts";
 

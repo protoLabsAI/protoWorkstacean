@@ -16,7 +16,8 @@ export interface A2AAgentConfig {
   url: string;
   /** Environment variable name holding the API key. Optional. */
   apiKeyEnv?: string;
-  /** Request timeout in ms. Default: 110_000 (just under the 120s ceremony timeout). */
+  /** Request timeout in ms. Default: 300_000 (5 min — agent-driven chats with
+   * multiple tool calls routinely exceed 2 min). */
   timeoutMs?: number;
 }
 
@@ -64,7 +65,7 @@ export class A2AExecutor implements IExecutor {
       method: "POST",
       headers,
       body,
-      signal: AbortSignal.timeout(this.config.timeoutMs ?? 110_000),
+      signal: AbortSignal.timeout(this.config.timeoutMs ?? 300_000),
     });
 
     if (!resp.ok) {
@@ -77,16 +78,41 @@ export class A2AExecutor implements IExecutor {
       };
     }
 
+    // Google A2A protocol response shape:
+    //   result: {
+    //     id, contextId, status: { state: "completed" },
+    //     artifacts: [{ artifactId, parts: [{ kind: "text", text: "..." }] }]
+    //   }
+    //
+    // We flatten all text parts across all artifacts into a single string
+    // so callers (skill-dispatcher) get the actual agent reply, not a generic
+    // "accepted" stub. Fallback cascade: artifacts.parts.text → result.message
+    // (legacy shape) → generic placeholder. Also logs the parse path on debug
+    // so future regressions are visible.
     const data = (await resp.json()) as {
       error?: { message: string };
-      result?: { status?: string; message?: string; [key: string]: unknown };
+      result?: {
+        status?: { state?: string } | string;
+        message?: string;
+        artifacts?: Array<{ parts?: Array<{ kind?: string; text?: string }> }>;
+        [key: string]: unknown;
+      };
     };
 
     if (data.error) {
       return { text: "", isError: true, correlationId: req.correlationId, data: { error: data.error.message } };
     }
 
-    const resultText = data.result?.message ?? `Skill "${req.skill}" accepted by ${this.config.name}`;
+    const artifactTexts = (data.result?.artifacts ?? [])
+      .flatMap((a) => a.parts ?? [])
+      .filter((p) => p.kind === "text" && typeof p.text === "string")
+      .map((p) => p.text as string);
+
+    const resultText =
+      artifactTexts.length > 0
+        ? artifactTexts.join("\n")
+        : data.result?.message ?? `Skill "${req.skill}" accepted by ${this.config.name}`;
+
     return { text: resultText, isError: false, correlationId: req.correlationId, data: data.result };
   }
 

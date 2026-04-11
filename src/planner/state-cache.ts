@@ -4,7 +4,6 @@
  */
 
 import type { PlannerState, SearchNode } from "./types.ts";
-import { stateKey } from "./world-state.ts";
 
 /** Cached state entry with metadata. */
 export interface CachedState {

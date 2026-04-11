@@ -1,4 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
+<<<<<<< HEAD
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -24,6 +25,14 @@ interface OutcomesApiResponse {
   summary: OutcomeSummary;
   recent: OutcomeRecord[];
 }
+=======
+import { getOutcomes, peek, type OutcomesResponse } from "../lib/api";
+
+const POLL_INTERVAL_MS = 30_000;
+
+type OutcomeSummary = OutcomesResponse["summary"];
+type OutcomeRecord = OutcomesResponse["recent"][number];
+>>>>>>> origin/main
 
 function formatTimestamp(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -42,6 +51,7 @@ const statusBadgeClass: Record<string, string> = {
 };
 
 export default function OutcomesTable() {
+<<<<<<< HEAD
   const [summary, setSummary] = useState<OutcomeSummary | null>(null);
   const [recent, setRecent] = useState<OutcomeRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +63,20 @@ export default function OutcomesTable() {
       const res = await fetch("/api/outcomes");
       if (!res.ok) throw new Error(`/api/outcomes: ${res.status}`);
       const json = (await res.json()) as OutcomesApiResponse;
+=======
+  const cached = peek<OutcomesResponse>("/api/outcomes");
+  const [summary, setSummary] = useState<OutcomeSummary | null>(cached?.summary ?? null);
+  const [recent, setRecent] = useState<OutcomeRecord[]>(
+    cached?.recent ? cached.recent.slice().reverse() : [],
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(!cached);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(cached ? new Date() : null);
+
+  async function fetchOutcomes(force = false) {
+    try {
+      const json = await getOutcomes(force);
+>>>>>>> origin/main
       setSummary(json.summary ?? { success: 0, failure: 0, timeout: 0, total: 0 });
       setRecent(Array.isArray(json.recent) ? json.recent.slice().reverse() : []);
       setError(null);
@@ -65,8 +89,13 @@ export default function OutcomesTable() {
   }
 
   useEffect(() => {
+<<<<<<< HEAD
     fetchOutcomes();
     const timer = setInterval(fetchOutcomes, POLL_INTERVAL_MS);
+=======
+    fetchOutcomes(true);
+    const timer = setInterval(() => fetchOutcomes(true), POLL_INTERVAL_MS);
+>>>>>>> origin/main
     return () => clearInterval(timer);
   }, []);
 

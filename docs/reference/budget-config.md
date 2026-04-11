@@ -1,4 +1,7 @@
-# Configuration Reference — Budget System
+---
+title: Budget System Configuration Reference
+---
+
 
 ## Budget Constants
 

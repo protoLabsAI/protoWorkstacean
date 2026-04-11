@@ -60,7 +60,7 @@ function hashString(s: string): number {
   let h = 5381;
   for (let i = 0; i < s.length; i++) {
     h = ((h << 5) + h) ^ s.charCodeAt(i);
-    h = h >>> 0;
+    h >>>= 0;
   }
   return h;
 }

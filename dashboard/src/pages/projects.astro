@@ -1,5 +1,6 @@
 ---
 import DashboardLayout from "../layouts/DashboardLayout.astro";
+<<<<<<< HEAD
 ---
 
 <DashboardLayout title="Projects" activePage="projects">
@@ -97,3 +98,11 @@ import DashboardLayout from "../layouts/DashboardLayout.astro";
     color: var(--text-secondary);
   }
 </style>
+=======
+import ProjectsView from "../components/ProjectsView.tsx";
+---
+
+<DashboardLayout title="Projects" activePage="projects">
+  <ProjectsView client:load />
+</DashboardLayout>
+>>>>>>> origin/main
