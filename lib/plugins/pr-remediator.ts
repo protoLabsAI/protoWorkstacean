@@ -365,6 +365,17 @@ async function ghDispatchBackmerge(
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
+type BranchDriftData = {
+  projects: Array<{
+    repo: string;
+    devToMain?: number;
+    devToStaging?: number | null;
+    stagingToMain?: number | null;
+    defaultBranch?: string;
+  }>;
+  maxDrift: number;
+};
+
 export class PrRemediatorPlugin implements Plugin {
   readonly name = "pr-remediator";
   readonly description = "Closes the GOAP loop on stuck PRs — auto-merges eligible titles, escalates others to HITL";
@@ -373,7 +384,7 @@ export class PrRemediatorPlugin implements Plugin {
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
   private latestPrData: PrDomainData | null = null;
-  private latestBranchDrift: { projects: Array<{ repo: string; devToMain?: number; devToStaging?: number | null; stagingToMain?: number | null; defaultBranch?: string }>; maxDrift: number } | null = null;
+  private latestBranchDrift: BranchDriftData | null = null;
   /** Map correlationId → PR identity, so HITL response can find the PR to merge. */
   private readonly pendingApprovals = new Map<string, { repo: string; number: number; title: string }>();
   /** Map `${repo}#${number}:${kind}` → in-flight dispatch metadata. */
@@ -412,7 +423,7 @@ export class PrRemediatorPlugin implements Plugin {
 
       const driftDomain = state?.domains?.branch_drift;
       if (driftDomain?.data) {
-        this.latestBranchDrift = driftDomain.data as typeof this.latestBranchDrift;
+        this.latestBranchDrift = driftDomain.data as BranchDriftData;
       } else if (state?.domains) {
         this.latestBranchDrift = null;
       }
