@@ -435,6 +435,29 @@ GOAP action dispatch outcomes tracked by the ActionDispatcher. Feeds the dashboa
 
 ---
 
+## GET /api/memory-health
+
+Two-stage probe of the Graphiti episodic memory backend. Backs the `memory` world-state domain and the `memory.graphiti_healthy` / `memory.search_working` goals. **No envelope.**
+
+**Auth**: None
+
+**Response** (`200`):
+```json
+{
+  "healthy": 1,
+  "searchOk": 1,
+  "error": ""
+}
+```
+
+- `healthy` — `1` if `GET {GRAPHITI_URL}/healthcheck` returned `200`, else `0`
+- `searchOk` — `1` if a trivial `POST /search` succeeded, else `0`. Search probing catches the deeper wiring failures (Neo4j vector functions missing, embedder misconfigured, gateway model aliases missing) that `/healthcheck` alone can't see
+- `error` — empty string on success, otherwise a short failure reason (e.g. `"search 400"` or a connection error message)
+
+Both probes have short timeouts (3s for healthcheck, 5s for search) so the world-state tick isn't blocked by a hung Graphiti container.
+
+---
+
 ## GET /api/ci-health
 
 Poll GitHub Actions success rate for every project in `projects.yaml`. Makes one GitHub REST call per project — **subject to rate limits**; cache aggressively on the client side (dashboard TTL: 5 min). **No envelope.**
