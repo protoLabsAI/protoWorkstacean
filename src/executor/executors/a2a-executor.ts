@@ -112,7 +112,12 @@ export class A2AExecutor implements IExecutor {
         ? artifactTexts.join("\n")
         : data.result?.message ?? `Skill "${req.skill}" accepted by ${this.config.name}`;
 
-    return { text: resultText, isError: false, correlationId: req.correlationId };
+    return {
+      text: resultText,
+      isError: false,
+      correlationId: req.correlationId,
+      data: data.result?.data as SkillResult["data"] | undefined,
+    };
   }
 
   private _buildText(req: SkillRequest): string {
