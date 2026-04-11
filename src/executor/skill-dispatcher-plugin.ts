@@ -19,6 +19,20 @@ import type { SkillRequest } from "./types.ts";
 import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 
+/**
+ * Classify a skill name into a flow item type for distribution tracking.
+ * Keeps flow.distribution_balanced honest: bug_triage is defect work, not
+ * feature work. Previously everything was hard-coded to "feature" which
+ * drove the distribution to 100% features and permanently violated the
+ * goal regardless of reality.
+ */
+function classifyFlowType(skill: string): "feature" | "defect" | "risk" | "debt" {
+  if (skill.includes("bug") || skill.includes("triage_issue") || skill.includes("fix")) return "defect";
+  if (skill.includes("security") || skill.includes("incident")) return "risk";
+  if (skill.includes("review") || skill.includes("refactor") || skill.includes("cleanup")) return "debt";
+  return "feature";
+}
+
 export class SkillDispatcherPlugin implements Plugin {
   readonly name = "skill-dispatcher";
   readonly description = "Sole agent.skill.request subscriber — resolves executor and dispatches";
@@ -149,7 +163,7 @@ export class SkillDispatcherPlugin implements Plugin {
     const dispatchedAt = Date.now();
     this._publishFlowEvent("flow.item.created", {
       id: flowItemId,
-      type: "feature",
+      type: classifyFlowType(skill),
       status: "active",
       stage: "dispatched",
       createdAt: dispatchedAt,
