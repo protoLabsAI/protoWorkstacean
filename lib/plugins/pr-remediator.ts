@@ -488,7 +488,21 @@ export class PrRemediatorPlugin implements Plugin {
   ): void {
     if (!this.bus) return;
 
+    // Suppress escalations for PRs that have left the pipeline (closed /
+    // merged) between the attempts hitting MAX_ATTEMPTS_PER_PR and the
+    // escalation firing. latestPrData is the cached pr_pipeline snapshot;
+    // if the PR is no longer in it, the remediation is moot — no point
+    // asking a human to unstick a closed PR. Silently drop and clear the
+    // in-flight entry so it doesn't linger.
     const pr = (this.latestPrData?.prs ?? []).find((p) => p.repo === repo && p.number === number);
+    if (!pr) {
+      console.log(
+        `[pr-remediator] suppressing stuck HITL escalation for ${repo}#${number} — PR no longer in pipeline (closed/merged)`,
+      );
+      this.inFlight.delete(this._inFlightKey(repo, number, kind));
+      return;
+    }
+
     const correlationId = crypto.randomUUID();
     const replyTopic = `hitl.response.pr.remediation_stuck.${correlationId}`;
     const devChannelId = loadProjectMetaMap().get(repo)?.devChannelId;
