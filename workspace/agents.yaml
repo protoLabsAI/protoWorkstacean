@@ -36,9 +36,8 @@ agents:
   # readyToMerge/changesRequested loop for non-safe-class PRs (task #73).
   # Posts as @protoquinn[bot] via installation token minted in her entrypoint
   # from QUINN_APP_ID + QUINN_APP_PRIVATE_KEY, refreshed every 45 min.
-  # In-process workspace/agents/quinn.yaml was retired to avoid name collision
-  # (executor registry was picking in-process before A2A). Uncovered: chat and
-  # security_triage — tracked as task #81.
+  # chat is uncovered here — Discord DMs fall through to ROUTER_DM_DEFAULT_AGENT
+  # (currently ava) for free-form conversation.
   - name: quinn
     url: "${QUINN_BASE_URL}/a2a"
     skills:
@@ -46,3 +45,5 @@ agents:
         description: Review a pull request (CI, CodeRabbit threads, diff) and submit a formal APPROVE/REQUEST_CHANGES/COMMENT review via pr_inspector
       - name: bug_triage
         description: Triage a bug report, classify severity, file it on the Ava board via file_bug
+      - name: security_triage
+        description: Triage a security incident (CVE, dependabot alert, vulnerability disclosure), classify severity, and file it on the board via report_incident — critical/high escalate to HITL before remediation
