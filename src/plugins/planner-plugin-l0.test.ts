@@ -222,6 +222,82 @@ describe("PlannerPluginL0", () => {
     expect(dispatched[0].actionId).toBe("high-prio");
   });
 
+  test("goal.violated: skips action when preconditions fail against cached world state", () => {
+    const action = makeAction({
+      goalId: "guarded-goal",
+      id: "guarded-action",
+      preconditions: [{ path: "extensions.domain_available", operator: "eq", value: true }],
+    });
+    registry.register(action);
+
+    const dispatched: BusMessage[] = [];
+    bus.subscribe(TOPICS.WORLD_ACTION_DISPATCH, "test", (msg) => { dispatched.push(msg); });
+
+    // Seed world state with domain_available = false
+    const worldState = makeWorldState({ extensions: { domain_available: false } });
+    bus.publish(TOPICS.WORLD_STATE_UPDATED, {
+      id: "ws-1",
+      correlationId: "corr-ws",
+      topic: TOPICS.WORLD_STATE_UPDATED,
+      timestamp: Date.now(),
+      payload: worldState,
+    });
+
+    // Clear dispatches from world state update (preconditions fail there too)
+    dispatched.length = 0;
+
+    // Fire goal violation
+    bus.publish("world.goal.violated", {
+      id: "gv-1",
+      correlationId: "corr-gv",
+      topic: "world.goal.violated",
+      timestamp: Date.now(),
+      payload: { type: "world.goal.violated", violation: { goalId: "guarded-goal", description: "test", severity: "warn", timestamp: Date.now() } },
+    });
+
+    expect(dispatched).toHaveLength(0);
+  });
+
+  test("goal.violated: dispatches action when preconditions pass against cached world state", () => {
+    const action = makeAction({
+      goalId: "guarded-goal",
+      id: "guarded-action",
+      preconditions: [{ path: "extensions.domain_available", operator: "eq", value: true }],
+    });
+    registry.register(action);
+
+    const dispatched: BusMessage[] = [];
+    bus.subscribe(TOPICS.WORLD_ACTION_DISPATCH, "test", (msg) => { dispatched.push(msg); });
+
+    // Seed world state with domain_available = true
+    const worldState = makeWorldState({ extensions: { domain_available: true } });
+    bus.publish(TOPICS.WORLD_STATE_UPDATED, {
+      id: "ws-1",
+      correlationId: "corr-ws",
+      topic: TOPICS.WORLD_STATE_UPDATED,
+      timestamp: Date.now(),
+      payload: worldState,
+    });
+
+    // Clear dispatches from world state update
+    dispatched.length = 0;
+
+    // Fire goal violation — goal is now in-flight from world state update, clear it
+    planner["inFlightGoals"].clear();
+
+    bus.publish("world.goal.violated", {
+      id: "gv-1",
+      correlationId: "corr-gv",
+      topic: "world.goal.violated",
+      timestamp: Date.now(),
+      payload: { type: "world.goal.violated", violation: { goalId: "guarded-goal", description: "test", severity: "warn", timestamp: Date.now() } },
+    });
+
+    expect(dispatched).toHaveLength(1);
+    const payload = dispatched[0].payload as ActionDispatchPayload;
+    expect(payload.actionId).toBe("guarded-action");
+  });
+
   test("uninstall removes subscriptions", () => {
     const action = makeAction();
     registry.register(action);
