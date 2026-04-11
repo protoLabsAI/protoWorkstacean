@@ -140,31 +140,6 @@ export class EventViewerPlugin implements Plugin {
   }
 
   private mainServerPort: number = parseInt(process.env.PORT || "3000", 10);
-<<<<<<< HEAD
-
-  private async proxyToMainServer(req: Request, url: URL): Promise<Response> {
-    const target = `http://localhost:${this.mainServerPort}${url.pathname}${url.search}`;
-    try {
-      const proxyReq = new Request(target, {
-        method: req.method,
-        headers: req.headers,
-        body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
-      });
-      const res = await fetch(proxyReq);
-      const body = await res.arrayBuffer();
-      const headers = new Headers(res.headers);
-      headers.set("Access-Control-Allow-Origin", "*");
-      return new Response(body, { status: res.status, headers });
-    } catch {
-      return Response.json({ error: "Main server unavailable" }, { status: 502 });
-    }
-  }
-
-  private async serveStatic(pathname: string): Promise<Response> {
-    if (pathname === "/" || pathname === "/index.html")
-      return this.serveFile("index.html", "text/html");
-=======
->>>>>>> origin/main
 
   private async proxyToMainServer(req: Request, url: URL): Promise<Response> {
     const target = `http://localhost:${this.mainServerPort}${url.pathname}${url.search}`;
