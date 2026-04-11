@@ -6,7 +6,7 @@
  * and end-to-end dispatch via SkillDispatcherPlugin.
  */
 
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, spyOn } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -145,6 +145,61 @@ describe("AgentRuntimePlugin", () => {
         expect(executor).not.toBeNull();
         expect(executor!.type).toBe("proto-sdk");
 
+        plugin.uninstall();
+      } finally {
+        cleanup();
+      }
+    });
+  });
+
+  describe("validateAgentTools warnings", () => {
+    test("logs warning for unknown tools", async () => {
+      const agentWithUnknownTools = {
+        ...quinnAgent,
+        tools: ["nonexistent_tool", "another_missing"],
+      };
+      const { workspaceDir, cleanup } = makeTempWorkspace({
+        "quinn-unknown.yaml": agentWithUnknownTools,
+      });
+      try {
+        const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
+        const bus = new InMemoryEventBus();
+        const registry = new ExecutorRegistry();
+        const warnSpy = spyOn(console, "warn");
+        const plugin = new AgentRuntimePlugin({ workspaceDir }, registry);
+        plugin.install(bus);
+
+        const warnCalls = warnSpy.mock.calls.map(c => c[0] as string);
+        const warningCall = warnCalls.find(msg => msg.includes("[agent-runtime] WARNING:"));
+        expect(warningCall).toBeDefined();
+        expect(warningCall).toContain("quinn");
+        expect(warningCall).toContain("nonexistent_tool");
+        expect(warningCall).toContain("another_missing");
+
+        warnSpy.mockRestore();
+        plugin.uninstall();
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("no warning when all tools are known or tools list is empty", async () => {
+      const { workspaceDir, cleanup } = makeTempWorkspace({
+        "quinn.yaml": quinnAgent,
+      });
+      try {
+        const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
+        const bus = new InMemoryEventBus();
+        const registry = new ExecutorRegistry();
+        const warnSpy = spyOn(console, "warn");
+        const plugin = new AgentRuntimePlugin({ workspaceDir }, registry);
+        plugin.install(bus);
+
+        const warnCalls = warnSpy.mock.calls.map(c => c[0] as string);
+        const hasAgentWarning = warnCalls.some(msg => msg.includes("[agent-runtime] WARNING:"));
+        expect(hasAgentWarning).toBe(false);
+
+        warnSpy.mockRestore();
         plugin.uninstall();
       } finally {
         cleanup();

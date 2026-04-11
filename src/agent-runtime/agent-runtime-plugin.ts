@@ -52,6 +52,13 @@ export class AgentRuntimePlugin implements Plugin {
     const definitions = loadAgentDefinitions(this.config.workspaceDir);
 
     for (const def of definitions) {
+      const unknownTools = this.toolRegistry.validateAgentTools(def.name, def.tools ?? []);
+      if (unknownTools.length > 0) {
+        console.warn(
+          `[agent-runtime] WARNING: agent ${def.name} declares unknown tools: ${unknownTools.join(", ")}`,
+        );
+      }
+
       const executor = new ProtoSdkExecutor(def, this.toolRegistry, {
         gatewayUrl: this.config.gatewayUrl,
         gatewayApiKey: this.config.gatewayApiKey,
