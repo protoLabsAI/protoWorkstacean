@@ -11,6 +11,8 @@ import { DistributionGoalEvaluator } from "../evaluators/distribution_goal_evalu
 import { LangfuseLogger } from "../integrations/langfuse_logger.ts";
 import { DiscordLogger } from "../integrations/discord_logger.ts";
 import type { GoalViolatedEventPayload } from "../types/events.ts";
+import type { TelemetryService } from "../telemetry/telemetry-service.ts";
+import { GOAL_EVENTS } from "../telemetry/telemetry-service.ts";
 
 /**
  * GoalEvaluatorPlugin — observe-only goal registry + evaluator.
@@ -45,7 +47,7 @@ export class GoalEvaluatorPlugin implements Plugin, IGoalEvaluatorPlugin {
   // EventBus unavailability buffer
   private violationBuffer: GoalViolation[] = [];
 
-  constructor(config?: Partial<GoalsConfig>) {
+  constructor(config?: Partial<GoalsConfig>, private readonly telemetry?: TelemetryService) {
     this.config = { ...DEFAULT_GOALS_CONFIG, ...config };
     this.observeOnly = this.config.observeOnly;
     this.loader = new GoalsLoader(this.config.workspaceDir, this.config.projectsBaseDir);
@@ -104,6 +106,10 @@ export class GoalEvaluatorPlugin implements Plugin, IGoalEvaluatorPlugin {
           violation = this.distributionEvaluator.evaluate(goal, state, projectSlug);
         }
 
+        // Telemetry: one eval bumps `evaluated`, then either satisfied or violated
+        this.telemetry?.bump("goal", goal.id, "evaluated");
+        this.telemetry?.bump("goal", goal.id, violation ? "violated" : "satisfied");
+
         if (violation) {
           violations.push(violation);
         }
@@ -122,6 +128,13 @@ export class GoalEvaluatorPlugin implements Plugin, IGoalEvaluatorPlugin {
     console.info(
       `[goal-evaluator] Loaded ${this.goals.length} goal(s) from ${loaded.source}${projectSlug ? ` (project: ${projectSlug})` : ""}`,
     );
+    // Register every loaded goal with zero counts so the audit view surfaces
+    // "loaded but never evaluated" as well as "evaluated but never violated".
+    if (this.telemetry) {
+      for (const goal of this.goals) {
+        this.telemetry.registerKnown("goal", goal.id, GOAL_EVENTS);
+      }
+    }
   }
 
   // ── Private ───────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@
  */
 
 import type { Route, ApiContext } from "./types.ts";
+import type { TelemetryService } from "../telemetry/telemetry-service.ts";
 
 interface WorldStateAPI {
   getWorldState(opts?: { domain?: string; maxAgeMs?: number }): unknown;
@@ -104,6 +105,18 @@ export function createRoutes(ctx: ApiContext): Route[] {
     return Response.json(hitlPlugin.getQueueSnapshot());
   }
 
+  function handleGetTelemetry(kind: "goal" | "action"): Response {
+    if (!ctx.telemetry) return Response.json([]);
+    return Response.json(ctx.telemetry.aggregate(kind));
+  }
+
+  function handleGetTelemetryUnused(kind: "goal" | "action", hoursParam?: string): Response {
+    if (!ctx.telemetry) return Response.json([]);
+    const hours = hoursParam ? Number(hoursParam) : 72;
+    const maxQuietMs = Number.isFinite(hours) ? hours * 60 * 60 * 1000 : 72 * 60 * 60 * 1000;
+    return Response.json(ctx.telemetry.unused(kind, maxQuietMs));
+  }
+
   return [
     { method: "GET", path: "/api/world-state",          handler: () => handleGetWorldState() },
     { method: "GET", path: "/api/world-state/:domain",  handler: (_, p) => handleGetWorldState(p.domain) },
@@ -113,5 +126,17 @@ export function createRoutes(ctx: ApiContext): Route[] {
     { method: "GET", path: "/api/flow-metrics/:metric", handler: (_, p) => handleGetFlowMetrics(p.metric) },
     { method: "GET", path: "/api/outcomes",             handler: () => handleGetOutcomes() },
     { method: "GET", path: "/api/hitl-queue",           handler: () => handleGetHitlQueue() },
+    { method: "GET", path: "/api/telemetry/goals",      handler: () => handleGetTelemetry("goal") },
+    { method: "GET", path: "/api/telemetry/actions",    handler: () => handleGetTelemetry("action") },
+    {
+      method: "GET",
+      path: "/api/telemetry/unused/:kind",
+      handler: (req, p) => {
+        const kind = p.kind === "goal" || p.kind === "action" ? p.kind : null;
+        if (!kind) return Response.json({ error: "kind must be 'goal' or 'action'" }, { status: 400 });
+        const hours = new URL(req.url).searchParams.get("hours") ?? undefined;
+        return handleGetTelemetryUnused(kind, hours);
+      },
+    },
   ];
 }

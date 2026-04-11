@@ -76,6 +76,18 @@ function loadActionsYaml(): void {
 }
 loadActionsYaml();
 
+// --- Telemetry: per-goal and per-action counters persisted to knowledge.db ---
+// Hosts the audit view ("is this action actually used?") exposed via
+// /api/telemetry/* endpoints. Goal and action counters are bumped by the
+// goal-evaluator and action-dispatcher respectively. Loaded actions are
+// registered here at startup so zero-count rows exist for the audit.
+import { TelemetryService, ACTION_EVENTS } from "./telemetry/telemetry-service.js";
+const telemetry = new TelemetryService(`${dataDir}/knowledge.db`);
+telemetry.init();
+for (const action of actionRegistry.getAll()) {
+  telemetry.registerKnown("action", action.id, ACTION_EVENTS);
+}
+
 // Core plugins — always loaded, statically imported (no dynamic overhead needed)
 const debugPlugin = new DebugPlugin();
 debugPlugin.install(bus);
@@ -178,7 +190,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { GoalEvaluatorPlugin } = await import("./plugins/goal_evaluator_plugin.js");
-      return new GoalEvaluatorPlugin({ workspaceDir });
+      return new GoalEvaluatorPlugin({ workspaceDir }, telemetry);
     },
   },
   {
@@ -245,7 +257,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { ActionDispatcherPlugin } = await import("./plugins/action-dispatcher-plugin.js");
-      return new ActionDispatcherPlugin({ wipLimit: 5 });
+      return new ActionDispatcherPlugin({ wipLimit: 5 }, telemetry);
     },
   },
   {
@@ -440,6 +452,7 @@ const apiContext: ApiContext = {
   bus,
   plugins: allPlugins,
   executorRegistry,
+  telemetry,
   apiKey: API_KEY,
 };
 
