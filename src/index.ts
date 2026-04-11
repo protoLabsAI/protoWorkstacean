@@ -10,6 +10,9 @@ import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { ActionRegistry } from "./planner/action-registry";
 import type { Plugin, } from "../lib/types";
 import type { Action } from "./planner/types/action";
+import { parseEnv } from "./config/env.ts";
+// Fail-fast env validation — exits immediately on misconfiguration.
+parseEnv();
 // --- Workspace config ---
 const workspaceDir = resolve(
   process.env.WORKSPACE_DIR || join(process.cwd(), "workspace")
