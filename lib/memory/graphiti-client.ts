@@ -52,9 +52,12 @@ export class GraphitiClient {
     currentMessage: string,
   ): Promise<string> {
 
+    // Graphiti's /get-memory requires center_node_uuid (even when null)
+    // and Message.role (even when blank). Omitting either causes 422.
     const result = await this._post<{ facts: GraphitiFact[] }>("/get-memory", {
       group_id: groupId,
-      messages: [{ content: currentMessage, role_type: "user" }],
+      center_node_uuid: null,
+      messages: [{ content: currentMessage, role_type: "user", role: "" }],
       max_facts: 15,
     });
 
