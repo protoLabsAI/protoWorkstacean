@@ -159,12 +159,21 @@ actions:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
 
-  - id: alert.pr_conflicts
+  # alert.pr_conflicts was retired in favour of action.pr_update_branch below.
+  # The planner-plugin-l0 violation path dispatches one action per goal per
+  # tick (src/plugins/planner-plugin-l0.ts:114 claims the inFlightGoals slot
+  # after the first matching action), so keeping both actions on pr.no_conflicts
+  # would starve remediation — the alert would always win the race. Remediation
+  # that actually fixes the problem is strictly better than a Discord ping.
+  # If remediation fails and exhausts attempts, pr-remediator's stuck-HITL
+  # escalation still reaches Discord via the HITL plugin.
+
+  - id: action.pr_update_branch
     goalId: pr.no_conflicts
     tier: tier_0
-    priority: 20
-    cost: 0
-    name: "Alert on PRs with merge conflicts"
+    priority: 25
+    cost: 1
+    name: "Update dirty PR branches against their base via GitHub update-branch API"
     preconditions:
       - path: "extensions.pr_pipeline_available"
         operator: eq
@@ -174,7 +183,7 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
+      topic: "pr.remediate.update_branch"
       fireAndForget: true
 
   - id: alert.pr_stale

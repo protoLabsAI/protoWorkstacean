@@ -167,7 +167,7 @@ const ATTEMPT_COOLDOWN_MS = 5 * 60 * 1000;
 // human clears the entry (by the PR leaving pr_pipeline, e.g. merged/closed).
 const MAX_ATTEMPTS_PER_PR = 3;
 
-type RemediationKind = "fix_ci" | "address_feedback" | "merge_ready";
+type RemediationKind = "fix_ci" | "address_feedback" | "merge_ready" | "update_branch";
 
 interface InFlightEntry {
   kind: RemediationKind;
@@ -294,6 +294,57 @@ async function ghApprove(repo: string, num: number): Promise<{ ok: boolean; stat
     if (resp.ok) return { ok: true, status: resp.status };
     const body = await resp.text().catch(() => "");
     return { ok: false, status: resp.status, error: body.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
+/**
+ * Update a PR's head branch to incorporate the latest changes from its base.
+ *
+ * Uses GitHub's `update-branch` endpoint which merges the base into the head
+ * (merge strategy, not rebase — that's a GitHub API limitation). The result
+ * is a new merge commit on the PR branch bringing in whatever landed on the
+ * base since the PR was opened. Squash-merge at the end flattens everything
+ * so the history impact is zero for repos using squash merges.
+ *
+ * Purpose: close the stale-base gap in the autonomous merge loop. Before
+ * this, any PR whose base advanced after it was opened went `mergeable=dirty`
+ * and just sat there — even if CI was green and review was approved — until
+ * a human rebased. With this in the loop, pr-remediator calls update-branch
+ * on any dirty bot-origin PR and the PR flows through the rest of the gates
+ * normally on the next tick.
+ *
+ * Returns 202 when the update is queued (async), 200 when applied inline,
+ * 422 when GitHub can't auto-merge (real conflict in the merge itself —
+ * that's the case we can't fix and must escalate).
+ */
+async function ghUpdateBranch(
+  repo: string,
+  num: number,
+  expectedHeadSha?: string,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const body: Record<string, unknown> = {};
+    if (expectedHeadSha) body.expected_head_sha = expectedHeadSha;
+    const resp = await fetch(`https://api.github.com/repos/${repo}/pulls/${num}/update-branch`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (resp.ok || resp.status === 202) return { ok: true, status: resp.status };
+    const errBody = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: errBody.slice(0, 300) };
   } catch (err) {
     return { ok: false, status: 0, error: String(err) };
   }
@@ -446,6 +497,9 @@ export class PrRemediatorPlugin implements Plugin {
     }));
     this.subscriptionIds.push(bus.subscribe("pr.remediate.address_feedback", this.name, (msg) => {
       void this._handleAddressFeedback(msg);
+    }));
+    this.subscriptionIds.push(bus.subscribe("pr.remediate.update_branch", this.name, (msg) => {
+      void this._handleUpdateBranch(msg);
     }));
     this.subscriptionIds.push(bus.subscribe("pr.backmerge.dispatch", this.name, () => {
       void this._handleBackmergeDispatch();
@@ -759,6 +813,70 @@ export class PrRemediatorPlugin implements Plugin {
         // _emitHitlApproval call site.
         console.warn(`[pr-remediator] auto-merge failed ${pr.repo}#${pr.number}: ${result.error}`);
         this._emitHitlApproval(pr, msg.correlationId, `Auto-merge failed (${result.status}): ${result.error}`);
+      }
+    }
+  }
+
+  // ── update_branch ──────────────────────────────────────────────────────────
+  //
+  // Closes the stale-base gap in the autonomous merge loop. When a PR goes
+  // `mergeable=dirty` because its base branch advanced underneath it, there
+  // used to be nothing to unstick it — human had to rebase by hand. Now the
+  // remediator calls GitHub's `update-branch` endpoint which merges the base
+  // into the head branch, giving the PR a fresh CI run against current state.
+  //
+  // Scope: any dirty PR. GitHub's update-branch is a no-op if there's no new
+  // base content, and fails loudly (422) if the merge itself has conflicts,
+  // so the filter is intentionally loose. The dedup gate via _shouldDispatch
+  // prevents thrashing on repeated tick-cycles.
+  //
+  // We do NOT restrict to bot authors because (a) Ava authors PRs as the
+  // token-holder identity, not a bot account — we can't distinguish her from
+  // a human author at the GitHub level until task #77 lands, and (b) dirty
+  // human PRs also benefit from an auto-update; if the API can't merge
+  // cleanly it returns 422 and we bail, same as a bot PR.
+
+  private async _handleUpdateBranch(msg: BusMessage): Promise<void> {
+    const dirty = (this.latestPrData?.prs ?? []).filter((p) => p.mergeable === "dirty");
+    if (dirty.length === 0) {
+      console.log("[pr-remediator] update_branch fired but no PRs match mergeable=dirty");
+      return;
+    }
+
+    for (const pr of dirty) {
+      const gate = this._shouldDispatch(pr.repo, pr.number, "update_branch");
+      if (!gate.ok) {
+        console.log(`[pr-remediator] skip update_branch ${pr.repo}#${pr.number}: ${gate.reason}`);
+        continue;
+      }
+
+      // Claim the slot before the network call so a concurrent trigger can't
+      // race into a second update-branch against the same PR.
+      this._recordDispatch(pr.repo, pr.number, "update_branch", `update-${crypto.randomUUID()}`);
+
+      console.log(`[pr-remediator] dispatching update_branch for ${pr.repo}#${pr.number} (author: ${pr.author})`);
+      const result = await ghUpdateBranch(pr.repo, pr.number, pr.headSha);
+
+      if (result.ok) {
+        console.log(`[pr-remediator] update_branch queued for ${pr.repo}#${pr.number} (HTTP ${result.status})`);
+        // 202 means GitHub accepted the update and will process it
+        // asynchronously. 200 means it applied inline. Either way the PR
+        // will flip from mergeable=dirty to clean on the next pr_pipeline
+        // domain tick (~60s), at which point the normal merge_ready /
+        // address_feedback paths take over.
+      } else if (result.status === 422) {
+        // The merge itself has conflicts — GitHub can't auto-resolve.
+        // Mark this dispatch as completed so cooldown kicks in, but don't
+        // escalate yet: _shouldDispatch will exhaust the attempt budget
+        // eventually and emit the stuck-HITL on its own. Real conflicts
+        // need human intervention.
+        console.warn(`[pr-remediator] update_branch rejected ${pr.repo}#${pr.number}: ${result.error}`);
+      } else if (result.status === 403) {
+        // App lacks write permission on this repo. Silent skip, log once —
+        // the goal will keep firing but the dedup gate will cool it down.
+        console.warn(`[pr-remediator] update_branch 403 on ${pr.repo}#${pr.number} — App lacks write permission`);
+      } else {
+        console.warn(`[pr-remediator] update_branch failed ${pr.repo}#${pr.number}: ${result.status} ${result.error}`);
       }
     }
   }
