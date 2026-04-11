@@ -16,6 +16,7 @@
 import { readFileSync, watchFile, unwatchFile } from "node:fs";
 import { createSign } from "node:crypto";
 import { parse } from "yaml";
+import { FIRE_AND_FORGET_SKILLS } from "../../src/router/faf-skills.ts";
 
 // ── GitHub App auth ───────────────────────────────────────────────────────────
 // Ava posts chain responses as ava[bot] using her own App identity.
@@ -230,15 +231,10 @@ function routeToAgent(skill: string | null, agents: AgentDef[]): AgentDef | null
 
 // ── A2A protocol ────────────────────────────────────────────────────────────
 
-// Skills that involve multi-step orchestration (external APIs, agent chains).
-// These are dispatched fire-and-forget: workstacean acks immediately and the
-// agent posts back to the reply topic when done. No workstacean-side timeout.
-const FIRE_AND_FORGET_SKILLS = new Set([
-  "onboard_project",  // GitHub + Plane + Discord chain
-  "plan",             // SPARC PRD + antagonistic review
-  "plan_resume",      // checkpoint restore + feature creation
-  "deep_research",    // web + knowledge store traversal
-]);
+// FIRE_AND_FORGET_SKILLS is imported from src/router/faf-skills.ts so the
+// allowlist is owned in exactly one place — the router now filters the same
+// set (fix/router-skip-faf-skills) and both sides read from the shared module.
+// If you need to add a skill, do it there.
 
 // In-flight guard: tracks currently-running fire-and-forget operations.
 // Key: `{agentName}:{skill}:{contentHash}` — prevents duplicate concurrent runs
@@ -536,13 +532,10 @@ export default {
       // agent runs twice (observed on protoWorkstacean#104 as paired
       // @protoquinn[bot] review comments).
       //
-      // TODO(#75 router-faf-dedup): the router path does NOT skip FAF skills,
-      // so onboard_project / plan / plan_resume / deep_research are still
-      // double-dispatched today — masked only by the inFlightFAF timing guard
-      // below. That mask is race-prone (two fast events can both clear the
-      // check before either sets it). Proper fix needs symmetric filters on
-      // both sides OR consolidating the ack-immediately pattern into
-      // skill-dispatcher so FAF skills can live entirely in the router path.
+      // The symmetric half of this guard lives in src/router/router-plugin.ts
+      // where FIRE_AND_FORGET_SKILLS (from src/router/faf-skills.ts) is also
+      // filtered out — together they guarantee FAF dispatch is handled exactly
+      // once regardless of which subscriber fires first.
       if (!skill || !LOCALLY_OWNED_SKILLS.has(skill)) return;
 
       const agent = routeToAgent(skill, agents);
