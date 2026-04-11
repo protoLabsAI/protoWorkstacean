@@ -478,25 +478,54 @@ export class DiscordPlugin implements Plugin {
 
       // ── HITL button interactions ─────────────────────────────────────────
       if (interaction.isButton() && interaction.customId.startsWith("hitl:")) {
+        // Defer IMMEDIATELY — Discord's interaction token expires 3s after
+        // the click, and any work we do before this call eats into that
+        // budget. We've seen "Unknown interaction" errors when the handler
+        // did even small amounts of sync work first.
+        //
+        // If deferUpdate throws (e.g. token already expired because the
+        // click was on a very old message and Discord's state is gone, or
+        // network blip), fall through to the body so the decision still
+        // gets published on the bus — the UI just won't update.
+        try {
+          await interaction.deferUpdate();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[discord] HITL deferUpdate failed (${msg}) — processing decision anyway`);
+        }
+
         const [, decision, correlationId] = interaction.customId.split(":");
-        await interaction.deferUpdate();
+        if (!decision || !correlationId) {
+          console.warn(`[discord] HITL button with malformed customId: ${interaction.customId}`);
+          return;
+        }
 
         const entry = this.pendingHITLMessages.get(correlationId);
+        // Recover the reply topic. If the container restarted since the
+        // message was rendered, pendingHITLMessages is empty. The request
+        // embed carries the topic on the footer only in some flows, so
+        // fall back to a sensible pattern-based topic for our stuck
+        // escalation flow (the only flow that uses non-approve/reject
+        // options today).
         const replyTopic = entry?.replyTopic
-          ?? `hitl.response.${correlationId.split("-")[0]}.${correlationId}`;
+          ?? `hitl.response.pr.remediation_stuck.${correlationId}`;
 
-        bus.publish(replyTopic, {
-          id: crypto.randomUUID(),
-          correlationId,
-          topic: replyTopic,
-          timestamp: Date.now(),
-          payload: {
-            type: "hitl_response",
+        try {
+          bus.publish(replyTopic, {
+            id: crypto.randomUUID(),
             correlationId,
-            decision: decision as "approve" | "reject" | "modify",
-            decidedBy: interaction.user.id,
-          },
-        });
+            topic: replyTopic,
+            timestamp: Date.now(),
+            payload: {
+              type: "hitl_response",
+              correlationId,
+              decision,
+              decidedBy: interaction.user.id,
+            },
+          });
+        } catch (err) {
+          console.error(`[discord] HITL bus publish failed for ${correlationId}:`, err);
+        }
 
         if (entry) this.pendingHITLMessages.delete(correlationId);
 
@@ -507,13 +536,18 @@ export class DiscordPlugin implements Plugin {
         if (decision === "approve") color = COLOR_APPROVE;
         else if (decision === "reject") color = COLOR_REJECT;
         else color = COLOR_NEUTRAL;
-        const label = decision.charAt(0).toUpperCase() + decision.slice(1);
+        const label = decision.charAt(0).toUpperCase() + decision.slice(1).replace(/_/g, " ");
         const decidedEmbed = new EmbedBuilder()
           .setTitle(interaction.message.embeds[0]?.title ?? "Decision recorded")
           .setDescription(`**${label}** by <@${interaction.user.id}>`)
           .setColor(color);
 
-        await interaction.message.edit({ embeds: [decidedEmbed], components: [] }).catch(console.error);
+        // Best-effort UI update. If the bot can no longer edit the message
+        // (e.g. posted by an old session), swallow the error so the
+        // decision still counts.
+        await interaction.message.edit({ embeds: [decidedEmbed], components: [] }).catch(err => {
+          console.warn(`[discord] HITL message edit failed for ${correlationId}:`, err instanceof Error ? err.message : err);
+        });
         return;
       }
 
