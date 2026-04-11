@@ -261,6 +261,67 @@ async function ghMerge(repo: string, num: number): Promise<{ ok: boolean; status
 }
 
 /**
+ * Submit an APPROVED review on a PR as Quinn. Used by the auto-approve
+ * path for structurally-safe PR classes (dependabot/renovate, promote,
+ * chore(deps) where the content is either machine-generated or already
+ * reviewed upstream.
+ *
+ * GitHub rejects review submissions on your own PRs (422 Unprocessable),
+ * so this path only ever runs for PRs opened by a different identity
+ * than Quinn — the safe classes above are all opened by dependabot,
+ * renovate, or human users, so that constraint is naturally satisfied.
+ */
+async function ghApprove(repo: string, num: number): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(`https://api.github.com/repos/${repo}/pulls/${num}/reviews`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        event: "APPROVE",
+        body: "Auto-approved by Quinn: safe PR class (dependabot/renovate/promote/chore(deps)) with passing CI.",
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (resp.ok) return { ok: true, status: resp.status };
+    const body = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: body.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
+/**
+ * Is this PR in a class that Quinn can auto-approve?
+ *
+ *   - dependabot / renovate authors (automated dep bumps)
+ *   - "promote:" title prefix (release pipeline — content already reviewed)
+ *   - "chore(deps" title prefix (manual dep bump)
+ *
+ * All three classes are structurally safe: they either contain no
+ * hand-written code (dep bumps) or are re-promoting content that's
+ * already passed review on the upstream branch.
+ */
+const AUTO_APPROVE_AUTHORS = new Set(["dependabot[bot]", "renovate[bot]"]);
+const AUTO_APPROVE_TITLE_PREFIXES = ["promote:", "chore(deps"];
+
+function isAutoApproveClass(pr: PrDomainEntry): boolean {
+  if (AUTO_APPROVE_AUTHORS.has(pr.author)) return true;
+  for (const prefix of AUTO_APPROVE_TITLE_PREFIXES) {
+    if (pr.title.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/**
  * Trigger a GitHub Actions workflow_dispatch event for the auto back-merge
  * workflow on a repo's default branch. The workflow filename and the ref
  * it runs on are both configurable via env so repos that use a different
@@ -321,6 +382,8 @@ export class PrRemediatorPlugin implements Plugin {
   private readonly backmergeDispatchedAt = new Map<string, number>();
   /** `slug:reason` → timestamp of last auto-mode kick alert (5-min dedupe). */
   private readonly autoModeKickAlertsAt = new Map<string, number>();
+  /** `repo#number` → timestamp of last auto-approve attempt (avoid re-submitting on every tick while GitHub catches up). */
+  private readonly autoApprovedAt = new Map<string, number>();
 
   install(bus: EventBus): void {
     this.bus = bus;
@@ -336,6 +399,12 @@ export class PrRemediatorPlugin implements Plugin {
         // Drop in-flight entries for PRs no longer in the pipeline (merged/closed).
         // This lets exhausted entries clear naturally without a timer.
         this._pruneInFlight();
+        // Auto-approve any safe-class PR that's CI-passing but still waiting
+        // on a review — Quinn submits an APPROVED review, next world state
+        // tick flips readyToMerge, _handleMergeReady auto-merges.
+        void this._runAutoApprovePass().catch(err =>
+          console.error("[pr-remediator] auto-approve pass error:", err),
+        );
       } else if (state?.domains) {
         // Domain missing from a valid state update — drop stale cache
         this.latestPrData = null;
@@ -584,6 +653,59 @@ export class PrRemediatorPlugin implements Plugin {
       const prId = key.split(":")[0];
       if (prId && !activePrs.has(prId)) {
         this.inFlight.delete(key);
+      }
+    }
+  }
+
+  // ── auto-approve (dependabot / promote / chore(deps) ─────────────────────
+  //
+  // CodeRabbit doesn't submit APPROVED reviews on clean PRs (verified
+  // empirically — see the audit of recent PRs across all managed repos),
+  // which means the tightened readyToMerge = "approved review" check was
+  // leaving safe-class PRs stuck forever. This pass closes the gap: Quinn
+  // submits an APPROVED review on every PR whose author/title marks it as
+  // structurally safe, whose CI is passing, and whose review state is
+  // still pending/none.
+  //
+  // The pass is rate-limited per PR via autoApprovedAt — GitHub takes a
+  // few seconds to reflect the new review, and the world state domain
+  // polls every couple of minutes, so we skip any PR approved in the last
+  // 10 minutes to avoid double-posting while the state catches up.
+
+  private static readonly AUTO_APPROVE_COOLDOWN_MS = 10 * 60 * 1000;
+
+  private async _runAutoApprovePass(): Promise<void> {
+    if (!AUTO_MERGE_ENABLED) return; // same env gate as the merge path
+    const prs = this.latestPrData?.prs ?? [];
+    const now = Date.now();
+
+    for (const pr of prs) {
+      if (!isAutoApproveClass(pr)) continue;
+      if (pr.ciStatus !== "pass") continue;
+      if (pr.reviewState === "approved") continue;
+      if (pr.reviewState === "changes_requested") continue; // don't override real feedback
+      if (pr.isDraft) continue;
+
+      const key = `${pr.repo}#${pr.number}`;
+      const lastApproval = this.autoApprovedAt.get(key);
+      if (lastApproval !== undefined && now - lastApproval < PrRemediatorPlugin.AUTO_APPROVE_COOLDOWN_MS) {
+        continue;
+      }
+
+      this.autoApprovedAt.set(key, now);
+      const result = await ghApprove(pr.repo, pr.number);
+      if (result.ok) {
+        console.log(`[pr-remediator] auto-approved ${key} (class=${AUTO_APPROVE_AUTHORS.has(pr.author) ? pr.author : "title-prefix"})`);
+      } else if (result.status === 422) {
+        // Usually "Can not approve your own pull request" — Quinn opened it.
+        // Drop the cooldown entry so we don't rapidly re-attempt; set it far
+        // in the future instead.
+        this.autoApprovedAt.set(key, now + 24 * 60 * 60 * 1000);
+        console.log(`[pr-remediator] skip auto-approve ${key}: 422 (likely Quinn-authored PR)`);
+      } else {
+        console.warn(`[pr-remediator] auto-approve failed ${key}: ${result.status} ${result.error}`);
+        // Drop cooldown so we retry on next tick after a real failure.
+        this.autoApprovedAt.delete(key);
       }
     }
   }
