@@ -93,7 +93,9 @@ describe("TelemetryService", () => {
   });
 
   test("bump is a no-op when db init failed", () => {
-    const broken = new TelemetryService("/nonexistent/readonly/dir/fail.db");
+    // /dev/null/anything always ENOTDIRs — works the same as root or an
+    // unprivileged user, unlike /nonexistent which root can mkdir.
+    const broken = new TelemetryService("/dev/null/fail.db");
     broken.init();
     // Should not throw
     broken.bump("goal", "x", "evaluated");
