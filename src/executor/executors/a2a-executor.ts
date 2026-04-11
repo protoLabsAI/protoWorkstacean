@@ -74,7 +74,6 @@ export class A2AExecutor implements IExecutor {
         text: "",
         isError: true,
         correlationId: req.correlationId,
-        data: { httpStatus: resp.status, body: errText },
       };
     }
 
@@ -100,7 +99,7 @@ export class A2AExecutor implements IExecutor {
     };
 
     if (data.error) {
-      return { text: "", isError: true, correlationId: req.correlationId, data: { error: data.error.message } };
+      return { text: data.error.message, isError: true, correlationId: req.correlationId };
     }
 
     const artifactTexts = (data.result?.artifacts ?? [])
@@ -113,7 +112,7 @@ export class A2AExecutor implements IExecutor {
         ? artifactTexts.join("\n")
         : data.result?.message ?? `Skill "${req.skill}" accepted by ${this.config.name}`;
 
-    return { text: resultText, isError: false, correlationId: req.correlationId, data: data.result };
+    return { text: resultText, isError: false, correlationId: req.correlationId };
   }
 
   private _buildText(req: SkillRequest): string {

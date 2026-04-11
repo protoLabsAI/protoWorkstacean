@@ -16,7 +16,7 @@
  */
 
 import { query, createSdkMcpServer, isSDKResultMessage } from "@protolabsai/sdk";
-import type { SDKResultMessageSuccess } from "@protolabsai/sdk";
+import type { SDKResultMessageSuccess, ExtendedUsage } from "@protolabsai/sdk";
 import type { AgentDefinition } from "./types.ts";
 import type { ToolRegistry } from "./tool-registry.ts";
 
@@ -36,6 +36,10 @@ export interface AgentRunResult {
   isError: boolean;
   /** Raw stop reason from the SDK result message. */
   stopReason?: string;
+  /** Token usage reported by the SDK. */
+  usage?: ExtendedUsage;
+  /** Number of agentic turns taken. */
+  numTurns?: number;
 }
 
 /**
