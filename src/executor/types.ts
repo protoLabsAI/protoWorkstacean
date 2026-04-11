@@ -13,6 +13,8 @@ import type { ExtendedUsage } from "@protolabsai/sdk";
  *   parentId      = parent span ID (the bus message ID that triggered this request)
  */
 
+import type { AgentSkillRequestPayload } from "../event-bus/payloads.ts";
+
 // ── Request / Result ──────────────────────────────────────────────────────────
 
 export interface SkillRequest {
@@ -28,8 +30,8 @@ export interface SkillRequest {
   parentId?: string;
   /** Topic to publish the response on. */
   replyTopic: string;
-  /** Full original payload for executors that need extra fields. */
-  payload: Record<string, unknown>;
+  /** Full original bus message payload — typed with known agent.skill.request fields. */
+  payload: AgentSkillRequestPayload;
 }
 
 export interface SkillResult {
