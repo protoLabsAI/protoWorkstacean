@@ -209,12 +209,23 @@ export class SkillDispatcherPlugin implements Plugin {
         console.log(
           `[skill-dispatcher] Skill "${skill}" completed via ${executor.type} — ${(result.text ?? "").length} chars: ${preview}${(result.text ?? "").length > 300 ? "…" : ""}`,
         );
+        if (result.data?.stopReason === "max_turns") {
+          console.warn("[skill-dispatcher] Agent hit maxTurns limit");
+        }
         this._publishFlowEvent("flow.item.completed", {
           id: flowItemId,
           status: "complete",
           stage: "done",
           completedAt: Date.now(),
-          meta: { skill, executorType: executor.type, durationMs: Date.now() - dispatchedAt },
+          meta: {
+            skill,
+            executorType: executor.type,
+            durationMs: Date.now() - dispatchedAt,
+            inputTokens: result.data?.usage?.input_tokens,
+            outputTokens: result.data?.usage?.output_tokens,
+            numTurns: result.data?.numTurns,
+            stopReason: result.data?.stopReason,
+          },
         });
       }
 

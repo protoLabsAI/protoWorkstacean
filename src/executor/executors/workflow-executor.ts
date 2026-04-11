@@ -64,7 +64,6 @@ export class WorkflowExecutor implements IExecutor {
               text: `Workflow stopped at step "${step.topic}"`,
               isError: false,
               correlationId: req.correlationId,
-              data: { results, stoppedAt: step.topic },
             };
           }
         } else {
@@ -77,7 +76,6 @@ export class WorkflowExecutor implements IExecutor {
       text: `Workflow completed (${this.steps.length} step(s))`,
       isError: false,
       correlationId: req.correlationId,
-      data: { results },
     };
   }
 
