@@ -493,5 +493,10 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     engine.registerDomain("hitl_queue", createHttpCollector(`${base}/api/hitl-queue`), 30_000); // 30s — catch routing holes fast
 
     console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue");
+
+    // All local + workspace/domains.yaml + per-project domains are now
+    // registered. Defer prune briefly so any async per-project domain
+    // discovery has a chance to finish before we drop orphans.
+    setTimeout(() => engine.pruneOrphanDomains(), 10_000);
   }
 }
