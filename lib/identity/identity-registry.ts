@@ -11,7 +11,12 @@
  *   // → { id: "josh", displayName: "Josh", ... }
  *
  *   const groupId = registry.groupId("discord", "123456789");
- *   // → "user:josh"   (or "user:discord_123456789" if not mapped)
+ *   // → "user_josh"   (or "user_discord_123456789" if not mapped)
+ *
+ * Group IDs use only alphanumeric characters, dashes, and underscores —
+ * Graphiti's validate_group_id rejects anything else (colons crash the
+ * ingestion worker silently). Keep this constraint in mind if you ever
+ * add new segment separators.
  */
 
 import { readFileSync, watchFile, unwatchFile } from "node:fs";
@@ -41,12 +46,12 @@ export class IdentityRegistry {
 
   /**
    * Return the Graphiti group_id for a user.
-   * If the user is known: "user:{canonicalId}"   e.g. "user:josh"
-   * If unknown:           "user:{platform}_{platformId}"  e.g. "user:discord_123456"
+   * If the user is known: "user_{canonicalId}"   e.g. "user_josh"
+   * If unknown:           "user_{platform}_{platformId}"  e.g. "user_discord_123456"
    */
   groupId(platform: string, platformId: string): string {
     const user = this.resolve(platform, platformId);
-    return user ? `user:${user.id}` : `user:${platform}_${platformId}`;
+    return user ? `user_${user.id}` : `user_${platform}_${platformId}`;
   }
 
   /**

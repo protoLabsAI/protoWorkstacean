@@ -119,10 +119,11 @@ export class SkillDispatcherPlugin implements Plugin {
     );
 
     // ── Memory enrichment ──────────────────────────────────────────────────────
-    // Graphiti group id selection:
-    //   (a) human-originated: user:{canonicalId} via identityRegistry
+    // Graphiti group id selection (alphanumeric/dash/underscore only — colons
+    // crash graphiti's ingestion worker silently):
+    //   (a) human-originated: user_{canonicalId} via identityRegistry
     //   (b) bot-initiated with meta.systemActor (pr-remediator / sweep /
-    //       ceremony / cron): system:{actor} — gives the autonomous loop
+    //       ceremony / cron): system_{actor} — gives the autonomous loop
     //       its own persistent memory of what it did, grouped by the
     //       subsystem that triggered it
     //   (c) fallthrough: no group — no write, no read
@@ -143,13 +144,16 @@ export class SkillDispatcherPlugin implements Plugin {
     if (sourceUserId && sourcePlatform && sourcePlatform !== "cron") {
       groupId = this.identityRegistry.groupId(sourcePlatform, sourceUserId);
       const agentName = targets[0];
-      if (agentName) agentGroupId = `agent:${agentName}:${groupId}`;
+      // agent_{agent}__{user_...} — double underscore separates the two
+      // identity segments unambiguously. Single-underscore would collide
+      // with the user_{platform}_{id} fallback.
+      if (agentName) agentGroupId = `agent_${agentName}__${groupId}`;
     } else if (systemActor) {
       // Bot-initiated dispatch — memory goes to a stable system-actor group
       // so the autonomous loop builds its own episodic history. No
       // agent-scoped split: it's already one subsystem writing, not a
       // human talking to a specific agent.
-      groupId = `system:${systemActor}`;
+      groupId = `system_${systemActor}`;
     }
 
     if (groupId && rawContent) {
@@ -221,7 +225,7 @@ export class SkillDispatcherPlugin implements Plugin {
       //   history with the user on top of the cross-agent baseline.
       //
       // System-originated (bot-initiated, meta.systemActor set): written
-      //   only to the single system:{actor} group. No agent split —
+      //   only to the single system_{actor} group. No agent split —
       //   systemActor IS the actor, no user involved.
       if (!result.isError && result.text && groupId && originalContent) {
         const identity = sourceUserId && sourcePlatform

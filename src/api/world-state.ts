@@ -119,7 +119,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
       const search = await fetch(`${url}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: "health probe", group_ids: ["user:josh"], max_facts: 1 }),
+        body: JSON.stringify({ query: "health probe", group_ids: ["user_josh"], max_facts: 1 }),
         signal: AbortSignal.timeout(5_000),
       });
       if (search.ok) result.searchOk = 1;
