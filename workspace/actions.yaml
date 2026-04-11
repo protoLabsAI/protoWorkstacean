@@ -423,6 +423,53 @@ actions:
       topic: "pr.backmerge.dispatch"
       fireAndForget: true
 
+  # ── Plane board health ────────────────────────────────────────────
+
+  - id: alert.plane_urgent_stale
+    goalId: plane.no_urgent_stale
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Alert on excessive urgent Plane issues"
+    preconditions:
+      - path: "domains.plane.data.urgentOpen"
+        operator: gt
+        value: 5
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: alert.plane_stale_backlog
+    goalId: plane.no_stale_backlog
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert when too many Plane issues are >14 days old"
+    preconditions:
+      - path: "domains.plane.data.staleOpen"
+        operator: gt
+        value: 10
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: alert.plane_unassigned_piling
+    goalId: plane.unassigned_not_piling
+    tier: tier_0
+    priority: 15
+    cost: 0
+    name: "Alert when unassigned Plane issues pile up"
+    preconditions:
+      - path: "domains.plane.data.unassignedOpen"
+        operator: gt
+        value: 20
+    effects: []
+    meta:
+      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
   # ── HITL routing health ───────────────────────────────────────────
   #
   # This alert bypasses the HITL plugin entirely — if the HITL routing

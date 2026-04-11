@@ -491,8 +491,9 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     engine.registerDomain("branch_drift", createHttpCollector(`${base}/api/branch-drift`), 600_000); // 10min
     engine.registerDomain("branch_protection", createHttpCollector(`${base}/api/branch-protection`), 600_000); // 10min — rulesets change rarely
     engine.registerDomain("hitl_queue", createHttpCollector(`${base}/api/hitl-queue`), 30_000); // 30s — catch routing holes fast
+    engine.registerDomain("plane", createHttpCollector(`${base}/api/plane-board`), 120_000); // 2min — Plane REST list across projects
 
-    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue");
+    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue, plane");
 
     // All local + workspace/domains.yaml + per-project domains are now
     // registered. Defer prune briefly so any async per-project domain
