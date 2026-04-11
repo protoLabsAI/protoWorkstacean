@@ -1,17 +1,22 @@
 /**
- * PlaneHITLPlugin — routes Plane webhook issue events to Discord threads.
+ * PlaneDiscordNotifierPlugin — forwards Plane webhook issue events to a
+ * project's Discord dev channel as notification embeds.
  *
  * Loads workspace/projects.yaml at startup and builds a mapping from
  * Plane project ID → Discord channel ID (prefers discord.dev, falls back
  * to discord.general). Projects without any Discord channel configured
  * are excluded from the mapping.
  *
+ * This is NOT a HITL sink — it's a one-way notifier. The file was
+ * originally named plane-hitl.ts but that was a naming lie: no HITL
+ * approval flow happens here, just outbound Discord posts. Renamed for
+ * clarity.
+ *
  * Inbound topics consumed:
  *   message.inbound.plane.issue.# — published by PlanePlugin
  *
  * Outbound:
  *   message.outbound.discord.push.{channelId} — posts a Discord message
- *   hitl.request.{correlationId}               — escalates to HITL gate
  *
  * Config: workspace/projects.yaml
  */
@@ -46,7 +51,7 @@ function buildMapping(projectsPath: string): Map<string, ProjectMapping> {
     const parsed = parseYaml(raw) as { projects?: unknown[] };
     rawProjects = parsed.projects ?? [];
   } catch (err) {
-    console.error(`[plane-hitl] Failed to parse ${projectsPath}:`, err);
+    console.error(`[plane-discord-notifier] Failed to parse ${projectsPath}:`, err);
     return mapping;
   }
 
@@ -54,7 +59,7 @@ function buildMapping(projectsPath: string): Map<string, ProjectMapping> {
     const validation = validateProjectEntry(rawProject);
     if (!validation.ok) {
       const slug = (rawProject as Record<string, unknown>)?.slug ?? "(unknown)";
-      console.warn(`[plane-hitl] Skipping invalid project "${slug}": ${validation.errors.join("; ")}`);
+      console.warn(`[plane-discord-notifier] Skipping invalid project "${slug}": ${validation.errors.join("; ")}`);
       continue;
     }
 
@@ -81,10 +86,10 @@ function buildMapping(projectsPath: string): Map<string, ProjectMapping> {
 
 // ── Plugin ─────────────────────────────────────────────────────────────────────
 
-export class PlaneHITLPlugin implements Plugin {
-  readonly name = "plane-hitl";
+export class PlaneDiscordNotifierPlugin implements Plugin {
+  readonly name = "plane-discord-notifier";
   readonly description =
-    "Plane → Discord routing: routes Plane issue events to project Discord channels";
+    "Plane → Discord notifier: forwards Plane issue events to project Discord channels as one-way embeds";
   readonly capabilities = ["plane-discord-routing"];
 
   private workspaceDir: string;
@@ -98,7 +103,7 @@ export class PlaneHITLPlugin implements Plugin {
     const projectsPath = join(this.workspaceDir, "projects.yaml");
     this.mapping = buildMapping(projectsPath);
     console.log(
-      `[plane-hitl] Loaded ${this.mapping.size} project(s) with Plane→Discord mapping`,
+      `[plane-discord-notifier] Loaded ${this.mapping.size} project(s) with Plane→Discord mapping`,
     );
 
     // Hot-reload on file change
@@ -106,7 +111,7 @@ export class PlaneHITLPlugin implements Plugin {
       watchFile(projectsPath, { interval: 5_000 }, () => {
         this.mapping = buildMapping(projectsPath);
         console.log(
-          `[plane-hitl] projects.yaml changed — reloaded ${this.mapping.size} project(s)`,
+          `[plane-discord-notifier] projects.yaml changed — reloaded ${this.mapping.size} project(s)`,
         );
       });
     }
@@ -163,7 +168,7 @@ export class PlaneHITLPlugin implements Plugin {
     });
 
     console.log(
-      `[plane-hitl] Issue "${title}" (${issueId}) → Discord channel ${project.discordChannelId} (${project.slug})`,
+      `[plane-discord-notifier] Issue "${title}" (${issueId}) → Discord channel ${project.discordChannelId} (${project.slug})`,
     );
   }
 

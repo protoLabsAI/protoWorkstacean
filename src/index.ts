@@ -170,11 +170,11 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
-    name: "plane-hitl",
+    name: "plane-discord-notifier",
     condition: () => true,
     factory: async () => {
-      const { PlaneHITLPlugin } = await import("../lib/plugins/plane-hitl");
-      return new PlaneHITLPlugin(workspaceDir);
+      const { PlaneDiscordNotifierPlugin } = await import("../lib/plugins/plane-discord-notifier");
+      return new PlaneDiscordNotifierPlugin(workspaceDir);
     },
   },
   {
