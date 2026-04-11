@@ -209,13 +209,21 @@ function matchSkill(content: string, hint?: string): string | null {
   return null;
 }
 
-function routeToAgent(skill: string | null, agents: AgentDef[]): AgentDef {
+function routeToAgent(skill: string | null, agents: AgentDef[]): AgentDef | null {
   if (skill) {
     const match = agents.find(a => a.skills.includes(skill));
     if (match) return match;
+    // Skill is explicit but no registered A2A agent claims it — return null
+    // so the caller can escalate or skip. The previous behaviour of silently
+    // defaulting to Ava misrouted pr_review (an in-process proto-sdk skill on
+    // Quinn) to Ava, which then responded narratively because her LLM obliges
+    // any prompt regardless of its declared skill surface.
+    return null;
   }
-  // Default: Ava (Chief of Staff — she delegates further)
-  return agents.find(a => a.name === "ava") ?? agents[0];
+  // No skill at all — fall back to Ava as the Chief-of-Staff default for
+  // unstructured chat. This path is only reached for free-form content with
+  // no skillHint and no keyword match.
+  return agents.find(a => a.name === "ava") ?? agents[0] ?? null;
 }
 
 // ── A2A protocol ────────────────────────────────────────────────────────────
@@ -497,9 +505,37 @@ export default {
 
       const channelKey = String(p.channel ?? msg.topic.split(".").slice(2).join("-"));
       const skill = matchSkill(content, p.skillHint as string | undefined);
-      const agent = routeToAgent(skill, agents);
       const outboundTopic = msg.reply?.topic
         ?? `message.outbound.${msg.topic.split(".").slice(1).join(".")}`;
+
+      // ── Local ownership guard ──────────────────────────────────────────────
+      // This plugin owns three narrow paths:
+      //   1. MEMORY_SKILLS — handled inline via handleMemorySkill
+      //   2. onboard_project — forwarded to OnboardingPlugin
+      //   3. FIRE_AND_FORGET_SKILLS — ack-immediately orchestration skills
+      //      (plan / plan_resume / deep_research) that the router path does
+      //      not have an equivalent ack pattern for yet.
+      //
+      // Everything else — including skillHint-tagged webhooks like pr_review
+      // from github.ts — is the router + skill-dispatcher pipeline's
+      // responsibility. Without this guard the same inbound event triggers
+      // *both* plugins and the agent runs twice (observed on
+      // protoWorkstacean#104 as paired @protoquinn[bot] review comments).
+      const isLocallyOwned =
+        (skill && MEMORY_SKILLS.has(skill)) ||
+        skill === "onboard_project" ||
+        (skill && FIRE_AND_FORGET_SKILLS.has(skill));
+      if (!isLocallyOwned) return;
+
+      const agent = routeToAgent(skill, agents);
+      if (!agent) {
+        // routeToAgent now returns null when an explicit skill has no A2A
+        // claimant (was previously silently defaulting to Ava). For locally-
+        // owned skills this should never happen — but log it if it does so
+        // we don't silently drop.
+        console.warn(`[a2a] no registered agent for locally-owned skill "${skill}" — skipping`);
+        return;
+      }
 
       // Memory skills are handled locally — never forwarded to an external agent
       if (skill && MEMORY_SKILLS.has(skill)) {
@@ -646,6 +682,10 @@ export default {
       const cronId = msg.topic.replace("cron.", "");
       const skill = matchSkill(content, p.skillHint as string | undefined);
       const agent = routeToAgent(skill, agents);
+      if (!agent) {
+        console.warn(`[a2a-cron] ${cronId} — no agent claims skill "${skill}" — dropping`);
+        return;
+      }
 
       console.log(`[a2a-cron] ${cronId} → ${agent.name}`);
 
