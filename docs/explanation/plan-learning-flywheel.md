@@ -1,4 +1,7 @@
-# Plan Learning Flywheel
+---
+title: Plan Learning Flywheel
+---
+
 
 ## Concept
 

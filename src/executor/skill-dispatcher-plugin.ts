@@ -68,11 +68,15 @@ export class SkillDispatcherPlugin implements Plugin {
       ?? (payload.meta as Record<string, unknown> | undefined)?.skillHint as string | undefined
       ?? "";
 
-    const targets: string[] = Array.isArray(payload.targets)
-      ? (payload.targets as string[])
-      : typeof (payload.meta as Record<string, unknown> | undefined)?.agentId === "string"
-        ? [(payload.meta as Record<string, unknown>).agentId as string]
-        : [];
+    let targets: string[] = [];
+    if (Array.isArray(payload.targets)) {
+      targets = payload.targets as string[];
+    } else {
+      const meta = payload.meta as Record<string, unknown> | undefined;
+      if (typeof meta?.agentId === "string") {
+        targets = [meta.agentId];
+      }
+    }
 
     const correlationId = msg.correlationId;
     const parentId = msg.id; // this message is the parent span
@@ -157,7 +161,9 @@ export class SkillDispatcherPlugin implements Plugin {
       const result = await executor.execute(req);
 
       if (result.isError) {
-        console.error(`[skill-dispatcher] Executor "${executor.type}" error for skill "${skill}"`);
+        console.error(
+          `[skill-dispatcher] Executor "${executor.type}" error for skill "${skill}": ${(result.text ?? "").slice(0, 500)}`,
+        );
         this._publishFlowEvent("flow.item.updated", {
           id: flowItemId,
           status: "blocked",
@@ -165,7 +171,13 @@ export class SkillDispatcherPlugin implements Plugin {
           meta: { skill, error: result.text },
         });
       } else {
-        console.log(`[skill-dispatcher] Skill "${skill}" completed via ${executor.type}`);
+        // Log a preview of the response so we can see what the executor actually
+        // returned — critical for debugging A2A/agent behaviour when the skill
+        // completes but produces no board side-effects.
+        const preview = (result.text ?? "").replace(/\s+/g, " ").slice(0, 300);
+        console.log(
+          `[skill-dispatcher] Skill "${skill}" completed via ${executor.type} — ${(result.text ?? "").length} chars: ${preview}${(result.text ?? "").length > 300 ? "…" : ""}`,
+        );
         this._publishFlowEvent("flow.item.completed", {
           id: flowItemId,
           status: "complete",

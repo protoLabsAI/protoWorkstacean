@@ -31,9 +31,15 @@ function isValidRole(r: unknown): r is AgentRole {
  * Parse and validate a single raw YAML object into an AgentDefinition.
  * Throws a descriptive error if required fields are missing or invalid.
  */
+function describeType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
 export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefinition {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`[${fileName}] YAML must be a mapping object, got ${raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw}`);
+    throw new Error(`[${fileName}] YAML must be a mapping object, got ${describeType(raw)}`);
   }
   if (!raw.name || typeof raw.name !== "string") {
     throw new Error(`[${fileName}] Missing or invalid 'name' field`);

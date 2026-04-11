@@ -5,7 +5,7 @@
  * The A2A interface is abstracted so tests can provide mock proposers.
  */
 
-import type { Action, Goal, Plan, PlannerState } from "./types.ts";
+import type { Action, PlannerState } from "./types.ts";
 import type { CandidatePlan, L2Context } from "./routing-interface.ts";
 
 /** Interface for A2A communication with an LLM agent. */

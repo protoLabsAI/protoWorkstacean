@@ -4,7 +4,7 @@
  * Computes costs considering action weights, risk factors, and historical success rates.
  */
 
-import type { Plan, Action } from "./types.ts";
+import type { Plan, } from "./types.ts";
 
 /** Cost factors for plan evaluation. */
 export interface CostFactors {

@@ -4,7 +4,7 @@
  * Used by ConfidenceScorer and monitoring systems to evaluate plan quality.
  */
 
-import type { Plan, PlannerState, Goal, ValidationResult } from "./types.ts";
+import type { Plan, ValidationResult } from "./types.ts";
 
 /** Quality metric result. */
 export interface QualityMetric {

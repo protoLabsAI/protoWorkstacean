@@ -1,4 +1,7 @@
-# How to Configure Discord
+---
+title: How to Configure Discord
+---
+
 
 _This is a how-to guide. It covers bot setup, `discord.yaml` configuration, slash commands, and autocomplete._
 

@@ -5,10 +5,10 @@
  * hierarchy, producing primitive action sequences for the A* planner.
  */
 
-import type { Action, CompositeTask, HierarchyLevel, PlannerState } from "./types.ts";
+import type { Action, HierarchyLevel, PlannerState } from "./types.ts";
 import { HIERARCHY_ORDER } from "./types.ts";
 import { TaskNetwork } from "./task-network.ts";
-import { childLevel, isPrimitiveLevel } from "./hierarchy-levels.ts";
+import { isPrimitiveLevel } from "./hierarchy-levels.ts";
 
 /** Result of HTN decomposition. */
 export interface DecompositionResult {

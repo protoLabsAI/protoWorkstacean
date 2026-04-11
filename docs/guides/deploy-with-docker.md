@@ -28,6 +28,8 @@ services:
     ports:
       # Expose the HTTP API on the host (adjust or remove for internal-only)
       - "3000:3000"
+      # Expose the Astro dashboard + WebSocket event stream (disable with DISABLE_EVENT_VIEWER)
+      - "8080:8080"
     volumes:
       # Workspace config (agents, goals, actions, ceremonies, domains)
       - ./workspace:/workspace
@@ -134,6 +136,16 @@ curl http://localhost:3000/health
 
 Docker's healthcheck (`test: curl -f ...`) will restart the container if this endpoint stops responding.
 
+## Dashboard
+
+The Astro dashboard is built during the Docker image build and served by the event-viewer plugin on port `8080`. Once the stack is up:
+
+```bash
+open http://localhost:8080
+```
+
+Set `DISABLE_EVENT_VIEWER=1` in `.env` to skip the plugin entirely (e.g. for headless deployments). See the [Dashboard reference](../../reference/dashboard) for pages, API client, and cache behavior.
+
 ## Production docker-compose with ava
 
 If you run ava alongside workstacean in the same Compose project:
@@ -194,3 +206,4 @@ volumes:
 - [Getting Started](../../tutorials/getting-started)
 - [Environment variables reference](../../reference/env-vars)
 - [HTTP API reference](../../reference/http-api)
+- [Dashboard reference](../../reference/dashboard)

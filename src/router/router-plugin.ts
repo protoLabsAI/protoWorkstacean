@@ -49,6 +49,14 @@ export interface RouterConfig {
   channelRegistry?: ChannelRegistry;
 }
 
+/** Build reply topic from channel + optional recipient. */
+function buildReplyTopic(channel: string, recipient?: string): string {
+  if (channel === "signal") {
+    return recipient ? `message.outbound.signal.${recipient}` : "message.outbound.signal.cron";
+  }
+  return `message.outbound.${channel}`;
+}
+
 export class RouterPlugin implements Plugin {
   readonly name = "router";
   readonly description =
@@ -275,13 +283,7 @@ export class RouterPlugin implements Plugin {
     const runId = crypto.randomUUID();
 
     // Construct reply topic from channel/recipient (matches AgentPlugin's old logic)
-    const replyTopic =
-      msg.reply?.topic ??
-      (channel === "signal" && recipient
-        ? `message.outbound.signal.${recipient}`
-        : channel === "signal"
-          ? "message.outbound.signal.cron"
-          : `message.outbound.${channel}`);
+    const replyTopic = msg.reply?.topic ?? buildReplyTopic(channel, recipient);
 
     console.log(
       `[router] cron "${msg.topic}" → skill "${match.skill}" (via ${match.via}) → ${replyTopic}`,

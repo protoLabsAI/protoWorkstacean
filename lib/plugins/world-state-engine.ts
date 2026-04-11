@@ -1,4 +1,13 @@
 /**
+ * TODO(refactor): This file is 606 lines mixing engine + Redis + SQLite + HTTP
+ * collector factory + MCP tool factory. When next touching, consider splitting:
+ *   lib/plugins/world-state/engine.ts — core state machine, domain registry
+ *   lib/plugins/world-state/redis-cache.ts — Redis fast-path + fallback
+ *   lib/plugins/world-state/snapshot-store.ts — SQLite persistence
+ *   lib/plugins/world-state/http-collector.ts — createHttpCollector factory
+ *   lib/plugins/world-state/mcp-tool.ts — MCP tool factory
+ *   lib/plugins/world-state-engine.ts — plugin shell
+ *
  * WorldStateEngine — generic, application-agnostic world state machine.
  *
  * The engine makes no assumptions about what domains exist. Applications
