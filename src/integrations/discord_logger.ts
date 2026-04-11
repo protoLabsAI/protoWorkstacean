@@ -1,4 +1,5 @@
 import type { GoalViolation } from "../types/goals.ts";
+import { HttpClient } from "../services/http-client.ts";
 
 const SEVERITY_COLORS: Record<string, number> = {
   low: 0x3498db,      // blue
@@ -14,9 +15,11 @@ const SEVERITY_COLORS: Record<string, number> = {
  */
 export class DiscordLogger {
   private webhookUrl: string | null;
+  private readonly http: HttpClient;
 
   constructor(webhookUrl?: string) {
     this.webhookUrl = webhookUrl ?? process.env.DISCORD_GOALS_WEBHOOK_URL ?? null;
+    this.http = new HttpClient({ timeoutMs: 10_000 });
     if (!this.webhookUrl) {
       console.info("[discord-logger] DISCORD_GOALS_WEBHOOK_URL not set — using console fallback");
     }
@@ -32,18 +35,7 @@ export class DiscordLogger {
     const embed = this._buildEmbed(violation);
 
     try {
-      const resp = await fetch(this.webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ embeds: [embed] }),
-        signal: AbortSignal.timeout(10_000),
-      });
-
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => "");
-        throw new Error(`Discord webhook error ${resp.status}: ${body}`);
-      }
-
+      await this.http.post(this.webhookUrl, { embeds: [embed] });
       return true;
     } catch (err) {
       console.error("[discord-logger] Discord integration error:", err);

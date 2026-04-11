@@ -20,6 +20,13 @@ import { validateComments } from "../diff/validateComments.ts";
 import { buildSummaryPrompt, buildInlineReviewPrompt } from "./promptBuilder.ts";
 import type { PRFile, ReviewResult, ReviewBatch } from "./types.ts";
 import type { LLMComment, AnnotatedHunk } from "../diff/types.ts";
+import { HttpClient } from "../services/http-client.ts";
+
+const GH_HEADERS = {
+  Accept: "application/vnd.github+json",
+  "User-Agent": "protoWorkstacean/1.0",
+  "X-GitHub-Api-Version": "2022-11-28",
+};
 
 /** Token budget: 80% of ~100k Sonnet context window. */
 const TOKEN_BUDGET = 80_000;
@@ -94,23 +101,11 @@ async function fetchPRFiles(
   owner: string,
   repo: string,
   prNumber: number,
-  token: string,
+  http: HttpClient,
 ): Promise<PRFile[]> {
-  const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "User-Agent": "protoWorkstacean/1.0",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
-
-  if (!res.ok) {
-    throw new Error(`GitHub API error fetching PR files: ${res.status} ${await res.text()}`);
-  }
-
-  return res.json() as Promise<PRFile[]>;
+  return http.get(
+    `/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`,
+  ) as Promise<PRFile[]>;
 }
 
 /**
@@ -120,23 +115,9 @@ async function fetchPRMeta(
   owner: string,
   repo: string,
   prNumber: number,
-  token: string,
+  http: HttpClient,
 ): Promise<{ title: string; body: string; headSha: string; draft: boolean }> {
-  const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "User-Agent": "protoWorkstacean/1.0",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
-
-  if (!res.ok) {
-    throw new Error(`GitHub API error fetching PR meta: ${res.status} ${await res.text()}`);
-  }
-
-  const data = await res.json() as {
+  const data = await http.get(`/repos/${owner}/${repo}/pulls/${prNumber}`) as {
     title: string;
     body: string | null;
     draft: boolean;
@@ -174,10 +155,16 @@ export async function review(
   const client = new Anthropic({ apiKey });
   const token = await getToken(owner, repo);
 
+  const ghHttp = new HttpClient({
+    baseUrl: "https://api.github.com",
+    headers: GH_HEADERS,
+    auth: { type: "bearer", token },
+  });
+
   // Fetch PR metadata and files
   const [meta, files] = await Promise.all([
-    fetchPRMeta(owner, repo, prNumber, token),
-    fetchPRFiles(owner, repo, prNumber, token),
+    fetchPRMeta(owner, repo, prNumber, ghHttp),
+    fetchPRFiles(owner, repo, prNumber, ghHttp),
   ]);
 
   // Skip draft PRs

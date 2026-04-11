@@ -3,6 +3,8 @@
  * the overall review decision (APPROVE / REQUEST_CHANGES) from the GitHub API.
  */
 
+import { HttpClient } from "../http-client.ts";
+
 const GITHUB_API = "https://api.github.com";
 const USER_AGENT = "protoWorkstacean/1.0";
 
@@ -37,13 +39,16 @@ export interface PRReviewData {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function makeHeaders(token: string): Record<string, string> {
-  return {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-    "User-Agent": USER_AGENT,
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
+function makeGitHubClient(token: string): HttpClient {
+  return new HttpClient({
+    baseUrl: GITHUB_API,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": USER_AGENT,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
 }
 
 // ── Fetchers ───────────────────────────────────────────────────────────────────
@@ -53,19 +58,17 @@ function makeHeaders(token: string): Record<string, string> {
  * Returns empty string if unavailable.
  */
 export async function fetchPRDiff(meta: PRMetadata, token: string): Promise<string> {
+  const client = makeGitHubClient(token);
   const url = `${GITHUB_API}/repos/${meta.owner}/${meta.repo}/pulls/${meta.prNumber}`;
   try {
-    const res = await fetch(url, {
-      headers: {
-        ...makeHeaders(token),
-        Accept: "application/vnd.github.diff",
-      },
+    const resp = await client.fetch(url, {
+      headers: { Accept: "application/vnd.github.diff" },
     });
-    if (!res.ok) {
-      console.error(`[diff-fetcher] fetchPRDiff failed ${res.status}`);
+    if (!resp.ok) {
+      console.error(`[diff-fetcher] fetchPRDiff failed ${resp.status}`);
       return "";
     }
-    return await res.text();
+    return await resp.text();
   } catch (err) {
     console.error("[diff-fetcher] fetchPRDiff error:", err);
     return "";
@@ -79,14 +82,11 @@ export async function fetchReviewComments(
   meta: PRMetadata,
   token: string,
 ): Promise<ReviewComment[]> {
-  const url = `${GITHUB_API}/repos/${meta.owner}/${meta.repo}/pulls/${meta.prNumber}/comments`;
+  const client = makeGitHubClient(token);
   try {
-    const res = await fetch(url, { headers: makeHeaders(token) });
-    if (!res.ok) {
-      console.error(`[diff-fetcher] fetchReviewComments failed ${res.status}`);
-      return [];
-    }
-    const raw = await res.json() as Array<{
+    const raw = await client.get(
+      `/repos/${meta.owner}/${meta.repo}/pulls/${meta.prNumber}/comments`,
+    ) as Array<{
       body?: string;
       path?: string;
       line?: number | null;
@@ -115,12 +115,11 @@ export async function fetchReviewDecision(
   meta: PRMetadata,
   token: string,
 ): Promise<ReviewDecision> {
-  const url = `${GITHUB_API}/repos/${meta.owner}/${meta.repo}/pulls/${meta.prNumber}/reviews`;
+  const client = makeGitHubClient(token);
   try {
-    const res = await fetch(url, { headers: makeHeaders(token) });
-    if (!res.ok) return "PENDING";
-
-    const reviews = await res.json() as Array<{
+    const reviews = await client.get(
+      `/repos/${meta.owner}/${meta.repo}/pulls/${meta.prNumber}/reviews`,
+    ) as Array<{
       state?: string;
       submitted_at?: string;
     }>;

@@ -36,6 +36,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import type { WorldState, WorldStateDomain, WorldStateSnapshot } from "../types/world-state.ts";
+import { HttpClient } from "../../src/services/http-client.ts";
 
 // ── Domain registration ───────────────────────────────────────────────────────
 
@@ -589,26 +590,11 @@ export function createHttpCollector(
   url: string,
   opts: { timeoutMs?: number; headers?: Record<string, string> } = {},
 ): DomainCollector {
-  return async () => {
-    const resp = await fetch(url, {
-      method: "GET",
-      headers: opts.headers,
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
-    });
-
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status} from ${url}`);
-    }
-
-    const json = await resp.json();
-
-    // Unwrap standard API envelope: { success, data } → data
-    if (json && typeof json === "object" && "data" in json && "success" in json) {
-      return json.data;
-    }
-
-    return json;
-  };
+  const http = new HttpClient({
+    timeoutMs: opts.timeoutMs ?? 10_000,
+    headers: opts.headers,
+  });
+  return () => http.get(url, { unwrapEnvelope: true });
 }
 
 // ── MCP tool factory ──────────────────────────────────────────────────────────
