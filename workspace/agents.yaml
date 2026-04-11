@@ -6,6 +6,11 @@ agents:
   - name: ava
     url: "${AVA_BASE_URL}/a2a"
     apiKeyEnv: AVA_API_KEY
+    # Per-agent Discord bot — DiscordPlugin's agent pool spins up a
+    # dedicated Client() so users can @-mention or DM @ava-bot directly
+    # instead of routing through the shared workstacean bot. The token
+    # must already be present in process env.
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_AVA
     skills:
       - name: sitrep
         description: Situation report — board state, running agents, escalations
@@ -23,12 +28,27 @@ agents:
   # bridge into protoLabs Studio for product context. Skills are still TBD;
   # start with chat so we can dispatch ad-hoc content work before wiring the
   # full Jon/Cindi skill surface in task #72.
+  #
+  # Jon + Cindi are surfaced through the same protoContent runtime but
+  # each has their own Discord persona. DISCORD_BOT_TOKEN_JON is provisioned
+  # today; Cindi's token will land when her agent card ships. Using Jon's
+  # token here so DMs to @jon-bot reach the protoContent runtime directly.
   - name: protocontent
     url: "${PROTOCONTENT_BASE_URL}/a2a"
     apiKeyEnv: PROTOCONTENT_A2A_KEY
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_JON
     skills:
       - name: chat
         description: Open-ended content + GTM dialogue with protoContent (Jon + Cindi)
+
+  # Frank — personal chaos lab runtime. His Discord bot is the pool's
+  # entry point for messages that aren't fleet-operations (ask Frank about
+  # an idea, a random experiment, a personal note). He's not in the
+  # skill-broker registry yet — just a Discord presence via the token below.
+  - name: frank
+    url: "${FRANK_BASE_URL:-http://frank:3020}/a2a"
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_FRANK
+    skills: []
 
   # Quinn — standalone QA engineer (labs/quinn nanobot/LangGraph agent).
   # Submits FORMAL GitHub reviews (APPROVE/REQUEST_CHANGES/COMMENT) via the
@@ -37,7 +57,9 @@ agents:
   # Posts as @protoquinn[bot] via installation token minted in her entrypoint
   # from QUINN_APP_ID + QUINN_APP_PRIVATE_KEY, refreshed every 45 min.
   # chat is uncovered here — Discord DMs fall through to ROUTER_DM_DEFAULT_AGENT
-  # (currently ava) for free-form conversation.
+  # (currently ava) for free-form conversation. Note: DISCORD_BOT_TOKEN_QUINN
+  # is the same as the primary DISCORD_BOT_TOKEN, so Quinn's Discord identity
+  # is already live via the shared client — not duplicated in the agent pool.
   - name: quinn
     url: "${QUINN_BASE_URL}/a2a"
     skills:
