@@ -23,7 +23,7 @@ import type {
 import type { GoalViolatedEventPayload } from "../types/events.ts";
 import { TOPICS } from "../event-bus/topics.ts";
 import { ActionRegistry } from "../planner/action-registry.ts";
-import { matchActions } from "../planner/pattern-matcher.ts";
+import { matchActions, evaluatePrecondition } from "../planner/pattern-matcher.ts";
 import { LoopDetector } from "../planner/loop-detector.ts";
 import { CooldownManager } from "../planner/cooldown-manager.ts";
 
@@ -52,6 +52,9 @@ export class PlannerPluginL0 implements Plugin {
   /** Tracks correlationIds currently in-flight to avoid double-dispatch. */
   private readonly inFlightGoals = new Set<string>();
 
+  /** Latest world state snapshot, used for precondition checks on goal violations. */
+  private lastWorldState: WorldState | null = null;
+
   constructor(
     private readonly registry: ActionRegistry,
     private readonly pluginConfig: PlannerPluginL0Config = {}
@@ -70,6 +73,7 @@ export class PlannerPluginL0 implements Plugin {
       this.name,
       (msg: BusMessage) => {
         const worldState = msg.payload as WorldState;
+        this.lastWorldState = worldState;
         this.evaluate(worldState, msg.correlationId);
       }
     );
@@ -95,6 +99,7 @@ export class PlannerPluginL0 implements Plugin {
         const payload = msg.payload as GoalViolatedEventPayload;
         const violation = payload.violation;
         const matchingActions = this.registry.getByGoal(violation.goalId);
+        const currentState = this.lastWorldState;
         for (const action of matchingActions) {
           if (this.inFlightGoals.has(action.goalId)) continue;
           if (this.cooldownManager.isOnCooldown(action.goalId, action.id)) continue;
@@ -102,8 +107,12 @@ export class PlannerPluginL0 implements Plugin {
             this.handleOscillation(action.goalId, action.id, msg.correlationId);
             continue;
           }
+          // Check preconditions against current world state before dispatching
+          if (currentState !== null && !action.preconditions.every((p) => evaluatePrecondition(p, currentState))) {
+            continue;
+          }
           this.inFlightGoals.add(action.goalId);
-          this.dispatchAction(action, {} as WorldState, msg.correlationId);
+          this.dispatchAction(action, currentState ?? ({} as WorldState), msg.correlationId);
         }
       }
     );
