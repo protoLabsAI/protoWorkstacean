@@ -18,7 +18,7 @@
  *   DISCORD_DIGEST_CHANNEL  fallback channel ID for cron-triggered posts
  */
 
-import { readFileSync, existsSync, watchFile, unwatchFile, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, watchFile, unwatchFile, mkdirSync, readdirSync } from "node:fs";
 import type { ChannelRegistry } from "../channels/channel-registry.ts";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -163,16 +163,60 @@ interface AgentsYaml {
 }
 
 function loadAgentPoolDefs(workspaceDir: string): AgentPoolEntry[] {
+  const seen = new Map<string, AgentPoolEntry>();
+
+  // 1. A2A registry — workspace/agents.yaml (external agents)
   const agentsPath = join(workspaceDir, "agents.yaml");
-  if (!existsSync(agentsPath)) return [];
-  try {
-    const raw = readFileSync(agentsPath, "utf8");
-    const parsed = parseYaml(raw) as AgentsYaml;
-    return parsed.agents ?? [];
-  } catch (err) {
-    console.error("[discord] Failed to parse agents.yaml:", err);
-    return [];
+  if (existsSync(agentsPath)) {
+    try {
+      const raw = readFileSync(agentsPath, "utf8");
+      const parsed = parseYaml(raw) as AgentsYaml;
+      for (const entry of parsed.agents ?? []) {
+        if (entry?.name) seen.set(entry.name, entry);
+      }
+    } catch (err) {
+      console.error("[discord] Failed to parse agents.yaml:", err);
+    }
   }
+
+  // 2. In-process agents — workspace/agents/*.yaml (runtime agents loaded
+  //    by AgentRuntimePlugin). Each can also declare discordBotTokenEnvKey
+  //    so the agent pool spins up a dedicated Client for it — without
+  //    this second scan, in-process agents can never get their own
+  //    Discord bot identity.
+  const agentsDir = join(workspaceDir, "agents");
+  if (existsSync(agentsDir)) {
+    try {
+      for (const file of readdirSync(agentsDir)) {
+        if (!(file.endsWith(".yaml") || file.endsWith(".yml"))) continue;
+        if (file.endsWith(".example") || file.endsWith(".retired")) continue;
+        const filePath = join(agentsDir, file);
+        try {
+          const parsed = parseYaml(readFileSync(filePath, "utf8")) as {
+            name?: string;
+            discordBotTokenEnvKey?: string;
+          };
+          if (parsed?.name && typeof parsed.discordBotTokenEnvKey === "string") {
+            // First source wins — A2A registry takes precedence so external
+            // agents with a Discord surface aren't silently overridden by
+            // an in-process agent of the same name.
+            if (!seen.has(parsed.name)) {
+              seen.set(parsed.name, {
+                name: parsed.name,
+                discordBotTokenEnvKey: parsed.discordBotTokenEnvKey,
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`[discord] Failed to parse agent file ${file}:`, err);
+        }
+      }
+    } catch (err) {
+      console.error("[discord] Failed to enumerate workspace/agents/:", err);
+    }
+  }
+
+  return Array.from(seen.values());
 }
 
 // ── Projects loader (for autocomplete + project resolution) ───────────────────
