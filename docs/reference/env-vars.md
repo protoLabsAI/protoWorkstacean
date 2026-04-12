@@ -141,7 +141,7 @@ Any environment variable can be interpolated into domain URLs and headers in `wo
 
 ```yaml
 domains:
-  - name: ava_board
+  - name: protomaker_board
     url: "${AVA_BASE_URL}/api/world/board"
     headers:
       X-API-Key: "${AVA_API_KEY}"

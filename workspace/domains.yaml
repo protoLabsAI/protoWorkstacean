@@ -11,14 +11,18 @@
 #   5. Set env vars (APP_BASE_URL, APP_API_KEY)
 
 domains:
-  # ── Ava (protoMaker Studio) ────────────────────────────────────────
-  - name: ava_board
+  # ── protoMaker team (multi-agent board runtime) ────────────────────
+  # The AVA_* env var names are historical — they describe the HTTP
+  # server identity, not the logical agent slug. See docs/explanation/
+  # agent-identity.md for the full split between the protoMaker team
+  # and the in-process Ava chat agent.
+  - name: protomaker_board
     url: "${AVA_BASE_URL}/api/world/board"
     tickMs: 60000
     headers:
       X-API-Key: "${AVA_API_KEY}"
 
-  - name: ava_pipeline
+  - name: protomaker_pipeline
     url: "${AVA_BASE_URL}/api/world/agent-health"
     tickMs: 60000
     headers:

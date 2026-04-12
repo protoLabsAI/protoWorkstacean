@@ -42,7 +42,7 @@ Example with URL and header interpolation:
 
 ```yaml
 domains:
-  - name: ava_board
+  - name: protomaker_board
     url: "${AVA_BASE_URL}/api/world/board"
     tickMs: 60000
     headers:
