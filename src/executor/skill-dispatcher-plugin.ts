@@ -158,7 +158,13 @@ export class SkillDispatcherPlugin implements Plugin {
       groupId = `system_${systemActor}`;
     }
 
-    if (groupId && rawContent) {
+    // Skills that are purely conversational (no tools, no board context needed)
+    // skip memory enrichment entirely. Prepending cross-agent episode history
+    // to a casual chat makes the agent parrot back stale context from prior
+    // Quinn / protoMaker dispatches instead of just answering the question.
+    const SKIP_MEMORY_SKILLS = new Set(["chat"]);
+
+    if (groupId && rawContent && !SKIP_MEMORY_SKILLS.has(skill)) {
       const [sharedCtx, agentCtx] = await Promise.all([
         this.graphiti.getContextBlock(groupId, rawContent).catch(() => ""),
         agentGroupId ? this.graphiti.getContextBlock(agentGroupId, rawContent).catch(() => "") : Promise.resolve(""),
