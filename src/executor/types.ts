@@ -28,6 +28,9 @@ export interface SkillRequest {
   correlationId: string;
   /** Parent span ID — the bus message ID that produced this request. */
   parentId?: string;
+  /** A2A context ID for multi-turn conversations. When set, A2AExecutor uses
+   *  this instead of correlationId, enabling conversation continuity across turns. */
+  contextId?: string;
   /** Topic to publish the response on. */
   replyTopic: string;
   /** Full original bus message payload — typed with known agent.skill.request fields. */

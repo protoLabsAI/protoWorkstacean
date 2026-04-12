@@ -54,8 +54,8 @@ export class A2AExecutor implements IExecutor {
           role: "user",
           parts: [{ kind: "text", text }],
         },
-        // contextId carries the trace ID across the boundary
-        contextId: req.correlationId,
+        // contextId carries conversation state; correlationId is the trace ID
+        contextId: req.contextId ?? req.correlationId,
         metadata: {
           skillHint: req.skill,
           correlationId: req.correlationId,

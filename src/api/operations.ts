@@ -2,9 +2,9 @@
  * Operations routes — ceremonies, skills, channels, HITL, onboard, publish.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { Route, ApiContext } from "./types.ts";
 import { serveWorkspaceYaml } from "./types.ts";
 
@@ -96,6 +96,72 @@ export function createRoutes(ctx: ApiContext): Route[] {
     return Response.json({ success: true, message: "Onboarding request published" });
   }
 
+  async function handleCreateCeremony(req: Request): Promise<Response> {
+    if (ctx.apiKey && req.headers.get("X-API-Key") !== ctx.apiKey) {
+      return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    let body: Record<string, unknown>;
+    try { body = (await req.json()) as Record<string, unknown>; }
+    catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
+
+    const id = body.id as string | undefined;
+    const name = body.name as string | undefined;
+    const schedule = body.schedule as string | undefined;
+    const skill = body.skill as string | undefined;
+
+    if (!id || !name || !schedule || !skill) {
+      return Response.json({ success: false, error: "id, name, schedule, and skill are required" }, { status: 400 });
+    }
+    if (!/^[\w.\-]+$/.test(id)) {
+      return Response.json({ success: false, error: "Invalid ceremony id (alphanumeric, dots, dashes only)" }, { status: 400 });
+    }
+
+    const ceremony = {
+      id,
+      name,
+      schedule,
+      skill,
+      targets: (body.targets as string[]) ?? ["all"],
+      notifyChannel: (body.notifyChannel as string) ?? "",
+      enabled: body.enabled !== false,
+    };
+
+    const ceremoniesDir = join(ctx.workspaceDir, "ceremonies");
+    if (!existsSync(ceremoniesDir)) mkdirSync(ceremoniesDir, { recursive: true });
+    writeFileSync(join(ceremoniesDir, `${id}.yaml`), stringifyYaml(ceremony));
+
+    return Response.json({ success: true, data: ceremony });
+  }
+
+  async function handleUpdateCeremony(req: Request, id: string): Promise<Response> {
+    if (ctx.apiKey && req.headers.get("X-API-Key") !== ctx.apiKey) {
+      return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    const filePath = join(ctx.workspaceDir, "ceremonies", `${id}.yaml`);
+    if (!existsSync(filePath)) {
+      return Response.json({ success: false, error: `Ceremony "${id}" not found` }, { status: 404 });
+    }
+
+    let body: Record<string, unknown>;
+    try { body = (await req.json()) as Record<string, unknown>; }
+    catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
+
+    const existing = parseYaml(readFileSync(filePath, "utf8")) as Record<string, unknown>;
+    const updated = { ...existing, ...body, id };
+    writeFileSync(filePath, stringifyYaml(updated));
+
+    return Response.json({ success: true, data: updated });
+  }
+
+  async function handleDeleteCeremony(req: Request, id: string): Promise<Response> {
+    if (ctx.apiKey && req.headers.get("X-API-Key") !== ctx.apiKey) {
+      return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    const filePath = join(ctx.workspaceDir, "ceremonies", `${id}.yaml`);
+    if (existsSync(filePath)) unlinkSync(filePath);
+    return Response.json({ success: true, message: `Ceremony "${id}" deleted` });
+  }
+
   return [
     { method: "GET",  path: "/health",                  handler: () => Response.json({ status: "ok", timestamp: Date.now() }) },
     { method: "POST", path: "/publish",                 handler: (req) => handlePublish(req) },
@@ -104,7 +170,10 @@ export function createRoutes(ctx: ApiContext): Route[] {
     { method: "GET",  path: "/api/agents",              handler: () => serveWorkspaceYaml(ctx.workspaceDir, "agents.yaml", "agents") },
     { method: "GET",  path: "/api/goals",               handler: () => serveWorkspaceYaml(ctx.workspaceDir, "goals.yaml", "goals") },
     { method: "GET",  path: "/api/ceremonies",          handler: () => handleGetCeremonies() },
+    { method: "POST", path: "/api/ceremonies/create",   handler: (req) => handleCreateCeremony(req) },
     { method: "POST", path: "/api/ceremonies/:id/run",  handler: (req, p) => handleRunCeremony(req, p.id) },
+    { method: "POST", path: "/api/ceremonies/:id/update", handler: (req, p) => handleUpdateCeremony(req, p.id) },
+    { method: "POST", path: "/api/ceremonies/:id/delete", handler: (req, p) => handleDeleteCeremony(req, p.id) },
     { method: "GET",  path: "/api/skills/:agentName",   handler: (_, p) => handleGetAgentSkills(p.agentName) },
     { method: "GET",  path: "/api/channels",            handler: () => Response.json({ success: true, data: [] }) },
     { method: "GET",  path: "/api/hitl/pending",        handler: () => Response.json({ success: true, data: hitlPlugin?.getPendingRequests() ?? [] }) },

@@ -391,10 +391,72 @@ export function createRoutes(ctx: ApiContext): Route[] {
     return Response.json({ totalBypassActors, unprotectedRepoCount, projects });
   }
 
+  async function handleCreateIssue(req: Request): Promise<Response> {
+    if (ctx.apiKey && req.headers.get("X-API-Key") !== ctx.apiKey) {
+      return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    if (!GITHUB_TOKEN) {
+      return Response.json({ success: false, error: "GITHUB_TOKEN not set" }, { status: 500 });
+    }
+
+    let body: Record<string, unknown>;
+    try { body = (await req.json()) as Record<string, unknown>; }
+    catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
+
+    const repo = body.repo as string | undefined;
+    const title = body.title as string | undefined;
+    const issueBody = body.body as string | undefined;
+    const labels = body.labels as string[] | undefined;
+
+    if (!repo || !title) {
+      return Response.json({ success: false, error: "repo and title are required" }, { status: 400 });
+    }
+
+    // Security: only allow issues on managed repos
+    const managed = repos();
+    if (!managed.includes(repo)) {
+      return Response.json(
+        { success: false, error: `Repo "${repo}" is not in projects.yaml` },
+        { status: 403 },
+      );
+    }
+
+    try {
+      const data = await ghHttp.fetch(`https://api.github.com/repos/${repo}/issues`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        body: JSON.stringify({
+          title,
+          body: issueBody ?? "",
+          labels: labels ?? [],
+        }),
+      });
+
+      if (!data.ok) {
+        const errText = await data.text().catch(() => "(no body)");
+        return Response.json({ success: false, error: `GitHub API: ${data.status} ${errText}` }, { status: data.status });
+      }
+
+      const issue = await data.json() as { number: number; html_url: string; title: string };
+      return Response.json({
+        success: true,
+        data: { number: issue.number, html_url: issue.html_url, title: issue.title },
+      });
+    } catch (e) {
+      return Response.json({ success: false, error: String(e) }, { status: 502 });
+    }
+  }
+
   return [
-    { method: "GET", path: "/api/ci-health",          handler: () => handleGetCiHealth() },
-    { method: "GET", path: "/api/pr-pipeline",        handler: () => handleGetPrPipeline() },
-    { method: "GET", path: "/api/branch-drift",       handler: () => handleGetBranchDrift() },
-    { method: "GET", path: "/api/branch-protection",  handler: () => handleGetBranchProtection() },
+    { method: "GET",  path: "/api/ci-health",          handler: () => handleGetCiHealth() },
+    { method: "GET",  path: "/api/pr-pipeline",        handler: () => handleGetPrPipeline() },
+    { method: "GET",  path: "/api/branch-drift",       handler: () => handleGetBranchDrift() },
+    { method: "GET",  path: "/api/branch-protection",  handler: () => handleGetBranchProtection() },
+    { method: "POST", path: "/api/github/issues",      handler: (req) => handleCreateIssue(req) },
   ];
 }
