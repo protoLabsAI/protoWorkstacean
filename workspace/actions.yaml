@@ -315,7 +315,7 @@ actions:
     meta:
       topic: "agent.skill.request"
       skillHint: board_health
-      agentId: ava
+      agentId: protomaker
       fireAndForget: true
 
   - id: alert.ava_backlog_piling
@@ -359,7 +359,7 @@ actions:
     meta:
       topic: "agent.skill.request"
       skillHint: auto_mode
-      agentId: ava
+      agentId: protomaker
       fireAndForget: true
 
   # ── Branch protection ─────────────────────────────────────────────

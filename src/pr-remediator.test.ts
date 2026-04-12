@@ -262,7 +262,7 @@ describe("PrRemediatorPlugin — fix_ci", () => {
     };
     expect(p0.skill).toBe("bug_triage");
     // skill-dispatcher routes by payload.meta.agentId, not top-level agentId
-    expect(p0.meta.agentId).toBe("ava");
+    expect(p0.meta.agentId).toBe("protomaker");
     expect(p0.meta.skillHint).toBe("bug_triage");
     // Project targeting — reaches Ava via A2AExecutor's `...req.payload` spread
     expect(p0.projectSlug).toBe("protomaker");
@@ -320,7 +320,7 @@ describe("PrRemediatorPlugin — address_feedback", () => {
       meta: { agentId: string };
     };
     expect(p.skill).toBe("bug_triage");
-    expect(p.meta.agentId).toBe("ava");
+    expect(p.meta.agentId).toBe("protomaker");
     expect(p.projectSlug).toBe("protomaker");
     expect(p.projectRepo).toBe("protoLabsAI/protoMaker");
     expect(p.content).toContain("#55");

@@ -3,14 +3,17 @@
 # URL values support ${ENV_VAR} interpolation.
 
 agents:
-  - name: ava
+  # protoMaker team — the multi-agent runtime at AVA_BASE_URL (historically
+  # called "ava" internally). What we previously collapsed as a single agent
+  # is actually the protoMaker team coordinating board ops, feature lifecycle,
+  # bug triage, and planning. Output surfaces via the shared protoBot Discord
+  # client (DISCORD_BOT_TOKEN_PROTO — the primary listener) rather than a
+  # dedicated pool bot. The env var names (AVA_BASE_URL / AVA_API_KEY) stay
+  # unchanged to avoid a coordinated infisical rename; only the agent slug
+  # changes. Task #86 tracks the rest of the cross-repo terminology cleanup.
+  - name: protomaker
     url: "${AVA_BASE_URL}/a2a"
     apiKeyEnv: AVA_API_KEY
-    # Per-agent Discord bot — DiscordPlugin's agent pool spins up a
-    # dedicated Client() so users can @-mention or DM @ava-bot directly
-    # instead of routing through the shared workstacean bot. The token
-    # must already be present in process env.
-    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_AVA
     skills:
       - name: sitrep
         description: Situation report — board state, running agents, escalations

@@ -762,7 +762,7 @@ export class GitHubPlugin implements Plugin {
               trustTier,
               quarantine: { sanitized: false, patternsFound: [] },
               meta: {
-                agentId: "ava",
+                agentId: "protomaker",
                 skillHint: config.autoTriage.skillHint,
                 systemActor: "auto-triage-sweep",
               },

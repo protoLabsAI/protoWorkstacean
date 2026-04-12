@@ -1202,7 +1202,8 @@ Critical rules:
     //
     // A2AExecutor spreads the full payload into the JSON-RPC message metadata
     // (src/executor/executors/a2a-executor.ts line 58 — `...req.payload`), so
-    // anything in extraMeta reaches Ava's A2A handler as message.metadata.
+    // anything in extraMeta reaches the protoMaker team's A2A handler as
+    // message.metadata.
     this.bus.publish("agent.skill.request", {
       id: crypto.randomUUID(),
       correlationId,
@@ -1216,7 +1217,7 @@ Critical rules:
         // memory layer — skill-dispatcher writes episodes to
         // `system_pr-remediator` so the autonomous loop builds its own
         // episodic history separate from user-chat memory.
-        meta: { agentId: "ava", skillHint, systemActor: "pr-remediator" },
+        meta: { agentId: "protomaker", skillHint, systemActor: "pr-remediator" },
         ...(extraMeta ?? {}),
       },
     });

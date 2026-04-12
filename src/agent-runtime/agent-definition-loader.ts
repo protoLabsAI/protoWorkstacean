@@ -97,6 +97,11 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
         .filter((s): s is AgentSkillDefinition => s !== null)
     : [];
 
+  const discordBotTokenEnvKey =
+    typeof raw.discordBotTokenEnvKey === "string" && raw.discordBotTokenEnvKey.length > 0
+      ? raw.discordBotTokenEnvKey
+      : undefined;
+
   return {
     name: raw.name,
     role: raw.role,
@@ -108,6 +113,7 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
     ...(canDelegate !== undefined ? { canDelegate } : {}),
     maxTurns,
     skills,
+    ...(discordBotTokenEnvKey ? { discordBotTokenEnvKey } : {}),
   };
 }
 
