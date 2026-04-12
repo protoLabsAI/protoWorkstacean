@@ -1,10 +1,11 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
-import { SkillDispatcherPlugin } from "../skill-dispatcher-plugin.ts";
+import { SkillDispatcherPlugin, assembleContext } from "../skill-dispatcher-plugin.ts";
 import { ExecutorRegistry } from "../executor-registry.ts";
 import { FunctionExecutor } from "../executors/function-executor.ts";
 import type { BusMessage } from "../../../lib/types.ts";
 import type { SkillRequest, SkillResult } from "../types.ts";
 import type { GraphitiClient } from "../../../lib/memory/graphiti-client.ts";
+import type { ConversationTurn } from "../../../lib/plugins/logger.ts";
 
 // Minimal in-memory event bus for tests
 function makeBus() {
@@ -339,5 +340,96 @@ describe("SkillDispatcherPlugin — memory enrichment", () => {
     const reply = bus.published.find(m => m.topic === "reply.user");
     expect(reply).toBeDefined();
     expect((reply!.payload as Record<string, unknown>).content).toBe("ok anyway");
+  });
+});
+
+// ── assembleContext pure function ──────────────────────────────────────────────
+
+function makeTurn(overrides: Partial<ConversationTurn> = {}): ConversationTurn {
+  return {
+    role: "user",
+    content: "Hello",
+    channel: "discord",
+    skill: "chat",
+    createdAt: new Date("2024-01-01T12:00:00.000Z").getTime(),
+    ...overrides,
+  };
+}
+
+describe("assembleContext", () => {
+  it("emits only <current_message> when no memory and no turns", () => {
+    const result = assembleContext(undefined, [], "Hello there");
+    expect(result).toBe("<current_message>\nHello there\n</current_message>");
+    expect(result).not.toContain("<recalled_memory>");
+    expect(result).not.toContain("<recent_conversation>");
+  });
+
+  it("includes <recalled_memory> with instruction when memory is provided", () => {
+    const result = assembleContext("- User prefers bullets", [], "Hello");
+    expect(result).toContain("<recalled_memory>");
+    expect(result).toContain("</recalled_memory>");
+    expect(result).toContain("- User prefers bullets");
+    expect(result).toContain("do NOT repeat them back");
+    expect(result).toContain("<current_message>");
+    expect(result).not.toContain("<recent_conversation>");
+  });
+
+  it("includes <recent_conversation> when turns are provided", () => {
+    const turns = [
+      makeTurn({ role: "user", content: "What time is it?", channel: "discord" }),
+      makeTurn({ role: "assistant", content: "It is noon.", channel: "discord" }),
+    ];
+    const result = assembleContext(undefined, turns, "Thanks");
+    expect(result).toContain("<recent_conversation>");
+    expect(result).toContain("</recent_conversation>");
+    expect(result).toContain("What time is it?");
+    expect(result).toContain("It is noon.");
+    expect(result).not.toContain("<recalled_memory>");
+    expect(result).toContain("<current_message>");
+  });
+
+  it("labels turns with ISO timestamp, channel, and role", () => {
+    const ts = new Date("2024-06-15T09:30:00.000Z").getTime();
+    const turns = [
+      makeTurn({ role: "user", content: "Hi", channel: "slack", createdAt: ts }),
+    ];
+    const result = assembleContext(undefined, turns, "Next");
+    expect(result).toContain("2024-06-15T09:30:00.000Z");
+    expect(result).toContain("[slack]");
+    expect(result).toContain("User:");
+  });
+
+  it("omits channel suffix when channel is undefined", () => {
+    const turns = [makeTurn({ channel: undefined })];
+    const result = assembleContext(undefined, turns, "Next");
+    expect(result).not.toMatch(/\[undefined\]/);
+    expect(result).toContain("User:");
+  });
+
+  it("labels assistant turns correctly", () => {
+    const turns = [makeTurn({ role: "assistant", content: "Hello!" })];
+    const result = assembleContext(undefined, turns, "Next");
+    expect(result).toContain("Assistant:");
+  });
+
+  it("emits all three sections in correct order when all data present", () => {
+    const turns = [makeTurn({ content: "Previous question" })];
+    const result = assembleContext("Some facts", turns, "Current question");
+
+    const rmPos = result.indexOf("<recalled_memory>");
+    const rcPos = result.indexOf("<recent_conversation>");
+    const cmPos = result.indexOf("<current_message>");
+
+    expect(rmPos).toBeGreaterThanOrEqual(0);
+    expect(rcPos).toBeGreaterThanOrEqual(0);
+    expect(cmPos).toBeGreaterThanOrEqual(0);
+    expect(rmPos).toBeLessThan(rcPos);
+    expect(rcPos).toBeLessThan(cmPos);
+  });
+
+  it("does not emit empty <recalled_memory> when memory is empty string", () => {
+    const result = assembleContext("", [], "Hello");
+    expect(result).not.toContain("<recalled_memory>");
+    expect(result).toBe("<current_message>\nHello\n</current_message>");
   });
 });

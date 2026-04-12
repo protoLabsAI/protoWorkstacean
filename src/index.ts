@@ -95,9 +95,11 @@ for (const action of actionRegistry.getAll()) {
 const debugPlugin = new DebugPlugin();
 debugPlugin.install(bus);
 
+const loggerPlugin = new LoggerPlugin(dataDir);
+
 const corePlugins: Plugin[] = [
   debugPlugin,
-  new LoggerPlugin(dataDir),
+  loggerPlugin,
   new CLIPlugin(),
   new SignalPlugin(),
   new SchedulerPlugin(dataDir),
@@ -236,7 +238,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { SkillDispatcherPlugin } = await import("./executor/skill-dispatcher-plugin.js");
-      return new SkillDispatcherPlugin(executorRegistry, workspaceDir);
+      return new SkillDispatcherPlugin(executorRegistry, workspaceDir, undefined, loggerPlugin);
     },
   },
   {
