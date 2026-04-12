@@ -11,9 +11,12 @@ import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { CallbackHandler as LangfuseCallbackHandler } from "langfuse-langchain";
 import { HttpClient } from "../../services/http-client.ts";
 import type { AgentDefinition } from "../../agent-runtime/types.ts";
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
+
+const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
 
 export interface DeepAgentConfig {
   gatewayUrl?: string;
@@ -318,11 +321,22 @@ export class DeepAgentExecutor implements IExecutor {
         messageModifier: new SystemMessage(enrichedPrompt),
       });
 
-      console.log(`[deep-agent:${this.agentDef.name}] invoke with ${tools.length} tools, prompt length=${prompt.length}`);
+      const callbacks = LANGFUSE_ENABLED
+        ? [new LangfuseCallbackHandler({
+            publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
+            secretKey: process.env.LANGFUSE_SECRET_KEY!,
+            baseUrl: process.env.LANGFUSE_HOST ?? process.env.LANGFUSE_BASE_URL,
+            sessionId: req.correlationId,
+            userId: this.agentDef.name,
+            metadata: { skill: req.skill, agent: this.agentDef.name },
+          })]
+        : [];
+
+      console.log(`[deep-agent:${this.agentDef.name}] invoke with ${tools.length} tools, prompt length=${prompt.length}, langfuse=${LANGFUSE_ENABLED}`);
 
       const result = await agent.invoke(
         { messages: [{ role: "user", content: prompt }] },
-        { recursionLimit: this.agentDef.maxTurns * 2 + 1 },
+        { recursionLimit: this.agentDef.maxTurns * 2 + 1, callbacks },
       );
 
       const messages = result.messages ?? [];
@@ -352,6 +366,11 @@ export class DeepAgentExecutor implements IExecutor {
         }
       }
 
+      // Flush Langfuse traces
+      for (const cb of callbacks) {
+        await (cb as LangfuseCallbackHandler).flushAsync?.().catch(() => {});
+      }
+
       return {
         text: text || "No response generated.",
         isError: false,
@@ -359,6 +378,12 @@ export class DeepAgentExecutor implements IExecutor {
       };
     } catch (e) {
       console.error(`[deep-agent:${this.agentDef.name}]`, e);
+      // Flush even on error
+      if (LANGFUSE_ENABLED) {
+        for (const cb of callbacks) {
+          await (cb as LangfuseCallbackHandler).flushAsync?.().catch(() => {});
+        }
+      }
       return {
         text: e instanceof Error ? e.message : String(e),
         isError: true,
