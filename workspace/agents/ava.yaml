@@ -23,9 +23,9 @@ systemPrompt: |
 
   ## Your tools
 
-  You have exactly 6 tools. Use them, don't narrate them.
+  You have 7 tools. Use them, don't narrate them.
 
-  **chat_with_agent** — Talk to another agent (Quinn, protoMaker, etc.).
+  **chat_with_agent** — Talk to another agent (Quinn, protoMaker, Researcher, etc.).
   Multi-turn: pass contextId from a prior response to continue. Always
   set done=true on your final message to end the conversation cleanly.
 
@@ -33,6 +33,10 @@ systemPrompt: |
   waiting. Use for background tasks.
 
   **get_world_state** — Read current system health, agent status, domains.
+
+  **web_search** — Quick web search via SearXNG. Use for simple factual
+  lookups. For deep multi-source research, use chat_with_agent with the
+  researcher agent instead.
 
   **manage_board** — Create or update features on the protoMaker board.
 
@@ -54,6 +58,7 @@ systemPrompt: |
   ## Delegation targets
 
   - Quinn (pr_review, bug_triage, security_triage) — QA engineer, reads everything
+  - Researcher (deep_research, summarize) — autonomous research agent with papers, HuggingFace, GitHub, web. Use for "research X in depth" tasks.
   - protoMaker (sitrep, board_health, auto_mode, manage_feature) — board operations
   - protoContent / Jon (chat) — content strategy, antagonistic review on user-initiated plans
   - Frank — infrastructure, deployments
@@ -82,6 +87,7 @@ tools:
   - chat_with_agent
   - delegate_task
   - get_world_state
+  - web_search
   - manage_board
   - create_github_issue
   - manage_cron

@@ -384,10 +384,33 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
+  const webSearch = tool(
+    "web_search",
+    "Quick web search via SearXNG. Use for simple factual lookups. " +
+      "For deep multi-source research, use chat_with_agent with the researcher agent instead.",
+    {
+      query: z.string().describe("Search query"),
+    },
+    async ({ query }) => {
+      const searxngUrl = process.env.SEARXNG_URL ?? "http://searxng:8080";
+      try {
+        const params = new URLSearchParams({ q: query, format: "json", engines: "google,duckduckgo" });
+        const resp = await fetch(`${searxngUrl}/search?${params}`, { signal: AbortSignal.timeout(10_000) });
+        if (!resp.ok) return err(`SearXNG ${resp.status}`);
+        const data = await resp.json() as { results?: Array<{ title: string; content?: string; url?: string }> };
+        const results = (data.results ?? []).slice(0, 5);
+        if (!results.length) return ok({ results: [], message: "No results found." });
+        return ok({ results: results.map(r => ({ title: r.title, snippet: r.content ?? "", url: r.url ?? "" })) });
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
   return [
     publishEvent, getWorldState, getIncidents, reportIncident, getProjects,
     getCiHealth, getPrPipeline, getBranchDrift, getOutcomes, getCeremonies, runCeremony,
-    chatWithAgent, delegateTask, manageBoard, createGitHubIssue, manageCron,
+    chatWithAgent, delegateTask, manageBoard, createGitHubIssue, manageCron, webSearch,
   ];
 }
 
@@ -412,6 +435,7 @@ export const BUS_TOOL_NAMES = [
   "manage_board",
   "create_github_issue",
   "manage_cron",
+  "web_search",
 ] as const;
 
 export type BusToolName = (typeof BUS_TOOL_NAMES)[number];

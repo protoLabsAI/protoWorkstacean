@@ -53,6 +53,18 @@ agents:
     discordBotTokenEnvKey: DISCORD_BOT_TOKEN_FRANK
     skills: []
 
+  # protoResearcher — autonomous AI/ML research agent. Monitors HuggingFace,
+  # GitHub, papers, and the web. Has a hybrid vector+BM25 knowledge store
+  # and three specialized subagents (Explorer, Analyst, Writer).
+  # Ava delegates deep research tasks here via chat_with_agent.
+  - name: researcher
+    url: "http://protoresearcher:7870/a2a"
+    skills:
+      - name: deep_research
+        description: Research a topic in depth — scans papers, HuggingFace, GitHub, web. Returns structured findings with significance ratings.
+      - name: summarize
+        description: Summarize recent research findings from the knowledge store.
+
   # Quinn — standalone QA engineer (labs/quinn nanobot/LangGraph agent).
   # Submits FORMAL GitHub reviews (APPROVE/REQUEST_CHANGES/COMMENT) via the
   # pr_inspector tool, not narrative issue comments — closes the pr-remediator

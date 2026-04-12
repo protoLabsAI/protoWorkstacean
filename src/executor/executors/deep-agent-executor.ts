@@ -236,6 +236,21 @@ function createLangChainTools(toolNames: string[], http: HttpClient) {
       async (input) => JSON.stringify(await http.post(`/api/ceremonies/${input.ceremonyId}/run`, {})),
       { name: "run_ceremony", description: "Trigger a ceremony.", schema: z.object({ ceremonyId: z.string() }) },
     ),
+    web_search: tool(
+      async (input) => {
+        const searxngUrl = process.env.SEARXNG_URL ?? "http://searxng:8080";
+        const params = new URLSearchParams({ q: input.query, format: "json", engines: "google,duckduckgo" });
+        const resp = await fetch(`${searxngUrl}/search?${params}`, { signal: AbortSignal.timeout(10_000) });
+        const data = await resp.json() as { results?: Array<{ title: string; content?: string; url?: string }> };
+        const results = (data.results ?? []).slice(0, 5);
+        return JSON.stringify(results.map(r => ({ title: r.title, snippet: r.content ?? "", url: r.url ?? "" })));
+      },
+      {
+        name: "web_search",
+        description: "Quick web search via SearXNG. For deep research, use chat_with_agent with the researcher agent.",
+        schema: z.object({ query: z.string().describe("Search query") }),
+      },
+    ),
   };
 
   return toolNames.map(n => all[n]).filter((t): t is ReturnType<typeof tool> => t != null);
