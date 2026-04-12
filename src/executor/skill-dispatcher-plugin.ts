@@ -163,8 +163,19 @@ export class SkillDispatcherPlugin implements Plugin {
         this.graphiti.getContextBlock(groupId, rawContent).catch(() => ""),
         agentGroupId ? this.graphiti.getContextBlock(agentGroupId, rawContent).catch(() => "") : Promise.resolve(""),
       ]);
-      const combined = [sharedCtx, agentCtx].filter(Boolean).join("");
-      if (combined) rawContent = `${combined}${rawContent}`;
+      const combined = [sharedCtx, agentCtx].filter(Boolean).join("\n");
+      if (combined) {
+        rawContent =
+          `<recalled_memory>\n` +
+          `The following facts were retrieved from your memory about this user. ` +
+          `Use them as background context if relevant — do NOT repeat them back ` +
+          `to the user or reference them unless the user's message specifically ` +
+          `asks about something they relate to. Focus your response on what the ` +
+          `user is actually saying below.\n\n` +
+          `${combined}\n` +
+          `</recalled_memory>\n\n` +
+          rawContent;
+      }
     }
     // ── End memory enrichment ─────────────────────────────────────────────────
 
