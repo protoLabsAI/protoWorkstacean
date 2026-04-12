@@ -133,6 +133,7 @@ export class AgentExecutor {
             usage = errMsg.usage;
             numTurns = errMsg.num_turns;
           }
+          break;
         }
       }
       // Stream text blocks for logging / debugging
