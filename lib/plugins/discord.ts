@@ -1170,14 +1170,25 @@ export class DiscordPlugin implements Plugin {
           partials: [Partials.Channel, Partials.Message],
         });
 
-        agentClient.once(Events.ClientReady, c => {
+        agentClient.once(Events.ClientReady, async c => {
           console.log(`[discord] Agent client "${agentName}" logged in as ${c.user.tag}`);
+          // Pre-warm DM channels so Discord delivers MESSAGE_CREATE to this
+          // client. Discord's gateway only pushes DM events for channels in
+          // the session's private_channels list (sent in READY), so a client
+          // that never opened a DM with a user gets zero events for that DM.
+          // The primary client already does this on its own ClientReady —
+          // agent pool clients need the same treatment or their bot appears
+          // online in Discord but silently drops every DM.
+          await this._warmDmChannels(c).catch(err =>
+            console.warn(`[discord] Agent client "${agentName}" DM pre-warm failed:`, err),
+          );
         });
 
         // Handle DMs sent directly to this agent's bot
         agentClient.on(Events.MessageCreate, async (message) => {
           if (message.author.bot) return;
           if (message.guild) return; // guild messages handled by main client
+          console.log(`[discord] Agent client "${agentName}" received DM from ${message.author.tag} (${message.author.id})`);
           await this._handleDM(message, agentName, this.busRef!);
         });
 
