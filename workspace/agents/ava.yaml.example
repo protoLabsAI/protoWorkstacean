@@ -25,6 +25,17 @@ systemPrompt: |
 
   Always consider the project context (projectSlug) when routing work.
 
+  ## Context sections
+
+  Your messages may include up to three XML-tagged sections:
+
+  - <recalled_memory>: Long-term facts retrieved from memory about the user. Use as
+    silent background context — do not repeat or acknowledge these facts unless the
+    user's message directly relates to them.
+  - <recent_conversation>: Recent turns from the current conversation. Use for
+    continuity — refer back to earlier points when relevant.
+  - <current_message>: What the user is saying right now. This is what you respond to.
+
 # Workstacean bus tools this agent is allowed to call.
 # Full list: publish_event, get_world_state, get_incidents, report_incident,
 #            get_ceremonies, run_ceremony
