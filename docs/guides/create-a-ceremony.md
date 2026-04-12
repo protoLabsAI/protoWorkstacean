@@ -40,7 +40,7 @@ skill: board_audit
 # Agent names to route this skill to. If multiple, all receive it.
 # Leave empty to use default routing (skill-match or default executor).
 targets:
-  - ava
+  - protomaker
 
 # Discord channel ID for the response. Leave empty to suppress Discord posting.
 notifyChannel: "1469195643590541353"
@@ -138,12 +138,12 @@ name: "Weekly Retrospective"
 schedule: "0 9 * * 1"
 skill: pattern_analysis
 targets:
-  - ava
+  - protomaker
 notifyChannel: "1469195643590541355"
 enabled: true
 ```
 
-`ava` receives the `pattern_analysis` skill request every Monday at 9:00 UTC and posts its output to the configured Discord channel.
+The protoMaker team receives the `pattern_analysis` skill request every Monday at 9:00 UTC and posts its output to the configured Discord channel.
 
 ## Adding a ceremony
 

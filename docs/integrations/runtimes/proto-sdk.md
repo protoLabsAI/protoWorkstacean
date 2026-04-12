@@ -53,4 +53,4 @@ If `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set, every session is tra
 
 Use `ProtoSdkExecutor` for any agent that should run inside the workstacean process with direct access to the workstacean bus tools. This is the right choice for most agents.
 
-Use [A2A](a2a) instead when the agent lives in a separate service (e.g. ava, quinn) or needs its own resource isolation.
+Use [A2A](a2a) instead when the agent lives in a separate service (e.g. the protoMaker team, quinn, protoContent) or needs its own resource isolation.

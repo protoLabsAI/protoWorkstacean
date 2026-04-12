@@ -40,12 +40,14 @@ All environment variables recognised by protoWorkstacean, their defaults, and wh
 | `LANGFUSE_BASE_URL` | _(none)_ | ProtoSdkExecutor | LangFuse base URL (e.g. `https://cloud.langfuse.com`). |
 | `LANGFUSE_HOST` | _(none)_ | ProtoSdkExecutor | Alternative LangFuse host (overrides `LANGFUSE_BASE_URL`). |
 
-## A2A / ava
+## A2A / protoMaker team
+
+_These env vars describe the HTTP server identity of the protoMaker team runtime (board ops, planning, feature lifecycle). The `AVA_*` prefix is historical and kept for backwards compatibility with infisical / homelab-iac; the logical agent slug in `workspace/agents.yaml` is `protomaker`._
 
 | Variable | Default | Plugin | Description |
 |----------|---------|--------|-------------|
-| `AVA_BASE_URL` | _(none)_ | WorldStateEngine, SkillBrokerPlugin | Base URL of ava (e.g. `http://ava:3008`). Used for domain URL interpolation and A2A agent registration. |
-| `AVA_API_KEY` | _(none)_ | A2AExecutor, WorldStateEngine | API key sent as `X-API-Key` when polling ava domain endpoints or calling ava's `/a2a` endpoint. |
+| `AVA_BASE_URL` | _(none)_ | WorldStateEngine, SkillBrokerPlugin | Base URL of the protoMaker team server (e.g. `http://ava:3008`). Used for domain URL interpolation and A2A agent registration. |
+| `AVA_API_KEY` | _(none)_ | A2AExecutor, WorldStateEngine | API key sent as `X-API-Key` when polling protoMaker team domain endpoints or calling its `/a2a` endpoint. |
 
 ## Discord
 
@@ -61,12 +63,16 @@ All environment variables recognised by protoWorkstacean, their defaults, and wh
 | `DISCORD_BUDGET_WEBHOOK_URL` | _(none)_ | BudgetPlugin | Webhook URL for budget threshold alerts. |
 | `DISCORD_WEBHOOK_ALERTS` | _(none)_ | Various | General-purpose alert webhook URL (fallback for plugins without a dedicated webhook var). |
 
-Agents can declare their own Discord bot tokens via `discordBotTokenEnvKey` in `agents.yaml`:
+Agents can declare their own Discord bot tokens via `discordBotTokenEnvKey` in either `workspace/agents.yaml` (A2A registry) or `workspace/agents/*.yaml` (in-process definitions). DiscordPlugin's agent pool spins up a dedicated `Client()` per declared bot so users can DM each agent directly. The primary token (`DISCORD_BOT_TOKEN`) is the shared listener — protoBot — which handles guild messages, slash commands, HITL interactions, and DM fallback.
 
 | Variable | Default | Plugin | Description |
 |----------|---------|--------|-------------|
-| `DISCORD_BOT_TOKEN_AVA` | _(none)_ | DiscordPlugin | Per-agent bot token for ava. |
-| `DISCORD_BOT_TOKEN_QUINN` | _(none)_ | DiscordPlugin | Per-agent bot token for Quinn. |
+| `DISCORD_BOT_TOKEN` | _(none)_ | DiscordPlugin | Primary shared client — protoBot. Guild messages, slash commands, HITL interactions, DM fallback. Should be a dedicated protoBot token, not a reuse of any agent-specific token. |
+| `DISCORD_BOT_TOKEN_PROTO` | _(none)_ | (homelab-iac) | Source of truth for protoBot in infisical; `DISCORD_BOT_TOKEN` is interpolated from this in `docker-compose.yml`. |
+| `DISCORD_BOT_TOKEN_AVA` | _(none)_ | DiscordPlugin | In-process Ava — conversational chat agent with no tools. |
+| `DISCORD_BOT_TOKEN_JON` | _(none)_ | DiscordPlugin | protoContent — Jon persona for content/GTM dialogue. |
+| `DISCORD_BOT_TOKEN_FRANK` | _(none)_ | DiscordPlugin | Frank — personal chaos lab runtime (future). |
+| `DISCORD_BOT_TOKEN_QUINN` | _(none)_ | DiscordPlugin | Quinn — @protoquinn[bot]. Used by the pr-remediator + quinn's own container for formal PR reviews. |
 
 ## GitHub
 

@@ -8,7 +8,7 @@ This tutorial walks you through installing protoWorkstacean, writing a minimal w
 
 - [Bun](https://bun.sh) >= 1.1
 - An Anthropic API key (for in-process agent execution)
-- Optional: a running ava instance for A2A routing
+- Optional: a running protoMaker team server for A2A routing (board ops, feature lifecycle)
 
 ## 1. Clone and install
 
@@ -42,11 +42,13 @@ WORKSTACEAN_API_KEY=dev-secret
 WORKSPACE_DIR=./workspace
 ```
 
-If you have ava running, add:
+If you have the protoMaker team server running, add:
 
 ```dotenv
+# AVA_* env vars describe the HTTP server identity — historical name,
+# the logical agent slug in workspace/agents.yaml is `protomaker`.
 AVA_BASE_URL=http://localhost:3008
-AVA_API_KEY=your-ava-key
+AVA_API_KEY=your-protomaker-team-key
 ```
 
 For a full list of variables, see [reference/env-vars.md](../../reference/env-vars).
@@ -56,33 +58,36 @@ For a full list of variables, see [reference/env-vars.md](../../reference/env-va
 The `workspace/` directory holds all runtime configuration. Start from the bundled examples:
 
 ```bash
-# In-process agent definitions
+# In-process agent definitions — ava is the conversational chat agent,
+# frank is a chaos-lab experimental persona. Both are optional; start
+# with just ava to test the in-process pipeline.
 cp workspace/agents/ava.yaml.example   workspace/agents/ava.yaml
 cp workspace/agents/frank.yaml.example workspace/agents/frank.yaml
 
-# External A2A agent registry (leave empty if not using ava)
+# External A2A agent registry — list the protoMaker team, quinn, etc.
 cp workspace/agents.yaml.example workspace/agents.yaml
 
 # Project registry
 cp workspace/projects.yaml.example workspace/projects.yaml
 ```
 
-Edit `workspace/agents/ava.yaml` and set your `systemPrompt`. The file looks like:
+Edit `workspace/agents/ava.yaml` and set your `systemPrompt`. For a minimal
+chat-only Ava:
 
 ```yaml
 name: ava
-role: orchestrator
-model: claude-opus-4-6
+role: general
+model: claude-sonnet-4-6
 systemPrompt: |
-  You are Ava, the Chief of Staff for protoLabs AI. ...
-tools:
-  - publish_event
-  - get_world_state
-maxTurns: 20
+  You are Ava, a conversational protoAgent. You answer questions
+  and think out loud with the user. You have no tools — when a
+  request needs action, suggest which agent is best suited:
+  protoMaker team for board ops, Quinn for PR review, Frank for infra.
+tools: []
+maxTurns: 6
 skills:
-  - name: sitrep
-    description: Generate a situational awareness report
-    keywords: [status, sitrep, /sitrep]
+  - name: chat
+    description: Free-form conversation with the user
 ```
 
 Create minimal stubs for the GOAP files (required at startup):
@@ -101,7 +106,7 @@ bun run src/index.ts
 Startup logs should look like:
 
 ```
-[agent-runtime] loaded agent: ava (orchestrator, 2 skills)
+[agent-runtime] loaded agent: ava (general, 1 skill)
 [skill-broker] loaded 0 external agents
 [ceremony-plugin] loaded 3 ceremonies
 [world-state] domain discovery: 0 domains registered
@@ -135,7 +140,7 @@ curl -X POST http://localhost:3000/publish \
   }'
 ```
 
-`SkillDispatcherPlugin` picks this up, resolves `sitrep` to ava's `ProtoSdkExecutor`, and runs the in-process agent. The result lands on `agent.skill.response.tutorial-001`.
+`SkillDispatcherPlugin` picks this up, resolves `sitrep` to the appropriate executor (the protoMaker team's `A2AExecutor` if you wired it, otherwise the dispatcher will log "no executor" and drop the request). For a pure in-process test, change the skill to `chat` — Ava will answer it directly. The result lands on `agent.skill.response.tutorial-001`.
 
 To read the response, query the SQLite event log:
 
