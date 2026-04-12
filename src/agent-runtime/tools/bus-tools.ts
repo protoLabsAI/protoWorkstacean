@@ -257,19 +257,20 @@ export function createBusTools(opts: BusToolsOptions = {}) {
   const chatWithAgent = tool(
     "chat_with_agent",
     "Synchronous multi-turn conversation with another agent. Omit contextId to " +
-      "start a new conversation. Pass contextId from a prior response to continue. " +
-      "Set done=true on your final message to end the conversation cleanly — this " +
-      "prevents the remote agent from looping with 'anything else?' follow-ups.",
+      "start a new conversation. Pass contextId and taskId from a prior response to " +
+      "continue. Set done=true on your final message to end the conversation cleanly. " +
+      "Response includes taskState (completed, input-required, working, failed).",
     {
       agent: z.string().describe("Agent name: quinn, protomaker, protocontent, frank"),
       message: z.string().describe("What to say to the agent"),
       contextId: z.string().optional().describe("Context ID from a prior turn — omit for new conversation"),
+      taskId: z.string().optional().describe("Task ID from a prior turn — continues a specific task"),
       skill: z.string().optional().describe("Skill hint: pr_review, bug_triage, sitrep, etc."),
       done: z.boolean().optional().describe("Set true on your last message to end the conversation"),
     },
-    async ({ agent, message, contextId, skill, done }) => {
+    async ({ agent, message, contextId, taskId, skill, done }) => {
       try {
-        const data = await http.post("/api/a2a/chat", { agent, message, contextId, skill, done });
+        const data = await http.post("/api/a2a/chat", { agent, message, contextId, taskId, skill, done });
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));

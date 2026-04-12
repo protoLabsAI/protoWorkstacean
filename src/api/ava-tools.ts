@@ -102,12 +102,20 @@ export function createRoutes(ctx: ApiContext): Route[] {
         },
       });
 
+      const remoteTaskId = result.data?.taskId;
+      const remoteContextId = result.data?.contextId ?? conversationId;
+      const taskState = result.data?.taskState ?? "completed";
+
       return Response.json({
         success: true,
         data: {
           response: result.text,
-          // Omit contextId when done — signals conversation end
-          ...(done ? {} : { contextId: conversationId }),
+          // Omit contextId/taskId when done — signals conversation end
+          ...(done ? {} : {
+            contextId: remoteContextId,
+            ...(remoteTaskId ? { taskId: remoteTaskId } : {}),
+          }),
+          taskState,
           correlationId,
           agent,
         },

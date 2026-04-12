@@ -30,11 +30,13 @@ function createLangChainTools(toolNames: string[], http: HttpClient) {
         name: "chat_with_agent",
         description:
           "Multi-turn conversation with another agent. " +
-          "Set done=true on your final message to end cleanly.",
+          "Pass contextId+taskId from prior response to continue. " +
+          "Set done=true on final message. Response includes taskState.",
         schema: z.object({
           agent: z.string(),
           message: z.string(),
           contextId: z.string().optional(),
+          taskId: z.string().optional(),
           skill: z.string().optional(),
           done: z.boolean().optional(),
         }),

@@ -49,6 +49,12 @@ export interface SkillResult {
     usage?: ExtendedUsage;
     numTurns?: number;
     stopReason?: string;
+    /** A2A task ID — thread on follow-up turns for multi-turn continuity. */
+    taskId?: string;
+    /** A2A context ID — groups related tasks in a conversation. */
+    contextId?: string;
+    /** A2A task lifecycle state: working, input-required, completed, failed, etc. */
+    taskState?: string;
   };
 }
 
