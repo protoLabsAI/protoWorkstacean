@@ -51,14 +51,19 @@ X-API-Key: <resolved from apiKeyEnv>
 ```yaml
 # workspace/agents.yaml
 agents:
-  - name: ava
+  # protoMaker team — multi-agent runtime for board ops, planning,
+  # feature lifecycle. The AVA_* env vars keep their historical names
+  # because they describe the HTTP server identity, not the agent slug.
+  - name: protomaker
     type: a2a
     url: "${AVA_BASE_URL}/a2a"
     apiKeyEnv: AVA_API_KEY
     skills:
-      - plan
       - sitrep
-      - triage
+      - board_health
+      - manage_feature
+      - bug_triage
+      - plan
 
   - name: quinn
     type: a2a
@@ -67,6 +72,7 @@ agents:
     skills:
       - pr_review
       - bug_triage
+      - security_triage
 ```
 
 Environment variables are interpolated at registration time from the process environment.
@@ -85,7 +91,7 @@ new A2AExecutor(config: {
 ## When to use
 
 Use `A2AExecutor` when:
-- The agent runs in a separate service (ava, quinn, etc.)
+- The agent runs in a separate service (protoMaker team, quinn, protoContent, frank, etc.)
 - The agent needs its own container, resources, or deployment lifecycle
 - The agent exposes a standard A2A `message/send` endpoint
 

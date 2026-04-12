@@ -45,7 +45,7 @@ Sent as the `payload` of a `message.inbound.onboard` bus message (or the JSON bo
 | `github` | `string` | ✅ | — | Repository in `"owner/repo"` format |
 | `defaultBranch` | `string` | | `"main"` | Default git branch |
 | `team` | `string` | | `"dev"` | Team assignment: `"dev"`, `"gtm"`, etc. |
-| `agents` | `string[]` | | `["ava", "quinn"]` | Agent identifiers to associate |
+| `agents` | `string[]` | | `["protomaker", "quinn"]` | Agent identifiers to associate |
 | `discord` | `object` | | `{}` | Discord channel IDs (`general`, `updates`, `dev`, `alerts`, `releases`) |
 
 ---

@@ -4,8 +4,8 @@ title: Add an Agent
 
 protoWorkstacean supports two agent patterns:
 
-- **In-process** — the agent runs inside the workstacean process, powered by `@protolabsai/sdk`. Skills execute as @protolabsai/sdk sessions with a configurable system prompt and tool whitelist.
-- **External A2A** — the agent runs in a separate service (e.g. ava/protoMaker). protoWorkstacean calls it over HTTP using JSON-RPC 2.0. This is the right choice for stateful agents with their own infrastructure.
+- **In-process** — the agent runs inside the workstacean process, powered by `@protolabsai/sdk`. Skills execute as @protolabsai/sdk sessions with a configurable system prompt and tool whitelist. Example today: `ava` (conversational chat agent, no tools).
+- **External A2A** — the agent runs in a separate service with its own HTTP surface. protoWorkstacean calls it over JSON-RPC 2.0. Right choice for stateful agents with their own infrastructure. Examples today: the **protoMaker team** (at `${AVA_BASE_URL}/a2a`, handles board ops and planning), **Quinn** (PR review, bug triage), **protoContent** (Jon/Cindi content), **Frank** (infra).
 
 Both patterns register into `ExecutorRegistry` and are dispatched by `SkillDispatcherPlugin`. From the bus's perspective they are identical — both consume `agent.skill.request` and reply on `agent.skill.response.<correlationId>`.
 
@@ -192,8 +192,9 @@ Returns:
 
 ```json
 [
-  { "name": "ava", "type": "proto-sdk", "skills": ["sitrep", "plan"] },
-  { "name": "my-service", "type": "a2a", "skills": ["analyze_data", "generate_report"] }
+  { "name": "ava",        "type": "proto-sdk", "skills": ["chat"] },
+  { "name": "protomaker", "type": "a2a",       "skills": ["sitrep", "board_health", "manage_feature", "bug_triage"] },
+  { "name": "quinn",      "type": "a2a",       "skills": ["pr_review", "bug_triage", "security_triage"] }
 ]
 ```
 

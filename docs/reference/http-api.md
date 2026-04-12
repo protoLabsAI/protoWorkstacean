@@ -137,7 +137,17 @@ List agents loaded from `workspace/agents.yaml`.
     {
       "name": "ava",
       "executor": "proto-sdk",
-      "skills": ["sitrep", "plan", "triage"]
+      "skills": ["chat"]
+    },
+    {
+      "name": "protomaker",
+      "executor": "a2a",
+      "skills": ["sitrep", "plan", "board_health", "manage_feature", "bug_triage"]
+    },
+    {
+      "name": "quinn",
+      "executor": "a2a",
+      "skills": ["pr_review", "bug_triage", "security_triage"]
     }
   ]
 }
@@ -219,14 +229,14 @@ Return the skills registered for a specific agent.
 **Auth**: None
 
 **Path params**:
-- `agentName` — agent name (e.g. `ava`, `quinn`)
+- `agentName` — agent name (e.g. `protomaker`, `quinn`, `ava`)
 
 **Response** (`200`):
 ```json
 {
   "success": true,
   "data": {
-    "name": "ava",
+    "name": "protomaker",
     "skills": [
       { "name": "sitrep", "description": "Generate a situational awareness report" }
     ]
@@ -357,12 +367,13 @@ Agent executor registry summary. **No envelope.**
 **Response** (`200`):
 ```json
 {
-  "agentCount": 2,
+  "agentCount": 3,
   "agents": {
-    "ava":   { "skills": ["sitrep", "plan"], "executorType": "proto-sdk" },
-    "quinn": { "skills": ["pr_review"],      "executorType": "a2a" }
+    "ava":        { "skills": ["chat"],                               "executorType": "proto-sdk" },
+    "protomaker": { "skills": ["sitrep", "plan", "manage_feature"],   "executorType": "a2a" },
+    "quinn":      { "skills": ["pr_review", "bug_triage"],            "executorType": "a2a" }
   },
-  "registrationCount": 3
+  "registrationCount": 6
 }
 ```
 
