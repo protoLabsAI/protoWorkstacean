@@ -98,7 +98,17 @@ const _worldCaches = new Map<string, WorldStateCache>();
 function createLangChainTools(toolNames: string[], http: HttpClient) {
   const all: Record<string, ReturnType<typeof tool>> = {
     chat_with_agent: tool(
-      async (input) => JSON.stringify(await http.post("/api/a2a/chat", input)),
+      async (input) => {
+        console.log(`[deep-agent:tool] chat_with_agent called: agent=${input.agent}, skill=${input.skill ?? "auto"}, msg="${input.message.slice(0, 80)}"`);
+        try {
+          const result = await http.post("/api/a2a/chat", input);
+          console.log(`[deep-agent:tool] chat_with_agent returned: ${JSON.stringify(result).slice(0, 200)}`);
+          return JSON.stringify(result);
+        } catch (e) {
+          console.error(`[deep-agent:tool] chat_with_agent ERROR:`, e);
+          throw e;
+        }
+      },
       {
         name: "chat_with_agent",
         description:
@@ -308,12 +318,27 @@ export class DeepAgentExecutor implements IExecutor {
         messageModifier: new SystemMessage(enrichedPrompt),
       });
 
+      console.log(`[deep-agent:${this.agentDef.name}] invoke with ${tools.length} tools, prompt length=${prompt.length}`);
+
       const result = await agent.invoke(
         { messages: [{ role: "user", content: prompt }] },
         { recursionLimit: this.agentDef.maxTurns * 2 + 1 },
       );
 
       const messages = result.messages ?? [];
+      console.log(`[deep-agent:${this.agentDef.name}] ${messages.length} messages returned`);
+
+      // Log tool calls made
+      for (const msg of messages) {
+        const type = msg._getType?.() ?? msg.constructor?.name ?? "";
+        if (type === "ai" || type === "AIMessage") {
+          const tc = (msg as Record<string, unknown>).tool_calls;
+          if (Array.isArray(tc) && tc.length > 0) {
+            console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${tc.map((t: { name?: string }) => t.name).join(", ")}`);
+          }
+        }
+      }
+
       let text = "";
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
