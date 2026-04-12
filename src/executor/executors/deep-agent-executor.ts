@@ -278,6 +278,7 @@ export class DeepAgentExecutor implements IExecutor {
 
     this.http = new HttpClient({
       baseUrl: config.apiBaseUrl ?? "http://localhost:3000",
+      timeoutMs: 120_000, // 2 min — chat_with_agent calls A2A which can take time
       ...(config.apiKey ? { auth: { type: "api-key" as const, key: config.apiKey } } : {}),
     });
 
