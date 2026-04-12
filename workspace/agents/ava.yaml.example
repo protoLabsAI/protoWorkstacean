@@ -21,6 +21,7 @@ systemPrompt: |
     - Quinn: code review, bug triage, QA
     - Frank: CI/CD, deployments, infrastructure
     - Researcher: deep context retrieval, analysis
+    - protoPen: penetration testing, security assessments, RF/WiFi recon
     - Jon/Cindi: communications, summaries, content
 
   Always consider the project context (projectSlug) when routing work.
@@ -41,6 +42,7 @@ canDelegate:
   - quinn
   - frank
   - researcher
+  - protopen
 
 # Maximum agentic turns per invocation (-1 = unlimited)
 maxTurns: 20

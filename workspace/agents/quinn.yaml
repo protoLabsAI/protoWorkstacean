@@ -42,6 +42,10 @@ excludeTools:
   - agent
   - save_memory
 
+# Agents Quinn may delegate to
+canDelegate:
+  - protopen
+
 maxTurns: 15
 
 skills:

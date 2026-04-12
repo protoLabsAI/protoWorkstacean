@@ -17,3 +17,18 @@ agents:
         description: Manage feature lifecycle (unblock, assign, status change)
       - name: bug_triage
         description: Triage a bug and file it on the board
+
+  - name: protopen
+    url: "http://steamdeck:7870/a2a"
+    apiKeyEnv: PROTOPEN_API_KEY
+    skills:
+      - name: passive_recon
+        description: "Passive reconnaissance — WiFi/RF/network enumeration, no active probing"
+      - name: active_pentest
+        description: "Active penetration test — PMKID capture, vuln scanning, RF replay (requires engagement mode)"
+      - name: security_report
+        description: "Generate security assessment report from engagement findings"
+      - name: deep_research
+        description: "Research a topic in depth using HuggingFace, GitHub, web, and knowledge store"
+      - name: summarize
+        description: "Summarize findings from the knowledge store"
