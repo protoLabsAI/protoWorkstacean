@@ -58,13 +58,13 @@ agents:
   # and three specialized subagents (Explorer, Analyst, Writer).
   # Ava delegates deep research tasks here via chat_with_agent.
   - name: researcher
-    url: "http://protoresearcher:7870/a2a"
+    url: "http://research-langgraph-agent:7870/a2a"
     streaming: true
     skills:
+      - name: search
+        description: Quick search across web (SearXNG), knowledge graph (Neo4j), and Wikipedia.
       - name: deep_research
-        description: Research a topic in depth — scans papers, HuggingFace, GitHub, web. Returns structured findings with significance ratings.
-      - name: summarize
-        description: Summarize recent research findings from the knowledge store.
+        description: Multi-source deep research with entity extraction, relationship mapping, and structured output via rabbit-hole.io pipeline.
 
   # Quinn — standalone QA engineer (labs/quinn nanobot/LangGraph agent).
   # Submits FORMAL GitHub reviews (APPROVE/REQUEST_CHANGES/COMMENT) via the
