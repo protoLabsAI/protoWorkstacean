@@ -19,6 +19,55 @@ import type { SkillRequest } from "./types.ts";
 import type { AgentSkillRequestPayload, FlowItemPayload } from "../event-bus/payloads.ts";
 import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
+import type { LoggerPlugin, ConversationTurn } from "../../lib/plugins/logger.ts";
+
+/**
+ * Assemble a structured context envelope for the agent prompt.
+ *
+ * Pure function — no side effects, suitable for unit testing.
+ *
+ * Sections emitted (in order, only when non-empty):
+ *   <recalled_memory>  — Graphiti facts retrieved for this user
+ *   <recent_conversation> — last N turns from LoggerPlugin
+ *   <current_message>  — the user's actual input (always emitted)
+ *
+ * When there is no history (no memory, no turns), only <current_message>
+ * is emitted — no empty XML tags.
+ */
+export function assembleContext(
+  recalledMemory: string | undefined,
+  recentTurns: ConversationTurn[],
+  currentMessage: string,
+): string {
+  const parts: string[] = [];
+
+  if (recalledMemory) {
+    parts.push(
+      `<recalled_memory>\n` +
+      `The following facts were retrieved from your memory about this user. ` +
+      `Use them as background context if relevant — do NOT repeat them back ` +
+      `to the user or reference them unless the user's message specifically ` +
+      `asks about something they relate to. Focus your response on what the ` +
+      `user is actually saying below.\n\n` +
+      `${recalledMemory}\n` +
+      `</recalled_memory>`,
+    );
+  }
+
+  if (recentTurns.length > 0) {
+    const turnLines = recentTurns.map(turn => {
+      const ts = new Date(turn.createdAt).toISOString();
+      const channelSuffix = turn.channel ? ` [${turn.channel}]` : "";
+      const label = turn.role === "user" ? "User" : "Assistant";
+      return `[${ts}${channelSuffix}] ${label}: ${turn.content}`;
+    });
+    parts.push(`<recent_conversation>\n${turnLines.join("\n")}\n</recent_conversation>`);
+  }
+
+  parts.push(`<current_message>\n${currentMessage}\n</current_message>`);
+
+  return parts.join("\n\n");
+}
 
 /**
  * Classify a skill name into a flow item type for distribution tracking.
@@ -43,15 +92,19 @@ export class SkillDispatcherPlugin implements Plugin {
   private readonly subscriptionIds: string[] = [];
   private readonly graphiti: GraphitiClient;
   private readonly identityRegistry: IdentityRegistry;
+  private readonly loggerPlugin: LoggerPlugin | undefined;
 
   constructor(
     private readonly registry: ExecutorRegistry,
     workspaceDir: string,
     /** Injectable for testing — defaults to a real GraphitiClient. */
     graphiti?: GraphitiClient,
+    /** Injectable for testing — provides recent conversation turns. */
+    loggerPlugin?: LoggerPlugin,
   ) {
     this.graphiti = graphiti ?? new GraphitiClient();
     this.identityRegistry = new IdentityRegistry(workspaceDir);
+    this.loggerPlugin = loggerPlugin;
   }
 
   install(bus: EventBus): void {
@@ -164,18 +217,18 @@ export class SkillDispatcherPlugin implements Plugin {
         agentGroupId ? this.graphiti.getContextBlock(agentGroupId, rawContent).catch(() => "") : Promise.resolve(""),
       ]);
       const combined = [sharedCtx, agentCtx].filter(Boolean).join("\n");
-      if (combined) {
-        rawContent =
-          `<recalled_memory>\n` +
-          `The following facts were retrieved from your memory about this user. ` +
-          `Use them as background context if relevant — do NOT repeat them back ` +
-          `to the user or reference them unless the user's message specifically ` +
-          `asks about something they relate to. Focus your response on what the ` +
-          `user is actually saying below.\n\n` +
-          `${combined}\n` +
-          `</recalled_memory>\n\n` +
-          rawContent;
-      }
+
+      // Retrieve recent turns for human-originated messages only
+      const recentTurns: ConversationTurn[] = (this.loggerPlugin && sourceUserId)
+        ? this.loggerPlugin.getRecentTurnsForUser(
+            sourceUserId,
+            targets[0] ?? "",
+            8,
+            24 * 60 * 60 * 1000,
+          )
+        : [];
+
+      rawContent = assembleContext(combined || undefined, recentTurns, rawContent);
     }
     // ── End memory enrichment ─────────────────────────────────────────────────
 
