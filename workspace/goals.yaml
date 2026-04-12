@@ -94,18 +94,18 @@ goals:
     max: 30
     description: "No project should have more than 30 commits of branch drift"
 
-  # ── Ava / protoMaker Studio ──────────────────────────────────────
-  - id: ava.board_healthy
+  # ── protoMaker team (multi-agent board runtime) ──────────────────
+  - id: protomaker.board_healthy
     type: Threshold
     severity: high
-    selector: "domains.ava_board.data.blocked_count"
+    selector: "domains.protomaker_board.data.blocked_count"
     max: 3
     description: "No more than 3 features blocked simultaneously"
 
-  - id: ava.backlog_not_piling
+  - id: protomaker.backlog_not_piling
     type: Threshold
     severity: medium
-    selector: "domains.ava_board.data.backlog_count"
+    selector: "domains.protomaker_board.data.backlog_count"
     max: 10
     description: "Backlog should not exceed 10 features — work is piling up"
 

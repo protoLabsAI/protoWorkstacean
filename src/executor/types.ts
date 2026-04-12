@@ -63,7 +63,7 @@ export interface ExecutorRegistration {
   /** Skill name this registration handles. null = default (catch-all). */
   skill: string | null;
   executor: IExecutor;
-  /** Agent name for target-based resolution (e.g. "ava", "quinn"). */
+  /** Agent name for target-based resolution (e.g. "ava", "protomaker", "quinn"). */
   agentName?: string;
   /** Higher priority wins when multiple registrations match the same skill. */
   priority: number;

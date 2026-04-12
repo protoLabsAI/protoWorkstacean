@@ -278,19 +278,19 @@ actions:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
 
-  # ── Ava / protoMaker Studio ───────────────────────────────────────
+  # ── protoMaker team (multi-agent board runtime) ──────────────────
 
-  - id: alert.ava_board_blocked
-    goalId: ava.board_healthy
+  - id: alert.protomaker_board_blocked
+    goalId: protomaker.board_healthy
     tier: tier_0
     priority: 10
     cost: 0
     name: "Alert on excessive blocked features"
     preconditions:
-      - path: "extensions.ava_board_available"
+      - path: "extensions.protomaker_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.blocked_count"
+      - path: "domains.protomaker_board.data.blocked_count"
         operator: gt
         value: 3
     effects: []
@@ -298,17 +298,17 @@ actions:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
 
-  - id: action.ava_triage_blocked
-    goalId: ava.board_healthy
+  - id: action.protomaker_triage_blocked
+    goalId: protomaker.board_healthy
     tier: tier_0
     priority: 20
     cost: 1
-    name: "Dispatch board health triage to Ava"
+    name: "Dispatch board health triage to the protoMaker team"
     preconditions:
-      - path: "extensions.ava_board_available"
+      - path: "extensions.protomaker_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.blocked_count"
+      - path: "domains.protomaker_board.data.blocked_count"
         operator: gt
         value: 3
     effects: []
@@ -318,17 +318,17 @@ actions:
       agentId: protomaker
       fireAndForget: true
 
-  - id: alert.ava_backlog_piling
-    goalId: ava.backlog_not_piling
+  - id: alert.protomaker_backlog_piling
+    goalId: protomaker.backlog_not_piling
     tier: tier_0
     priority: 15
     cost: 0
     name: "Alert when backlog exceeds 10 features"
     preconditions:
-      - path: "extensions.ava_board_available"
+      - path: "extensions.protomaker_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.backlog_count"
+      - path: "domains.protomaker_board.data.backlog_count"
         operator: gt
         value: 10
     effects: []
@@ -336,23 +336,23 @@ actions:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
 
-  - id: action.ava_start_auto_mode
-    goalId: ava.backlog_not_piling
+  - id: action.protomaker_start_auto_mode
+    goalId: protomaker.backlog_not_piling
     tier: tier_0
     priority: 30
     cost: 1
-    name: "Dispatch Ava to start auto-mode when backlog has work"
+    name: "Dispatch the protoMaker team to start auto-mode when backlog has work"
     preconditions:
-      - path: "extensions.ava_board_available"
+      - path: "extensions.protomaker_board_available"
         operator: eq
         value: true
-      - path: "extensions.ava_pipeline_available"
+      - path: "extensions.protomaker_pipeline_available"
         operator: eq
         value: true
-      - path: "domains.ava_pipeline.data.running_count"
+      - path: "domains.protomaker_pipeline.data.running_count"
         operator: eq
         value: 0
-      - path: "domains.ava_board.data.backlog_count"
+      - path: "domains.protomaker_board.data.backlog_count"
         operator: gt
         value: 0
     effects: []
