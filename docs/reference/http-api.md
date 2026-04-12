@@ -677,6 +677,192 @@ Returns `404` if the ID is not found or `incidents.yaml` is missing.
 
 ---
 
+## POST /api/a2a/chat
+
+Synchronous multi-turn conversation with a remote A2A agent. Calls the agent's executor directly (bypasses the bus) and returns the response. Used by Ava's `chat_with_agent` tool.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  agent: string;       // Agent name: "quinn", "protomaker", "protocontent", "frank"
+  message: string;     // What to say
+  contextId?: string;  // From prior turn — omit for new conversation
+  taskId?: string;     // From prior turn — continues a specific task
+  skill?: string;      // Skill hint (default: "chat")
+  done?: boolean;      // Set true on final message to end conversation
+}
+```
+
+**Response** (`200`):
+```json
+{
+  "success": true,
+  "data": {
+    "response": "Quinn's reply text...",
+    "contextId": "conv-uuid",
+    "taskId": "task-uuid",
+    "taskState": "completed",
+    "correlationId": "trace-uuid",
+    "agent": "quinn"
+  }
+}
+```
+
+When `done: true`, `contextId` and `taskId` are omitted from the response. `taskState` reflects the A2A task lifecycle: `working`, `input-required`, `completed`, `failed`, `canceled`, `rejected`.
+
+Publishes `agent.chat.outbound` (Ava's message) and `agent.chat.inbound` (agent's response) events to the bus for Discord o11y.
+
+---
+
+## POST /api/a2a/delegate
+
+Fire-and-forget task dispatch to a remote agent. Publishes to `agent.skill.request` on the bus and returns immediately without waiting for the agent's response.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  agent: string;        // Agent name
+  skill: string;        // Skill to invoke
+  message: string;      // Task description
+  projectSlug?: string; // Project scope for routing
+}
+```
+
+**Response** (`200`):
+```json
+{
+  "success": true,
+  "data": {
+    "correlationId": "trace-uuid",
+    "message": "Task delegated to quinn (skill: pr_review)"
+  }
+}
+```
+
+---
+
+## POST /api/github/issues
+
+File an issue on a managed GitHub repository. Only repos listed in `projects.yaml` are allowed.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  repo: string;        // "owner/name" format, e.g. "protoLabsAI/protoWorkstacean"
+  title: string;       // Issue title
+  body?: string;       // Issue body (markdown)
+  labels?: string[];   // Labels to apply
+}
+```
+
+**Response** (`200`):
+```json
+{
+  "success": true,
+  "data": { "number": 42, "html_url": "https://github.com/...", "title": "..." }
+}
+```
+
+Returns `403` if the repo is not in `projects.yaml`.
+
+---
+
+## POST /api/ceremonies/create
+
+Create a new scheduled ceremony. Writes YAML to `workspace/ceremonies/` and registers with the hot-reload watcher.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  id: string;            // Unique ID (alphanumeric, dots, dashes)
+  name: string;          // Human-readable name
+  schedule: string;      // Cron expression, e.g. "*/30 * * * *"
+  skill: string;         // Skill to invoke when ceremony fires
+  targets?: string[];    // Agent targets (default: ["all"])
+  enabled?: boolean;     // Default: true
+  notifyChannel?: string; // Discord channel ID for notifications
+}
+```
+
+**Response** (`200`):
+```json
+{ "success": true, "data": { "id": "my.ceremony", "name": "...", "schedule": "...", "..." } }
+```
+
+---
+
+## POST /api/ceremonies/:id/update
+
+Update an existing ceremony. Merges fields into the existing YAML.
+
+**Auth**: API key
+
+**Path params**: `id` — ceremony ID
+
+**Request body**: Same fields as create (all optional except `id`).
+
+---
+
+## POST /api/ceremonies/:id/delete
+
+Delete a ceremony. Removes the YAML file and unregisters from the scheduler.
+
+**Auth**: API key
+
+**Path params**: `id` — ceremony ID
+
+---
+
+## POST /api/board/features/create
+
+Create a feature on the protoMaker board. Proxies to the Studio MCP server at `AVA_BASE_URL`.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  projectPath: string;      // Absolute path to project directory
+  title: string;            // Feature title
+  description?: string;     // Feature description
+  status?: string;          // Default: "backlog"
+  priority?: number;        // 0=none, 1=urgent, 2=high, 3=normal, 4=low
+  complexity?: string;      // "small" | "medium" | "large" | "architectural"
+  projectSlug?: string;
+}
+```
+
+---
+
+## POST /api/board/features/update
+
+Update an existing feature on the protoMaker board.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  projectPath: string;
+  featureId: string;        // Feature UUID
+  title?: string;
+  description?: string;
+  status?: string;          // "backlog" | "in-progress" | "review" | "done"
+  priority?: number;
+  complexity?: string;
+}
+```
+
+---
+
 ## Dashboard proxy
 
 The event-viewer plugin (port `8080`, disabled by `DISABLE_EVENT_VIEWER`) serves the Astro dashboard from `dashboard/dist/` and proxies unmatched `/api/*` requests plus the `/ws` WebSocket to the main HTTP server on `WORKSTACEAN_HTTP_PORT`. The dashboard's client-side API client talks only to the event-viewer port, so CORS is never an issue. See [Dashboard](./dashboard) for details.
