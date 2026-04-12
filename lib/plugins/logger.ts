@@ -3,6 +3,14 @@ import { mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Plugin, EventBus, BusMessage } from "../types";
 
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+  channel: string | undefined;
+  skill: string | undefined;
+  createdAt: number;
+}
+
 export class LoggerPlugin implements Plugin {
   name = "logger";
   description = "Event log subscriber - writes all messages to SQLite";
@@ -83,10 +91,98 @@ export class LoggerPlugin implements Plugin {
 
   getEventsByCorrelationId(correlationId: string): BusMessage[] {
     if (!this.db) return [];
-    
+
     const rows = this.db.query(
       "SELECT payload FROM events WHERE correlation_id = ? ORDER BY timestamp ASC"
     ).all(correlationId) as { payload: string }[];
     return rows.map(row => JSON.parse(row.payload));
+  }
+
+  /**
+   * Retrieve recent conversation turns for a canonical user.
+   *
+   * Uses only indexed columns (topic, timestamp, correlation_id) in SQL — no
+   * JSON_EXTRACT. Application-level filtering resolves userId from parsed payloads.
+   *
+   * @param canonicalUserId  The user's canonical ID (matches BusMessage.source.userId).
+   * @param agentName        Agent to scope turns to (matched against payload.targets).
+   *                         Pass empty string to include turns for any agent.
+   * @param limit            Maximum number of turns to return.
+   * @param maxAgeMs         Only include turns within this many ms of now.
+   */
+  getRecentTurnsForUser(
+    canonicalUserId: string,
+    agentName: string,
+    limit: number,
+    maxAgeMs: number,
+  ): ConversationTurn[] {
+    if (!this.db) return [];
+
+    const since = Date.now() - maxAgeMs;
+
+    // Step 1: Fetch recent agent.skill.request events by indexed columns only.
+    // Over-fetch so we have enough candidates after userId filtering.
+    const candidateRows = this.db.query(
+      "SELECT correlation_id, payload FROM events WHERE topic = 'agent.skill.request' AND timestamp >= ? ORDER BY timestamp DESC LIMIT ?"
+    ).all(since, limit * 10) as { correlation_id: string; payload: string }[];
+
+    // Step 2: Filter in application code — find correlationIds belonging to this user.
+    const seenCorrelationIds = new Set<string>();
+    const matchedCorrelationIds: string[] = [];
+
+    for (const row of candidateRows) {
+      if (matchedCorrelationIds.length >= limit) break;
+      if (seenCorrelationIds.has(row.correlation_id)) continue;
+      seenCorrelationIds.add(row.correlation_id);
+
+      const msg = JSON.parse(row.payload) as BusMessage;
+      if (msg.source?.userId !== canonicalUserId) continue;
+
+      // If agentName provided, check payload.targets includes it (empty targets = any agent).
+      if (agentName) {
+        const payload = msg.payload as { targets?: string[] };
+        const targets = payload?.targets;
+        if (targets && targets.length > 0 && !targets.includes(agentName)) continue;
+      }
+
+      matchedCorrelationIds.push(row.correlation_id);
+    }
+
+    if (matchedCorrelationIds.length === 0) return [];
+
+    // Step 3: Bulk-fetch all events for the matched correlationIds and assemble turns.
+    const turns: ConversationTurn[] = [];
+
+    for (const correlationId of matchedCorrelationIds) {
+      const events = this.getEventsByCorrelationId(correlationId);
+      const request = events.find(e => e.topic === "agent.skill.request");
+      const response = events.find(e => e.topic.startsWith("agent.skill.response."));
+
+      if (!request) continue;
+
+      const reqPayload = request.payload as { skill?: string; content?: string; targets?: string[] };
+      const channel = request.source?.interface;
+
+      turns.push({
+        role: "user",
+        content: reqPayload.content ?? "",
+        channel,
+        skill: reqPayload.skill,
+        createdAt: request.timestamp,
+      });
+
+      if (response) {
+        const resPayload = response.payload as { content?: string; error?: string };
+        turns.push({
+          role: "assistant",
+          content: resPayload.content ?? resPayload.error ?? "",
+          channel,
+          skill: reqPayload.skill,
+          createdAt: response.timestamp,
+        });
+      }
+    }
+
+    return turns;
   }
 }
