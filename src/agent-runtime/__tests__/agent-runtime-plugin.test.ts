@@ -99,12 +99,12 @@ describe("AgentRuntimePlugin", () => {
         // quinn's "bug_triage" skill should be registered
         const quinnsExecutor = registry.resolve("bug_triage");
         expect(quinnsExecutor).not.toBeNull();
-        expect(quinnsExecutor!.type).toBe("proto-sdk");
+        expect(quinnsExecutor!.type).toBe("deep-agent");
 
         // ava's "sitrep" skill should be registered
         const avasExecutor = registry.resolve("sitrep");
         expect(avasExecutor).not.toBeNull();
-        expect(avasExecutor!.type).toBe("proto-sdk");
+        expect(avasExecutor!.type).toBe("deep-agent");
 
         plugin.uninstall();
       } finally {
@@ -143,7 +143,7 @@ describe("AgentRuntimePlugin", () => {
         // "ava" is registered via sitrep skill — target routing returns ava's executor
         const executor = registry.resolve("bug_triage", ["ava"]);
         expect(executor).not.toBeNull();
-        expect(executor!.type).toBe("proto-sdk");
+        expect(executor!.type).toBe("deep-agent");
 
         plugin.uninstall();
       } finally {
@@ -210,13 +210,13 @@ describe("AgentRuntimePlugin", () => {
   describe("end-to-end via SkillDispatcherPlugin", () => {
     test("dispatches skill request and publishes result", async () => {
       const { workspaceDir, cleanup } = makeTempWorkspace({ "quinn.yaml": quinnAgent });
-      const { AgentExecutor } = await import("../agent-executor.ts");
-      const originalRun = AgentExecutor.prototype.run;
+      const { DeepAgentExecutor } = await import("../../executor/executors/deep-agent-executor.ts");
+      const originalExecute = DeepAgentExecutor.prototype.execute;
       try {
-        AgentExecutor.prototype.run = mock(async () => ({
+        DeepAgentExecutor.prototype.execute = mock(async (req) => ({
           text: "Bug triaged successfully.",
           isError: false,
-          stopReason: "end_turn",
+          correlationId: req.correlationId,
         }));
 
         const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
@@ -241,18 +241,18 @@ describe("AgentRuntimePlugin", () => {
         agentRuntime.uninstall();
         dispatcher.uninstall();
       } finally {
-        AgentExecutor.prototype.run = originalRun;
+        DeepAgentExecutor.prototype.execute = originalExecute;
         cleanup();
       }
     });
 
     test("publishes error when executor throws", async () => {
       const { workspaceDir, cleanup } = makeTempWorkspace({ "quinn.yaml": quinnAgent });
-      const { AgentExecutor } = await import("../agent-executor.ts");
-      const originalRun2 = AgentExecutor.prototype.run;
+      const { DeepAgentExecutor } = await import("../../executor/executors/deep-agent-executor.ts");
+      const originalExecute2 = DeepAgentExecutor.prototype.execute;
       try {
-        AgentExecutor.prototype.run = mock(async () => {
-          throw new Error("Subprocess crashed");
+        DeepAgentExecutor.prototype.execute = mock(async () => {
+          throw new Error("Agent crashed");
         });
 
         const { AgentRuntimePlugin } = await import("../agent-runtime-plugin.ts");
@@ -271,12 +271,12 @@ describe("AgentRuntimePlugin", () => {
 
         const response = await responsePromise;
         const payload = response.payload as { error?: string };
-        expect(payload.error).toContain("Subprocess crashed");
+        expect(payload.error).toContain("Agent crashed");
 
         agentRuntime.uninstall();
         dispatcher.uninstall();
       } finally {
-        AgentExecutor.prototype.run = originalRun2;
+        DeepAgentExecutor.prototype.execute = originalExecute2;
         cleanup();
       }
     });
