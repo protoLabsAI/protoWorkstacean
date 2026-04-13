@@ -59,6 +59,8 @@ tools:
   - discord_list_members
   - chat_with_agent
   - get_world_state
+  - react
+  - send_update
 
 maxTurns: 8
 

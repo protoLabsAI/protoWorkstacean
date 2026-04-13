@@ -11,9 +11,12 @@
  *   POST /api/discord/channels/create   — create a channel (text/voice/category)
  *   POST /api/discord/send              — send a message to a channel
  *   GET  /api/discord/members           — list members (paginated)
+ *   POST /api/discord/react             — react to the message that triggered a conversation
+ *   POST /api/discord/progress          — send a progress update during a running conversation
  */
 
 import type { Route, ApiContext } from "./types.ts";
+import { pendingReplies, canSendProgress } from "../../lib/plugins/discord.ts";
 
 function getDiscordClient(ctx: ApiContext) {
   const plugin = ctx.plugins.find(p => p.name === "discord") as any;
@@ -163,6 +166,61 @@ export function createRoutes(ctx: ApiContext): Route[] {
         }));
 
         return Response.json({ success: true, data: members });
+      },
+    },
+    {
+      method: "POST",
+      path: "/api/discord/react",
+      handler: async (req) => {
+        let body: { correlationId?: string; emoji?: string };
+        try { body = (await req.json()) as typeof body; }
+        catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
+
+        if (!body.correlationId || !body.emoji) {
+          return Response.json({ success: false, error: "correlationId and emoji are required" }, { status: 400 });
+        }
+
+        const pending = pendingReplies.get(body.correlationId);
+        if (!pending?.message) {
+          return Response.json({ success: false, error: "No pending message for this correlationId" }, { status: 404 });
+        }
+
+        try {
+          await pending.message.react(body.emoji);
+          return Response.json({ success: true });
+        } catch (e) {
+          return Response.json({ success: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+        }
+      },
+    },
+    {
+      method: "POST",
+      path: "/api/discord/progress",
+      handler: async (req) => {
+        let body: { correlationId?: string; content?: string };
+        try { body = (await req.json()) as typeof body; }
+        catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
+
+        if (!body.correlationId || !body.content) {
+          return Response.json({ success: false, error: "correlationId and content are required" }, { status: 400 });
+        }
+
+        // Server-side throttle — 1 update per 5s per conversation
+        if (!canSendProgress(body.correlationId)) {
+          return Response.json({ success: false, error: "Throttled — last update was < 5s ago", throttled: true }, { status: 429 });
+        }
+
+        const pending = pendingReplies.get(body.correlationId);
+        if (!pending?.message) {
+          return Response.json({ success: false, error: "No pending message for this correlationId" }, { status: 404 });
+        }
+
+        try {
+          await (pending.message.channel as any).send({ content: body.content.slice(0, 2000) });
+          return Response.json({ success: true });
+        } catch (e) {
+          return Response.json({ success: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+        }
       },
     },
   ];

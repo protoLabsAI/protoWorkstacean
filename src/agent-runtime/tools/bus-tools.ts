@@ -436,6 +436,15 @@ export const BUS_TOOL_NAMES = [
   "create_github_issue",
   "manage_cron",
   "web_search",
+  // Discord operations (protoBot agent)
+  "discord_server_stats",
+  "discord_list_channels",
+  "discord_create_channel",
+  "discord_send",
+  "discord_list_members",
+  // Conversation feedback (any DeepAgent)
+  "react",
+  "send_update",
 ] as const;
 
 export type BusToolName = (typeof BUS_TOOL_NAMES)[number];

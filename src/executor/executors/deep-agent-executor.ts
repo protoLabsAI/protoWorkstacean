@@ -102,7 +102,7 @@ const _worldCaches = new Map<string, WorldStateCache>();
 // These are all StructuredToolInterface at runtime, but TS can't unify them into a single
 // Record type because tool()'s zod v3/v4 interop overloads produce SchemaOutputT params
 // that don't widen back to the base interface defaults. Record stays loose; return is typed.
-function createLangChainTools(toolNames: string[], http: HttpClient): StructuredToolInterface[] {
+function createLangChainTools(toolNames: string[], http: HttpClient, correlationId?: string): StructuredToolInterface[] {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const all: Record<string, any> = {
     chat_with_agent: tool(
@@ -307,6 +307,39 @@ function createLangChainTools(toolNames: string[], http: HttpClient): Structured
       async () => JSON.stringify(await http.get("/api/discord/members")),
       { name: "discord_list_members", description: "List Discord server members with roles.", schema: z.object({}) },
     ),
+    // ── Conversation feedback tools (require correlationId) ──────────────────
+    react: tool(
+      async (input) => {
+        if (!correlationId) return JSON.stringify({ success: false, error: "No active conversation" });
+        return JSON.stringify(await http.post("/api/discord/react", { correlationId, emoji: input.emoji }));
+      },
+      {
+        name: "react",
+        description:
+          "Add an emoji reaction to the user's triggering message. Use for acknowledgment before a long task " +
+          "(eyes for 'working on it', hourglass for 'slow one', thinking for 'considering'). " +
+          "Don't react on every response — only when you're about to do substantial work.",
+        schema: z.object({
+          emoji: z.string().describe("Single emoji to react with (e.g. 👀, ⏳, 🤔, ✅, 🔍)"),
+        }),
+      },
+    ),
+    send_update: tool(
+      async (input) => {
+        if (!correlationId) return JSON.stringify({ success: false, error: "No active conversation" });
+        return JSON.stringify(await http.post("/api/discord/progress", { correlationId, content: input.content }));
+      },
+      {
+        name: "send_update",
+        description:
+          "Send a brief progress update to the user while other tools run. Throttled server-side to 1 per 5s — " +
+          "don't spam, use only for meaningful progress (e.g. 'Quinn is reviewing the PR now', 'Searching the board...'). " +
+          "The user WILL see the final response — this is just for long-running work.",
+        schema: z.object({
+          content: z.string().describe("Short progress message (max 2000 chars, ideally 1 sentence)"),
+        }),
+      },
+    ),
   };
 
   return toolNames.map(n => all[n]).filter(Boolean) as StructuredToolInterface[];
@@ -349,7 +382,7 @@ export class DeepAgentExecutor implements IExecutor {
 
   async execute(req: SkillRequest): Promise<SkillResult> {
     const prompt = req.content ?? req.prompt ?? this._buildPrompt(req);
-    const tools = createLangChainTools(this.agentDef.tools, this.http);
+    const tools = createLangChainTools(this.agentDef.tools, this.http, req.correlationId);
 
     const callbacks = LANGFUSE_ENABLED
       ? [new LangfuseCallbackHandler({
