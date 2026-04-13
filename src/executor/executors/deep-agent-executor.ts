@@ -9,7 +9,7 @@
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage } from "@langchain/core/messages";
-import { tool } from "@langchain/core/tools";
+import { tool, type StructuredToolInterface } from "@langchain/core/tools";
 import { z } from "zod";
 import { CallbackHandler as LangfuseCallbackHandler } from "@langfuse/langchain";
 import { HttpClient } from "../../services/http-client.ts";
@@ -98,10 +98,12 @@ class WorldStateCache {
 
 const _worldCaches = new Map<string, WorldStateCache>();
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangChain tool()
-// generic params shift across minor versions; pinning to a concrete DynamicStructuredTool
-// generic breaks on every upgrade. The runtime contract is stable; only the TS generics drift.
-function createLangChainTools(toolNames: string[], http: HttpClient) {
+// Each tool() call infers a unique DynamicStructuredTool<ZodObject<{specific fields}>, ...>.
+// These are all StructuredToolInterface at runtime, but TS can't unify them into a single
+// Record type because tool()'s zod v3/v4 interop overloads produce SchemaOutputT params
+// that don't widen back to the base interface defaults. Record stays loose; return is typed.
+function createLangChainTools(toolNames: string[], http: HttpClient): StructuredToolInterface[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const all: Record<string, any> = {
     chat_with_agent: tool(
       async (input) => {
@@ -269,7 +271,7 @@ function createLangChainTools(toolNames: string[], http: HttpClient) {
     ),
   };
 
-  return (toolNames.map(n => all[n]).filter(Boolean)) as ReturnType<typeof tool>[];
+  return toolNames.map(n => all[n]).filter(Boolean) as StructuredToolInterface[];
 }
 
 export class DeepAgentExecutor implements IExecutor {
