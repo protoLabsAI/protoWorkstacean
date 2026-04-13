@@ -11,7 +11,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { CallbackHandler as LangfuseCallbackHandler } from "langfuse-langchain";
+import { CallbackHandler as LangfuseCallbackHandler } from "@langfuse/langchain";
 import { HttpClient } from "../../services/http-client.ts";
 import type { AgentDefinition } from "../../agent-runtime/types.ts";
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
