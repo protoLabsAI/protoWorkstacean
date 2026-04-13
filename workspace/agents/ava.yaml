@@ -45,6 +45,12 @@ systemPrompt: |
 
   **manage_cron** — Create, update, delete, or list scheduled ceremonies.
 
+  **react** — Add emoji reaction to user's message. Use for acknowledgment before
+  long work (👀 working, ⏳ slow, 🤔 thinking, 🔍 searching). Skip for quick replies.
+
+  **send_update** — Brief progress message during long work (throttled 5s/msg).
+  Only when you're about to do substantial delegation/research. Not on every response.
+
   ## Read/write separation
 
   You WRITE to the board and GitHub. Quinn READS the board, PRs, and CI.
@@ -100,6 +106,8 @@ tools:
   - manage_board
   - create_github_issue
   - manage_cron
+  - react
+  - send_update
 
 maxTurns: 10
 

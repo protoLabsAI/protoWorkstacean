@@ -144,10 +144,22 @@ function compileSpamPatterns(patterns: string[]): RegExp[] {
 // ── Pending reply handles ─────────────────────────────────────────────────────
 // Kept outside the bus payload so the SQLite logger never tries to serialize them.
 
-const pendingReplies = new Map<
+export const pendingReplies = new Map<
   string,
   { message?: Message; interaction?: ChatInputCommandInteraction }
 >();
+
+// Progress update throttle — rate limits agent send_update calls per conversation.
+// Keyed by correlationId → timestamp of last update. Min interval: 5s.
+const progressLastSent = new Map<string, number>();
+const PROGRESS_MIN_INTERVAL_MS = 5_000;
+
+export function canSendProgress(correlationId: string): boolean {
+  const last = progressLastSent.get(correlationId) ?? 0;
+  if (Date.now() - last < PROGRESS_MIN_INTERVAL_MS) return false;
+  progressLastSent.set(correlationId, Date.now());
+  return true;
+}
 
 function makeId(): string {
   return crypto.randomUUID();
@@ -1179,9 +1191,8 @@ export class DiscordPlugin implements Plugin {
       isNew,
     });
 
-    if (isFirst) {
-      await message.react("👀").catch(() => {});
-    }
+    // No auto-reaction — agents add their own via the `react` tool if they want.
+    void isFirst;
   }
 
   /**
@@ -1217,7 +1228,7 @@ export class DiscordPlugin implements Plugin {
     // Normal dispatch path — no agent in-flight
     // Resolve the original Discord message via the client that owns this DM channel.
     // For agent pool DMs, that's the agent's own client; for main bot DMs, it's this.client.
-    const client = (agentName && this.agentClients.get(agentName)) ?? this.client;
+    const client = (agentName ? this.agentClients.get(agentName) : undefined) ?? this.client;
     const discordChannel = client?.channels.cache.get(channelId);
     const discordMessage = discordChannel && "messages" in discordChannel
       ? await (discordChannel as TextChannel).messages.fetch(lastMessage.id).catch(() => null)

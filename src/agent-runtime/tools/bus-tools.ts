@@ -442,6 +442,9 @@ export const BUS_TOOL_NAMES = [
   "discord_create_channel",
   "discord_send",
   "discord_list_members",
+  // Conversation feedback (any DeepAgent)
+  "react",
+  "send_update",
 ] as const;
 
 export type BusToolName = (typeof BUS_TOOL_NAMES)[number];
