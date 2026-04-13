@@ -20,6 +20,7 @@ import type { AgentSkillRequestPayload, FlowItemPayload } from "../event-bus/pay
 import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 import type { LoggerPlugin, ConversationTurn } from "../../lib/plugins/logger.ts";
+import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 
 /**
  * Assemble a structured context envelope for the agent prompt.
@@ -93,6 +94,15 @@ export class SkillDispatcherPlugin implements Plugin {
   private readonly graphiti: GraphitiClient;
   private readonly identityRegistry: IdentityRegistry;
   private readonly loggerPlugin: LoggerPlugin | undefined;
+  private readonly mailbox: ContextMailbox | undefined;
+
+  /**
+   * In-flight execution tracking — set at the TOP of _dispatch() (before any
+   * await) so isActive() is accurate even during the async Graphiti enrichment
+   * window. Without this, a DM debounce timer firing during enrichment would
+   * see isActive() === false and double-dispatch.
+   */
+  private readonly activeExecutions = new Map<string, { startedAt: number; skill: string }>();
 
   constructor(
     private readonly registry: ExecutorRegistry,
@@ -101,10 +111,18 @@ export class SkillDispatcherPlugin implements Plugin {
     graphiti?: GraphitiClient,
     /** Injectable for testing — provides recent conversation turns. */
     loggerPlugin?: LoggerPlugin,
+    /** Optional mailbox for mid-execution DM queuing. */
+    mailbox?: ContextMailbox,
   ) {
     this.graphiti = graphiti ?? new GraphitiClient();
     this.identityRegistry = new IdentityRegistry(workspaceDir);
     this.loggerPlugin = loggerPlugin;
+    this.mailbox = mailbox;
+  }
+
+  /** Check if an execution is currently active for a given correlationId. */
+  isActive(correlationId: string): boolean {
+    return this.activeExecutions.has(correlationId);
   }
 
   install(bus: EventBus): void {
@@ -147,7 +165,15 @@ export class SkillDispatcherPlugin implements Plugin {
     const parentId = msg.id; // this message is the parent span
     const replyTopic = msg.reply?.topic ?? `agent.skill.response.${correlationId}`;
 
+    // Mark as active IMMEDIATELY — before any await. _dispatch() is called via
+    // `void this._dispatch(msg)` (fire-and-forget from the sync bus handler).
+    // The async Graphiti enrichment below yields to the event loop for 100-500ms.
+    // Without this early set, a DM debounce timer firing during that window would
+    // see isActive() === false and dispatch a competing execution.
+    this.activeExecutions.set(correlationId, { startedAt: Date.now(), skill: skill || "unknown" });
+
     if (!skill) {
+      this.activeExecutions.delete(correlationId);
       console.warn("[skill-dispatcher] Received skill request with no skill — dropping");
       this._publishResponse(replyTopic, correlationId, undefined, "No skill specified");
       return;
@@ -156,6 +182,7 @@ export class SkillDispatcherPlugin implements Plugin {
     const executor = this.registry.resolve(skill, targets);
 
     if (!executor) {
+      this.activeExecutions.delete(correlationId);
       const searched = targets.length > 0
         ? `targets [${targets.join(", ")}] or skill "${skill}"`
         : `skill "${skill}"`;
@@ -340,7 +367,51 @@ export class SkillDispatcherPlugin implements Plugin {
         meta: { skill, error: errorMsg },
       });
       this._publishResponse(replyTopic, correlationId, undefined, errorMsg);
+    } finally {
+      this.activeExecutions.delete(correlationId);
+      this._drainMailbox(correlationId, skill, targets, msg.source, replyTopic);
     }
+  }
+
+  /**
+   * Drain pending mailbox messages after execution completes.
+   *
+   * If the user sent additional DMs while the agent was working, they
+   * accumulated in the ContextMailbox. This method drains them and publishes
+   * a new agent.skill.request so the conversation continues with the same
+   * agent/skill and full memory enrichment.
+   */
+  private _drainMailbox(
+    correlationId: string,
+    skill: string,
+    targets: string[],
+    source: BusMessage["source"],
+    replyTopic: string,
+  ): void {
+    if (!this.bus || !this.mailbox?.has(correlationId)) return;
+
+    const queued = this.mailbox.drain(correlationId);
+    if (queued.length === 0) return;
+
+    const formatted = ContextMailbox.format(queued);
+    console.log(
+      `[skill-dispatcher] Draining ${queued.length} queued message(s) for ${correlationId} — starting new turn`,
+    );
+
+    this.bus.publish("agent.skill.request", {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic: "agent.skill.request",
+      timestamp: Date.now(),
+      payload: {
+        skill,
+        content: formatted,
+        targets,
+        isDM: true,
+      },
+      source,
+      reply: { topic: replyTopic },
+    });
   }
 
   private _publishFlowEvent(topic: string, item: FlowItemPayload): void {

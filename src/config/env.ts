@@ -58,6 +58,10 @@ export const EnvSchema = z
     DISCORD_WEBHOOK_ALERTS:       z.string().optional(),
     /** Idle timeout (ms) before a DM conversation session expires (default: 15 min). */
     DM_CONVERSATION_TIMEOUT_MS:   z.string().optional(),
+    /** Sliding-window debounce (ms) for batching rapid-fire DMs (default: 3000). */
+    DM_DEBOUNCE_MS:               z.string().optional(),
+    /** TTL (ms) for pending mailbox messages before they're swept (default: 10 min). */
+    MAILBOX_TTL_MS:               z.string().optional(),
 
     // GitHub
     GITHUB_TOKEN:          z.string().optional(),

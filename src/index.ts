@@ -27,6 +27,10 @@ const dataDir = resolve(
 
 const bus = new InMemoryEventBus();
 
+// --- Context mailbox — mid-execution DM queue for debounced message injection ---
+import { ContextMailbox } from "../lib/dm/context-mailbox.ts";
+const contextMailbox = new ContextMailbox();
+
 // --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
 import { ChannelRegistry } from "../lib/channels/channel-registry.js";
 const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));
@@ -147,7 +151,17 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => !!process.env.DISCORD_BOT_TOKEN,
     factory: async () => {
       const { DiscordPlugin } = await import("../lib/plugins/discord");
-      return new DiscordPlugin(workspaceDir, dataDir, channelRegistry, hitlPlugin);
+      return new DiscordPlugin({
+        workspaceDir,
+        dataDir,
+        channelRegistry,
+        hitlPlugin,
+        mailbox: contextMailbox,
+        isExecutionActive: (correlationId: string) => {
+          const dispatcher = registeredPlugins.find(p => p.name === "skill-dispatcher");
+          return !!(dispatcher as any)?.isActive?.(correlationId);
+        },
+      });
     },
   },
   {
@@ -238,7 +252,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { SkillDispatcherPlugin } = await import("./executor/skill-dispatcher-plugin.js");
-      return new SkillDispatcherPlugin(executorRegistry, workspaceDir, undefined, loggerPlugin);
+      return new SkillDispatcherPlugin(executorRegistry, workspaceDir, undefined, loggerPlugin, contextMailbox);
     },
   },
   {
@@ -459,6 +473,7 @@ const apiContext: ApiContext = {
   executorRegistry,
   telemetry,
   apiKey: API_KEY,
+  mailbox: contextMailbox,
 };
 
 const routes = createAllRoutes(apiContext);

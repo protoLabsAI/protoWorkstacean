@@ -9,6 +9,8 @@
 import type { Route, ApiContext } from "./types.ts";
 import type { SkillRequest } from "../executor/types.ts";
 
+const AGENT_OPS_CHANNEL = process.env.DISCORD_AGENT_OPS_CHANNEL ?? "";
+
 export function createRoutes(ctx: ApiContext): Route[] {
   /**
    * POST /api/a2a/chat — synchronous multi-turn conversation with an agent.
@@ -84,6 +86,19 @@ export function createRoutes(ctx: ApiContext): Route[] {
         },
       });
 
+      // Post to Discord agent-ops channel so agent conversations are visible
+      if (AGENT_OPS_CHANNEL) {
+        ctx.bus.publish(`message.outbound.discord.push.${AGENT_OPS_CHANNEL}`, {
+          id: crypto.randomUUID(),
+          correlationId,
+          topic: `message.outbound.discord.push.${AGENT_OPS_CHANNEL}`,
+          timestamp: Date.now(),
+          payload: {
+            content: `**ava → ${agent}** (${skill})\n${message.length > 300 ? message.slice(0, 300) + "…" : message}`,
+          },
+        });
+      }
+
       const result = await executor.execute(skillReq);
 
       // Publish agent's response for o11y
@@ -101,6 +116,22 @@ export function createRoutes(ctx: ApiContext): Route[] {
           done,
         },
       });
+
+      // Post agent response to Discord
+      if (AGENT_OPS_CHANNEL) {
+        const responsePreview = result.text.length > 500
+          ? result.text.slice(0, 500) + "…"
+          : result.text;
+        ctx.bus.publish(`message.outbound.discord.push.${AGENT_OPS_CHANNEL}`, {
+          id: crypto.randomUUID(),
+          correlationId,
+          topic: `message.outbound.discord.push.${AGENT_OPS_CHANNEL}`,
+          timestamp: Date.now(),
+          payload: {
+            content: `**${agent} → ava** (${result.data?.taskState ?? "completed"})\n${responsePreview}`,
+          },
+        });
+      }
 
       const remoteTaskId = result.data?.taskId;
       const remoteContextId = result.data?.contextId ?? conversationId;
