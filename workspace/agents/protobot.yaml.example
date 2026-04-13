@@ -8,7 +8,7 @@
 # Discord itself: channels, roles, announcements, community pulse.
 
 name: protobot
-role: operations
+role: devops
 
 model: claude-sonnet-4-6
 
