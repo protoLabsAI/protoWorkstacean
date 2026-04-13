@@ -73,11 +73,10 @@ agents:
   # Posts as @protoquinn[bot] via installation token minted in her entrypoint
   # from QUINN_APP_ID + QUINN_APP_PRIVATE_KEY, refreshed every 45 min.
   # chat is uncovered here — Discord DMs fall through to ROUTER_DM_DEFAULT_AGENT
-  # (currently ava) for free-form conversation. Note: DISCORD_BOT_TOKEN_QUINN
-  # is the same as the primary DISCORD_BOT_TOKEN, so Quinn's Discord identity
-  # is already live via the shared client — not duplicated in the agent pool.
+  # (currently ava) for free-form conversation.
   - name: quinn
     url: "${QUINN_BASE_URL}/a2a"
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_QUINN
     skills:
       - name: pr_review
         description: Review a pull request (CI, CodeRabbit threads, diff) and submit a formal APPROVE/REQUEST_CHANGES/COMMENT review via pr_inspector
