@@ -271,7 +271,8 @@ export class DiscordPlugin implements Plugin {
   readonly description = "Discord gateway — routes messages to/from the A2A agent fleet";
   readonly capabilities = ["discord-inbound", "discord-outbound"];
 
-  private client!: Client;
+  /** Exposed for API routes (discord operations agent). */
+  client!: Client;
   private busRef!: EventBus;
   private config!: DiscordConfig;
   private workspaceDir: string;

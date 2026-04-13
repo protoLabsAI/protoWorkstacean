@@ -15,6 +15,7 @@ import { createRoutes as planeRoutes } from "./plane.ts";
 import { createRoutes as avaToolRoutes } from "./ava-tools.ts";
 import { createRoutes as boardRoutes } from "./board.ts";
 import { createRoutes as mailboxRoutes } from "./mailbox.ts";
+import { createRoutes as discordRoutes } from "./discord.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
@@ -29,5 +30,6 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...avaToolRoutes(ctx),
     ...boardRoutes(ctx),
     ...(ctx.mailbox ? mailboxRoutes(ctx.mailbox, ctx) : []),
+    ...discordRoutes(ctx),
   ];
 }
