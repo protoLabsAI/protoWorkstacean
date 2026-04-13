@@ -1245,21 +1245,40 @@ export class DiscordPlugin implements Plugin {
       startTime: new Date(),
     });
 
-    bus.publish(`message.inbound.discord.${channelId}`, {
-      id: lastMessage.id,
-      correlationId: conversationId,
-      topic: `message.inbound.discord.${channelId}`,
-      timestamp: Date.now(),
-      payload: {
-        sender: userId,
-        channel: channelId,
-        content: batchedContent,
-        isDM: true,
-        ...(agentName ? { agentId: agentName } : {}),
-      },
-      source: { interface: "discord" as const, channelId, userId },
-      reply: { topic: `message.outbound.discord.${channelId}` },
-    });
+    if (agentName) {
+      // Agent pool DM — we know exactly which agent. Skip the router entirely,
+      // publish straight to agent.skill.request with the target.
+      bus.publish("agent.skill.request", {
+        id: lastMessage.id,
+        correlationId: conversationId,
+        topic: "agent.skill.request",
+        timestamp: Date.now(),
+        payload: {
+          skill: "chat",
+          content: batchedContent,
+          targets: [agentName],
+          isDM: true,
+        },
+        source: { interface: "discord" as const, channelId, userId },
+        reply: { topic: `message.outbound.discord.${channelId}` },
+      });
+    } else {
+      // Main bot DM — route through message.inbound for the router to resolve.
+      bus.publish(`message.inbound.discord.${channelId}`, {
+        id: lastMessage.id,
+        correlationId: conversationId,
+        topic: `message.inbound.discord.${channelId}`,
+        timestamp: Date.now(),
+        payload: {
+          sender: userId,
+          channel: channelId,
+          content: batchedContent,
+          isDM: true,
+        },
+        source: { interface: "discord" as const, channelId, userId },
+        reply: { topic: `message.outbound.discord.${channelId}` },
+      });
+    }
   }
 
   private _initAgentPool(): void {
