@@ -11,6 +11,10 @@ import { createRoutes as worldStateRoutes } from "./world-state.ts";
 import { createRoutes as githubRoutes } from "./github.ts";
 import { createRoutes as incidentRoutes } from "./incidents.ts";
 import { createRoutes as operationRoutes } from "./operations.ts";
+import { createRoutes as planeRoutes } from "./plane.ts";
+import { createRoutes as avaToolRoutes } from "./ava-tools.ts";
+import { createRoutes as boardRoutes } from "./board.ts";
+import { createRoutes as mailboxRoutes } from "./mailbox.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
@@ -21,5 +25,9 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...worldStateRoutes(ctx),
     ...githubRoutes(ctx),
     ...incidentRoutes(ctx),
+    ...planeRoutes(ctx),
+    ...avaToolRoutes(ctx),
+    ...boardRoutes(ctx),
+    ...(ctx.mailbox ? mailboxRoutes(ctx.mailbox, ctx) : []),
   ];
 }

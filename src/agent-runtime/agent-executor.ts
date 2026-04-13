@@ -16,7 +16,7 @@
  */
 
 import { query, createSdkMcpServer, isSDKResultMessage } from "@protolabsai/sdk";
-import type { SDKResultMessageSuccess } from "@protolabsai/sdk";
+import type { SDKResultMessageSuccess, SDKResultMessageError, ExtendedUsage } from "@protolabsai/sdk";
 import type { AgentDefinition } from "./types.ts";
 import type { ToolRegistry } from "./tool-registry.ts";
 
@@ -36,6 +36,10 @@ export interface AgentRunResult {
   isError: boolean;
   /** Raw stop reason from the SDK result message. */
   stopReason?: string;
+  /** Token usage reported by the SDK. */
+  usage?: ExtendedUsage;
+  /** Number of agentic turns taken. */
+  numTurns?: number;
 }
 
 /**
@@ -107,6 +111,8 @@ export class AgentExecutor {
     let resultText = "";
     let isError = false;
     let stopReason: string | undefined;
+    let usage: ExtendedUsage | undefined;
+    let numTurns: number | undefined;
 
     for await (const message of session) {
       if (isSDKResultMessage(message)) {
@@ -117,11 +123,17 @@ export class AgentExecutor {
             resultText = success.result ?? "";
             const rawStopReason = (success as Record<string, unknown>).stop_reason;
             stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined;
+            usage = success.usage;
+            numTurns = success.num_turns;
           } else if ("error" in message) {
             // SDKResultMessageError
+            const errMsg = message as SDKResultMessageError;
             isError = true;
-            resultText = String((message as { error: unknown }).error ?? "Unknown error");
+            resultText = String((errMsg as { error: unknown }).error ?? "Unknown error");
+            usage = errMsg.usage;
+            numTurns = errMsg.num_turns;
           }
+          break;
         }
       }
       // Stream text blocks for logging / debugging
@@ -143,6 +155,6 @@ export class AgentExecutor {
 
     if (resultText.length > 0) process.stdout.write("\n");
 
-    return { text: resultText, isError, stopReason };
+    return { text: resultText, isError, stopReason, usage, numTurns };
   }
 }

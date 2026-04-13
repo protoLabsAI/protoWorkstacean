@@ -45,16 +45,21 @@ export class GraphitiClient {
    * Returns a formatted [User context] block, or "" if no facts found.
    *
    * @param groupId  Canonical group ID — use IdentityRegistry.groupId() to resolve.
-   *                 Falls back to "user:{platform}_{userId}" if unresolved.
+   *                 Falls back to "user_{platform}_{userId}" if unresolved.
+   *                 MUST use only alphanumeric, dashes, underscores — colons
+   *                 will crash graphiti's ingestion worker silently.
    */
   async getContextBlock(
     groupId: string,
     currentMessage: string,
   ): Promise<string> {
 
+    // Graphiti's /get-memory requires center_node_uuid (even when null)
+    // and Message.role (even when blank). Omitting either causes 422.
     const result = await this._post<{ facts: GraphitiFact[] }>("/get-memory", {
       group_id: groupId,
-      messages: [{ content: currentMessage, role_type: "user" }],
+      center_node_uuid: null,
+      messages: [{ content: currentMessage, role_type: "user", role: "" }],
       max_facts: 15,
     });
 

@@ -83,6 +83,15 @@ export interface AgentDefinition {
 
   /** Skills this agent can handle (maps skill.name → AgentSkillDefinition). */
   skills: AgentSkillDefinition[];
+
+  /**
+   * Optional Discord bot token env var. When set, DiscordPlugin's agent
+   * pool spins up a dedicated Client() for this agent so users can @-mention
+   * or DM the agent's bot directly instead of routing through the shared
+   * protoBot listener. Only meaningful for in-process agents that want
+   * their own Discord identity.
+   */
+  discordBotTokenEnvKey?: string;
 }
 
 /**
@@ -98,4 +107,5 @@ export interface RawAgentYaml {
   canDelegate?: unknown;
   maxTurns?: unknown;
   skills?: unknown;
+  discordBotTokenEnvKey?: unknown;
 }

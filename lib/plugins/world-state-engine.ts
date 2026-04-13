@@ -36,6 +36,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import type { WorldState, WorldStateDomain, WorldStateSnapshot } from "../types/world-state.ts";
+import { HttpClient } from "../../src/services/http-client.ts";
 
 // ── Domain registration ───────────────────────────────────────────────────────
 
@@ -204,6 +205,36 @@ export class WorldStateEngine implements Plugin {
       `[world-state-engine] Installed — ${this.domains.size} domain(s): ` +
       `${[...this.domains.keys()].join(", ") || "(none yet)"}`,
     );
+  }
+
+  /**
+   * Remove any domain entries in the restored state that have no matching
+   * registration. Call this once after all registerDomain() calls have
+   * finished (either immediately in startup if all registrations are
+   * synchronous, or via a short deferred timer). Without this, domains
+   * removed from yaml or renamed stay in the snapshot forever as stale
+   * data — /api/world-state shows both the old and new name, actions
+   * and goals can match the wrong one, etc.
+   *
+   * Also clears the matching extensions.<name>_available flag so stale
+   * availability signals don't linger.
+   */
+  pruneOrphanDomains(): void {
+    const registered = new Set(this.domains.keys());
+    const current = Object.keys(this.worldState.domains);
+    const orphans: string[] = [];
+    for (const name of current) {
+      if (!registered.has(name)) {
+        delete this.worldState.domains[name];
+        delete this.worldState.extensions[`${name}_available`];
+        orphans.push(name);
+      }
+    }
+    if (orphans.length > 0) {
+      console.log(
+        `[world-state-engine] Pruned ${orphans.length} orphan domain(s) from restored snapshot: ${orphans.join(", ")}`,
+      );
+    }
   }
 
   uninstall(): void {
@@ -559,26 +590,11 @@ export function createHttpCollector(
   url: string,
   opts: { timeoutMs?: number; headers?: Record<string, string> } = {},
 ): DomainCollector {
-  return async () => {
-    const resp = await fetch(url, {
-      method: "GET",
-      headers: opts.headers,
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
-    });
-
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status} from ${url}`);
-    }
-
-    const json = await resp.json();
-
-    // Unwrap standard API envelope: { success, data } → data
-    if (json && typeof json === "object" && "data" in json && "success" in json) {
-      return json.data;
-    }
-
-    return json;
-  };
+  const http = new HttpClient({
+    timeoutMs: opts.timeoutMs ?? 10_000,
+    headers: opts.headers,
+  });
+  return () => http.get(url, { unwrapEnvelope: true });
 }
 
 // ── MCP tool factory ──────────────────────────────────────────────────────────

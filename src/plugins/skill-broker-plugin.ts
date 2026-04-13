@@ -27,6 +27,7 @@ interface AgentDef {
   name: string;
   url: string;
   apiKeyEnv?: string;
+  streaming?: boolean;
   skills?: Array<AgentSkill | string>;
 }
 
@@ -43,14 +44,29 @@ export class SkillBrokerPlugin implements Plugin {
     this.executorRegistry = executorRegistry;
   }
 
-  install(_bus: EventBus): void {
+  install(bus: EventBus): void {
     const agents = this._loadAgents();
+    const opsChannel = process.env.DISCORD_AGENT_OPS_CHANNEL ?? "";
 
     for (const agent of agents) {
       const executor = new A2AExecutor({
         name: agent.name,
         url: resolveEnvVars(agent.url, "skill-broker"),
         apiKeyEnv: agent.apiKeyEnv,
+        streaming: agent.streaming ?? false,
+        onStreamUpdate: opsChannel
+          ? (update) => {
+              bus.publish(`message.outbound.discord.push.${opsChannel}`, {
+                id: crypto.randomUUID(),
+                correlationId: crypto.randomUUID(),
+                topic: `message.outbound.discord.push.${opsChannel}`,
+                timestamp: Date.now(),
+                payload: {
+                  content: `**${agent.name}** [${update.state ?? update.type}] ${(update.text ?? "").slice(0, 300)}`,
+                },
+              });
+            }
+          : undefined,
       });
 
       for (const s of agent.skills ?? []) {

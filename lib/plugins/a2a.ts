@@ -33,7 +33,7 @@ import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
-import { validateProjectEntry } from "../project-schema.ts";
+import { validateProjectEntry, channelIdOf } from "../project-schema.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -82,17 +82,15 @@ function buildIndex(projectsPath: string): Map<string, ProjectIndex> {
     if (!project.github || !project.slug) continue;
     if (project.status === "archived" || project.status === "suspended") continue;
 
-    // Support both flat discord shape (discord.dev) and nested (discord.channels.dev)
-    const disc = project.discord as Record<string, unknown> | undefined;
-    const channels = (disc?.channels as Record<string, string> | undefined) ?? disc;
+    // Each channel field may be a string or an object { channelId, webhook }
     index.set(project.github, {
       projectSlug: project.slug,
       discordChannels: {
-        general: channels?.general as string | undefined,
-        updates: channels?.updates as string | undefined,
-        dev: channels?.dev as string | undefined,
-        alerts: channels?.alerts as string | undefined,
-        releases: channels?.releases as string | undefined,
+        general: channelIdOf(project.discord.general) || undefined,
+        updates: channelIdOf(project.discord.updates) || undefined,
+        dev: channelIdOf(project.discord.dev) || undefined,
+        alerts: channelIdOf(project.discord.alerts) || undefined,
+        releases: channelIdOf(project.discord.releases) || undefined,
       },
     });
   }

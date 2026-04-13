@@ -87,4 +87,22 @@ describe("ToolRegistry", () => {
     registry.registerAll([makeTool("x"), makeTool("y")]);
     expect(registry.all()).toHaveLength(2);
   });
+
+  describe("validateAgentTools()", () => {
+    test("returns empty array when all declared tools are known", () => {
+      registry.registerAll([makeTool("a"), makeTool("b")]);
+      expect(registry.validateAgentTools("my-agent", ["a", "b"])).toEqual([]);
+    });
+
+    test("returns unknown tool names", () => {
+      registry.register(makeTool("known"));
+      const unknowns = registry.validateAgentTools("my-agent", ["known", "missing-1", "missing-2"]);
+      expect(unknowns).toEqual(["missing-1", "missing-2"]);
+    });
+
+    test("returns empty array for empty declared list", () => {
+      registry.register(makeTool("a"));
+      expect(registry.validateAgentTools("my-agent", [])).toEqual([]);
+    });
+  });
 });

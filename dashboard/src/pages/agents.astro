@@ -1,0 +1,8 @@
+---
+import DashboardLayout from "../layouts/DashboardLayout.astro";
+import AgentsView from "../components/AgentsView.tsx";
+---
+
+<DashboardLayout title="Agents" activePage="agents">
+  <AgentsView client:load />
+</DashboardLayout>

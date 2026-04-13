@@ -80,7 +80,6 @@ export const getEvents = (topic?: string, limit = 500) => {
 
 export const getTopics = () => apiFetch<string[]>("/api/topics");
 export const getConsumers = () => apiFetch<string[]>("/api/consumers");
-
 // ── Proxied APIs from main server (:3000) ─────────────────────────
 // TTL tuned to each endpoint's refresh cadence.
 export const getWorldState = (force = false) =>

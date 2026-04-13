@@ -192,7 +192,7 @@ All bus topics published and subscribed across all plugins and subsystems. Topic
 
 | Topic | Direction | Publisher | Subscriber | Description |
 |-------|-----------|-----------|------------|-------------|
-| `hitl.request.#` | Internal | Agents (e.g. ava post-plan) | HITLPlugin | Approval request |
+| `hitl.request.#` | Internal | Agents (e.g. protoMaker team post-plan, Quinn post-review) | HITLPlugin | Approval request |
 | `hitl.response.#` | Internal | Interface plugins (Discord reaction, CLI) | HITLPlugin | Human decision |
 | `hitl.pending.<correlationId>` | Internal | HITLPlugin | API callers | Unrouted request awaiting response |
 | `hitl.expired.<correlationId>` | Internal | HITLPlugin | Any | Request TTL exceeded (60s sweep) |

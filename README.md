@@ -1,6 +1,6 @@
 # protoWorkstacean
 
-Homeostatic agent orchestration platform. Monitors world state, evaluates goals, and drives ava's agent fleet to close deviations — continuously and autonomously.
+Homeostatic agent orchestration platform. Monitors world state, evaluates goals, and drives the protoLabs agent fleet — the protoMaker team, Quinn, Ava, Jon, Frank — to close deviations continuously and autonomously.
 
 ---
 
@@ -12,7 +12,7 @@ External surfaces (GitHub, Discord, Plane, HTTP)
     → RouterPlugin → agent.skill.request
       → SkillDispatcherPlugin → ExecutorRegistry
         → ProtoSdkExecutor (in-process @protolabsai/sdk)
-        → A2AExecutor (HTTP/JSON-RPC 2.0 → ava)
+        → A2AExecutor (HTTP/JSON-RPC 2.0 → protoMaker team / Quinn / protoContent / Frank)
 
 World engine loop (parallel):
   WorldStateEngine (domain pollers)
@@ -41,8 +41,8 @@ bun run src/index.ts
 | `DISCORD_BOT_TOKEN` | For Discord | Discord bot token |
 | `GITHUB_TOKEN` | For GitHub | PAT for webhook auth and API calls |
 | `GITHUB_APP_ID` | For GitHub App auth | App ID |
-| `AVA_BASE_URL` | For domain polling | Base URL of ava server (e.g. `http://localhost:3008`) |
-| `AVA_API_KEY` | For domain polling | Ava API key (`X-API-Key`) |
+| `AVA_BASE_URL` | For domain polling | Base URL of the protoMaker team server (env var name kept for historical reasons; e.g. `http://localhost:3008`) |
+| `AVA_API_KEY` | For domain polling | protoMaker team API key (`X-API-Key`) |
 | `WORKSTACEAN_HTTP_PORT` | No | HTTP API port (default: `3000`) |
 | `WORKSTACEAN_API_KEY` | No | API key for `/publish` endpoint |
 | `ANTHROPIC_API_KEY` | For in-process agents | Claude API key |
@@ -120,7 +120,7 @@ projects.yaml
     → actionRegistry.upsert(action)
 ```
 
-Domain URLs support `${ENV_VAR}` interpolation. ava exposes `/api/world/board` and `/api/world/agent-health` as pollable HTTP endpoints; `workspace/domains.yaml` registers them.
+Domain URLs support `${ENV_VAR}` interpolation. The protoMaker team server exposes `/api/world/board` and `/api/world/agent-health` as pollable HTTP endpoints; `workspace/domains.yaml` registers them.
 
 See [`docs/architecture.md`](docs/architecture.md).
 
@@ -128,7 +128,7 @@ See [`docs/architecture.md`](docs/architecture.md).
 
 ## Distributed tracing
 
-Every bus message carries `correlationId` (trace-id, never changes) and `parentId` (parent span-id). The `A2AExecutor` forwards both as `X-Correlation-Id` and `X-Parent-Id` HTTP headers. ava echoes the `contextId` back, linking its processing to the originating trace.
+Every bus message carries `correlationId` (trace-id, never changes) and `parentId` (parent span-id). The `A2AExecutor` forwards both as `X-Correlation-Id` and `X-Parent-Id` HTTP headers. External A2A agents echo the `contextId` back, linking their processing to the originating trace.
 
 ---
 

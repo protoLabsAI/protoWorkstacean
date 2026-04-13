@@ -7,9 +7,14 @@
  */
 
 import type { ExtractedSymbol } from "../diff/symbol-extractor.ts";
+import { HttpClient } from "../http-client.ts";
 
-const GITHUB_RAW = "https://raw.githubusercontent.com";
 const CONTEXT_LINES = 10; // lines before and after the symbol definition
+
+const githubRawHttp = new HttpClient({
+  baseUrl: "https://raw.githubusercontent.com",
+  headers: { "User-Agent": "protoWorkstacean/1.0" },
+});
 
 export interface SymbolContext {
   symbol: ExtractedSymbol;
@@ -33,22 +38,11 @@ export async function fetchSymbolContext(
   const filePath = symbol.filePath ?? "";
   if (!filePath) return null;
 
-  const url = `${GITHUB_RAW}/${owner}/${repo}/${ref}/${filePath}`;
-
   try {
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "User-Agent": "protoWorkstacean/1.0",
-      },
-    });
-
-    if (!res.ok) {
-      console.warn(`[symbol-fetcher] Could not fetch ${filePath} at ${ref}: ${res.status}`);
-      return null;
-    }
-
-    const text = await res.text();
+    const text = await githubRawHttp.get(`/${owner}/${repo}/${ref}/${filePath}`, {
+      auth: { type: "bearer", token },
+      responseType: "text",
+    }) as string;
     const lines = text.split("\n");
     const targetLine = symbol.line - 1; // convert to 0-based index
 

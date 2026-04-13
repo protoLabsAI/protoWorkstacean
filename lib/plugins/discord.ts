@@ -18,7 +18,7 @@
  *   DISCORD_DIGEST_CHANNEL  fallback channel ID for cron-triggered posts
  */
 
-import { readFileSync, existsSync, watchFile, unwatchFile, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, watchFile, unwatchFile, mkdirSync, readdirSync } from "node:fs";
 import type { ChannelRegistry } from "../channels/channel-registry.ts";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -42,6 +42,9 @@ import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer, type TurnData } from "../conversation/conversation-tracer.ts";
 import { GraphitiClient } from "../memory/graphiti-client.ts";
 import { IdentityRegistry } from "../identity/identity-registry.ts";
+import { channelIdOf, type ProjectDiscordChannel } from "../project-schema.ts";
+import { DmAccumulator, type AccumulatorEntry } from "../dm/dm-accumulator.ts";
+import type { ContextMailbox } from "../dm/context-mailbox.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -162,16 +165,60 @@ interface AgentsYaml {
 }
 
 function loadAgentPoolDefs(workspaceDir: string): AgentPoolEntry[] {
+  const seen = new Map<string, AgentPoolEntry>();
+
+  // 1. A2A registry — workspace/agents.yaml (external agents)
   const agentsPath = join(workspaceDir, "agents.yaml");
-  if (!existsSync(agentsPath)) return [];
-  try {
-    const raw = readFileSync(agentsPath, "utf8");
-    const parsed = parseYaml(raw) as AgentsYaml;
-    return parsed.agents ?? [];
-  } catch (err) {
-    console.error("[discord] Failed to parse agents.yaml:", err);
-    return [];
+  if (existsSync(agentsPath)) {
+    try {
+      const raw = readFileSync(agentsPath, "utf8");
+      const parsed = parseYaml(raw) as AgentsYaml;
+      for (const entry of parsed.agents ?? []) {
+        if (entry?.name) seen.set(entry.name, entry);
+      }
+    } catch (err) {
+      console.error("[discord] Failed to parse agents.yaml:", err);
+    }
   }
+
+  // 2. In-process agents — workspace/agents/*.yaml (runtime agents loaded
+  //    by AgentRuntimePlugin). Each can also declare discordBotTokenEnvKey
+  //    so the agent pool spins up a dedicated Client for it — without
+  //    this second scan, in-process agents can never get their own
+  //    Discord bot identity.
+  const agentsDir = join(workspaceDir, "agents");
+  if (existsSync(agentsDir)) {
+    try {
+      for (const file of readdirSync(agentsDir)) {
+        if (!(file.endsWith(".yaml") || file.endsWith(".yml"))) continue;
+        if (file.endsWith(".example") || file.endsWith(".retired")) continue;
+        const filePath = join(agentsDir, file);
+        try {
+          const parsed = parseYaml(readFileSync(filePath, "utf8")) as {
+            name?: string;
+            discordBotTokenEnvKey?: string;
+          };
+          if (parsed?.name && typeof parsed.discordBotTokenEnvKey === "string") {
+            // First source wins — A2A registry takes precedence so external
+            // agents with a Discord surface aren't silently overridden by
+            // an in-process agent of the same name.
+            if (!seen.has(parsed.name)) {
+              seen.set(parsed.name, {
+                name: parsed.name,
+                discordBotTokenEnvKey: parsed.discordBotTokenEnvKey,
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`[discord] Failed to parse agent file ${file}:`, err);
+        }
+      }
+    } catch (err) {
+      console.error("[discord] Failed to enumerate workspace/agents/:", err);
+    }
+  }
+
+  return Array.from(seen.values());
 }
 
 // ── Projects loader (for autocomplete + project resolution) ───────────────────
@@ -181,7 +228,11 @@ interface ProjectEntry {
   title: string;
   github?: string;
   status?: string;
-  discord?: { general?: string; updates?: string; dev?: string };
+  discord?: {
+    general?: ProjectDiscordChannel;
+    updates?: ProjectDiscordChannel;
+    dev?: ProjectDiscordChannel;
+  };
 }
 
 interface ProjectsYaml {
@@ -205,6 +256,16 @@ function loadProjectsDefs(workspaceDir: string): ProjectEntry[] {
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
+export interface DiscordPluginOptions {
+  workspaceDir: string;
+  dataDir?: string;
+  channelRegistry?: ChannelRegistry;
+  hitlPlugin?: HITLPlugin;
+  mailbox?: ContextMailbox;
+  /** Check if an agent execution is in-flight for a given correlationId. */
+  isExecutionActive?: (correlationId: string) => boolean;
+}
+
 export class DiscordPlugin implements Plugin {
   readonly name = "discord";
   readonly description = "Discord gateway — routes messages to/from the A2A agent fleet";
@@ -223,6 +284,8 @@ export class DiscordPlugin implements Plugin {
 
   private channelRegistry?: ChannelRegistry;
   private hitlPlugin?: HITLPlugin;
+  private mailbox?: ContextMailbox;
+  private isExecutionActive?: (correlationId: string) => boolean;
 
   // correlationId → { message, replyTopic } for active HITL approvals
   private pendingHITLMessages = new Map<string, { message: Message; replyTopic: string }>();
@@ -235,6 +298,9 @@ export class DiscordPlugin implements Plugin {
   // correlationId (= conversationId for conv turns) → pending Langfuse turn data
   private pendingTurns = new Map<string, TurnData>();
 
+  // DM debounce accumulator — batches rapid-fire DMs before dispatch
+  private dmAccumulator?: DmAccumulator;
+
   // Runtime rate-limit state (built from config on install)
   private rateLimits = new Map<string, number[]>();
   private rateMaxMessages = 5;
@@ -245,11 +311,13 @@ export class DiscordPlugin implements Plugin {
   private rlDb: Database | null = null;
   private dataDir: string | null = null;
 
-  constructor(workspaceDir: string, dataDir?: string, channelRegistry?: ChannelRegistry, hitlPlugin?: HITLPlugin) {
-    this.workspaceDir = workspaceDir;
-    this.dataDir = dataDir ? resolve(dataDir) : null;
-    this.channelRegistry = channelRegistry;
-    this.hitlPlugin = hitlPlugin;
+  constructor(opts: DiscordPluginOptions) {
+    this.workspaceDir = opts.workspaceDir;
+    this.dataDir = opts.dataDir ? resolve(opts.dataDir) : null;
+    this.channelRegistry = opts.channelRegistry;
+    this.hitlPlugin = opts.hitlPlugin;
+    this.mailbox = opts.mailbox;
+    this.isExecutionActive = opts.isExecutionActive;
 
     // When a conversation times out, finalize its Langfuse trace
     this.conversationManager.setTimeoutCallback((entry) => {
@@ -270,6 +338,13 @@ export class DiscordPlugin implements Plugin {
     this.busRef = bus;
     this.config = loadConfig(this.workspaceDir);
     this.identityRegistry = new IdentityRegistry(this.workspaceDir);
+
+    // DM debounce accumulator — batches rapid-fire DMs before dispatch/mailbox
+    this.dmAccumulator = new DmAccumulator({
+      debounceMs: Number(process.env.DM_DEBOUNCE_MS ?? 3000),
+      onFlush: (entry) => this._handleDMFlush(entry, bus),
+      fallbackMailbox: this.mailbox,
+    });
 
     // Apply moderation config
     const { rateLimit, spamPatterns } = this.config.moderation;
@@ -473,25 +548,54 @@ export class DiscordPlugin implements Plugin {
 
       // ── HITL button interactions ─────────────────────────────────────────
       if (interaction.isButton() && interaction.customId.startsWith("hitl:")) {
+        // Defer IMMEDIATELY — Discord's interaction token expires 3s after
+        // the click, and any work we do before this call eats into that
+        // budget. We've seen "Unknown interaction" errors when the handler
+        // did even small amounts of sync work first.
+        //
+        // If deferUpdate throws (e.g. token already expired because the
+        // click was on a very old message and Discord's state is gone, or
+        // network blip), fall through to the body so the decision still
+        // gets published on the bus — the UI just won't update.
+        try {
+          await interaction.deferUpdate();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[discord] HITL deferUpdate failed (${msg}) — processing decision anyway`);
+        }
+
         const [, decision, correlationId] = interaction.customId.split(":");
-        await interaction.deferUpdate();
+        if (!decision || !correlationId) {
+          console.warn(`[discord] HITL button with malformed customId: ${interaction.customId}`);
+          return;
+        }
 
         const entry = this.pendingHITLMessages.get(correlationId);
+        // Recover the reply topic. If the container restarted since the
+        // message was rendered, pendingHITLMessages is empty. The request
+        // embed carries the topic on the footer only in some flows, so
+        // fall back to a sensible pattern-based topic for our stuck
+        // escalation flow (the only flow that uses non-approve/reject
+        // options today).
         const replyTopic = entry?.replyTopic
-          ?? `hitl.response.${correlationId.split("-")[0]}.${correlationId}`;
+          ?? `hitl.response.pr.remediation_stuck.${correlationId}`;
 
-        bus.publish(replyTopic, {
-          id: crypto.randomUUID(),
-          correlationId,
-          topic: replyTopic,
-          timestamp: Date.now(),
-          payload: {
-            type: "hitl_response",
+        try {
+          bus.publish(replyTopic, {
+            id: crypto.randomUUID(),
             correlationId,
-            decision: decision as "approve" | "reject" | "modify",
-            decidedBy: interaction.user.id,
-          },
-        });
+            topic: replyTopic,
+            timestamp: Date.now(),
+            payload: {
+              type: "hitl_response",
+              correlationId,
+              decision,
+              decidedBy: interaction.user.id,
+            },
+          });
+        } catch (err) {
+          console.error(`[discord] HITL bus publish failed for ${correlationId}:`, err);
+        }
 
         if (entry) this.pendingHITLMessages.delete(correlationId);
 
@@ -502,13 +606,18 @@ export class DiscordPlugin implements Plugin {
         if (decision === "approve") color = COLOR_APPROVE;
         else if (decision === "reject") color = COLOR_REJECT;
         else color = COLOR_NEUTRAL;
-        const label = decision.charAt(0).toUpperCase() + decision.slice(1);
+        const label = decision.charAt(0).toUpperCase() + decision.slice(1).replace(/_/g, " ");
         const decidedEmbed = new EmbedBuilder()
           .setTitle(interaction.message.embeds[0]?.title ?? "Decision recorded")
           .setDescription(`**${label}** by <@${interaction.user.id}>`)
           .setColor(color);
 
-        await interaction.message.edit({ embeds: [decidedEmbed], components: [] }).catch(console.error);
+        // Best-effort UI update. If the bot can no longer edit the message
+        // (e.g. posted by an old session), swallow the error so the
+        // decision still counts.
+        await interaction.message.edit({ embeds: [decidedEmbed], components: [] }).catch(err => {
+          console.warn(`[discord] HITL message edit failed for ${correlationId}:`, err instanceof Error ? err.message : err);
+        });
         return;
       }
 
@@ -547,7 +656,7 @@ export class DiscordPlugin implements Plugin {
           const projects = loadProjectsDefs(this.workspaceDir);
           const project = projects.find(p => p.slug === projectSlug);
           if (project) {
-            devChannelId = project.discord?.dev || undefined;
+            devChannelId = channelIdOf(project.discord?.dev) || undefined;
             projectRepo = project.github || undefined;
           }
         }
@@ -792,6 +901,7 @@ export class DiscordPlugin implements Plugin {
   }
 
   uninstall(): void {
+    this.dmAccumulator?.destroy();
     this.conversationManager.destroy();
     this.pendingTurns.clear();
     this.pendingHITLMessages.clear();
@@ -1053,18 +1163,74 @@ export class DiscordPlugin implements Plugin {
     const conv = this.conversationManager.getOrCreate(message.channelId, userId, timeoutMs, agentName);
     const { conversationId, isNew, turnNumber } = conv;
 
-    pendingReplies.set(conversationId, { message });
-    if (agentName) this.pendingAgents.set(conversationId, agentName);
-
     const content = message.cleanContent.replace(/<@!?\d+>/g, "").trim();
     if (!content) return;
+
+    // Push into debounce accumulator — batches rapid-fire DMs
+    const isFirst = this.dmAccumulator!.push({
+      conversationId,
+      userId,
+      channelId: message.channelId,
+      agentName,
+      message: { id: message.id, channelId: message.channelId },
+      content,
+      turnNumber,
+      isNew,
+    });
+
+    if (isFirst) {
+      await message.react("👀").catch(() => {});
+    }
+  }
+
+  /**
+   * Flush callback for DmAccumulator — called when debounce timer fires.
+   *
+   * Checks if an agent execution is in-flight for this conversation:
+   *   - No  → dispatch normally via bus (standard DM flow)
+   *   - Yes → push to mailbox (drained on execution completion by SkillDispatcher)
+   */
+  private async _handleDMFlush(entry: Omit<AccumulatorEntry, "timer">, bus: EventBus): Promise<void> {
+    const {
+      conversationId, userId, channelId, agentName,
+      lastMessage, contents, turnNumber, isNew,
+    } = entry;
+
+    const batchedContent = contents.length === 1
+      ? contents[0]
+      : contents.map((c, i) => `[${i + 1}/${contents.length}] ${c}`).join("\n\n");
+
+    // If agent is mid-execution, queue to mailbox instead of dispatching
+    if (this.isExecutionActive?.(conversationId) && this.mailbox) {
+      console.log(
+        `[discord] Agent in-flight for ${conversationId} — queuing ${contents.length} message(s) to mailbox`,
+      );
+      this.mailbox.push(conversationId, {
+        content: batchedContent,
+        sender: userId,
+        receivedAt: Date.now(),
+      });
+      return;
+    }
+
+    // Normal dispatch path — no agent in-flight
+    // Resolve the original Discord message for reply threading
+    const discordChannel = this.client?.channels.cache.get(channelId);
+    const discordMessage = discordChannel && "messages" in discordChannel
+      ? await (discordChannel as TextChannel).messages.fetch(lastMessage.id).catch(() => null)
+      : null;
+
+    if (discordMessage) {
+      pendingReplies.set(conversationId, { message: discordMessage });
+    }
+    if (agentName) this.pendingAgents.set(conversationId, agentName);
 
     // Langfuse tracing
     if (isNew) {
       this.conversationTracer.startTrace({
         conversationId,
         userId,
-        channelId: message.channelId,
+        channelId,
         agentName,
         platform: "discord-dm",
       }).catch(err => console.error("[discord] Langfuse startTrace error:", err));
@@ -1072,26 +1238,26 @@ export class DiscordPlugin implements Plugin {
     this.pendingTurns.set(conversationId, {
       conversationId,
       turnNumber,
-      input: content,
+      input: batchedContent,
       userId,
       agentName,
       startTime: new Date(),
     });
 
-    bus.publish(`message.inbound.discord.${message.channelId}`, {
-      id: message.id,
+    bus.publish(`message.inbound.discord.${channelId}`, {
+      id: lastMessage.id,
       correlationId: conversationId,
-      topic: `message.inbound.discord.${message.channelId}`,
+      topic: `message.inbound.discord.${channelId}`,
       timestamp: Date.now(),
       payload: {
         sender: userId,
-        channel: message.channelId,
-        content,
+        channel: channelId,
+        content: batchedContent,
         isDM: true,
         ...(agentName ? { agentId: agentName } : {}),
       },
-      source: { interface: "discord" as const, channelId: message.channelId, userId },
-      reply: { topic: `message.outbound.discord.${message.channelId}` },
+      source: { interface: "discord" as const, channelId, userId },
+      reply: { topic: `message.outbound.discord.${channelId}` },
     });
   }
 
@@ -1131,14 +1297,25 @@ export class DiscordPlugin implements Plugin {
           partials: [Partials.Channel, Partials.Message],
         });
 
-        agentClient.once(Events.ClientReady, c => {
+        agentClient.once(Events.ClientReady, async c => {
           console.log(`[discord] Agent client "${agentName}" logged in as ${c.user.tag}`);
+          // Pre-warm DM channels so Discord delivers MESSAGE_CREATE to this
+          // client. Discord's gateway only pushes DM events for channels in
+          // the session's private_channels list (sent in READY), so a client
+          // that never opened a DM with a user gets zero events for that DM.
+          // The primary client already does this on its own ClientReady —
+          // agent pool clients need the same treatment or their bot appears
+          // online in Discord but silently drops every DM.
+          await this._warmDmChannels(c).catch(err =>
+            console.warn(`[discord] Agent client "${agentName}" DM pre-warm failed:`, err),
+          );
         });
 
         // Handle DMs sent directly to this agent's bot
         agentClient.on(Events.MessageCreate, async (message) => {
           if (message.author.bot) return;
           if (message.guild) return; // guild messages handled by main client
+          console.log(`[discord] Agent client "${agentName}" received DM from ${message.author.tag} (${message.author.id})`);
           await this._handleDM(message, agentName, this.busRef!);
         });
 

@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { Plugin, EventBus } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
+import type { TelemetryService } from "../telemetry/telemetry-service.ts";
+import type { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 
 export type Params = Record<string, string>;
 export type RouteHandler = (req: Request, params: Params) => Response | Promise<Response>;
@@ -29,7 +31,9 @@ export interface ApiContext {
   bus: EventBus;
   plugins: Plugin[];
   executorRegistry: ExecutorRegistry;
+  telemetry?: TelemetryService;
   apiKey?: string;
+  mailbox?: ContextMailbox;
 }
 
 /** Match a path against a pattern like "/api/foo/:id/run". Returns params or null. */

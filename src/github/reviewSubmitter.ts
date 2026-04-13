@@ -19,6 +19,7 @@ import type {
 } from "./types.ts";
 import { toGitHubComment } from "./types.ts";
 import type { ValidatedComment } from "../diff/types.ts";
+import { HttpClient } from "../services/http-client.ts";
 
 const GITHUB_API_BASE = "https://api.github.com";
 const USER_AGENT = "protoWorkstacean/1.0";
@@ -26,9 +27,18 @@ const API_VERSION = "2022-11-28";
 
 export class GitHubReviewSubmitter {
   private readonly getToken: (owner: string, repo: string) => Promise<string>;
+  private readonly http: HttpClient;
 
   constructor(getToken: (owner: string, repo: string) => Promise<string>) {
     this.getToken = getToken;
+    this.http = new HttpClient({
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": USER_AGENT,
+        "X-GitHub-Api-Version": API_VERSION,
+        "Content-Type": "application/json",
+      },
+    });
   }
 
   /**
@@ -71,15 +81,9 @@ export class GitHubReviewSubmitter {
 
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await this.http.fetch(url, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          Accept: "application/vnd.github+json",
-          "User-Agent": USER_AGENT,
-          "X-GitHub-Api-Version": API_VERSION,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
     } catch (err) {

@@ -10,6 +10,9 @@ import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { ActionRegistry } from "./planner/action-registry";
 import type { Plugin, } from "../lib/types";
 import type { Action } from "./planner/types/action";
+import { parseEnv } from "./config/env.ts";
+// Fail-fast env validation — exits immediately on misconfiguration.
+parseEnv();
 // --- Workspace config ---
 const workspaceDir = resolve(
   process.env.WORKSPACE_DIR || join(process.cwd(), "workspace")
@@ -23,6 +26,10 @@ const dataDir = resolve(
 );
 
 const bus = new InMemoryEventBus();
+
+// --- Context mailbox — mid-execution DM queue for debounced message injection ---
+import { ContextMailbox } from "../lib/dm/context-mailbox.ts";
+const contextMailbox = new ContextMailbox();
 
 // --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
 import { ChannelRegistry } from "../lib/channels/channel-registry.js";
@@ -76,13 +83,27 @@ function loadActionsYaml(): void {
 }
 loadActionsYaml();
 
+// --- Telemetry: per-goal and per-action counters persisted to knowledge.db ---
+// Hosts the audit view ("is this action actually used?") exposed via
+// /api/telemetry/* endpoints. Goal and action counters are bumped by the
+// goal-evaluator and action-dispatcher respectively. Loaded actions are
+// registered here at startup so zero-count rows exist for the audit.
+import { TelemetryService, ACTION_EVENTS } from "./telemetry/telemetry-service.js";
+const telemetry = new TelemetryService(`${dataDir}/knowledge.db`);
+telemetry.init();
+for (const action of actionRegistry.getAll()) {
+  telemetry.registerKnown("action", action.id, ACTION_EVENTS);
+}
+
 // Core plugins — always loaded, statically imported (no dynamic overhead needed)
 const debugPlugin = new DebugPlugin();
 debugPlugin.install(bus);
 
+const loggerPlugin = new LoggerPlugin(dataDir);
+
 const corePlugins: Plugin[] = [
   debugPlugin,
-  new LoggerPlugin(dataDir),
+  loggerPlugin,
   new CLIPlugin(),
   new SignalPlugin(),
   new SchedulerPlugin(dataDir),
@@ -130,7 +151,17 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => !!process.env.DISCORD_BOT_TOKEN,
     factory: async () => {
       const { DiscordPlugin } = await import("../lib/plugins/discord");
-      return new DiscordPlugin(workspaceDir, dataDir, channelRegistry, hitlPlugin);
+      return new DiscordPlugin({
+        workspaceDir,
+        dataDir,
+        channelRegistry,
+        hitlPlugin,
+        mailbox: contextMailbox,
+        isExecutionActive: (correlationId: string) => {
+          const dispatcher = registeredPlugins.find(p => p.name === "skill-dispatcher");
+          return !!(dispatcher as any)?.isActive?.(correlationId);
+        },
+      });
     },
   },
   {
@@ -158,11 +189,11 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
-    name: "plane-hitl",
+    name: "plane-discord-notifier",
     condition: () => true,
     factory: async () => {
-      const { PlaneHITLPlugin } = await import("../lib/plugins/plane-hitl");
-      return new PlaneHITLPlugin(workspaceDir);
+      const { PlaneDiscordNotifierPlugin } = await import("../lib/plugins/plane-discord-notifier");
+      return new PlaneDiscordNotifierPlugin(workspaceDir);
     },
   },
   {
@@ -178,7 +209,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { GoalEvaluatorPlugin } = await import("./plugins/goal_evaluator_plugin.js");
-      return new GoalEvaluatorPlugin({ workspaceDir });
+      return new GoalEvaluatorPlugin({ workspaceDir }, telemetry);
     },
   },
   {
@@ -221,7 +252,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { SkillDispatcherPlugin } = await import("./executor/skill-dispatcher-plugin.js");
-      return new SkillDispatcherPlugin(executorRegistry, workspaceDir);
+      return new SkillDispatcherPlugin(executorRegistry, workspaceDir, undefined, loggerPlugin, contextMailbox);
     },
   },
   {
@@ -245,7 +276,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { ActionDispatcherPlugin } = await import("./plugins/action-dispatcher-plugin.js");
-      return new ActionDispatcherPlugin({ wipLimit: 5 });
+      return new ActionDispatcherPlugin({ wipLimit: 5 }, telemetry);
     },
   },
   {
@@ -440,7 +471,9 @@ const apiContext: ApiContext = {
   bus,
   plugins: allPlugins,
   executorRegistry,
+  telemetry,
   apiKey: API_KEY,
+  mailbox: contextMailbox,
 };
 
 const routes = createAllRoutes(apiContext);
@@ -476,7 +509,16 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     engine.registerDomain("ci", createHttpCollector(`${base}/api/ci-health`), 300_000); // 5min — GitHub rate limits
     engine.registerDomain("pr_pipeline", createHttpCollector(`${base}/api/pr-pipeline`), 120_000); // 2min
     engine.registerDomain("branch_drift", createHttpCollector(`${base}/api/branch-drift`), 600_000); // 10min
+    engine.registerDomain("branch_protection", createHttpCollector(`${base}/api/branch-protection`), 600_000); // 10min — rulesets change rarely
+    engine.registerDomain("hitl_queue", createHttpCollector(`${base}/api/hitl-queue`), 30_000); // 30s — catch routing holes fast
+    engine.registerDomain("plane", createHttpCollector(`${base}/api/plane-board`), 120_000); // 2min — Plane REST list across projects
+    engine.registerDomain("memory", createHttpCollector(`${base}/api/memory-health`), 60_000); // 1min — Graphiti health + search probe
 
-    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift");
+    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue, plane, memory");
+
+    // All local + workspace/domains.yaml + per-project domains are now
+    // registered. Defer prune briefly so any async per-project domain
+    // discovery has a chance to finish before we drop orphans.
+    setTimeout(() => engine.pruneOrphanDomains(), 10_000);
   }
 }

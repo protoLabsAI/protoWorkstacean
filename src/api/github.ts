@@ -7,8 +7,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { Route, ApiContext } from "./types.ts";
+import { HttpClient } from "../services/http-client.ts";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+
+const ghHttp = new HttpClient({
+  baseUrl: "https://api.github.com",
+  timeoutMs: 15_000,
+  headers: {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  },
+});
 
 function loadProjectRepos(workspaceDir: string): string[] {
   const projectsPath = join(workspaceDir, "projects.yaml");
@@ -21,16 +31,7 @@ function loadProjectRepos(workspaceDir: string): string[] {
 
 async function ghApi(path: string): Promise<unknown> {
   if (!GITHUB_TOKEN) throw new Error("GITHUB_TOKEN not set");
-  const resp = await fetch(`https://api.github.com${path}`, {
-    headers: {
-      Authorization: `Bearer ${GITHUB_TOKEN}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!resp.ok) throw new Error(`GitHub API ${resp.status}: ${path}`);
-  return resp.json();
+  return ghHttp.get(path, { auth: { type: "bearer", token: GITHUB_TOKEN } });
 }
 
 export function createRoutes(ctx: ApiContext): Route[] {
@@ -38,14 +39,23 @@ export function createRoutes(ctx: ApiContext): Route[] {
 
   async function handleGetCiHealth(): Promise<Response> {
     const repoList = repos();
-    if (!repoList.length) return Response.json({ successRate: 1, totalRuns: 0, failedRuns: 0, projects: [] });
+    if (!repoList.length) return Response.json({ successRate: 1, totalRuns: 0, failedRuns: 0, failingMainCount: 0, projects: [] });
 
-    const projects: Array<{ repo: string; successRate: number; totalRuns: number; failedRuns: number; latestConclusion: string | null }> = [];
+    const projects: Array<{
+      repo: string;
+      successRate: number;
+      totalRuns: number;
+      failedRuns: number;
+      latestConclusion: string | null;
+      mainBranchLastPushGreen: boolean;
+    }> = [];
     let totalAll = 0;
     let failedAll = 0;
+    let failingMainCount = 0;
 
     for (const repo of repoList) {
       try {
+        // Aggregate recent run health across all branches
         const data = await ghApi(`/repos/${repo}/actions/runs?per_page=10&status=completed`) as {
           workflow_runs?: Array<{ conclusion: string }>;
         };
@@ -54,20 +64,39 @@ export function createRoutes(ctx: ApiContext): Route[] {
         const rate = runs.length > 0 ? (runs.length - failed) / runs.length : 1;
         totalAll += runs.length;
         failedAll += failed;
+
+        // Targeted: is the latest push to the default branch green? This is the
+        // signal that actually blocks downstream promotion PRs — a red main is
+        // the single most expensive CI failure pattern we have (see today's
+        // PR #3328 dirty-prettier incident).
+        let mainBranchLastPushGreen = true;
+        try {
+          const repoMeta = await ghApi(`/repos/${repo}`) as { default_branch: string };
+          const mainRuns = await ghApi(
+            `/repos/${repo}/actions/runs?branch=${encodeURIComponent(repoMeta.default_branch)}&event=push&per_page=5&status=completed`,
+          ) as { workflow_runs?: Array<{ conclusion: string }> };
+          const latestMain = mainRuns.workflow_runs?.[0];
+          mainBranchLastPushGreen = !latestMain || latestMain.conclusion === "success" || latestMain.conclusion === "skipped";
+          if (!mainBranchLastPushGreen) failingMainCount += 1;
+        } catch {
+          // Keep optimistic default on lookup errors to avoid false positives.
+        }
+
         projects.push({
           repo,
           successRate: Math.round(rate * 100) / 100,
           totalRuns: runs.length,
           failedRuns: failed,
           latestConclusion: runs[0]?.conclusion ?? null,
+          mainBranchLastPushGreen,
         });
       } catch {
-        projects.push({ repo, successRate: 0, totalRuns: 0, failedRuns: 0, latestConclusion: null });
+        projects.push({ repo, successRate: 0, totalRuns: 0, failedRuns: 0, latestConclusion: null, mainBranchLastPushGreen: true });
       }
     }
 
     const successRate = totalAll > 0 ? Math.round(((totalAll - failedAll) / totalAll) * 100) / 100 : 1;
-    return Response.json({ successRate, totalRuns: totalAll, failedRuns: failedAll, projects });
+    return Response.json({ successRate, totalRuns: totalAll, failedRuns: failedAll, failingMainCount, projects });
   }
 
   async function handleGetPrPipeline(): Promise<Response> {
@@ -178,11 +207,22 @@ export function createRoutes(ctx: ApiContext): Route[] {
           }
         } catch { /* leave none */ }
 
+        // Ready to merge requires:
+        //   - not a draft
+        //   - clean mergeable status (no conflicts / not blocked by branch rules)
+        //   - CI passing
+        //   - an explicit approving review (NOT merely "no changes requested")
+        //
+        // The last condition is the tight one. A PR with zero reviews used to
+        // qualify as ready, which is how human-authored PRs were slipping
+        // through into the HITL approval prompt. Tight semantics: if a human
+        // (or CodeRabbit, in auto-approve mode) hasn't explicitly approved,
+        // don't merge. Tests + explicit approval are both mandatory.
         const readyToMerge =
           !pr.draft &&
           mergeable === "clean" &&
           ciStatus === "pass" &&
-          reviewState !== "changes_requested";
+          reviewState === "approved";
 
         return {
           repo, number: pr.number, title: pr.title, headSha: pr.head.sha,
@@ -256,9 +296,167 @@ export function createRoutes(ctx: ApiContext): Route[] {
     return Response.json({ projects, maxDrift });
   }
 
+  async function handleGetBranchProtection(): Promise<Response> {
+    const repoList = repos();
+    if (!repoList.length) return Response.json({
+      totalBypassActors: 0,
+      unprotectedRepoCount: 0,
+      projects: [],
+    });
+
+    const projects: Array<{
+      repo: string;
+      defaultBranch: string;
+      hasRuleset: boolean;
+      bypassActorCount: number;
+      requiredChecks: string[];
+      requiresPullRequest: boolean;
+    }> = [];
+    let totalBypassActors = 0;
+    let unprotectedRepoCount = 0;
+
+    for (const repo of repoList) {
+      try {
+        const repoMeta = await ghApi(`/repos/${repo}`) as { default_branch: string };
+        const defaultBranch = repoMeta.default_branch;
+
+        // Rulesets scoped to the default branch
+        const rulesets = await ghApi(`/repos/${repo}/rulesets`) as Array<{
+          id: number;
+          enforcement?: string;
+          source_type?: string;
+        }>;
+        const active = (Array.isArray(rulesets) ? rulesets : []).filter(r => r.enforcement === "active");
+
+        // Aggregate across all active rulesets for this repo — any one of
+        // them could provide protection, so we union required checks and
+        // take the max bypass count as the "worst case".
+        let bypassActorCount = 0;
+        const requiredChecks = new Set<string>();
+        let requiresPullRequest = false;
+        let matchesDefaultBranch = false;
+
+        for (const r of active) {
+          try {
+            const detail = await ghApi(`/repos/${repo}/rulesets/${r.id}`) as {
+              bypass_actors?: unknown[];
+              rules?: Array<{ type: string; parameters?: { required_status_checks?: Array<{ context: string }> } }>;
+              conditions?: { ref_name?: { include?: string[] } };
+            };
+            const includes = detail.conditions?.ref_name?.include ?? [];
+            const appliesToDefault = includes.some(
+              p => p === `refs/heads/${defaultBranch}` || p === "~DEFAULT_BRANCH" || p === "~ALL",
+            );
+            if (!appliesToDefault) continue;
+            matchesDefaultBranch = true;
+
+            const bypass = (detail.bypass_actors ?? []).length;
+            if (bypass > bypassActorCount) bypassActorCount = bypass;
+
+            for (const rule of detail.rules ?? []) {
+              if (rule.type === "required_status_checks") {
+                for (const c of rule.parameters?.required_status_checks ?? []) requiredChecks.add(c.context);
+              }
+              if (rule.type === "pull_request") requiresPullRequest = true;
+            }
+          } catch { /* skip malformed rulesets */ }
+        }
+
+        if (!matchesDefaultBranch) {
+          unprotectedRepoCount += 1;
+        }
+        totalBypassActors += bypassActorCount;
+
+        projects.push({
+          repo,
+          defaultBranch,
+          hasRuleset: matchesDefaultBranch,
+          bypassActorCount,
+          requiredChecks: [...requiredChecks],
+          requiresPullRequest,
+        });
+      } catch {
+        unprotectedRepoCount += 1;
+        projects.push({
+          repo,
+          defaultBranch: "main",
+          hasRuleset: false,
+          bypassActorCount: 0,
+          requiredChecks: [],
+          requiresPullRequest: false,
+        });
+      }
+    }
+
+    return Response.json({ totalBypassActors, unprotectedRepoCount, projects });
+  }
+
+  async function handleCreateIssue(req: Request): Promise<Response> {
+    if (ctx.apiKey && req.headers.get("X-API-Key") !== ctx.apiKey) {
+      return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    if (!GITHUB_TOKEN) {
+      return Response.json({ success: false, error: "GITHUB_TOKEN not set" }, { status: 500 });
+    }
+
+    let body: Record<string, unknown>;
+    try { body = (await req.json()) as Record<string, unknown>; }
+    catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
+
+    const repo = body.repo as string | undefined;
+    const title = body.title as string | undefined;
+    const issueBody = body.body as string | undefined;
+    const labels = body.labels as string[] | undefined;
+
+    if (!repo || !title) {
+      return Response.json({ success: false, error: "repo and title are required" }, { status: 400 });
+    }
+
+    // Security: only allow issues on managed repos
+    const managed = repos();
+    if (!managed.includes(repo)) {
+      return Response.json(
+        { success: false, error: `Repo "${repo}" is not in projects.yaml` },
+        { status: 403 },
+      );
+    }
+
+    try {
+      const data = await ghHttp.fetch(`https://api.github.com/repos/${repo}/issues`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        body: JSON.stringify({
+          title,
+          body: issueBody ?? "",
+          labels: labels ?? [],
+        }),
+      });
+
+      if (!data.ok) {
+        const errText = await data.text().catch(() => "(no body)");
+        return Response.json({ success: false, error: `GitHub API: ${data.status} ${errText}` }, { status: data.status });
+      }
+
+      const issue = await data.json() as { number: number; html_url: string; title: string };
+      return Response.json({
+        success: true,
+        data: { number: issue.number, html_url: issue.html_url, title: issue.title },
+      });
+    } catch (e) {
+      return Response.json({ success: false, error: String(e) }, { status: 502 });
+    }
+  }
+
   return [
-    { method: "GET", path: "/api/ci-health",    handler: () => handleGetCiHealth() },
-    { method: "GET", path: "/api/pr-pipeline",  handler: () => handleGetPrPipeline() },
-    { method: "GET", path: "/api/branch-drift", handler: () => handleGetBranchDrift() },
+    { method: "GET",  path: "/api/ci-health",          handler: () => handleGetCiHealth() },
+    { method: "GET",  path: "/api/pr-pipeline",        handler: () => handleGetPrPipeline() },
+    { method: "GET",  path: "/api/branch-drift",       handler: () => handleGetBranchDrift() },
+    { method: "GET",  path: "/api/branch-protection",  handler: () => handleGetBranchProtection() },
+    { method: "POST", path: "/api/github/issues",      handler: (req) => handleCreateIssue(req) },
   ];
 }

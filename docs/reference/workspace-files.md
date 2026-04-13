@@ -12,28 +12,45 @@ External A2A agent registry. Read by `SkillBrokerPlugin`.
 
 ```yaml
 agents:
-  - name: string           # Unique agent name
-    url: string            # Full A2A endpoint URL
-    apiKeyEnv?: string     # Env var name holding the API key
-    skills?:               # Skills to register. Omit to use /.well-known/agent.json discovery.
+  - name: string                    # Unique agent name
+    url: string                     # Full A2A endpoint URL
+    apiKeyEnv?: string              # Env var name holding the API key
+    discordBotTokenEnvKey?: string  # Optional Discord bot token env var — when set,
+                                    # DiscordPlugin's agent pool spins up a dedicated
+                                    # Client() for this agent so users can DM it directly
+    skills?:                        # Skills to register. Omit to use /.well-known/agent.json discovery.
       - name: string
         description?: string
-    subscribesTo?:         # Informational — bus topics this agent watches (not enforced)
+    subscribesTo?:                  # Informational — bus topics this agent watches (not enforced)
       - string
 ```
 
 **Example**:
 ```yaml
 agents:
-  - name: ava
-    url: http://ava:3008/a2a
+  # protoMaker team — multi-agent runtime for board ops, planning, feature lifecycle.
+  # Historically called "ava" internally; the env var names keep the AVA_* prefix
+  # because they describe the HTTP identity of the protoMaker server, not the
+  # logical agent slug.
+  - name: protomaker
+    url: ${AVA_BASE_URL}/a2a
     apiKeyEnv: AVA_API_KEY
     skills:
       - name: sitrep
-      - name: plan
+      - name: board_health
+      - name: manage_feature
+      - name: bug_triage
     subscribesTo:
       - message.inbound.#
       - hitl.response.#
+
+  # Quinn — standalone QA engineer.
+  - name: quinn
+    url: ${QUINN_BASE_URL}/a2a
+    skills:
+      - name: pr_review
+      - name: bug_triage
+      - name: security_triage
 ```
 
 ---
@@ -43,22 +60,47 @@ agents:
 In-process agent definition. One file per agent. Read by `AgentRuntimePlugin`.
 
 ```yaml
-name: string               # Must be globally unique and match the filename
+name: string                    # Must be globally unique and match the filename
 role: orchestrator | qa | devops | content | research | general
-model: string              # LLM model alias (e.g. "claude-sonnet-4-6")
-systemPrompt: string       # Full system prompt
-tools:                     # Workstacean bus tools this agent may call
-  - string                 # publish_event | get_world_state | get_incidents |
-                           # report_incident | get_ceremonies | run_ceremony
-canDelegate?:              # Agent names this agent may delegate to (2 levels max)
+model: string                   # LLM model alias (e.g. "claude-sonnet-4-6")
+systemPrompt: string            # Full system prompt
+tools:                          # Workstacean bus tools this agent may call
+  - string                      # publish_event | get_world_state | get_incidents |
+                                # report_incident | get_ceremonies | run_ceremony
+                                # — or [] for a tool-less chat agent
+canDelegate?:                   # Agent names this agent may delegate to (2 levels max)
   - string
-maxTurns?: number          # Max agentic turns per invocation. -1 = unlimited. Default: 20
+maxTurns?: number               # Max agentic turns per invocation. -1 = unlimited. Default: 20
+discordBotTokenEnvKey?: string  # Optional Discord bot token env var — DiscordPlugin
+                                # spins up a dedicated Client so users can DM this
+                                # agent's bot directly (same mechanism as the A2A
+                                # agent pool)
 skills:
-  - name: string           # Skill name — matched against agent.skill.request skillHint
+  - name: string                # Skill name — matched against agent.skill.request skillHint
     description?: string
-    keywords?:             # Content keywords for auto-routing (case-insensitive substring)
+    keywords?:                  # Content keywords for auto-routing (case-insensitive substring)
       - string
     systemPromptOverride?: string  # Override system prompt for this specific skill
+```
+
+**Example** (in-process conversational agent):
+```yaml
+# workspace/agents/ava.yaml
+name: ava
+role: general
+model: claude-sonnet-4-6
+systemPrompt: |
+  You are Ava, a conversational protoAgent. Your job is to be a
+  thoughtful chat partner. You have no tools — when a request needs
+  action, suggest which agent or skill is best suited (protoMaker
+  team for board ops, Quinn for reviews, Frank for infra, etc.).
+tools: []                           # No tools on purpose — chat-only
+maxTurns: 6
+discordBotTokenEnvKey: DISCORD_BOT_TOKEN_AVA
+skills:
+  - name: chat
+    description: Free-form conversation with the user
+    keywords: []
 ```
 
 ---

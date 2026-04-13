@@ -15,6 +15,7 @@
 
 import { tool } from "@protolabsai/sdk";
 import { z } from "zod";
+import { HttpClient } from "../../services/http-client.ts";
 
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -22,31 +23,6 @@ function ok(data: unknown) {
 
 function err(message: string) {
   return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
-}
-
-async function apiGet(baseUrl: string, path: string, apiKey?: string): Promise<unknown> {
-  const headers: Record<string, string> = {};
-  if (apiKey) headers["X-API-Key"] = apiKey;
-  const resp = await fetch(`${baseUrl}${path}`, { headers });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} ${await resp.text()}`);
-  return resp.json();
-}
-
-async function apiPost(
-  baseUrl: string,
-  path: string,
-  body: unknown,
-  apiKey?: string,
-): Promise<unknown> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (apiKey) headers["X-API-Key"] = apiKey;
-  const resp = await fetch(`${baseUrl}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} ${await resp.text()}`);
-  return resp.json();
 }
 
 export interface BusToolsOptions {
@@ -63,6 +39,10 @@ export interface BusToolsOptions {
 export function createBusTools(opts: BusToolsOptions = {}) {
   const baseUrl = opts.baseUrl ?? "http://localhost:3000";
   const apiKey = opts.apiKey;
+  const http = new HttpClient({
+    baseUrl,
+    ...(apiKey ? { auth: { type: "api-key" as const, key: apiKey } } : {}),
+  });
 
   const publishEvent = tool(
     "publish_event",
@@ -84,7 +64,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
           payload: projectSlug ? { ...payload, projectSlug } : payload,
           ...(projectSlug ? { source: { interface: "agent", projectSlug } } : {}),
         };
-        const data = await apiPost(baseUrl, "/publish", body, apiKey);
+        const data = await http.post("/publish", body);
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -108,7 +88,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     async ({ domain }) => {
       try {
         const path = domain ? `/api/world-state/${domain}` : "/api/world-state";
-        const data = await apiGet(baseUrl, path, apiKey);
+        const data = await http.get(path);
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -122,7 +102,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/incidents", apiKey);
+        const data = await http.get("/api/incidents");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -151,11 +131,13 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
     async ({ title, severity, description, affectedProjects, projectSlug }) => {
       try {
-        const body: Record<string, unknown> = { title, severity };
-        if (description) body.description = description;
-        if (affectedProjects) body.affectedProjects = affectedProjects;
-        if (projectSlug) body.projectSlug = projectSlug;
-        const data = await apiPost(baseUrl, "/api/incidents", body, apiKey);
+        const data = await http.post("/api/incidents", {
+          title,
+          severity,
+          ...(description ? { description } : {}),
+          ...(affectedProjects ? { affectedProjects } : {}),
+          ...(projectSlug ? { projectSlug } : {}),
+        });
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -170,7 +152,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/projects", apiKey);
+        const data = await http.get("/api/projects");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -185,7 +167,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/ci-health", apiKey);
+        const data = await http.get("/api/ci-health");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -200,7 +182,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/pr-pipeline", apiKey);
+        const data = await http.get("/api/pr-pipeline");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -214,7 +196,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/branch-drift", apiKey);
+        const data = await http.get("/api/branch-drift");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -229,7 +211,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/outcomes", apiKey);
+        const data = await http.get("/api/outcomes");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -243,7 +225,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     {},
     async () => {
       try {
-        const data = await apiGet(baseUrl, "/api/ceremonies", apiKey);
+        const data = await http.get("/api/ceremonies");
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -262,7 +244,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
     async ({ ceremonyId }) => {
       try {
-        const data = await apiPost(baseUrl, `/api/ceremonies/${ceremonyId}/run`, {}, apiKey);
+        const data = await http.post(`/api/ceremonies/${ceremonyId}/run`, {});
         return ok(data);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -270,7 +252,166 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
-  return [publishEvent, getWorldState, getIncidents, reportIncident, getProjects, getCiHealth, getPrPipeline, getBranchDrift, getOutcomes, getCeremonies, runCeremony];
+  // ── Ava helm tools ────────────────────────────────────────────────────────
+
+  const chatWithAgent = tool(
+    "chat_with_agent",
+    "Synchronous multi-turn conversation with another agent. Omit contextId to " +
+      "start a new conversation. Pass contextId and taskId from a prior response to " +
+      "continue. Set done=true on your final message to end the conversation cleanly. " +
+      "Response includes taskState (completed, input-required, working, failed).",
+    {
+      agent: z.string().describe("Agent name: quinn, protomaker, protocontent, frank"),
+      message: z.string().describe("What to say to the agent"),
+      contextId: z.string().optional().describe("Context ID from a prior turn — omit for new conversation"),
+      taskId: z.string().optional().describe("Task ID from a prior turn — continues a specific task"),
+      skill: z.string().optional().describe("Skill hint: pr_review, bug_triage, sitrep, etc."),
+      done: z.boolean().optional().describe("Set true on your last message to end the conversation"),
+    },
+    async ({ agent, message, contextId, taskId, skill, done }) => {
+      try {
+        const data = await http.post("/api/a2a/chat", { agent, message, contextId, taskId, skill, done });
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  const delegateTask = tool(
+    "delegate_task",
+    "Fire-and-forget: dispatch work to an agent without waiting for results. " +
+      "Use for background tasks like 'Quinn, review all open PRs' or 'protoMaker, start auto mode'.",
+    {
+      agent: z.string().describe("Agent name: quinn, protomaker, protocontent, frank"),
+      skill: z.string().describe("Skill to invoke: pr_review, bug_triage, board_health, auto_mode, etc."),
+      message: z.string().describe("Task description or instructions"),
+      projectSlug: z.string().optional().describe("Project slug for routing"),
+    },
+    async ({ agent, skill, message, projectSlug }) => {
+      try {
+        const data = await http.post("/api/a2a/delegate", { agent, skill, message, projectSlug });
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  const manageBoard = tool(
+    "manage_board",
+    "Create or update features on the protoMaker board. Use action 'create' to file " +
+      "new work items, 'update' to change status/priority/description of existing features.",
+    {
+      action: z.enum(["create", "update"]).describe("Operation to perform"),
+      projectPath: z.string().describe("Absolute path to the project directory"),
+      title: z.string().optional().describe("Feature title (required for create)"),
+      description: z.string().optional().describe("Feature description"),
+      featureId: z.string().optional().describe("Feature ID (required for update)"),
+      status: z.enum(["backlog", "in-progress", "review", "done"]).optional(),
+      priority: z.number().optional().describe("0=none, 1=urgent, 2=high, 3=normal, 4=low"),
+      complexity: z.enum(["small", "medium", "large", "architectural"]).optional(),
+      projectSlug: z.string().optional(),
+    },
+    async ({ action, projectPath, title, description, featureId, status, priority, complexity, projectSlug }) => {
+      try {
+        const endpoint = action === "create" ? "/api/board/features/create" : "/api/board/features/update";
+        const data = await http.post(endpoint, {
+          projectPath, title, description, featureId, status, priority, complexity, projectSlug,
+        });
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  const createGitHubIssue = tool(
+    "create_github_issue",
+    "File an issue on a managed GitHub repository. Only repos listed in projects.yaml are allowed.",
+    {
+      repo: z.string().describe("GitHub repo in owner/name format, e.g. 'protoLabsAI/protoWorkstacean'"),
+      title: z.string().describe("Issue title"),
+      body: z.string().optional().describe("Issue body (markdown)"),
+      labels: z.array(z.string()).optional().describe("Labels to apply"),
+    },
+    async ({ repo, title, body, labels }) => {
+      try {
+        const data = await http.post("/api/github/issues", { repo, title, body, labels });
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  const manageCron = tool(
+    "manage_cron",
+    "Create, update, or delete scheduled ceremonies (cron jobs). " +
+      "Ceremonies run agent skills on a schedule. The hot-reload watcher picks up changes within 5 seconds.",
+    {
+      action: z.enum(["create", "update", "delete", "list"]).describe("CRUD operation"),
+      id: z.string().optional().describe("Ceremony ID (required for create/update/delete), e.g. 'board.health'"),
+      name: z.string().optional().describe("Human-readable name (required for create)"),
+      schedule: z.string().optional().describe("Cron expression, e.g. '*/30 * * * *' (required for create)"),
+      skill: z.string().optional().describe("Skill to invoke when ceremony fires (required for create)"),
+      targets: z.array(z.string()).optional().describe("Agent targets, e.g. ['quinn'] or ['all']"),
+      enabled: z.boolean().optional().describe("Enable or disable the ceremony"),
+      notifyChannel: z.string().optional().describe("Discord channel ID for notifications"),
+    },
+    async ({ action, id, name, schedule, skill, targets, enabled, notifyChannel }) => {
+      try {
+        if (action === "list") {
+          const data = await http.get("/api/ceremonies");
+          return ok(data);
+        } else if (action === "create") {
+          const data = await http.post("/api/ceremonies/create", {
+            id, name, schedule, skill, targets, enabled: enabled ?? true, notifyChannel,
+          });
+          return ok(data);
+        } else if (action === "update") {
+          const data = await http.post(`/api/ceremonies/${id}/update`, {
+            name, schedule, skill, targets, enabled, notifyChannel,
+          });
+          return ok(data);
+        } else {
+          const data = await http.post(`/api/ceremonies/${id}/delete`, {});
+          return ok(data);
+        }
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  const webSearch = tool(
+    "web_search",
+    "Quick web search via SearXNG. Use for simple factual lookups. " +
+      "For deep multi-source research, use chat_with_agent with the researcher agent instead.",
+    {
+      query: z.string().describe("Search query"),
+    },
+    async ({ query }) => {
+      const searxngUrl = process.env.SEARXNG_URL ?? "http://searxng:8080";
+      try {
+        const params = new URLSearchParams({ q: query, format: "json", engines: "google,duckduckgo" });
+        const resp = await fetch(`${searxngUrl}/search?${params}`, { signal: AbortSignal.timeout(10_000) });
+        if (!resp.ok) return err(`SearXNG ${resp.status}`);
+        const data = await resp.json() as { results?: Array<{ title: string; content?: string; url?: string }> };
+        const results = (data.results ?? []).slice(0, 5);
+        if (!results.length) return ok({ results: [], message: "No results found." });
+        return ok({ results: results.map(r => ({ title: r.title, snippet: r.content ?? "", url: r.url ?? "" })) });
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  return [
+    publishEvent, getWorldState, getIncidents, reportIncident, getProjects,
+    getCiHealth, getPrPipeline, getBranchDrift, getOutcomes, getCeremonies, runCeremony,
+    chatWithAgent, delegateTask, manageBoard, createGitHubIssue, manageCron, webSearch,
+  ];
 }
 
 /**
@@ -289,6 +430,12 @@ export const BUS_TOOL_NAMES = [
   "get_outcomes",
   "get_ceremonies",
   "run_ceremony",
+  "chat_with_agent",
+  "delegate_task",
+  "manage_board",
+  "create_github_issue",
+  "manage_cron",
+  "web_search",
 ] as const;
 
 export type BusToolName = (typeof BUS_TOOL_NAMES)[number];
