@@ -99,7 +99,7 @@ class WorldStateCache {
 const _worldCaches = new Map<string, WorldStateCache>();
 
 function createLangChainTools(toolNames: string[], http: HttpClient) {
-  const all: Record<string, ReturnType<typeof tool>> = {
+  const all: Record<string, unknown> = {
     chat_with_agent: tool(
       async (input) => {
         console.log(`[deep-agent:tool] chat_with_agent called: agent=${input.agent}, skill=${input.skill ?? "auto"}, msg="${input.message.slice(0, 80)}"`);
@@ -266,7 +266,7 @@ function createLangChainTools(toolNames: string[], http: HttpClient) {
     ),
   };
 
-  return toolNames.map(n => all[n]).filter((t): t is ReturnType<typeof tool> => t != null);
+  return (toolNames.map(n => all[n]).filter(Boolean)) as ReturnType<typeof tool>[];
 }
 
 export class DeepAgentExecutor implements IExecutor {
@@ -308,6 +308,14 @@ export class DeepAgentExecutor implements IExecutor {
     const prompt = req.content ?? req.prompt ?? this._buildPrompt(req);
     const tools = createLangChainTools(this.agentDef.tools, this.http);
 
+    const callbacks = LANGFUSE_ENABLED
+      ? [new LangfuseCallbackHandler({
+          sessionId: req.correlationId,
+          userId: this.agentDef.name,
+          traceMetadata: { skill: req.skill, agent: this.agentDef.name },
+        })]
+      : [];
+
     try {
       // Inject cached world state into system prompt for instant situational awareness
       const worldSummary = await this.worldCache.getSummary();
@@ -320,17 +328,6 @@ export class DeepAgentExecutor implements IExecutor {
         tools,
         messageModifier: new SystemMessage(enrichedPrompt),
       });
-
-      const callbacks = LANGFUSE_ENABLED
-        ? [new LangfuseCallbackHandler({
-            publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
-            secretKey: process.env.LANGFUSE_SECRET_KEY!,
-            baseUrl: process.env.LANGFUSE_HOST ?? process.env.LANGFUSE_BASE_URL,
-            sessionId: req.correlationId,
-            userId: this.agentDef.name,
-            metadata: { skill: req.skill, agent: this.agentDef.name },
-          })]
-        : [];
 
       console.log(`[deep-agent:${this.agentDef.name}] invoke with ${tools.length} tools, prompt length=${prompt.length}, langfuse=${LANGFUSE_ENABLED}`);
 
@@ -346,7 +343,7 @@ export class DeepAgentExecutor implements IExecutor {
       for (const msg of messages) {
         const type = msg._getType?.() ?? msg.constructor?.name ?? "";
         if (type === "ai" || type === "AIMessage") {
-          const tc = (msg as Record<string, unknown>).tool_calls;
+          const tc = (msg as unknown as Record<string, unknown>).tool_calls;
           if (Array.isArray(tc) && tc.length > 0) {
             console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${tc.map((t: { name?: string }) => t.name).join(", ")}`);
           }
@@ -366,11 +363,6 @@ export class DeepAgentExecutor implements IExecutor {
         }
       }
 
-      // Flush Langfuse traces
-      for (const cb of callbacks) {
-        await (cb as LangfuseCallbackHandler).flushAsync?.().catch(() => {});
-      }
-
       return {
         text: text || "No response generated.",
         isError: false,
@@ -378,12 +370,6 @@ export class DeepAgentExecutor implements IExecutor {
       };
     } catch (e) {
       console.error(`[deep-agent:${this.agentDef.name}]`, e);
-      // Flush even on error
-      if (LANGFUSE_ENABLED) {
-        for (const cb of callbacks) {
-          await (cb as LangfuseCallbackHandler).flushAsync?.().catch(() => {});
-        }
-      }
       return {
         text: e instanceof Error ? e.message : String(e),
         isError: true,
