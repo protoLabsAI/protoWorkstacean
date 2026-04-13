@@ -1201,6 +1201,8 @@ export class DiscordPlugin implements Plugin {
       ? contents[0]
       : contents.map((c, i) => `[${i + 1}/${contents.length}] ${c}`).join("\n\n");
 
+    console.log(`[discord] DM flush: conversationId=${conversationId} agentName=${agentName ?? "NONE"} contents=${contents.length}`);
+
     // If agent is mid-execution, queue to mailbox instead of dispatching
     if (this.isExecutionActive?.(conversationId) && this.mailbox) {
       console.log(
