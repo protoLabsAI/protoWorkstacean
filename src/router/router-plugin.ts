@@ -175,6 +175,13 @@ export class RouterPlugin implements Plugin {
     const content = workingPayload.content;
     const isDM = workingPayload.isDM === true;
 
+    // Agent pool DM — the Discord plugin sets agentId when an agent-specific bot
+    // receives a DM. This takes highest priority: the user DM'd that agent's bot
+    // directly, so route to that agent. No keyword matching, no fallback.
+    const agentPoolAgent = isDM && typeof workingPayload.agentId === "string"
+      ? workingPayload.agentId
+      : undefined;
+
     // Channel-based agent assignment — takes priority over keyword agent matching.
     // If channels.yaml assigns this channel to a specific agent, prefer that.
     const channelEntry = this.config.channelRegistry?.findByTopic(msg.topic);
@@ -198,7 +205,7 @@ export class RouterPlugin implements Plugin {
       }
     }
 
-    if (!match && !storedSession) {
+    if (!match && !storedSession && !agentPoolAgent) {
       console.log(
         `[router] No skill match for topic "${msg.topic}"` +
         (content ? ` content="${content.slice(0, 60)}"` : "") +
@@ -227,7 +234,11 @@ export class RouterPlugin implements Plugin {
     let agentName: string | undefined;
     let skill: string;
 
-    if (storedSession) {
+    if (agentPoolAgent) {
+      // Agent pool DM — route directly to the bot's agent, skip all other resolution.
+      agentName = agentPoolAgent;
+      skill = match?.skill ?? storedSession?.skill ?? "chat";
+    } else if (storedSession) {
       // Re-set TTL on every turn (sliding window)
       this.dmSessions.set(conversationId, storedSession);
       agentName = channelAgent ?? storedSession.agentName;
