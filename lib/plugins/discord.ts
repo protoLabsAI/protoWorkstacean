@@ -1217,14 +1217,18 @@ export class DiscordPlugin implements Plugin {
     }
 
     // Normal dispatch path — no agent in-flight
-    // Resolve the original Discord message for reply threading
-    const discordChannel = this.client?.channels.cache.get(channelId);
+    // Resolve the original Discord message via the client that owns this DM channel.
+    // For agent pool DMs, that's the agent's own client; for main bot DMs, it's this.client.
+    const client = (agentName && this.agentClients.get(agentName)) ?? this.client;
+    const discordChannel = client?.channels.cache.get(channelId);
     const discordMessage = discordChannel && "messages" in discordChannel
       ? await (discordChannel as TextChannel).messages.fetch(lastMessage.id).catch(() => null)
       : null;
 
     if (discordMessage) {
       pendingReplies.set(conversationId, { message: discordMessage });
+    } else {
+      console.warn(`[discord] Could not fetch message for ${conversationId} via ${agentName ?? "main"} — reply will use unprompted push`);
     }
     if (agentName) this.pendingAgents.set(conversationId, agentName);
 
