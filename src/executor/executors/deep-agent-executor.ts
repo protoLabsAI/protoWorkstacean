@@ -98,8 +98,11 @@ class WorldStateCache {
 
 const _worldCaches = new Map<string, WorldStateCache>();
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangChain tool()
+// generic params shift across minor versions; pinning to a concrete DynamicStructuredTool
+// generic breaks on every upgrade. The runtime contract is stable; only the TS generics drift.
 function createLangChainTools(toolNames: string[], http: HttpClient) {
-  const all: Record<string, unknown> = {
+  const all: Record<string, any> = {
     chat_with_agent: tool(
       async (input) => {
         console.log(`[deep-agent:tool] chat_with_agent called: agent=${input.agent}, skill=${input.skill ?? "auto"}, msg="${input.message.slice(0, 80)}"`);
