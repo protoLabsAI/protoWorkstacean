@@ -69,20 +69,6 @@ projects:
         channelId: "1490978906419761262"
         webhook: "https://discord.com/api/webhooks/1491952347100876852/9DpUPDSRurXL18af1caqJY2oc8wflQ6j3xR0Gk9V8udeQWyewGFR-DUmyDLa7NEvM_iF"
 
-  - slug: ava
-    title: Ava
-    team: dev
-    github: protoLabsAI/ava
-    repoUrl: "https://github.com/protoLabsAI/ava"
-    projectPath: /home/josh/dev/labs/ava
-    defaultBranch: main
-    status: active
-    agents: [quinn]
-    discord:
-      dev:
-        channelId: ""
-        webhook: ""
-
   - slug: rabbit-hole-io
     title: rabbit-hole-io
     team: dev
