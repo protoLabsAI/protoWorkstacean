@@ -60,10 +60,7 @@ export default function AgentsView() {
       const cards: AgentCard[] = defs.map((def) => {
         const reg = registeredAgents[def.name];
         const agentCeremonies = ceremonies.filter(
-          (c) =>
-            c.targets?.includes(def.name) ||
-            c.targets?.includes("all") ||
-            false,
+          (c) => c.targets?.includes(def.name),
         );
 
         return {
