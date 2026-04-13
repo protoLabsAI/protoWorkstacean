@@ -31,6 +31,9 @@ tools:
   - get_incidents
   - report_incident
 
+canDelegate:
+  - protopen
+
 maxTurns: 15
 
 skills:
