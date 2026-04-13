@@ -43,6 +43,8 @@ import { ConversationTracer, type TurnData } from "../conversation/conversation-
 import { GraphitiClient } from "../memory/graphiti-client.ts";
 import { IdentityRegistry } from "../identity/identity-registry.ts";
 import { channelIdOf, type ProjectDiscordChannel } from "../project-schema.ts";
+import { DmAccumulator, type AccumulatorEntry } from "../dm/dm-accumulator.ts";
+import type { ContextMailbox } from "../dm/context-mailbox.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -254,6 +256,16 @@ function loadProjectsDefs(workspaceDir: string): ProjectEntry[] {
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
+export interface DiscordPluginOptions {
+  workspaceDir: string;
+  dataDir?: string;
+  channelRegistry?: ChannelRegistry;
+  hitlPlugin?: HITLPlugin;
+  mailbox?: ContextMailbox;
+  /** Check if an agent execution is in-flight for a given correlationId. */
+  isExecutionActive?: (correlationId: string) => boolean;
+}
+
 export class DiscordPlugin implements Plugin {
   readonly name = "discord";
   readonly description = "Discord gateway — routes messages to/from the A2A agent fleet";
@@ -272,6 +284,8 @@ export class DiscordPlugin implements Plugin {
 
   private channelRegistry?: ChannelRegistry;
   private hitlPlugin?: HITLPlugin;
+  private mailbox?: ContextMailbox;
+  private isExecutionActive?: (correlationId: string) => boolean;
 
   // correlationId → { message, replyTopic } for active HITL approvals
   private pendingHITLMessages = new Map<string, { message: Message; replyTopic: string }>();
@@ -284,6 +298,9 @@ export class DiscordPlugin implements Plugin {
   // correlationId (= conversationId for conv turns) → pending Langfuse turn data
   private pendingTurns = new Map<string, TurnData>();
 
+  // DM debounce accumulator — batches rapid-fire DMs before dispatch
+  private dmAccumulator?: DmAccumulator;
+
   // Runtime rate-limit state (built from config on install)
   private rateLimits = new Map<string, number[]>();
   private rateMaxMessages = 5;
@@ -294,11 +311,13 @@ export class DiscordPlugin implements Plugin {
   private rlDb: Database | null = null;
   private dataDir: string | null = null;
 
-  constructor(workspaceDir: string, dataDir?: string, channelRegistry?: ChannelRegistry, hitlPlugin?: HITLPlugin) {
-    this.workspaceDir = workspaceDir;
-    this.dataDir = dataDir ? resolve(dataDir) : null;
-    this.channelRegistry = channelRegistry;
-    this.hitlPlugin = hitlPlugin;
+  constructor(opts: DiscordPluginOptions) {
+    this.workspaceDir = opts.workspaceDir;
+    this.dataDir = opts.dataDir ? resolve(opts.dataDir) : null;
+    this.channelRegistry = opts.channelRegistry;
+    this.hitlPlugin = opts.hitlPlugin;
+    this.mailbox = opts.mailbox;
+    this.isExecutionActive = opts.isExecutionActive;
 
     // When a conversation times out, finalize its Langfuse trace
     this.conversationManager.setTimeoutCallback((entry) => {
@@ -319,6 +338,13 @@ export class DiscordPlugin implements Plugin {
     this.busRef = bus;
     this.config = loadConfig(this.workspaceDir);
     this.identityRegistry = new IdentityRegistry(this.workspaceDir);
+
+    // DM debounce accumulator — batches rapid-fire DMs before dispatch/mailbox
+    this.dmAccumulator = new DmAccumulator({
+      debounceMs: Number(process.env.DM_DEBOUNCE_MS ?? 3000),
+      onFlush: (entry) => this._handleDMFlush(entry, bus),
+      fallbackMailbox: this.mailbox,
+    });
 
     // Apply moderation config
     const { rateLimit, spamPatterns } = this.config.moderation;
@@ -875,6 +901,7 @@ export class DiscordPlugin implements Plugin {
   }
 
   uninstall(): void {
+    this.dmAccumulator?.destroy();
     this.conversationManager.destroy();
     this.pendingTurns.clear();
     this.pendingHITLMessages.clear();
@@ -1136,18 +1163,74 @@ export class DiscordPlugin implements Plugin {
     const conv = this.conversationManager.getOrCreate(message.channelId, userId, timeoutMs, agentName);
     const { conversationId, isNew, turnNumber } = conv;
 
-    pendingReplies.set(conversationId, { message });
-    if (agentName) this.pendingAgents.set(conversationId, agentName);
-
     const content = message.cleanContent.replace(/<@!?\d+>/g, "").trim();
     if (!content) return;
+
+    // Push into debounce accumulator — batches rapid-fire DMs
+    const isFirst = this.dmAccumulator!.push({
+      conversationId,
+      userId,
+      channelId: message.channelId,
+      agentName,
+      message: { id: message.id, channelId: message.channelId },
+      content,
+      turnNumber,
+      isNew,
+    });
+
+    if (isFirst) {
+      await message.react("👀").catch(() => {});
+    }
+  }
+
+  /**
+   * Flush callback for DmAccumulator — called when debounce timer fires.
+   *
+   * Checks if an agent execution is in-flight for this conversation:
+   *   - No  → dispatch normally via bus (standard DM flow)
+   *   - Yes → push to mailbox (drained on execution completion by SkillDispatcher)
+   */
+  private async _handleDMFlush(entry: Omit<AccumulatorEntry, "timer">, bus: EventBus): Promise<void> {
+    const {
+      conversationId, userId, channelId, agentName,
+      lastMessage, contents, turnNumber, isNew,
+    } = entry;
+
+    const batchedContent = contents.length === 1
+      ? contents[0]
+      : contents.map((c, i) => `[${i + 1}/${contents.length}] ${c}`).join("\n\n");
+
+    // If agent is mid-execution, queue to mailbox instead of dispatching
+    if (this.isExecutionActive?.(conversationId) && this.mailbox) {
+      console.log(
+        `[discord] Agent in-flight for ${conversationId} — queuing ${contents.length} message(s) to mailbox`,
+      );
+      this.mailbox.push(conversationId, {
+        content: batchedContent,
+        sender: userId,
+        receivedAt: Date.now(),
+      });
+      return;
+    }
+
+    // Normal dispatch path — no agent in-flight
+    // Resolve the original Discord message for reply threading
+    const discordChannel = this.client?.channels.cache.get(channelId);
+    const discordMessage = discordChannel && "messages" in discordChannel
+      ? await (discordChannel as TextChannel).messages.fetch(lastMessage.id).catch(() => null)
+      : null;
+
+    if (discordMessage) {
+      pendingReplies.set(conversationId, { message: discordMessage });
+    }
+    if (agentName) this.pendingAgents.set(conversationId, agentName);
 
     // Langfuse tracing
     if (isNew) {
       this.conversationTracer.startTrace({
         conversationId,
         userId,
-        channelId: message.channelId,
+        channelId,
         agentName,
         platform: "discord-dm",
       }).catch(err => console.error("[discord] Langfuse startTrace error:", err));
@@ -1155,26 +1238,26 @@ export class DiscordPlugin implements Plugin {
     this.pendingTurns.set(conversationId, {
       conversationId,
       turnNumber,
-      input: content,
+      input: batchedContent,
       userId,
       agentName,
       startTime: new Date(),
     });
 
-    bus.publish(`message.inbound.discord.${message.channelId}`, {
-      id: message.id,
+    bus.publish(`message.inbound.discord.${channelId}`, {
+      id: lastMessage.id,
       correlationId: conversationId,
-      topic: `message.inbound.discord.${message.channelId}`,
+      topic: `message.inbound.discord.${channelId}`,
       timestamp: Date.now(),
       payload: {
         sender: userId,
-        channel: message.channelId,
-        content,
+        channel: channelId,
+        content: batchedContent,
         isDM: true,
         ...(agentName ? { agentId: agentName } : {}),
       },
-      source: { interface: "discord" as const, channelId: message.channelId, userId },
-      reply: { topic: `message.outbound.discord.${message.channelId}` },
+      source: { interface: "discord" as const, channelId, userId },
+      reply: { topic: `message.outbound.discord.${channelId}` },
     });
   }
 
