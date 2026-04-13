@@ -269,6 +269,44 @@ function createLangChainTools(toolNames: string[], http: HttpClient): Structured
         schema: z.object({ query: z.string().describe("Search query") }),
       },
     ),
+    // ── Discord operations (protoBot agent) ──────────────────────────────────
+    discord_server_stats: tool(
+      async () => JSON.stringify(await http.get("/api/discord/server-stats")),
+      { name: "discord_server_stats", description: "Discord server stats: members, channels, roles, boost level.", schema: z.object({}) },
+    ),
+    discord_list_channels: tool(
+      async () => JSON.stringify(await http.get("/api/discord/channels")),
+      { name: "discord_list_channels", description: "List all Discord channels with type and category.", schema: z.object({}) },
+    ),
+    discord_create_channel: tool(
+      async (input) => JSON.stringify(await http.post("/api/discord/channels/create", input)),
+      {
+        name: "discord_create_channel",
+        description: "Create a Discord channel. Types: text, voice, category, announcement, forum.",
+        schema: z.object({
+          name: z.string().describe("Channel name (lowercase, hyphens)"),
+          type: z.enum(["text", "voice", "category", "announcement", "forum"]).optional().describe("Channel type (default: text)"),
+          parent: z.string().optional().describe("Parent category name or ID"),
+          topic: z.string().optional().describe("Channel topic/description"),
+        }),
+      },
+    ),
+    discord_send: tool(
+      async (input) => JSON.stringify(await http.post("/api/discord/send", input)),
+      {
+        name: "discord_send",
+        description: "Send a message to a Discord channel by name or ID.",
+        schema: z.object({
+          content: z.string().describe("Message content (markdown supported, max 2000 chars)"),
+          channelId: z.string().optional().describe("Channel ID"),
+          channelName: z.string().optional().describe("Channel name (alternative to ID)"),
+        }),
+      },
+    ),
+    discord_list_members: tool(
+      async () => JSON.stringify(await http.get("/api/discord/members")),
+      { name: "discord_list_members", description: "List Discord server members with roles.", schema: z.object({}) },
+    ),
   };
 
   return toolNames.map(n => all[n]).filter(Boolean) as StructuredToolInterface[];
