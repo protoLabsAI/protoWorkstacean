@@ -98,8 +98,11 @@ class WorldStateCache {
 
 const _worldCaches = new Map<string, WorldStateCache>();
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangChain tool()
+// generic params shift across minor versions; pinning to a concrete DynamicStructuredTool
+// generic breaks on every upgrade. The runtime contract is stable; only the TS generics drift.
 function createLangChainTools(toolNames: string[], http: HttpClient) {
-  const all: Record<string, ReturnType<typeof tool>> = {
+  const all: Record<string, any> = {
     chat_with_agent: tool(
       async (input) => {
         console.log(`[deep-agent:tool] chat_with_agent called: agent=${input.agent}, skill=${input.skill ?? "auto"}, msg="${input.message.slice(0, 80)}"`);
@@ -321,14 +324,13 @@ export class DeepAgentExecutor implements IExecutor {
         messageModifier: new SystemMessage(enrichedPrompt),
       });
 
+      // Langfuse v5: keys read from LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY env vars.
+      // ConstructorParams only accepts userId, sessionId, tags, version, traceMetadata.
       const callbacks = LANGFUSE_ENABLED
         ? [new LangfuseCallbackHandler({
-            publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
-            secretKey: process.env.LANGFUSE_SECRET_KEY!,
-            baseUrl: process.env.LANGFUSE_HOST ?? process.env.LANGFUSE_BASE_URL,
             sessionId: req.correlationId,
             userId: this.agentDef.name,
-            metadata: { skill: req.skill, agent: this.agentDef.name },
+            traceMetadata: { skill: req.skill, agent: this.agentDef.name },
           })]
         : [];
 
@@ -346,7 +348,7 @@ export class DeepAgentExecutor implements IExecutor {
       for (const msg of messages) {
         const type = msg._getType?.() ?? msg.constructor?.name ?? "";
         if (type === "ai" || type === "AIMessage") {
-          const tc = (msg as Record<string, unknown>).tool_calls;
+          const tc = (msg as unknown as Record<string, unknown>).tool_calls;
           if (Array.isArray(tc) && tc.length > 0) {
             console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${tc.map((t: { name?: string }) => t.name).join(", ")}`);
           }
@@ -366,11 +368,6 @@ export class DeepAgentExecutor implements IExecutor {
         }
       }
 
-      // Flush Langfuse traces
-      for (const cb of callbacks) {
-        await (cb as LangfuseCallbackHandler).flushAsync?.().catch(() => {});
-      }
-
       return {
         text: text || "No response generated.",
         isError: false,
@@ -378,12 +375,6 @@ export class DeepAgentExecutor implements IExecutor {
       };
     } catch (e) {
       console.error(`[deep-agent:${this.agentDef.name}]`, e);
-      // Flush even on error
-      if (LANGFUSE_ENABLED) {
-        for (const cb of callbacks) {
-          await (cb as LangfuseCallbackHandler).flushAsync?.().catch(() => {});
-        }
-      }
       return {
         text: e instanceof Error ? e.message : String(e),
         isError: true,
