@@ -188,6 +188,16 @@ export class WorldStateEngine implements Plugin {
     });
     this.subscriptionIds.push(mcpSubId);
 
+    // Arc 5.3: subscribe to world.state.delta (published by the effect-domain-v1
+    // extension when a task's terminal artifact declares observed deltas).
+    // Applies each delta in-process instead of waiting for the next domain
+    // poll — closes the outcome → state feedback loop at task-terminal
+    // latency rather than tick-interval latency.
+    const deltaSubId = bus.subscribe("world.state.delta", this.name, (msg: BusMessage) => {
+      this._applyWorldStateDelta(msg);
+    });
+    this.subscriptionIds.push(deltaSubId);
+
     // Start tickers for any domains registered before install()
     for (const reg of this.domains.values()) {
       this._startTicker(reg);
@@ -538,6 +548,109 @@ export class WorldStateEngine implements Plugin {
   }
 
   // ── Bus tool handler ───────────────────────────────────────────────────────
+
+  /**
+   * Apply an agent-declared world-state delta in-process.
+   *
+   * Walks `path` into the domain's data object and applies the requested
+   * op. No-ops silently on unknown domains or invalid paths — agents can't
+   * bring the engine down with a bad delta, they just lose the delta.
+   *
+   * After applying, publishes `world.state.updated` so the planner re-evaluates
+   * immediately. This is the core of Arc 5.3: close the outcome→state feedback
+   * loop at task-terminal latency rather than the domain's polling interval.
+   */
+  private _applyWorldStateDelta(msg: BusMessage): void {
+    const payload = (msg.payload ?? {}) as { deltas?: unknown };
+    const deltas = Array.isArray(payload.deltas) ? payload.deltas : [];
+    if (deltas.length === 0) return;
+
+    let applied = 0;
+    for (const raw of deltas) {
+      const entry = raw as { domain?: unknown; path?: unknown; op?: unknown; value?: unknown };
+      if (typeof entry.domain !== "string" || typeof entry.path !== "string" || typeof entry.op !== "string") continue;
+      if (entry.op !== "set" && entry.op !== "inc" && entry.op !== "push") continue;
+
+      const domainData = this.worldState.domains[entry.domain];
+      if (!domainData) continue; // unknown domain — drop silently
+
+      try {
+        this._applyDeltaAtPath(
+          domainData as unknown as Record<string, unknown>,
+          entry.path,
+          entry.op,
+          entry.value,
+        );
+        applied += 1;
+      } catch {
+        // Malformed path or type mismatch — skip this entry, continue others
+      }
+    }
+
+    if (applied > 0 && this.bus) {
+      this.worldState.timestamp = Date.now();
+      this.bus.publish("world.state.updated", {
+        id: crypto.randomUUID(),
+        correlationId: msg.correlationId,
+        topic: "world.state.updated",
+        timestamp: Date.now(),
+        payload: this.worldState,
+      });
+    }
+  }
+
+  /**
+   * Walk a dot-separated path into `root` and apply `op` with `value`.
+   * Creates intermediate objects for `set` only (inc/push require the path
+   * to already exist with a compatible type).
+   */
+  private _applyDeltaAtPath(
+    root: Record<string, unknown>,
+    path: string,
+    op: "set" | "inc" | "push",
+    value: unknown,
+  ): void {
+    const parts = path.split(".").filter(Boolean);
+    if (parts.length === 0) throw new Error("empty path");
+
+    if (op === "set") {
+      let cursor = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const key = parts[i];
+        if (typeof cursor[key] !== "object" || cursor[key] === null) {
+          cursor[key] = {};
+        }
+        cursor = cursor[key] as Record<string, unknown>;
+      }
+      cursor[parts[parts.length - 1]] = value;
+      return;
+    }
+
+    // For inc + push we require the full path to exist
+    let cursor: unknown = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (typeof cursor !== "object" || cursor === null) throw new Error("path not navigable");
+      cursor = (cursor as Record<string, unknown>)[parts[i]];
+    }
+    if (typeof cursor !== "object" || cursor === null) throw new Error("path not navigable");
+    const parent = cursor as Record<string, unknown>;
+    const leaf = parts[parts.length - 1];
+
+    if (op === "inc") {
+      if (typeof value !== "number") throw new Error("inc requires numeric value");
+      const current = parent[leaf];
+      // Allow inc on undefined (treat as 0, e.g. new counter) but reject on
+      // any other non-numeric target so we don't clobber arrays/objects/strings.
+      if (current !== undefined && typeof current !== "number") {
+        throw new Error("inc target is not a number");
+      }
+      parent[leaf] = (typeof current === "number" ? current : 0) + value;
+    } else if (op === "push") {
+      const arr = parent[leaf];
+      if (!Array.isArray(arr)) throw new Error("push target is not an array");
+      arr.push(value);
+    }
+  }
 
   private async _handleGetWorldState(msg: BusMessage): Promise<void> {
     const payload = (msg.payload ?? {}) as Record<string, unknown>;
