@@ -60,6 +60,18 @@ export class HITLPlugin implements Plugin {
   }
 
   /**
+   * Reset all module-level state. Intended for tests — clears the pending
+   * request map, unrendered-id set, and renderer registry so each test
+   * starts from a clean slate. Production code doesn't need this because
+   * the plugin is a singleton with process-lifetime state.
+   */
+  resetForTesting(): void {
+    pendingRequests.clear();
+    unrenderedCorrelationIds.clear();
+    renderers.clear();
+  }
+
+  /**
    * Queue snapshot for the world-state `hitl_queue` domain.
    * - pendingCount: all pending (rendered + unrendered)
    * - unrenderedCount: pending that had no matching renderer (routing hole)
@@ -80,53 +92,67 @@ export class HITLPlugin implements Plugin {
     console.log(`[hitl] Registered renderer for interface "${interfaceName}"`);
   }
 
+  /**
+   * Sweep pending HITL requests whose `expiresAt` is at or before `nowMs`.
+   *
+   * For each expired request:
+   *   - `onTimeout === "approve" | "reject"` → publish a synthetic HITLResponse
+   *     on `hitl.response.{correlationId}` so the TaskTracker / replyTopic
+   *     consumer treats it as an auto-decision
+   *   - `onTimeout === "escalate"` or unset → publish `hitl.expired.{correlationId}`
+   *     and invoke the renderer's onExpired() hook so a human sees the timeout
+   *
+   * Exposed (not private) so tests can invoke it directly with a controlled
+   * `nowMs` instead of waiting for the 60s production sweep timer.
+   */
+  sweepExpired(bus: EventBus, nowMs: number): void {
+    for (const [correlationId, req] of pendingRequests) {
+      if (new Date(req.expiresAt).getTime() > nowMs) continue;
+
+      pendingRequests.delete(correlationId);
+      unrenderedCorrelationIds.delete(correlationId);
+
+      if (req.onTimeout === "approve" || req.onTimeout === "reject") {
+        console.log(`[hitl] TTL expired → auto-${req.onTimeout} (${correlationId})`);
+        const autoResp: HITLResponse = {
+          type: "hitl_response",
+          correlationId,
+          decision: req.onTimeout,
+          decidedBy: `auto-${req.onTimeout}`,
+        };
+        bus.publish(`hitl.response.${correlationId}`, {
+          id: crypto.randomUUID(),
+          correlationId,
+          topic: `hitl.response.${correlationId}`,
+          timestamp: nowMs,
+          payload: autoResp,
+        });
+      } else {
+        console.log(`[hitl] Expired HITLRequest (${correlationId})`);
+        bus.publish(`hitl.expired.${correlationId}`, {
+          id: crypto.randomUUID(),
+          correlationId,
+          topic: `hitl.expired.${correlationId}`,
+          timestamp: nowMs,
+          payload: { type: "hitl_expired", correlationId, originalRequest: req },
+        });
+        const iface = req.sourceMeta?.interface ?? "unknown";
+        const renderer = renderers.get(iface);
+        if (renderer?.onExpired) {
+          renderer.onExpired(req, bus).catch(err =>
+            console.error(`[hitl] renderer.onExpired failed for ${correlationId}:`, err),
+          );
+        }
+      }
+    }
+  }
+
   install(bus: EventBus): void {
     this.busRef = bus;
 
     // ── Expiry sweep: every 60s, remove expired pending requests ─────────
     this.expiryTimer = setInterval(() => {
-      const now = Date.now();
-      for (const [correlationId, req] of pendingRequests) {
-        if (new Date(req.expiresAt).getTime() <= now) {
-          pendingRequests.delete(correlationId);
-          unrenderedCorrelationIds.delete(correlationId);
-
-          if (req.onTimeout === "approve" || req.onTimeout === "reject") {
-            // Auto-respond according to the TTL policy
-            console.log(`[hitl] TTL expired → auto-${req.onTimeout} (${correlationId})`);
-            const autoResp: HITLResponse = {
-              type: "hitl_response",
-              correlationId,
-              decision: req.onTimeout,
-              decidedBy: `auto-${req.onTimeout}`,
-            };
-            bus.publish(`hitl.response.${correlationId}`, {
-              id: crypto.randomUUID(),
-              correlationId,
-              topic: `hitl.response.${correlationId}`,
-              timestamp: Date.now(),
-              payload: autoResp,
-            });
-          } else {
-            // onTimeout === "escalate" or not set — emit expired event for escalation handlers
-            console.log(`[hitl] Expired HITLRequest (${correlationId})`);
-            bus.publish(`hitl.expired.${correlationId}`, {
-              id: crypto.randomUUID(),
-              correlationId,
-              topic: `hitl.expired.${correlationId}`,
-              timestamp: Date.now(),
-              payload: { type: "hitl_expired", correlationId, originalRequest: req },
-            });
-            const iface = req.sourceMeta?.interface ?? "unknown";
-            const renderer = renderers.get(iface);
-            if (renderer?.onExpired) {
-              renderer.onExpired(req, bus).catch(err =>
-                console.error(`[hitl] renderer.onExpired failed for ${correlationId}:`, err),
-              );
-            }
-          }
-        }
-      }
+      this.sweepExpired(bus, Date.now());
     }, 60_000);
 
     // ── Route HITLRequest to the correct interface ───────────────────────
