@@ -51,24 +51,31 @@ agents:
     subscribesTo:
       - message.inbound.discord.#
 
-  # Frank — CI/CD + infrastructure
-  - name: frank
-    url: http://frank:7880/a2a
-    auth:
-      scheme: apiKey
-      credentialsEnv: FRANK_API_KEY
-    streaming: true
-    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_FRANK
-    subscribesTo:
-      - message.inbound.discord.#
-      - message.inbound.github.#
+  # Frank — CI/CD + infrastructure. NOT YET DEPLOYED. Leaving the entry
+  # commented out until Frank's agent card + A2A endpoint are live so
+  # workstacean doesn't register a dead executor or spam card-discovery
+  # 404s every 10 min. Reinstate this block (and DISCORD_BOT_TOKEN_FRANK
+  # in homelab-iac) once the container is up.
+  #
+  # - name: frank
+  #   url: http://frank:7880/a2a
+  #   auth:
+  #     scheme: apiKey
+  #     credentialsEnv: FRANK_API_KEY
+  #   streaming: true
+  #   discordBotTokenEnvKey: DISCORD_BOT_TOKEN_FRANK
+  #   subscribesTo:
+  #     - message.inbound.discord.#
+  #     - message.inbound.github.#
 
-  # protopen — security/pentest/RF recon (remote via Tailscale)
+  # protopen — security/pentest/RF recon. Remote via Tailscale
+  # (PROTOPEN_BASE_URL defaults to http://steamdeck:7870 in homelab-iac).
+  # Serves the legacy /.well-known/agent.json path; advertises streaming:true.
   - name: protopen
     url: ${PROTOPEN_BASE_URL}/a2a
     auth:
       scheme: apiKey
       credentialsEnv: PROTOPEN_API_KEY
-    streaming: false
+    streaming: true
     subscribesTo:
       - message.inbound.discord.#
