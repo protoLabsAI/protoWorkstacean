@@ -22,6 +22,9 @@ export const TOPICS = {
 
   /** Published by PlannerPluginL0 when escalation to tier_1 is needed. */
   PLANNER_ESCALATE: "world.planner.escalate",
+
+  /** Published by ActionDispatcherPlugin to invoke an agent skill (unified dispatch). */
+  AGENT_SKILL_REQUEST: "agent.skill.request",
 } as const;
 
 export type TopicValue = (typeof TOPICS)[keyof typeof TOPICS];
