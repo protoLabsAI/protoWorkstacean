@@ -108,6 +108,45 @@ async function handleHITLButton(ctx: DiscordContext, interaction: ButtonInteract
   });
 }
 
+// ── Config-change button interaction ──────────────────────────────────────────
+
+async function handleConfigChangeButton(ctx: DiscordContext, interaction: ButtonInteraction): Promise<void> {
+  try { await interaction.deferUpdate(); } catch (err) {
+    console.warn(`[discord] config_change deferUpdate failed (${err instanceof Error ? err.message : err}) — processing decision anyway`);
+  }
+
+  const [, decision, correlationId] = interaction.customId.split(":");
+  if (!decision || !correlationId) {
+    console.warn(`[discord] config_change button with malformed customId: ${interaction.customId}`);
+    return;
+  }
+
+  const entry = ctx.pendingConfigChangeMessages.get(correlationId);
+  const replyTopic = entry?.replyTopic ?? `config.change.response.${correlationId}`;
+
+  try {
+    ctx.bus.publish(replyTopic, {
+      id: crypto.randomUUID(), correlationId, topic: replyTopic, timestamp: Date.now(),
+      payload: { type: "config_change_response", correlationId, decision, decidedBy: interaction.user.id },
+    });
+  } catch (err) {
+    console.error(`[discord] config_change bus publish failed for ${correlationId}:`, err);
+  }
+
+  if (entry) ctx.pendingConfigChangeMessages.delete(correlationId);
+
+  const color = decision === "approve" ? 0x22c55e : 0xef4444;
+  const label = decision.charAt(0).toUpperCase() + decision.slice(1);
+  const decidedEmbed = new EmbedBuilder()
+    .setTitle(interaction.message.embeds[0]?.title ?? "Config change decision recorded")
+    .setDescription(`**${label}** by <@${interaction.user.id}>`)
+    .setColor(color);
+
+  await interaction.message.edit({ embeds: [decidedEmbed], components: [] }).catch(err => {
+    console.warn(`[discord] config_change message edit failed for ${correlationId}:`, err instanceof Error ? err.message : err);
+  });
+}
+
 // ── Slash command registration ────────────────────────────────────────────────
 
 export async function registerSlashCommands(ctx: DiscordContext): Promise<void> {
@@ -165,6 +204,11 @@ export function registerSlashCommandHandlers(ctx: DiscordContext): void {
 
     if (interaction.isButton() && interaction.customId.startsWith("hitl:")) {
       await handleHITLButton(ctx, interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("config_change:")) {
+      await handleConfigChangeButton(ctx, interaction);
       return;
     }
 
