@@ -100,6 +100,73 @@ describe("ExecutorRegistry", () => {
     });
   });
 
+  describe("registerEffect + resolveByEffect", () => {
+    it("returns candidates for a registered (domain, path)", () => {
+      const registry = new ExecutorRegistry();
+      registry.registerEffect("fix_ci", "ava", [
+        { domain: "ci", path: "data.blockedPRs", expectedDelta: -1, confidence: 0.9 },
+      ]);
+      const results = registry.resolveByEffect({ domain: "ci", path: "data.blockedPRs" });
+      expect(results).toHaveLength(1);
+      expect(results[0]).toMatchObject({
+        skill: "fix_ci",
+        agentName: "ava",
+        domain: "ci",
+        path: "data.blockedPRs",
+        expectedDelta: -1,
+        confidence: 0.9,
+      });
+    });
+
+    it("returns empty array when no match", () => {
+      const registry = new ExecutorRegistry();
+      expect(registry.resolveByEffect({ domain: "ci", path: "data.blockedPRs" })).toEqual([]);
+    });
+
+    it("accumulates multiple skills for the same (domain, path)", () => {
+      const registry = new ExecutorRegistry();
+      registry.registerEffect("fix_ci", "ava", [
+        { domain: "ci", path: "data.blockedPRs", expectedDelta: -1, confidence: 0.9 },
+      ]);
+      registry.registerEffect("triage_ci", "quinn", [
+        { domain: "ci", path: "data.blockedPRs", expectedDelta: -2, confidence: 0.6 },
+      ]);
+      const results = registry.resolveByEffect({ domain: "ci", path: "data.blockedPRs" });
+      expect(results).toHaveLength(2);
+      expect(results.map(r => r.skill)).toEqual(["fix_ci", "triage_ci"]);
+    });
+
+    it("a single registerEffect call with multiple effects populates all keys", () => {
+      const registry = new ExecutorRegistry();
+      registry.registerEffect("deploy", undefined, [
+        { domain: "ci", path: "data.failCount", expectedDelta: -1, confidence: 0.8 },
+        { domain: "plane", path: "data.openIssues", expectedDelta: -1, confidence: 0.7 },
+      ]);
+      expect(registry.resolveByEffect({ domain: "ci", path: "data.failCount" })).toHaveLength(1);
+      expect(registry.resolveByEffect({ domain: "plane", path: "data.openIssues" })).toHaveLength(1);
+    });
+
+    it("resolveByEffect returns a copy — mutations do not affect internal state", () => {
+      const registry = new ExecutorRegistry();
+      registry.registerEffect("fix_ci", undefined, [
+        { domain: "ci", path: "data.blockedPRs", expectedDelta: -1, confidence: 0.9 },
+      ]);
+      const results = registry.resolveByEffect({ domain: "ci", path: "data.blockedPRs" });
+      results.pop();
+      expect(registry.resolveByEffect({ domain: "ci", path: "data.blockedPRs" })).toHaveLength(1);
+    });
+
+    it("does not affect existing resolve() behaviour", () => {
+      const registry = new ExecutorRegistry();
+      const exec = makeExecutor("proto-sdk");
+      registry.register("fix_ci", exec);
+      registry.registerEffect("fix_ci", undefined, [
+        { domain: "ci", path: "data.blockedPRs", expectedDelta: -1, confidence: 0.9 },
+      ]);
+      expect(registry.resolve("fix_ci")).toBe(exec);
+    });
+  });
+
   describe("list + size", () => {
     it("tracks all registrations", () => {
       const registry = new ExecutorRegistry();
