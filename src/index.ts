@@ -315,6 +315,16 @@ const pluginRegistry: PluginRegistryEntry[] = [
       return new OutcomeAnalysisPlugin();
     },
   },
+  {
+    // Captures goal_proposal results from Ava, gates on HITL approval, then
+    // appends the approved entry to workspace/goals.yaml and triggers reload.
+    name: "goal-hot-reload",
+    condition: () => true,
+    factory: async () => {
+      const { GoalHotReloadPlugin } = await import("./plugins/goal-hot-reload-plugin.js");
+      return new GoalHotReloadPlugin(workspaceDir);
+    },
+  },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
   {
     name: "echo",
