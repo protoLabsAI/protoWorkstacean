@@ -3,12 +3,13 @@
  * optimistic state updates.
  *
  * Subscribes to: world.action.dispatch
- * Publishes:     world.action.outcome, world.action.queue_full
+ * Publishes:     agent.skill.request, world.action.outcome, world.action.queue_full
  *
  * On receiving a dispatch event:
  *   1. Checks WIP limit; if at capacity, queues action and publishes queue_full
  *   2. Applies optimistic state effects via StateUpdater
- *   3. If action has meta.topic, publishes to that topic and waits for outcome
+ *   3. If action has meta.topic, publishes to agent.skill.request with source.interface='cron',
+ *      payload.meta.systemActor='goap', and reply.topic=`agent.skill.response.${correlationId}`
  *   4. For free/internal (tier_0, no meta.topic) actions: resolves immediately as success
  *   5. Publishes world.action.outcome with result
  *   6. On failure: triggers rollback via StateRollbackRegistry
@@ -16,6 +17,7 @@
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ActionDispatchPayload, ActionOutcomePayload, ActionQueueFullPayload } from "../event-bus/action-events.ts";
+import type { AgentSkillResponsePayload } from "../event-bus/payloads.ts";
 import type { WorldState } from "../../lib/types/world-state.ts";
 import { TOPICS } from "../event-bus/topics.ts";
 import { DispatchQueue } from "../dispatcher/dispatch-queue.ts";
@@ -167,27 +169,29 @@ export class ActionDispatcherPlugin implements Plugin {
         return;
       }
 
-      // For fire-and-forget actions: publish to topic then immediately succeed.
+      // For fire-and-forget actions: publish to agent.skill.request then immediately succeed.
       // Use meta.fireAndForget for alerts, ceremony triggers, and other side-effect-only dispatches.
       if (action.meta.fireAndForget) {
-        this.bus.publish(action.meta.topic, {
+        this.bus.publish(TOPICS.AGENT_SKILL_REQUEST, {
           id: crypto.randomUUID(),
           correlationId,
           parentId: parentMsgId,
-          topic: action.meta.topic,
+          topic: TOPICS.AGENT_SKILL_REQUEST,
           timestamp: Date.now(),
+          source: { interface: "cron" },
           payload: {
-            actionId: action.id,
+            skill: action.meta.skillHint ?? action.id,
             goalId: action.goalId,
-            meta: action.meta,
+            meta: { ...action.meta, systemActor: "goap" },
           },
         });
         await this.completeAction(action, correlationId, parentCorrelationId, startedAt, true);
         return;
       }
 
-      // For actions with a dispatch topic, publish and wait for outcome via timeout
+      // For actions with a dispatch topic, publish to agent.skill.request and wait for skill response
       const timeoutMs = action.meta.timeout ?? this.config.defaultTimeoutMs ?? 30_000;
+      const replyTopic = `agent.skill.response.${correlationId}`;
 
       await new Promise<void>((resolve) => {
         // Set up timeout
@@ -204,27 +208,28 @@ export class ActionDispatcherPlugin implements Plugin {
         }, timeoutMs);
         this.pendingTimeouts.set(correlationId, timer);
 
-        // Publish to action's target topic
-        this.bus.publish(action.meta.topic!, {
+        // Publish to unified skill dispatch topic
+        this.bus.publish(TOPICS.AGENT_SKILL_REQUEST, {
           id: crypto.randomUUID(),
           correlationId,
           parentId: parentMsgId,
-          topic: action.meta.topic!,
+          topic: TOPICS.AGENT_SKILL_REQUEST,
           timestamp: Date.now(),
+          source: { interface: "cron" },
+          reply: { topic: replyTopic },
           payload: {
-            actionId: action.id,
+            skill: action.meta.skillHint ?? action.id,
             goalId: action.goalId,
-            meta: action.meta,
+            meta: { ...action.meta, systemActor: "goap" },
           },
         });
 
-        // Subscribe to outcome for this specific correlationId
-        const outcomeSubId = this.bus.subscribe(
-          TOPICS.WORLD_ACTION_OUTCOME,
+        // Subscribe to skill response for this specific correlationId
+        const responseSubId = this.bus.subscribe(
+          replyTopic,
           this.name + ".await." + correlationId,
-          (outcomeMsg: BusMessage) => {
-            const outcome = outcomeMsg.payload as ActionOutcomePayload;
-            if (outcome.correlationId !== correlationId) return;
+          (responseMsg: BusMessage) => {
+            const response = responseMsg.payload as AgentSkillResponsePayload;
 
             // Cancel timeout
             const t = this.pendingTimeouts.get(correlationId);
@@ -232,15 +237,15 @@ export class ActionDispatcherPlugin implements Plugin {
               clearTimeout(t);
               this.pendingTimeouts.delete(correlationId);
             }
-            this.bus.unsubscribe(outcomeSubId);
+            this.bus.unsubscribe(responseSubId);
 
             void this.completeAction(
               action,
               correlationId,
               parentCorrelationId,
               startedAt,
-              outcome.success,
-              outcome.error
+              !response.error,
+              response.error
             ).then(resolve);
           }
         );
