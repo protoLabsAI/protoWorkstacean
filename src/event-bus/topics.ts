@@ -32,6 +32,13 @@ export const TOPICS = {
    * Use this prefix to subscribe to all outcomes.
    */
   AUTONOMOUS_OUTCOME_PREFIX: "autonomous.outcome",
+
+  /**
+   * Published by EffectDomainExtension after each skill execution that returns
+   * effect-domain data. Consumed by WorldStateEngine to apply in-process deltas
+   * and re-fire goal evaluation immediately.
+   */
+  WORLD_STATE_DELTA: "world.state.delta",
 } as const;
 
 export type TopicValue = (typeof TOPICS)[keyof typeof TOPICS];
