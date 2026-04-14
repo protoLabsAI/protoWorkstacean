@@ -108,6 +108,72 @@ export class A2AExecutor implements IExecutor {
   }
 
   /**
+   * Poll a task for its current state. Used by TaskTracker to check progress
+   * on long-running tasks without blocking the executor loop.
+   */
+  async pollTask(taskId: string, correlationId: string, parentId?: string): Promise<SkillResult> {
+    try {
+      const client = await this._buildClient(correlationId, parentId);
+      const task = await client.getTask({ id: taskId });
+      const artifactText = (task.artifacts ?? [])
+        .flatMap(a => a.parts)
+        .filter((p): p is { kind: "text"; text: string } => p.kind === "text" && typeof p.text === "string")
+        .map(p => p.text)
+        .join("\n");
+      const statusText = task.status.message ? this._textFromParts(task.status.message.parts) : "";
+      return {
+        text: artifactText || statusText || "",
+        isError: task.status.state === "failed" || task.status.state === "rejected",
+        correlationId,
+        data: { taskId: task.id, contextId: task.contextId, taskState: task.status.state },
+      };
+    } catch (err) {
+      return {
+        text: err instanceof Error ? err.message : String(err),
+        isError: true,
+        correlationId,
+      };
+    }
+  }
+
+  /**
+   * Cancel an in-flight task. Idempotent: already-terminal tasks throw
+   * TaskNotCancelableError which we surface as isError.
+   */
+  async cancelTask(taskId: string, correlationId: string, parentId?: string): Promise<SkillResult> {
+    try {
+      const client = await this._buildClient(correlationId, parentId);
+      const task = await client.cancelTask({ id: taskId });
+      return {
+        text: `Task ${taskId} canceled`,
+        isError: false,
+        correlationId,
+        data: { taskId: task.id, contextId: task.contextId, taskState: task.status.state },
+      };
+    } catch (err) {
+      return {
+        text: err instanceof Error ? err.message : String(err),
+        isError: true,
+        correlationId,
+      };
+    }
+  }
+
+  /**
+   * Resubscribe to a task's SSE stream after connection drops. Yields events
+   * just like sendMessageStream; TaskTracker can prefer this over polling
+   * when the agent card says capabilities.streaming: true.
+   */
+  async resubscribeTask(
+    taskId: string,
+    correlationId: string,
+    parentId?: string,
+  ): Promise<AsyncGenerator<Message | Task | TaskStatusUpdateEvent | TaskArtifactUpdateEvent, void, undefined>> {
+    const client = await this._buildClient(correlationId, parentId);
+    return client.resubscribeTask({ id: taskId });
+  }
+
+  /**
    * Non-streaming path: client.sendMessage returns Message | Task.
    */
   private async _executeBlocking(
