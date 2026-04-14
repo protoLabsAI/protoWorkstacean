@@ -8,7 +8,7 @@
  *   4. null — no executor found; SkillDispatcherPlugin logs and drops
  */
 
-import type { IExecutor, ExecutorRegistration } from "./types.ts";
+import type { IExecutor, ExecutorRegistration, HitlMode } from "./types.ts";
 
 export class ExecutorRegistry {
   private readonly _registrations: ExecutorRegistration[] = [];
@@ -21,13 +21,14 @@ export class ExecutorRegistry {
   register(
     skill: string,
     executor: IExecutor,
-    opts: { agentName?: string; priority?: number } = {},
+    opts: { agentName?: string; priority?: number; hitlMode?: HitlMode } = {},
   ): void {
     this._registrations.push({
       skill,
       executor,
       agentName: opts.agentName,
       priority: opts.priority ?? 0,
+      ...(opts.hitlMode !== undefined ? { hitlMode: opts.hitlMode } : {}),
     });
   }
 
@@ -61,6 +62,17 @@ export class ExecutorRegistry {
 
     // 3. Default
     return this._default;
+  }
+
+  /**
+   * Resolve the declared HITL mode for a skill (highest-priority registration wins).
+   * Returns undefined if the skill has no registration or no hitlMode declared.
+   */
+  resolveHitlMode(skill: string): HitlMode | undefined {
+    const bySkill = this._registrations
+      .filter(r => r.skill === skill && r.hitlMode !== undefined)
+      .sort((a, b) => b.priority - a.priority);
+    return bySkill[0]?.hitlMode;
   }
 
   /** All current registrations — useful for diagnostics and health checks. */

@@ -100,6 +100,39 @@ describe("ExecutorRegistry", () => {
     });
   });
 
+  describe("resolveHitlMode", () => {
+    it("returns the hitlMode for a registered skill", () => {
+      const registry = new ExecutorRegistry();
+      registry.register("deploy", makeExecutor("a2a"), { hitlMode: "gated" });
+      expect(registry.resolveHitlMode("deploy")).toBe("gated");
+    });
+
+    it("returns undefined when skill has no hitlMode", () => {
+      const registry = new ExecutorRegistry();
+      registry.register("chat", makeExecutor("proto-sdk"));
+      expect(registry.resolveHitlMode("chat")).toBeUndefined();
+    });
+
+    it("returns undefined for unknown skill", () => {
+      const registry = new ExecutorRegistry();
+      expect(registry.resolveHitlMode("unknown")).toBeUndefined();
+    });
+
+    it("highest priority registration wins when multiple declare hitlMode", () => {
+      const registry = new ExecutorRegistry();
+      registry.register("skill", makeExecutor("a"), { hitlMode: "notification", priority: 5 });
+      registry.register("skill", makeExecutor("b"), { hitlMode: "gated", priority: 10 });
+      expect(registry.resolveHitlMode("skill")).toBe("gated");
+    });
+
+    it("falls through to lower-priority registration that has hitlMode if higher doesn't", () => {
+      const registry = new ExecutorRegistry();
+      registry.register("skill", makeExecutor("a"), { hitlMode: "veto", priority: 5 });
+      registry.register("skill", makeExecutor("b"), { priority: 10 }); // no hitlMode
+      expect(registry.resolveHitlMode("skill")).toBe("veto");
+    });
+  });
+
   describe("list + size", () => {
     it("tracks all registrations", () => {
       const registry = new ExecutorRegistry();

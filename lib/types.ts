@@ -20,6 +20,28 @@ export interface BusMessage {
   replyTo?: string;
 }
 
+// ── HITL mode — per-skill escalation gradient ─────────────────────────────────
+
+/**
+ * HITL mode declared by an agent per-skill. Controls the default escalation
+ * gradient for that skill. Goal config can override per-dispatch.
+ *
+ *   autonomous   — proceed without any human notification or approval
+ *   notification — proceed, but surface a non-blocking notification to operators
+ *   veto         — notify operators and allow a short veto window before proceeding
+ *   gated        — block until a human explicitly approves
+ *   compound     — composed of multiple modes (e.g. veto then gated on retry)
+ */
+export type HitlMode = "autonomous" | "notification" | "veto" | "gated" | "compound";
+
+export const VALID_HITL_MODES: HitlMode[] = [
+  "autonomous",
+  "notification",
+  "veto",
+  "gated",
+  "compound",
+];
+
 // ── HITL (human-in-the-loop) gate types ──────────────────────────────────────
 
 export interface HITLRequest {

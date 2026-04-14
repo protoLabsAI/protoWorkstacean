@@ -51,11 +51,13 @@ export function buildAgentCard(ctx: ApiContext): AgentCard {
   for (const reg of registrations) {
     if (!reg.skill || seen.has(reg.skill)) continue;
     seen.add(reg.skill);
+    const tags = ["routed", reg.agentName ?? "default"].filter(Boolean);
+    if (reg.hitlMode) tags.push(`hitl:${reg.hitlMode}`);
     skills.push({
       id: reg.skill,
       name: reg.skill,
       description: `Skill routed by workstacean to ${reg.agentName ?? "default executor"}`,
-      tags: ["routed", reg.agentName ?? "default"].filter(Boolean),
+      tags,
     });
   }
 

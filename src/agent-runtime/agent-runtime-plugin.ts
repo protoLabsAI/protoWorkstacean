@@ -63,6 +63,7 @@ export class AgentRuntimePlugin implements Plugin {
         this.executorRegistry.register(skill.name, executor, {
           agentName: def.name,
           priority: 10,
+          ...(skill.hitlMode !== undefined ? { hitlMode: skill.hitlMode } : {}),
         });
       }
     }

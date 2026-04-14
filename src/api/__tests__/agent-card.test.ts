@@ -91,6 +91,23 @@ describe("GET /.well-known/agent-card.json", () => {
     expect(card.capabilities.pushNotifications).toBe(true);
   });
 
+  test("includes hitl:{mode} tag when skill has hitlMode declared", () => {
+    registry.register("deploy", fakeExecutor(), { agentName: "frank", hitlMode: "gated" });
+    registry.register("health_check", fakeExecutor(), { agentName: "frank", hitlMode: "autonomous" });
+    registry.register("chat", fakeExecutor(), { agentName: "ava" }); // no hitlMode
+
+    const card = buildAgentCard(ctx);
+
+    const deploy = card.skills.find(s => s.id === "deploy");
+    expect(deploy?.tags).toContain("hitl:gated");
+
+    const health = card.skills.find(s => s.id === "health_check");
+    expect(health?.tags).toContain("hitl:autonomous");
+
+    const chat = card.skills.find(s => s.id === "chat");
+    expect(chat?.tags?.some(t => t.startsWith("hitl:"))).toBe(false);
+  });
+
   test("route handler returns cache-control + JSON body", async () => {
     registry.register("plan", fakeExecutor(), { agentName: "ava" });
     const [route] = createRoutes(ctx);

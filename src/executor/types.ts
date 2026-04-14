@@ -14,6 +14,7 @@ import type { ExtendedUsage } from "@protolabsai/sdk";
  */
 
 import type { AgentSkillRequestPayload } from "../event-bus/payloads.ts";
+import type { HitlMode } from "../../lib/types.ts";
 
 // ── Request / Result ──────────────────────────────────────────────────────────
 
@@ -76,4 +77,11 @@ export interface ExecutorRegistration {
   agentName?: string;
   /** Higher priority wins when multiple registrations match the same skill. */
   priority: number;
+  /**
+   * HITL escalation mode declared by the agent for this skill.
+   * Used by SkillDispatcherPlugin to determine the default gate behavior.
+   */
+  hitlMode?: HitlMode;
 }
+
+export type { HitlMode };

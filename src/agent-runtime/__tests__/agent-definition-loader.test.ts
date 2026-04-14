@@ -89,6 +89,41 @@ describe("parseAgentYaml", () => {
     expect(def.skills[0].name).toBe("plan");
   });
 
+  test("parses hitlMode on a skill", () => {
+    const def = parseAgentYaml(
+      { ...validRaw, skills: [{ name: "chat", hitlMode: "notification" }] },
+      "x.yaml",
+    );
+    expect(def.skills[0].hitlMode).toBe("notification");
+  });
+
+  test("all valid hitlMode values are accepted", () => {
+    const modes = ["autonomous", "notification", "veto", "gated", "compound"] as const;
+    for (const mode of modes) {
+      const def = parseAgentYaml(
+        { ...validRaw, skills: [{ name: "test", hitlMode: mode }] },
+        "x.yaml",
+      );
+      expect(def.skills[0].hitlMode).toBe(mode);
+    }
+  });
+
+  test("invalid hitlMode is ignored (field omitted)", () => {
+    const def = parseAgentYaml(
+      { ...validRaw, skills: [{ name: "chat", hitlMode: "superautonomous" }] },
+      "x.yaml",
+    );
+    expect(def.skills[0].hitlMode).toBeUndefined();
+  });
+
+  test("missing hitlMode is undefined", () => {
+    const def = parseAgentYaml(
+      { ...validRaw, skills: [{ name: "chat" }] },
+      "x.yaml",
+    );
+    expect(def.skills[0].hitlMode).toBeUndefined();
+  });
+
   test("canDelegate is undefined when not provided", () => {
     const def = parseAgentYaml({ ...validRaw, canDelegate: undefined }, "x.yaml");
     expect(def.canDelegate).toBeUndefined();

@@ -117,10 +117,12 @@ skills:
   - name: chat
     description: Operational helm — system health, agent delegation, board management, issue filing, schedule control. The user's single control interface.
     keywords: []
+    hitlMode: notification
 
   - name: diagnose_pr_stuck
     description: Diagnose a stuck PR with merge conflicts and return a structured verdict (redundant, rebasable, decomposable, genuine) with evidence to drive autonomous recovery.
     keywords: [diagnose, conflict, stuck, merge, rebase, pr, dirty]
+    hitlMode: autonomous
     systemPromptOverride: |
       You are a PR conflict diagnostician. Analyze the given PR and return ONLY a JSON verdict.
 

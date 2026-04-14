@@ -6,6 +6,8 @@
  * selection, delegation rules, and bus subscription patterns.
  */
 
+import type { HitlMode } from "../../lib/types.ts";
+
 export type AgentRole =
   | "orchestrator"   // Ava — delegates to subagents, drives plans
   | "qa"             // Quinn — code review, bug triage
@@ -29,7 +31,15 @@ export interface AgentSkillDefinition {
   keywords?: string[];
   /** Override the system prompt for this specific skill. */
   systemPromptOverride?: string;
+  /**
+   * HITL escalation mode for this skill. Agent self-declares the default;
+   * goal config can override per-dispatch.
+   * @default "notification"
+   */
+  hitlMode?: HitlMode;
 }
+
+export type { HitlMode };
 
 /**
  * Complete definition of an in-process agent loaded from YAML.

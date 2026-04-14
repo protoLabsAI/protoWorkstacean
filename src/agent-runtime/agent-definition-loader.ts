@@ -13,6 +13,8 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AgentDefinition, AgentRole, AgentSkillDefinition, RawAgentYaml } from "./types.ts";
+import type { HitlMode } from "../../lib/types.ts";
+import { VALID_HITL_MODES } from "../../lib/types.ts";
 
 const VALID_ROLES: AgentRole[] = [
   "orchestrator",
@@ -85,13 +87,18 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
           const keywords = Array.isArray(s.keywords)
             ? s.keywords.filter((k): k is string => typeof k === "string")
             : undefined;
-        return {
+          const hitlMode: HitlMode | undefined =
+            typeof s.hitlMode === "string" && (VALID_HITL_MODES as string[]).includes(s.hitlMode)
+              ? (s.hitlMode as HitlMode)
+              : undefined;
+          return {
             name,
             ...(typeof s.description === "string" ? { description: s.description } : {}),
             ...(keywords?.length ? { keywords } : {}),
             ...(typeof s.systemPromptOverride === "string"
               ? { systemPromptOverride: s.systemPromptOverride }
               : {}),
+            ...(hitlMode !== undefined ? { hitlMode } : {}),
           };
         })
         .filter((s): s is AgentSkillDefinition => s !== null)
