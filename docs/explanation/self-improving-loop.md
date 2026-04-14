@@ -135,6 +135,27 @@ An earlier attempt to close `outcome → state` by republishing `world.state.upd
 
 ---
 
+## Fleet-level rollups — `agent_fleet_health`
+
+`AgentFleetHealthPlugin` (Arc 8.1) subscribes to `autonomous.outcome.#` and keeps a rolling 24-hour window of every autonomous dispatch. For each agent it exposes:
+
+- `successRate` — fraction of the window's outcomes that succeeded
+- `p50LatencyMs` / `p95LatencyMs` — wall-clock distribution
+- `costPerSuccessfulOutcome` — USD / success (from `cost-v1` usage samples when available, falling back to `MODEL_RATES["default"]` token pricing)
+- `recentFailures` — last 10 failure correlation IDs for drill-down
+
+Exposed as the `agent_fleet_health` world-state domain via a 60-second collector. Goals can target `domains.agent_fleet_health.data.<agent>.successRate < 0.5` to fire when a specific agent degrades, or `costPerSuccessfulOutcome > X` to catch runaway spend.
+
+---
+
+## Closing the other side — goal proposals from chronic failures
+
+`OutcomeAnalysisPlugin` has always emitted `ops.alert.action_quality` on chronic failure clusters. Arc 9.2 added a second output: an `agent.skill.request { skill: "goal_proposal" }` targeting Ava. Ava reads the cluster context (skill, actual vs expected success rate, recent failures) and either proposes a new goal — which `GoalHotReloadPlugin` applies without a restart — or files a feature on the board describing what's missing.
+
+"Bottlenecks are growth" operationalized: the system's own failures become inputs to its own goal backlog, closing the loop from observation → ranking → planner selection → outcome → **goal refinement**.
+
+---
+
 ## What's still ahead
 
 - **Ranking tiebreakers beyond Arc 6.4** — blast radius (cost-v1's `highConfFailures` companion in `confidence-v1`), per-user context (Graphiti memory as a ranking signal), recency decay on old samples
