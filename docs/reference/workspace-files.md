@@ -14,11 +14,18 @@ External A2A agent registry. Read by `SkillBrokerPlugin`.
 agents:
   - name: string                    # Unique agent name
     url: string                     # Full A2A endpoint URL
-    apiKeyEnv?: string              # Env var name holding the API key
+    apiKeyEnv?: string              # Legacy shorthand — env var holding a value sent as X-API-Key
+    auth?:                          # Structured auth (Phase 8). Preferred over apiKeyEnv.
+      scheme: "apiKey" | "bearer" | "hmac"
+      credentialsEnv: string        # Env var holding the credential value
+    headers?: Record<string, string> # Static extra request headers (e.g. a2a-extensions opt-in)
+    streaming?: boolean             # Whether the agent supports SSE streaming
     discordBotTokenEnvKey?: string  # Optional Discord bot token env var — when set,
                                     # DiscordPlugin's agent pool spins up a dedicated
                                     # Client() for this agent so users can DM it directly
-    skills?:                        # Skills to register. Omit to use /.well-known/agent.json discovery.
+    skills?:                        # Skills to register. Omit to auto-discover from
+                                    # /.well-known/agent-card.json (falls back to agent.json).
+                                    # Yaml entries take precedence as explicit overrides.
       - name: string
         description?: string
     subscribesTo?:                  # Informational — bus topics this agent watches (not enforced)

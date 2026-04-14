@@ -166,12 +166,30 @@ Copy `*.example` counterparts to bootstrap a new deployment.
 | `GET` | `/api/incidents` | Security incident list |
 | `POST` | `/api/incidents` | Report a new incident |
 | `POST` | `/api/incidents/:id/resolve` | Resolve an incident |
+| `GET` | `/.well-known/agent-card.json` | A2A agent card — discovery for external agents |
+| `POST` | `/a2a` | A2A JSON-RPC 2.0 endpoint (message/send, message/stream, tasks/*) |
+| `POST` | `/api/a2a/callback/:taskId` | Push-notification webhook for long-running A2A tasks |
+
+Full reference: [`docs/reference/http-api.md`](docs/reference/http-api.md).
+
+---
+
+## A2A protocol support
+
+protoWorkstacean is a first-class [A2A](https://a2a-protocol.org) client **and** server, built on [`@a2a-js/sdk`](https://www.npmjs.com/package/@a2a-js/sdk):
+
+- **Client** — `A2AExecutor` speaks the full A2A v0.3 protocol: `message/send`, `message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`, push notifications, artifact chunking, and native `input-required` HITL.
+- **Server** — workstacean exposes `/.well-known/agent-card.json` + `POST /a2a` so external agents can call it. Incoming calls bridge through the bus and back via `BusAgentExecutor`.
+- **Auth** — per-agent structured auth config in `workspace/agents.yaml` (apiKey / bearer / hmac schemes).
+- **Extensions** — `ExtensionRegistry` scaffolding for opt-in A2A extensions; no extensions shipped by default.
+
+See [`docs/guides/add-an-agent.md`](docs/guides/add-an-agent.md) for the full agent-onboarding flow.
 
 ---
 
 ## Testing
 
 ```bash
-bun test              # all 577 tests
+bun test              # all tests
 bun test --watch      # watch mode
 ```
