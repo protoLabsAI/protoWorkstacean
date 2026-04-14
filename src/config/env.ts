@@ -62,6 +62,8 @@ export const EnvSchema = z
     DM_DEBOUNCE_MS:               z.string().optional(),
     /** TTL (ms) for pending mailbox messages before they're swept (default: 10 min). */
     MAILBOX_TTL_MS:               z.string().optional(),
+    /** Public URL of workstacean API — used by A2A push-notification webhooks (e.g. http://workstacean:3000). */
+    WORKSTACEAN_BASE_URL:         z.string().optional(),
 
     // GitHub
     GITHUB_TOKEN:          z.string().optional(),

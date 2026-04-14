@@ -33,6 +33,21 @@ export interface A2AAgentConfig {
   streaming?: boolean;
   /** Callback for intermediate streaming updates (e.g. publish to bus). */
   onStreamUpdate?: (update: { type: string; text?: string; state?: string }) => void;
+  /**
+   * Public base URL of the workstacean API server (e.g. http://workstacean:3000
+   * on the docker network). Required to register push notification webhooks.
+   * If unset, push notifications are skipped and we fall back to polling.
+   */
+  callbackBaseUrl?: string;
+}
+
+export interface ExecuteOptions {
+  /**
+   * If provided and the agent supports push notifications, the executor
+   * registers a push-notification config pointing at this taskId + token
+   * so the agent can POST task updates back via /api/a2a/callback/:taskId.
+   */
+  callback?: { taskId: string; token: string };
 }
 
 /**
@@ -104,6 +119,32 @@ export class A2AExecutor implements IExecutor {
         isError: true,
         correlationId: req.correlationId,
       };
+    }
+  }
+
+  /**
+   * Register a push-notification webhook for a task. Agent will POST Task
+   * snapshots to the URL with the given token in X-A2A-Notification-Token
+   * when the task state changes. Silently no-ops if the agent doesn't
+   * support push notifications (we fall back to polling).
+   */
+  async registerPushNotification(
+    taskId: string,
+    callbackUrl: string,
+    token: string,
+    correlationId: string,
+    parentId?: string,
+  ): Promise<boolean> {
+    try {
+      const client = await this._buildClient(correlationId, parentId);
+      await client.setTaskPushNotificationConfig({
+        taskId,
+        pushNotificationConfig: { url: callbackUrl, token },
+      });
+      return true;
+    } catch {
+      // Agent doesn't support push notifications — tracker falls back to polling
+      return false;
     }
   }
 

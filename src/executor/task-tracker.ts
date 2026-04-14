@@ -28,6 +28,8 @@ export interface TrackedTask {
   registeredAt: number;
   lastPolledAt: number;
   pollIntervalMs: number;
+  /** Per-task secret for authenticating push-notification callbacks. */
+  callbackToken?: string;
 }
 
 export interface TaskTrackerOptions {
@@ -67,6 +69,8 @@ export class TaskTracker {
     executor: A2AExecutor;
     parentId?: string;
     pollIntervalMs?: number;
+    /** Per-task token for authenticating push callbacks. Generated if omitted. */
+    callbackToken?: string;
   }): void {
     const now = Date.now();
     this.tasks.set(params.correlationId, {
@@ -79,9 +83,54 @@ export class TaskTracker {
       registeredAt: now,
       lastPolledAt: now,
       pollIntervalMs: params.pollIntervalMs ?? this.defaultPollIntervalMs,
+      callbackToken: params.callbackToken ?? crypto.randomUUID(),
     });
     console.log(
       `[task-tracker] Tracking ${params.agentName} task ${params.taskId.slice(0, 8)}… (correlationId: ${params.correlationId.slice(0, 8)}…)`,
+    );
+  }
+
+  /** Look up the callback token for a tracked task. Used by the webhook route. */
+  getCallbackToken(correlationId: string): string | undefined {
+    return this.tasks.get(correlationId)?.callbackToken;
+  }
+
+  /**
+   * Handle an incoming push notification. Body is the A2A Task object.
+   * If the task is terminal, we publish the response and untrack. Otherwise
+   * we update lastPolledAt so the polling loop gives the task more time.
+   */
+  handleCallback(correlationId: string, body: Record<string, unknown>): void {
+    const task = this.tasks.get(correlationId);
+    if (!task) return;
+
+    const status = (body.status ?? {}) as { state?: string; message?: { parts?: Array<{ kind?: string; text?: string }> } };
+    const state = typeof status.state === "string" ? status.state : undefined;
+
+    task.lastPolledAt = Date.now();
+
+    if (!state || !TERMINAL_STATES.has(state)) {
+      // Non-terminal update — just refresh the polled timestamp
+      return;
+    }
+
+    // Extract text from artifacts (primary) or status.message (fallback)
+    const artifacts = (body.artifacts ?? []) as Array<{ parts?: Array<{ kind?: string; text?: string }> }>;
+    const artifactText = artifacts
+      .flatMap(a => a.parts ?? [])
+      .filter((p): p is { kind: "text"; text: string } => p.kind === "text" && typeof p.text === "string")
+      .map(p => p.text)
+      .join("\n");
+    const statusText = status.message?.parts
+      ? status.message.parts.filter(p => p.kind === "text").map(p => p.text ?? "").join("")
+      : "";
+    const content = artifactText || statusText;
+    const isError = state === "failed" || state === "rejected";
+
+    this._publishResponse(task, isError ? undefined : content, isError ? (content || state) : undefined);
+    this.tasks.delete(correlationId);
+    console.log(
+      `[task-tracker] Callback for ${task.taskId.slice(0, 8)}… → terminal state "${state}" (via webhook)`,
     );
   }
 
