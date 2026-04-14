@@ -35,6 +35,10 @@ const contextMailbox = new ContextMailbox();
 import { TaskTracker } from "./executor/task-tracker.ts";
 const taskTracker = new TaskTracker({ bus });
 
+// --- A2A extensions — registered before any executor is installed ---
+import { registerConfidenceExtension } from "./executor/extensions/confidence.ts";
+registerConfidenceExtension(bus);
+
 // --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
 import { ChannelRegistry } from "../lib/channels/channel-registry.js";
 const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));

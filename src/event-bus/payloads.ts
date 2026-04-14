@@ -251,6 +251,18 @@ export interface AutonomousOutcomePayload {
   effectDelta?: Record<string, unknown>;
 }
 
+// ── autonomous.confidence.reported ───────────────────────────────────────────
+
+/**
+ * Payload for `autonomous.confidence.reported` — published by the confidence-v1
+ * extension interceptor after each skill execution where the agent attached a
+ * `x-confidence` block to its terminal message.
+ *
+ * OutcomeAnalysis uses this to weight failure signals: a high-confidence bad
+ * outcome is a stronger signal than a low-confidence one.
+ */
+export type { ConfidenceReportedPayload } from "../executor/extensions/confidence.ts";
+
 // ── world.goal.violated ──────────────────────────────────────────────────────
 // Defined in src/types/events.ts — re-exported here for convenience.
 export type { GoalViolatedEventPayload } from "../types/events.ts";

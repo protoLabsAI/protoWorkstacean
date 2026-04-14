@@ -30,6 +30,12 @@ interface ActionStats {
   success: number;
   failure: number;
   timeout: number;
+  /**
+   * Confidence-weighted failure score. Each failure contributes its agent-reported
+   * confidence (in [0.0, 1.0]) — or 1.0 if unknown — so high-confidence bad
+   * outcomes weigh more heavily than uncertain ones.
+   */
+  weightedFailures: number;
   lastEvaluatedAt: number;
   alertedAt?: number;
 }
@@ -58,6 +64,8 @@ export class OutcomeAnalysisPlugin implements Plugin {
   private readonly subscriptionIds: string[] = [];
   private readonly actionStats = new Map<string, ActionStats>();
   private readonly hitlStats = new Map<string, HitlStats>();
+  /** Short-term cache of agent-reported confidence scores keyed by correlationId. */
+  private readonly confidenceCache = new Map<string, number>();
   private analysisTimer?: ReturnType<typeof setInterval>;
 
   install(bus: EventBus): void {
@@ -68,6 +76,9 @@ export class OutcomeAnalysisPlugin implements Plugin {
     );
     this.subscriptionIds.push(
       bus.subscribe("hitl.escalation", this.name, (msg) => this._onHitlEscalation(msg)),
+    );
+    this.subscriptionIds.push(
+      bus.subscribe("autonomous.confidence.reported", this.name, (msg) => this._onConfidence(msg)),
     );
 
     this.analysisTimer = setInterval(() => this._runAnalysis(), ANALYSIS_INTERVAL_MS);
@@ -85,6 +96,14 @@ export class OutcomeAnalysisPlugin implements Plugin {
     this.bus = undefined;
   }
 
+  private _onConfidence(msg: BusMessage): void {
+    const p = msg.payload as Record<string, unknown> | undefined;
+    const correlationId = typeof p?.correlationId === "string" ? p.correlationId : undefined;
+    const confidence = typeof p?.confidence === "number" ? p.confidence : undefined;
+    if (!correlationId || confidence === undefined) return;
+    this.confidenceCache.set(correlationId, confidence);
+  }
+
   private _onOutcome(msg: BusMessage): void {
     const p = msg.payload as Record<string, unknown> | undefined;
     const actionId = typeof p?.actionId === "string" ? p.actionId : undefined;
@@ -93,6 +112,7 @@ export class OutcomeAnalysisPlugin implements Plugin {
     const success = p?.success === true;
     const error = typeof p?.error === "string" ? p.error : undefined;
     const isTimeout = error?.toLowerCase().includes("timeout") ?? false;
+    const correlationId = typeof p?.correlationId === "string" ? p.correlationId : undefined;
 
     const stats = this.actionStats.get(actionId) ?? {
       actionId,
@@ -100,16 +120,32 @@ export class OutcomeAnalysisPlugin implements Plugin {
       success: 0,
       failure: 0,
       timeout: 0,
+      weightedFailures: 0,
       lastEvaluatedAt: 0,
     };
 
     stats.total += 1;
-    if (success) stats.success += 1;
-    else if (isTimeout) stats.timeout += 1;
-    else stats.failure += 1;
+    if (success) {
+      stats.success += 1;
+    } else {
+      // Timeouts and plain failures both contribute to weighted failures.
+      // Use reported confidence if available, otherwise 1.0 (worst-case weight
+      // preserves existing behavior for agents without the confidence extension).
+      const reportedConfidence = correlationId ? this.confidenceCache.get(correlationId) : undefined;
+      const confidence: number = reportedConfidence ?? 1.0;
+      if (isTimeout) {
+        stats.timeout += 1;
+      } else {
+        stats.failure += 1;
+      }
+      stats.weightedFailures += confidence;
+    }
     stats.lastEvaluatedAt = Date.now();
 
     this.actionStats.set(actionId, stats);
+
+    // Evict used correlationId from the cache to keep it bounded.
+    if (correlationId) this.confidenceCache.delete(correlationId);
   }
 
   private _onHitlEscalation(msg: BusMessage): void {
@@ -131,9 +167,13 @@ export class OutcomeAnalysisPlugin implements Plugin {
   }
 
   /** Per-action success rate snapshot, sorted worst-first. Exposed for /api. */
-  getActionStats(): Array<ActionStats & { successRate: number }> {
+  getActionStats(): Array<ActionStats & { successRate: number; weightedFailureRate: number }> {
     return Array.from(this.actionStats.values())
-      .map(s => ({ ...s, successRate: s.total > 0 ? s.success / s.total : 0 }))
+      .map(s => ({
+        ...s,
+        successRate: s.total > 0 ? s.success / s.total : 0,
+        weightedFailureRate: s.total > 0 ? s.weightedFailures / s.total : 0,
+      }))
       .sort((a, b) => a.successRate - b.successRate);
   }
 
@@ -147,11 +187,17 @@ export class OutcomeAnalysisPlugin implements Plugin {
     if (!this.bus) return;
     const now = Date.now();
 
-    // Detect chronically-failing actions
+    // Detect chronically-failing actions.
+    // Alert threshold uses the confidence-weighted failure rate so that
+    // high-confidence bad outcomes trigger alerts sooner than uncertain ones.
     for (const stats of this.actionStats.values()) {
       if (stats.total < MIN_ATTEMPTS_BEFORE_ALERT) continue;
-      const rate = stats.success / stats.total;
-      if (rate >= POOR_SUCCESS_THRESHOLD) continue;
+      const successRate = stats.success / stats.total;
+      const weightedFailureRate = stats.weightedFailures / stats.total;
+      // Alert when either the raw success rate is poor OR the weighted failure
+      // rate is high (a few high-confidence failures can tip this threshold even
+      // if the raw count looks borderline).
+      if (successRate >= POOR_SUCCESS_THRESHOLD && weightedFailureRate < POOR_SUCCESS_THRESHOLD) continue;
 
       // Cooldown between repeat alerts for the same action
       if (stats.alertedAt && now - stats.alertedAt < ALERT_COOLDOWN_MS) continue;
@@ -164,15 +210,16 @@ export class OutcomeAnalysisPlugin implements Plugin {
         timestamp: now,
         payload: {
           actionId: stats.actionId,
-          successRate: rate,
+          successRate,
+          weightedFailureRate,
           total: stats.total,
           success: stats.success,
           failure: stats.failure,
           timeout: stats.timeout,
-          recommendation: `Action "${stats.actionId}" succeeded ${stats.success}/${stats.total} times (${(rate * 100).toFixed(0)}%). Consider rewriting preconditions, replacing the skill, or filing a feature to build a better capability.`,
+          recommendation: `Action "${stats.actionId}" succeeded ${stats.success}/${stats.total} times (${(successRate * 100).toFixed(0)}%, weighted failure rate ${(weightedFailureRate * 100).toFixed(0)}%). Consider rewriting preconditions, replacing the skill, or filing a feature to build a better capability.`,
         },
       });
-      console.warn(`[outcome-analysis] chronic failure: ${stats.actionId} ${(rate * 100).toFixed(0)}% over ${stats.total} attempts`);
+      console.warn(`[outcome-analysis] chronic failure: ${stats.actionId} ${(successRate * 100).toFixed(0)}% success, ${(weightedFailureRate * 100).toFixed(0)}% weighted failure over ${stats.total} attempts`);
     }
 
     // Detect HITL escalation patterns (feature-request signals)
