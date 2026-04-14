@@ -55,6 +55,8 @@ export interface SkillResult {
     contextId?: string;
     /** A2A task lifecycle state: working, input-required, completed, failed, etc. */
     taskState?: string;
+    /** Raw A2A artifacts from the terminal task — used by TaskTracker for worldstate-delta extraction. */
+    artifacts?: unknown[];
   };
 }
 

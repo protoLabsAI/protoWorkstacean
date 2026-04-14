@@ -232,7 +232,12 @@ export class A2AExecutor implements IExecutor {
         text: artifactText || statusText || "",
         isError: task.status.state === "failed" || task.status.state === "rejected",
         correlationId,
-        data: { taskId: task.id, contextId: task.contextId, taskState: task.status.state },
+        data: {
+          taskId: task.id,
+          contextId: task.contextId,
+          taskState: task.status.state,
+          artifacts: task.artifacts ?? [],
+        },
       };
     } catch (err) {
       return {

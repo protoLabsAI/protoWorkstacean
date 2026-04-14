@@ -19,6 +19,9 @@ import type { AgentSkillResponsePayload } from "../event-bus/payloads.ts";
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled", "rejected"]);
 const HITL_TTL_MS = 30 * 60_000; // 30 min default input-required window
 
+/** Extension URI for worldstate-delta-v1 artifacts. */
+const WORLDSTATE_DELTA_URI = "https://protolabs.ai/a2a/ext/worldstate-delta-v1";
+
 export interface TrackedTask {
   correlationId: string;
   taskId: string;
@@ -65,6 +68,8 @@ export class TaskTracker {
   private readonly defaultPollIntervalMs: number;
   private readonly maxTrackingMs: number;
   private readonly sweepTimer: ReturnType<typeof setInterval>;
+  /** Tracks task IDs for which world.state.delta events have already been published. */
+  private readonly publishedDeltaTaskIds = new Set<string>();
 
   constructor(opts: TaskTrackerOptions) {
     this.bus = opts.bus;
@@ -156,7 +161,7 @@ export class TaskTracker {
     }
 
     // Extract text from artifacts (primary) or status.message (fallback)
-    const artifacts = (body.artifacts ?? []) as Array<{ parts?: Array<{ kind?: string; text?: string }> }>;
+    const artifacts = (body.artifacts ?? []) as Array<{ extensions?: string[]; parts?: Array<{ kind?: string; text?: string; data?: Record<string, unknown> }> }>;
     const artifactText = artifacts
       .flatMap(a => a.parts ?? [])
       .filter((p): p is { kind: "text"; text: string } => p.kind === "text" && typeof p.text === "string")
@@ -168,6 +173,7 @@ export class TaskTracker {
     const content = artifactText || statusText;
     const isError = state === "failed" || state === "rejected";
 
+    this._extractAndPublishDeltas(task.taskId, task.agentName, artifacts);
     this._publishResponse(task, isError ? undefined : content, isError ? (content || state) : undefined, state);
     this.tasks.delete(correlationId);
     console.log(
@@ -228,6 +234,8 @@ export class TaskTracker {
         }
 
         if (state && TERMINAL_STATES.has(state)) {
+          const rawArtifacts = (result.data?.artifacts ?? []) as Array<{ extensions?: string[]; parts?: Array<{ kind?: string; text?: string; data?: Record<string, unknown> }> }>;
+          this._extractAndPublishDeltas(task.taskId, task.agentName, rawArtifacts);
           this._publishResponse(task, result.text, result.isError ? result.text : undefined, state);
           this.tasks.delete(task.correlationId);
           console.log(
@@ -315,6 +323,51 @@ export class TaskTracker {
       );
       this._publishResponse(task, undefined, `Resume failed: ${err instanceof Error ? err.message : String(err)}`);
       this.tasks.delete(task.correlationId);
+    }
+  }
+
+  /**
+   * Scan terminal task artifacts for worldstate-delta-v1 data parts and publish
+   * a `world.state.delta` event for each one. Idempotent: a given taskId is
+   * processed at most once even if both the callback and sweep paths fire.
+   */
+  private _extractAndPublishDeltas(
+    taskId: string,
+    agentName: string,
+    artifacts: Array<{
+      extensions?: string[];
+      parts?: Array<{ kind?: string; text?: string; data?: Record<string, unknown> }>;
+    }>,
+  ): void {
+    if (this.publishedDeltaTaskIds.has(taskId)) return;
+    this.publishedDeltaTaskIds.add(taskId);
+
+    for (const artifact of artifacts) {
+      if (!artifact.extensions?.includes(WORLDSTATE_DELTA_URI)) continue;
+      for (const part of artifact.parts ?? []) {
+        if (part.kind !== "data" || !part.data) continue;
+        const { domain, path, op, value } = part.data;
+        if (typeof domain !== "string" || typeof path !== "string" || typeof op !== "string") continue;
+
+        const topic = "world.state.delta";
+        this.bus.publish(topic, {
+          id: crypto.randomUUID(),
+          correlationId: taskId,
+          topic,
+          timestamp: Date.now(),
+          payload: {
+            domain,
+            path,
+            op,
+            value,
+            sourceTaskId: taskId,
+            sourceAgent: agentName,
+          },
+        });
+        console.log(
+          `[task-tracker] world.state.delta: ${domain}.${path} op=${op} from ${agentName} (task ${taskId.slice(0, 8)}…)`,
+        );
+      }
     }
   }
 

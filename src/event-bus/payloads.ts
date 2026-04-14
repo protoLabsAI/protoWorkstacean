@@ -251,6 +251,30 @@ export interface AutonomousOutcomePayload {
   effectDelta?: Record<string, unknown>;
 }
 
+// ── world.state.delta (worldstate-delta-v1) ──────────────────────────────────
+
+/**
+ * Payload for `world.state.delta` published by TaskTracker when a terminal task
+ * contains artifacts tagged with the x-protolabs/worldstate-delta-v1 extension.
+ *
+ * Each message represents a single domain mutation observed or declared by an agent.
+ * Idempotent: sourceTaskId is unique per task so consumers can deduplicate.
+ */
+export interface WorldStateDeltaV1Payload {
+  /** World-state domain (e.g. "ci", "plane"). */
+  domain: string;
+  /** Dot-separated path into the domain's data object (e.g. "data.blockedPRs"). */
+  path: string;
+  /** Mutation operation (e.g. "set", "add", "remove"). */
+  op: string;
+  /** New value to apply at `path`. */
+  value: unknown;
+  /** A2A task ID — used as idempotency key by consumers. */
+  sourceTaskId: string;
+  /** Agent that produced this delta. */
+  sourceAgent: string;
+}
+
 // ── world.goal.violated ──────────────────────────────────────────────────────
 // Defined in src/types/events.ts — re-exported here for convenience.
 export type { GoalViolatedEventPayload } from "../types/events.ts";
