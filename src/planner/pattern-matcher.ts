@@ -1,8 +1,7 @@
 /**
  * PatternMatcher — evaluates action preconditions against a WorldState snapshot.
  *
- * Returns matching actions sorted by priority (descending), then cost (ascending).
- * Deterministic: same inputs always produce the same output.
+ * Returns matching actions ranked by: priority desc → blast asc → confidence desc → cost asc → random tie-break.
  */
 
 import type { Action, Precondition } from "./types/action.ts";
@@ -56,13 +55,29 @@ export function actionMatches(action: Action, worldState: WorldState): boolean {
 /**
  * Match a list of actions against the current WorldState.
  *
- * Returns only actions whose preconditions are all satisfied,
- * sorted by priority descending, then cost ascending (deterministic tie-break).
+ * Returns only actions whose preconditions are all satisfied, ranked by:
+ *   1. Priority descending (higher = more urgent)
+ *   2. Blast ascending (lower blast radius = fewer side effects)
+ *   3. Confidence descending (higher confidence = more reliable effects)
+ *   4. Cost ascending (lower cost = cheaper)
+ *   5. Random tie-break (round-robin among exact ties to avoid starving any agent)
  */
 export function matchActions(actions: Action[], worldState: WorldState): Action[] {
   const matching = actions.filter((a) => actionMatches(a, worldState));
-  return matching.sort((a, b) => {
+  // Attach a random key before sorting so exact ties are broken by round-robin.
+  const withRand = matching.map((a) => ({ action: a, rand: Math.random() }));
+  withRand.sort((x, y) => {
+    const a = x.action;
+    const b = y.action;
     if (b.priority !== a.priority) return b.priority - a.priority;
-    return a.cost - b.cost;
+    const blastA = a.blast ?? 0;
+    const blastB = b.blast ?? 0;
+    if (blastA !== blastB) return blastA - blastB;
+    const confA = a.confidence ?? 1.0;
+    const confB = b.confidence ?? 1.0;
+    if (confA !== confB) return confB - confA;
+    if (a.cost !== b.cost) return a.cost - b.cost;
+    return x.rand - y.rand;
   });
+  return withRand.map((x) => x.action);
 }

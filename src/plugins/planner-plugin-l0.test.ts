@@ -298,6 +298,54 @@ describe("PlannerPluginL0", () => {
     expect(payload.actionId).toBe("guarded-action");
   });
 
+  test("ranks candidates by blast ascending when priorities are equal", () => {
+    registry.register(makeAction({ id: "high-blast", priority: 5, blast: 10, goalId: "blast-goal-1" }));
+    registry.register(makeAction({ id: "low-blast",  priority: 5, blast: 1,  goalId: "blast-goal-2" }));
+
+    const dispatched: ActionDispatchPayload[] = [];
+    bus.subscribe(TOPICS.WORLD_ACTION_DISPATCH, "test", (msg) => {
+      dispatched.push(msg.payload as ActionDispatchPayload);
+    });
+
+    planner.evaluate(makeWorldState(), "corr-blast");
+
+    expect(dispatched).toHaveLength(2);
+    // Lower blast should be dispatched first
+    expect(dispatched[0].actionId).toBe("low-blast");
+  });
+
+  test("ranks candidates by confidence descending when priority and blast are equal", () => {
+    registry.register(makeAction({ id: "low-conf",  priority: 5, blast: 0, confidence: 0.5, goalId: "conf-goal-1" }));
+    registry.register(makeAction({ id: "high-conf", priority: 5, blast: 0, confidence: 0.9, goalId: "conf-goal-2" }));
+
+    const dispatched: ActionDispatchPayload[] = [];
+    bus.subscribe(TOPICS.WORLD_ACTION_DISPATCH, "test", (msg) => {
+      dispatched.push(msg.payload as ActionDispatchPayload);
+    });
+
+    planner.evaluate(makeWorldState(), "corr-conf");
+
+    expect(dispatched).toHaveLength(2);
+    // Higher confidence should be dispatched first
+    expect(dispatched[0].actionId).toBe("high-conf");
+  });
+
+  test("ranks candidates by cost ascending when priority, blast, and confidence are equal", () => {
+    registry.register(makeAction({ id: "costly",  priority: 5, blast: 0, confidence: 1.0, cost: 50, goalId: "cost-goal-1" }));
+    registry.register(makeAction({ id: "cheaper", priority: 5, blast: 0, confidence: 1.0, cost: 5,  goalId: "cost-goal-2" }));
+
+    const dispatched: ActionDispatchPayload[] = [];
+    bus.subscribe(TOPICS.WORLD_ACTION_DISPATCH, "test", (msg) => {
+      dispatched.push(msg.payload as ActionDispatchPayload);
+    });
+
+    planner.evaluate(makeWorldState(), "corr-cost");
+
+    expect(dispatched).toHaveLength(2);
+    // Lower cost should be dispatched first
+    expect(dispatched[0].actionId).toBe("cheaper");
+  });
+
   test("uninstall removes subscriptions", () => {
     const action = makeAction();
     registry.register(action);

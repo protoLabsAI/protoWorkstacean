@@ -76,5 +76,17 @@ export interface Action {
   cost: number;
   /** Higher value = selected first when multiple actions match. */
   priority: number;
+  /**
+   * Blast radius — number of unrelated world-state paths this action may touch as side effects.
+   * Lower blast is safer; candidates with lower blast are preferred when effects are equivalent.
+   * Defaults to 0 (no side effects).
+   */
+  blast?: number;
+  /**
+   * Confidence score for the declared effects, in the range [0.0, 1.0].
+   * 1.0 = deterministic; lower values indicate probabilistic or uncertain effects.
+   * Candidates with higher confidence are preferred. Defaults to 1.0.
+   */
+  confidence?: number;
   meta: ActionMeta;
 }
