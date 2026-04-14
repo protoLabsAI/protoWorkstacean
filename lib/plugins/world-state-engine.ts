@@ -24,6 +24,7 @@
  * Inbound topics:
  *   tool.world_state.get       — bus-based world state query
  *   mcp.tool.get_world_state   — MCP tool invocation
+ *   world.state.delta          — incremental delta from agent skill execution
  *
  * Outbound topics:
  *   world.state.{domain}       — after each domain tick
@@ -187,6 +188,12 @@ export class WorldStateEngine implements Plugin {
       await this._handleGetWorldState(msg);
     });
     this.subscriptionIds.push(mcpSubId);
+
+    // Subscribe to incremental deltas from agent skill executions
+    const deltaSubId = bus.subscribe("world.state.delta", this.name, (msg: BusMessage) => {
+      this._handleWorldStateDelta(msg);
+    });
+    this.subscriptionIds.push(deltaSubId);
 
     // Start tickers for any domains registered before install()
     for (const reg of this.domains.values()) {
@@ -557,6 +564,58 @@ export class WorldStateEngine implements Plugin {
         ? { success: true, data: result }
         : { success: false, error: domain ? `No data for domain "${domain}"` : "World state not yet collected" },
     });
+  }
+
+  private _handleWorldStateDelta(msg: BusMessage): void {
+    const payload = msg.payload as {
+      source?: string;
+      skill?: string;
+      delta?: Array<{ domain: string; path: string; delta: number; confidence: number }>;
+    };
+
+    if (!Array.isArray(payload?.delta) || payload.delta.length === 0) return;
+
+    let applied = 0;
+    for (const d of payload.delta) {
+      const domainEntry = this.worldState.domains[d.domain];
+      if (!domainEntry) {
+        console.debug(`[world-state-engine] world.state.delta: domain "${d.domain}" not found — skipping`);
+        continue;
+      }
+
+      // Navigate the dot-separated path within the domain entry (e.g. "data.blockedPRs")
+      const parts = d.path.split(".");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let obj: any = domainEntry;
+      for (let i = 0; i < parts.length - 1; i++) {
+        obj = obj?.[parts[i]];
+        if (obj == null) break;
+      }
+
+      const leaf = parts[parts.length - 1];
+      if (obj != null && typeof obj[leaf] === "number") {
+        obj[leaf] += d.delta;
+        applied++;
+      }
+    }
+
+    if (applied === 0) return;
+
+    this.worldState.timestamp = Date.now();
+
+    if (this.bus) {
+      this.bus.publish("world.state.updated", {
+        id: crypto.randomUUID(),
+        correlationId: msg.correlationId,
+        topic: "world.state.updated",
+        timestamp: Date.now(),
+        payload: this.worldState,
+      });
+    }
+
+    console.debug(
+      `[world-state-engine] Applied ${applied} delta(s) from source=${payload.source ?? "unknown"} skill=${payload.skill ?? "unknown"}`,
+    );
   }
 
   private _persistSnapshot(): void {
