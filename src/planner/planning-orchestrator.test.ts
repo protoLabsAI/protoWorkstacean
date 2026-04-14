@@ -2,7 +2,8 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { InMemoryEventBus } from "../../lib/bus.ts";
 import { PlanningOrchestrator } from "./planning-orchestrator.ts";
 import { TOPICS } from "../event-bus/topics.ts";
-import type { ActionDispatchPayload, ActionOutcomePayload } from "../event-bus/action-events.ts";
+import type { ActionDispatchPayload } from "../event-bus/action-events.ts";
+import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 import type { WorldState } from "../../lib/types/world-state.ts";
 import type { Action } from "./types/action.ts";
 
@@ -68,9 +69,9 @@ describe("PlanningOrchestrator", () => {
     const action = makeAction();
     orchestrator.getRegistry().register(action);
 
-    const outcomes: ActionOutcomePayload[] = [];
-    bus.subscribe(TOPICS.WORLD_ACTION_OUTCOME, "test", (msg) => {
-      outcomes.push(msg.payload as ActionOutcomePayload);
+    const outcomes: AutonomousOutcomePayload[] = [];
+    bus.subscribe("autonomous.outcome.goap.test-action", "test", (msg) => {
+      outcomes.push(msg.payload as AutonomousOutcomePayload);
     });
 
     bus.publish(TOPICS.WORLD_STATE_UPDATED, {

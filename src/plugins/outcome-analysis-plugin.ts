@@ -1,12 +1,13 @@
 /**
  * OutcomeAnalysisPlugin — closes the learning loop.
  *
- * Subscribes to world.action.outcome events, tracks per-action success rates
- * and HITL escalation frequency, and emits signals on chronic issues:
+ * Subscribes to the unified `autonomous.outcome.#` stream (Arc 2.1 / 2.2),
+ * tracks per-skill success rates and HITL escalation frequency, and emits
+ * signals on chronic issues:
  *
- *   - Actions with <50% success rate over 10+ attempts → publishes
+ *   - Skills with <50% success rate over 10+ attempts → publishes
  *     ops.alert.action_quality so the fleet knows to investigate/replace it.
- *   - Actions with repeated HITL escalations → treated as feature-request
+ *   - Skills with repeated HITL escalations → treated as feature-request
  *     signals ("what would have unblocked this automatically?") and logged
  *     for Ava to file on the board.
  *
@@ -14,18 +15,25 @@
  * own failures become inputs to its own improvement backlog.
  *
  * Inbound:
- *   world.action.outcome  — every action completion
+ *   autonomous.outcome.#  — unified terminal-state event for every autonomous
+ *                           action (GOAP, ceremony, FAF, any skill dispatch).
+ *                           Replaces the previous split between
+ *                           world.action.outcome and per-reply-topic responses.
  *   hitl.escalation       — every HITL timeout/exhaustion (per pr-remediator)
  *
  * Outbound:
- *   ops.alert.action_quality   — action with poor success rate
+ *   ops.alert.action_quality   — skill with poor success rate
  *   ops.alert.hitl_escalation  — repeated human-needed action
  */
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
+import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 
 interface ActionStats {
+  /** Stats key — either a skill name (unified stream) or a legacy actionId. */
   actionId: string;
+  /** Autonomous subsystem that dispatched this skill (e.g. "goap", "ceremony"). */
+  systemActor?: string;
   total: number;
   success: number;
   failure: number;
@@ -63,9 +71,13 @@ export class OutcomeAnalysisPlugin implements Plugin {
   install(bus: EventBus): void {
     this.bus = bus;
 
+    // Every skill dispatch — GOAP action, ceremony, FAF, user-triggered —
+    // produces exactly one event on autonomous.outcome.# when the task reaches
+    // terminal state. Single source of truth for outcome clustering.
     this.subscriptionIds.push(
-      bus.subscribe("world.action.outcome", this.name, (msg) => this._onOutcome(msg)),
+      bus.subscribe("autonomous.outcome.#", this.name, (msg) => this._onAutonomousOutcome(msg)),
     );
+
     this.subscriptionIds.push(
       bus.subscribe("hitl.escalation", this.name, (msg) => this._onHitlEscalation(msg)),
     );
@@ -85,17 +97,23 @@ export class OutcomeAnalysisPlugin implements Plugin {
     this.bus = undefined;
   }
 
-  private _onOutcome(msg: BusMessage): void {
-    const p = msg.payload as Record<string, unknown> | undefined;
-    const actionId = typeof p?.actionId === "string" ? p.actionId : undefined;
-    if (!actionId) return;
+  /**
+   * Handle the autonomous.outcome.# stream. Routes by `skill`, which for
+   * GOAP-dispatched actions matches action.id (ActionDispatcher uses
+   * `skill: meta.skillHint ?? action.id`), and for ceremonies / user-
+   * dispatches uses the skill name directly. systemActor is captured so
+   * downstream reporting can slice per subsystem.
+   */
+  private _onAutonomousOutcome(msg: BusMessage): void {
+    const p = msg.payload as AutonomousOutcomePayload | undefined;
+    if (!p || typeof p.skill !== "string" || !p.skill) return;
 
-    const success = p?.success === true;
-    const error = typeof p?.error === "string" ? p.error : undefined;
-    const isTimeout = error?.toLowerCase().includes("timeout") ?? false;
+    const preview = typeof p.textPreview === "string" ? p.textPreview.toLowerCase() : "";
+    const isTimeout = !p.success && (preview.includes("timeout") || p.taskState === "canceled");
 
-    const stats = this.actionStats.get(actionId) ?? {
-      actionId,
+    const stats = this.actionStats.get(p.skill) ?? {
+      actionId: p.skill,
+      systemActor: p.systemActor,
       total: 0,
       success: 0,
       failure: 0,
@@ -104,12 +122,12 @@ export class OutcomeAnalysisPlugin implements Plugin {
     };
 
     stats.total += 1;
-    if (success) stats.success += 1;
+    if (p.success) stats.success += 1;
     else if (isTimeout) stats.timeout += 1;
     else stats.failure += 1;
     stats.lastEvaluatedAt = Date.now();
 
-    this.actionStats.set(actionId, stats);
+    this.actionStats.set(p.skill, stats);
   }
 
   private _onHitlEscalation(msg: BusMessage): void {

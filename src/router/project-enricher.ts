@@ -11,6 +11,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import type { BusMessage } from "../../lib/types.ts";
+import { TOPICS } from "../event-bus/topics.ts";
 
 interface ProjectDiscordChannels {
   general?: string;
@@ -100,7 +101,7 @@ export class ProjectEnricher {
     if (payload.projectSlug !== undefined) return null;
 
     // Only enrich GitHub inbound messages
-    if (!msg.topic.startsWith("message.inbound.github.")) return null;
+    if (!msg.topic.startsWith(TOPICS.MESSAGE_INBOUND_GITHUB_PREFIX)) return null;
 
     const github = payload.github as Record<string, unknown> | undefined;
     const owner = github?.owner as string | undefined;

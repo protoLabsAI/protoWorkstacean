@@ -2,7 +2,8 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { InMemoryEventBus } from "../../lib/bus.ts";
 import { ActionDispatcherPlugin } from "./action-dispatcher-plugin.ts";
 import { TOPICS } from "../event-bus/topics.ts";
-import type { ActionDispatchPayload, ActionOutcomePayload, ActionQueueFullPayload } from "../event-bus/action-events.ts";
+import type { ActionDispatchPayload, ActionQueueFullPayload } from "../event-bus/action-events.ts";
+import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 import type { Action } from "../planner/types/action.ts";
 import type { BusMessage } from "../../lib/types.ts";
 import type { WorldState } from "../../lib/types/world-state.ts";
@@ -58,9 +59,9 @@ describe("ActionDispatcherPlugin", () => {
   });
 
   test("dispatches tier_0 action and publishes outcome", async () => {
-    const outcomes: ActionOutcomePayload[] = [];
-    bus.subscribe(TOPICS.WORLD_ACTION_OUTCOME, "test", (msg) => {
-      outcomes.push(msg.payload as ActionOutcomePayload);
+    const outcomes: AutonomousOutcomePayload[] = [];
+    bus.subscribe("autonomous.outcome.goap.test-action", "test", (msg) => {
+      outcomes.push(msg.payload as AutonomousOutcomePayload);
     });
 
     const action = makeAction({ tier: "tier_0", meta: { fireAndForget: true } });
@@ -87,7 +88,7 @@ describe("ActionDispatcherPlugin", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     // Outcome should report success
-    const outcomes: ActionOutcomePayload[] = [];
+    const outcomes: AutonomousOutcomePayload[] = [];
     // Already dispatched — check queue instead
     expect(dispatcher.getQueue().activeCount).toBe(0);
     expect(dispatcher.getOutcomes().summary().success).toBe(1);
@@ -168,9 +169,9 @@ describe("ActionDispatcherPlugin", () => {
   });
 
   test("completes action when agent.skill.response.* is received", async () => {
-    const outcomes: import("../event-bus/action-events.ts").ActionOutcomePayload[] = [];
-    bus.subscribe(TOPICS.WORLD_ACTION_OUTCOME, "test", (msg) => {
-      outcomes.push(msg.payload as import("../event-bus/action-events.ts").ActionOutcomePayload);
+    const outcomes: AutonomousOutcomePayload[] = [];
+    bus.subscribe("autonomous.outcome.#", "test", (msg) => {
+      outcomes.push(msg.payload as AutonomousOutcomePayload);
     });
 
     const action = makeAction({

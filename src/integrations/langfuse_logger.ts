@@ -1,5 +1,6 @@
 import type { GoalViolation } from "../types/goals.ts";
 import { HttpClient } from "../services/http-client.ts";
+import { TOPICS } from "../event-bus/topics.ts";
 
 interface LangfuseConfig {
   publicKey: string;
@@ -47,7 +48,7 @@ export class LangfuseLogger {
       id: crypto.randomUUID(),
       type: "event",
       timestamp: new Date(violation.timestamp).toISOString(),
-      name: "world.goal.violated",
+      name: TOPICS.WORLD_GOAL_VIOLATED,
       metadata: {
         goalId: violation.goalId,
         goalType: violation.goalType,
@@ -83,7 +84,7 @@ export class LangfuseLogger {
       id: crypto.randomUUID(),
       type: "event",
       timestamp: new Date(violation.timestamp).toISOString(),
-      name: "world.goal.violated",
+      name: TOPICS.WORLD_GOAL_VIOLATED,
       metadata: {
         goalId: violation.goalId,
         goalType: violation.goalType,

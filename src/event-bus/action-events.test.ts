@@ -2,24 +2,23 @@ import { describe, test, expect } from "bun:test";
 import { TOPICS } from "./topics.ts";
 import type {
   ActionDispatchPayload,
-  ActionOutcomePayload,
   PlannerEscalatePayload,
 } from "./action-events.ts";
+import type { AutonomousOutcomePayload } from "./payloads.ts";
 
 describe("EventBus Topics", () => {
   test("all expected topics are defined", () => {
     expect(TOPICS.WORLD_STATE_UPDATED).toBe("world.state.updated");
     expect(TOPICS.WORLD_ACTION_DISPATCH).toBe("world.action.dispatch");
-    expect(TOPICS.WORLD_ACTION_OUTCOME).toBe("world.action.outcome");
     expect(TOPICS.WORLD_ACTION_OSCILLATION).toBe("world.action.oscillation");
     expect(TOPICS.WORLD_ACTION_QUEUE_FULL).toBe("world.action.queue_full");
     expect(TOPICS.PLANNER_ESCALATE).toBe("world.planner.escalate");
+    expect(TOPICS.AUTONOMOUS_OUTCOME_PREFIX).toBe("autonomous.outcome");
   });
 
-  test("topic values follow world.action.* convention", () => {
+  test("dispatch + oscillation + queue_full stay under world.action.*", () => {
     const actionTopics = [
       TOPICS.WORLD_ACTION_DISPATCH,
-      TOPICS.WORLD_ACTION_OUTCOME,
       TOPICS.WORLD_ACTION_OSCILLATION,
       TOPICS.WORLD_ACTION_QUEUE_FULL,
     ];
@@ -56,34 +55,52 @@ describe("ActionDispatchPayload", () => {
   });
 });
 
-describe("ActionOutcomePayload", () => {
-  test("success outcome", () => {
-    const payload: ActionOutcomePayload = {
-      type: "outcome",
+describe("AutonomousOutcomePayload", () => {
+  test("success outcome with goap context", () => {
+    const payload: AutonomousOutcomePayload = {
+      correlationId: "corr-1",
+      systemActor: "goap",
+      skill: "unblock_feature",
       actionId: "act-1",
       goalId: "goal-1",
-      correlationId: "corr-1",
-      timestamp: Date.now(),
       success: true,
+      taskState: "completed",
       durationMs: 150,
     };
     expect(payload.success).toBe(true);
     expect(payload.error).toBeUndefined();
+    expect(payload.actionId).toBe("act-1");
+    expect(payload.goalId).toBe("goal-1");
   });
 
   test("failure outcome with error", () => {
-    const payload: ActionOutcomePayload = {
-      type: "outcome",
+    const payload: AutonomousOutcomePayload = {
+      correlationId: "corr-1",
+      systemActor: "goap",
+      skill: "unblock_feature",
       actionId: "act-1",
       goalId: "goal-1",
-      correlationId: "corr-1",
-      timestamp: Date.now(),
       success: false,
       error: "Precondition check failed",
+      taskState: "failed",
       durationMs: 10,
     };
     expect(payload.success).toBe(false);
     expect(payload.error).toBe("Precondition check failed");
+  });
+
+  test("ceremony-originated outcome (no actionId/goalId)", () => {
+    const payload: AutonomousOutcomePayload = {
+      correlationId: "corr-2",
+      systemActor: "ceremony",
+      skill: "daily_sitrep",
+      success: true,
+      taskState: "completed",
+      durationMs: 2500,
+    };
+    expect(payload.systemActor).toBe("ceremony");
+    expect(payload.actionId).toBeUndefined();
+    expect(payload.goalId).toBeUndefined();
   });
 });
 
