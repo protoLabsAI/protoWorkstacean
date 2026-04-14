@@ -17,6 +17,8 @@ import { createRoutes as boardRoutes } from "./board.ts";
 import { createRoutes as mailboxRoutes } from "./mailbox.ts";
 import { createRoutes as discordRoutes } from "./discord.ts";
 import { createRoutes as a2aCallbackRoutes } from "./a2a-callback.ts";
+import { createRoutes as a2aServerRoutes } from "./a2a-server.ts";
+import { createRoutes as agentCardRoutes } from "./agent-card.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
@@ -33,5 +35,7 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...(ctx.mailbox ? mailboxRoutes(ctx.mailbox, ctx) : []),
     ...discordRoutes(ctx),
     ...(ctx.taskTracker ? a2aCallbackRoutes(ctx.taskTracker, ctx) : []),
+    ...agentCardRoutes(ctx),
+    ...a2aServerRoutes(ctx),
   ];
 }

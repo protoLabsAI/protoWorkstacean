@@ -20,13 +20,36 @@ import type {
 } from "@a2a-js/sdk";
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
 
+/**
+ * Auth scheme the executor applies on outbound requests.
+ *
+ *   "apiKey" — sends X-API-Key: <value>    (default — same as legacy behavior)
+ *   "bearer" — sends Authorization: Bearer <value>
+ *   "hmac"   — reserved for future HMAC-signed requests (extension hook only)
+ *
+ * `value` resolution: if `valueEnv` is set, we read process.env[valueEnv];
+ * otherwise we fall back to the agent-level `apiKeyEnv` for backward compat.
+ * Unset → no auth header stamped.
+ */
+export type A2AAuthScheme = "apiKey" | "bearer" | "hmac";
+
+export interface A2AAuthConfig {
+  scheme: A2AAuthScheme;
+  /** Environment variable holding the credential value. */
+  credentialsEnv?: string;
+}
+
 export interface A2AAgentConfig {
   /** Agent name (for logging). */
   name: string;
   /** Full A2A endpoint URL (to agent root — card is fetched at /.well-known/agent-card.json). */
   url: string;
-  /** Environment variable name holding the API key. Optional. */
+  /** Environment variable name holding the API key. Optional. Legacy alias for auth.apiKey. */
   apiKeyEnv?: string;
+  /** Structured auth config — preferred over apiKeyEnv when set. */
+  auth?: A2AAuthConfig;
+  /** Extra request headers (e.g. opt-in A2A extensions). Merged per-call. */
+  extraHeaders?: Record<string, string>;
   /** Request timeout in ms. Default: 300_000 (5 min). */
   timeoutMs?: number;
   /** Whether the remote agent supports SSE streaming (from agent card). */
@@ -51,7 +74,7 @@ export interface ExecuteOptions {
 }
 
 /**
- * Build a fetch wrapper that stamps API key + per-request trace headers.
+ * Build a fetch wrapper that stamps auth + per-request trace headers.
  * A new wrapper is built per executor.execute() call so each client sees
  * the right correlationId without requiring a separate cached client per trace.
  *
@@ -59,14 +82,33 @@ export interface ExecuteOptions {
  * `preconnect` (a browser-only signature) that Node/Bun's fetch doesn't expose.
  */
 function buildFetch(
-  apiKey: string,
+  auth: { scheme: A2AAuthScheme; value: string } | undefined,
+  extraHeaders: Record<string, string> | undefined,
   timeoutMs: number,
   correlationId: string,
   parentId?: string,
 ): typeof fetch {
   const wrapped = async (input: string | URL | Request, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
-    if (apiKey) headers.set("X-API-Key", apiKey);
+
+    // Auth header selection — scheme drives the header name.
+    if (auth && auth.value) {
+      if (auth.scheme === "bearer") {
+        headers.set("Authorization", `Bearer ${auth.value}`);
+      } else if (auth.scheme === "apiKey") {
+        headers.set("X-API-Key", auth.value);
+      }
+      // "hmac" is handled by an extension interceptor, not here.
+    }
+
+    // Static extra headers (e.g. a2a-extensions opt-in list). Don't overwrite
+    // anything the SDK already set — extras are for our metadata only.
+    if (extraHeaders) {
+      for (const [k, v] of Object.entries(extraHeaders)) {
+        if (!headers.has(k)) headers.set(k, v);
+      }
+    }
+
     headers.set("X-Correlation-Id", correlationId);
     if (parentId) headers.set("X-Parent-Id", parentId);
 
@@ -120,6 +162,30 @@ export class A2AExecutor implements IExecutor {
         correlationId: req.correlationId,
       };
     }
+  }
+
+  /**
+   * Resume a task that's in input-required state by sending a new message
+   * with the same taskId. Used by TaskTracker when a HITL response arrives.
+   */
+  async resumeTask(
+    taskId: string,
+    contextId: string,
+    text: string,
+    correlationId: string,
+    parentId?: string,
+  ): Promise<void> {
+    const client = await this._buildClient(correlationId, parentId);
+    await client.sendMessage({
+      message: {
+        kind: "message",
+        messageId: crypto.randomUUID(),
+        role: "user",
+        parts: [{ kind: "text", text }],
+        taskId,
+        contextId,
+      },
+    });
   }
 
   /**
@@ -271,15 +337,21 @@ export class A2AExecutor implements IExecutor {
     params: Parameters<Client["sendMessageStream"]>[0],
     req: SkillRequest,
   ): Promise<SkillResult> {
-    let resultText = "";
     let taskId: string | undefined;
     let contextId: string | undefined;
     let taskState = "working";
+    let terminalMessage = "";
+
+    // Artifact buffering — honors append + lastChunk per A2A spec.
+    // - append: false (or undefined) → replace the artifact's parts
+    // - append: true → concatenate incoming parts to existing buffer
+    // - lastChunk: true → signal artifact is complete (we emit artifact_complete)
+    const artifactBuffers = new Map<string, Array<{ kind: string; text?: string }>>();
 
     for await (const event of client.sendMessageStream(params)) {
       if (event.kind === "message") {
         // Terminal message — stream ends
-        resultText = this._textFromParts(event.parts);
+        terminalMessage = this._textFromParts(event.parts);
         taskState = "completed";
         break;
       }
@@ -287,6 +359,10 @@ export class A2AExecutor implements IExecutor {
         taskId = event.id;
         contextId = event.contextId;
         taskState = event.status.state;
+        // Seed artifact buffers from task snapshot if present
+        for (const artifact of event.artifacts ?? []) {
+          artifactBuffers.set(artifact.artifactId, [...artifact.parts]);
+        }
         continue;
       }
       if (event.kind === "status-update") {
@@ -303,13 +379,41 @@ export class A2AExecutor implements IExecutor {
       if (event.kind === "artifact-update") {
         taskId = event.taskId;
         contextId = event.contextId;
-        const artifactText = this._textFromParts(event.artifact.parts);
-        if (artifactText) {
-          resultText += (resultText ? "\n" : "") + artifactText;
-          this.config.onStreamUpdate?.({ type: "artifact", text: artifactText });
+        const aid = event.artifact.artifactId;
+        const incomingParts = event.artifact.parts;
+        const incomingText = this._textFromParts(incomingParts);
+
+        if (event.append) {
+          const existing = artifactBuffers.get(aid) ?? [];
+          artifactBuffers.set(aid, [...existing, ...incomingParts]);
+        } else {
+          // New artifact or replacement
+          artifactBuffers.set(aid, [...incomingParts]);
+        }
+
+        // Emit chunk event — consumers see progressive updates in real time
+        if (incomingText) {
+          this.config.onStreamUpdate?.({
+            type: event.append ? "artifact_chunk" : "artifact",
+            text: incomingText,
+          });
+        }
+        if (event.lastChunk) {
+          const finalText = this._textFromParts(artifactBuffers.get(aid) ?? []);
+          this.config.onStreamUpdate?.({
+            type: "artifact_complete",
+            text: finalText,
+          });
         }
       }
     }
+
+    // Final resultText = terminal message if we got one, otherwise concat of all artifact buffers
+    const artifactText = Array.from(artifactBuffers.values())
+      .map(parts => this._textFromParts(parts))
+      .filter(Boolean)
+      .join("\n");
+    const resultText = terminalMessage || artifactText;
 
     return {
       text: resultText || `Skill "${req.skill}" completed by ${this.config.name}`,
@@ -335,10 +439,22 @@ export class A2AExecutor implements IExecutor {
    */
   private async _buildClient(correlationId: string, parentId?: string): Promise<Client> {
     const baseUrl = this.config.url.replace(/\/a2a\/?$/, "");
-    const apiKey = this.config.apiKeyEnv ? (process.env[this.config.apiKeyEnv] ?? "") : "";
     const timeoutMs = this.config.timeoutMs ?? 300_000;
 
-    const customFetch = buildFetch(apiKey, timeoutMs, correlationId, parentId);
+    // Auth resolution — prefer structured auth.credentialsEnv; fall back to
+    // the legacy apiKeyEnv so existing agents.yaml keeps working.
+    const scheme: A2AAuthScheme = this.config.auth?.scheme ?? "apiKey";
+    const credEnv = this.config.auth?.credentialsEnv ?? this.config.apiKeyEnv;
+    const credValue = credEnv ? (process.env[credEnv] ?? "") : "";
+    const authOpts = credValue ? { scheme, value: credValue } : undefined;
+
+    const customFetch = buildFetch(
+      authOpts,
+      this.config.extraHeaders,
+      timeoutMs,
+      correlationId,
+      parentId,
+    );
     const factory = new ClientFactory({
       transports: [new JsonRpcTransportFactory({ fetchImpl: customFetch })],
     });

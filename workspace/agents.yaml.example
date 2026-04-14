@@ -1,7 +1,14 @@
 # protoLabs A2A Agent Registry
 # Authoritative source for the agent fleet.
-# Skills are refreshed live from /.well-known/agent.json on startup.
-# apiKeyEnv: name of env var holding the API key for this agent's /a2a endpoint.
+# Skills are refreshed live from /.well-known/agent-card.json on startup
+# (with a fallback to /.well-known/agent.json for legacy agents).
+#
+# Auth options (Phase 8):
+#   apiKeyEnv: env var holding a value sent as X-API-Key (legacy shorthand)
+#   auth:      structured auth block — preferred. Fields:
+#                scheme:          "apiKey" | "bearer" | "hmac"
+#                credentialsEnv:  env var holding the credential value
+#   headers:   static request headers (e.g. a2a-extensions opt-in)
 
 agents:
   - name: ava
@@ -19,7 +26,11 @@ agents:
 
   - name: quinn
     url: http://your-quinn-host:7870/a2a
-    apiKeyEnv: QUINN_API_KEY
+    # Structured auth (Phase 8). Same behavior as apiKeyEnv: QUINN_API_KEY
+    # but makes the scheme explicit and leaves room for bearer/hmac.
+    auth:
+      scheme: apiKey
+      credentialsEnv: QUINN_API_KEY
     discordBotTokenEnvKey: DISCORD_BOT_TOKEN_QUINN
     skills:
       - name: bug_triage
@@ -29,3 +40,12 @@ agents:
     subscribesTo:
       - message.inbound.discord.#
       - message.inbound.github.#
+
+  # Example — an external agent served over bearer auth:
+  # - name: external_partner
+  #   url: https://partner.example.com/a2a
+  #   auth:
+  #     scheme: bearer
+  #     credentialsEnv: PARTNER_API_TOKEN
+  #   headers:
+  #     a2a-extensions: "https://a2a-protocol.org/ext/cost-v1"

@@ -10,16 +10,16 @@ HITL is the approval gate that sits between an autonomous decision and its perma
 
 ## Overview
 
-When any system component needs a human decision, it publishes an `HITLRequest` to the bus. `HITLPlugin` routes it to the registered renderer for the originating interface (Discord, Plane, Signal, API). A human responds. The interface plugin publishes an `HITLResponse`. `HITLPlugin` routes the response back to the requester via `replyTopic` (bus) and, if configured, calls the plan_resume agent via A2A.
+When any system component needs a human decision, it publishes an `HITLRequest` to the bus. `HITLPlugin` routes it to the registered renderer for the originating interface (Discord, Plane, Signal, API). A human responds. The interface plugin publishes an `HITLResponse`. The bus delivers it to whichever plugin subscribed to the `replyTopic`.
 
 Two types of HITL flow coexist on the same infrastructure:
 
 | Flow | Publisher | Callback path | Example |
 |---|---|---|---|
-| **Plan gate** | Ava | plan_resume A2A → Ava resumes feature creation | New project plan after SPARC PRD |
+| **Plan gate** | A2A agent returns `input-required` | `TaskTracker` sends `message/send` with same `taskId` | Ava asks for approval mid-task |
 | **Operational gate** | Any plugin | `replyTopic` on the bus | Budget L3 escalation, goal violation, queue saturation |
 
-Both use the same `HITLRequest`/`HITLResponse` shapes, the same topic conventions, and the same renderer interface.
+Both use the same `HITLRequest`/`HITLResponse` shapes, the same topic conventions, and the same renderer interface. The plan-gate path uses the native A2A `input-required` state machine — no custom `plan_resume` skill is required.
 
 ---
 
@@ -93,9 +93,9 @@ When a renderer publishes an `HITLResponse` to `request.replyTopic` (a `hitl.res
 
 1. **Bus delivery** — the message lands on `request.replyTopic`. Any plugin that subscribed to that topic receives it automatically through pub/sub. No re-routing by HITLPlugin is needed — the bus handles it.
 
-2. **A2A plan_resume** — HITLPlugin subscribes to `hitl.response.#` and intercepts every response. If `workspace/agents.yaml` contains an agent with the `plan_resume` skill (Ava), HITLPlugin calls that agent via JSON-RPC 2.0. This is Ava's plan gate path — Ava is an external service that doesn't subscribe to the bus directly.
+2. **A2A task resume** — `TaskTracker` subscribes to `hitl.response.#`. If the response correlates to a tracked task that entered `input-required`, the tracker calls `executor.resumeTask(taskId, ...)` with the decision text. The agent picks up in the same task/context — no custom skill is invoked.
 
-Both paths are triggered by the single publish from the renderer. The A2A call is a no-op if no plan_resume agent is configured.
+Both paths are triggered by the single publish from the renderer. The A2A resume is a no-op if no task is awaiting input for that `correlationId`.
 
 > **Convention:** `request.replyTopic` is always in the `hitl.response.#` namespace so HITLPlugin can intercept it. Renderers should publish to `request.replyTopic` directly rather than constructing the topic themselves.
 
@@ -283,27 +283,28 @@ The plan gate is one specific use of HITL, triggered after Ava generates a SPARC
 2. Ava generates SPARC PRD + antagonistic review
    - Ava verdict: operational feasibility, risk score
    - Jon verdict: strategic value, ROI score
-3. Ava checkpoints plan to PlanStore (SQLite, keyed by correlationId, 7-day TTL)
-4. Ava publishes hitl.request.plan.{correlationId} with replyTopic
-5. HITLPlugin routes to registered renderer (Discord embed shows PRD summary + verdicts)
+3. Ava returns Task { status: { state: "input-required", message: <PRD summary> } }
+4. TaskTracker detects input-required → raises HITLRequest
+5. HITLPlugin routes to the registered renderer (Discord embed)
 6. Human approves/rejects/modifies
-7. Renderer publishes hitl.response.plan.{correlationId}
-8. HITLPlugin:
-   a. Publishes response to replyTopic (bus)
-   b. Calls plan_resume via A2A → Ava restores checkpoint, executes decision
+7. Renderer publishes HITLResponse on hitl.response.{correlationId}
+8. TaskTracker intercepts the response → sends message/send with same taskId
+   carrying the decision text; Ava resumes the task natively
 ```
 
-### plan_resume decisions
+### plan decisions (resume payload)
+
+The decision is relayed verbatim as the resume message text. Ava parses it and takes the branch:
 
 | Decision | What happens |
 |---|---|
 | `approve` | Board features created, Plane issue → "In Progress", summary comment posted |
-| `reject` | Plan archived in PlanStore, rejection notice sent to originating channel |
-| `modify` | PRD re-drafted with `feedback` applied, antagonistic review re-run, new `HITLRequest` emitted with same `correlationId` |
+| `reject` | Plan archived, rejection notice sent to originating channel |
+| `modify` | PRD re-drafted with `feedback` applied, antagonistic review re-run, new `input-required` emitted |
 
 ### Auto-approve
 
-Plane issues with the `auto` label skip the gate entirely. `PlanePlugin` sets `autoApprove: true` in the bus message. Ava internally generates `HITLResponse { decision: "approve", decidedBy: "auto" }` and calls `plan_resume` directly.
+Plane issues with the `auto` label skip the gate entirely. `PlanePlugin` sets `autoApprove: true` in the bus message, and the agent either never enters `input-required` or short-circuits itself.
 
 ---
 

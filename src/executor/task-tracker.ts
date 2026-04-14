@@ -12,11 +12,12 @@
  * response on the reply topic, just later.
  */
 
-import type { EventBus } from "../../lib/types.ts";
+import type { EventBus, BusMessage, HITLRequest, HITLResponse } from "../../lib/types.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
 import type { AgentSkillResponsePayload } from "../event-bus/payloads.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled", "rejected"]);
+const HITL_TTL_MS = 30 * 60_000; // 30 min default input-required window
 
 export interface TrackedTask {
   correlationId: string;
@@ -30,6 +31,14 @@ export interface TrackedTask {
   pollIntervalMs: number;
   /** Per-task secret for authenticating push-notification callbacks. */
   callbackToken?: string;
+  /** Set when the task has asked for human input — suppresses polling until resumed. */
+  awaitingHuman?: boolean;
+  /** The Discord/etc interface that originated the request — reused for HITL routing. */
+  sourceInterface?: string;
+  /** Source channel ID for HITL rendering. */
+  sourceChannelId?: string;
+  /** User ID for HITL rendering. */
+  sourceUserId?: string;
 }
 
 export interface TaskTrackerOptions {
@@ -58,6 +67,14 @@ export class TaskTracker {
     this.maxTrackingMs = opts.maxTrackingMs ?? 60 * 60_000;
     this.sweepTimer = setInterval(() => { void this._sweep(); }, this.sweepIntervalMs);
     this.sweepTimer.unref?.();
+
+    // Subscribe to HITL responses — when a tracked task was awaiting input
+    // and a human responds, resume the task via sendMessage(taskId, decisionText).
+    this.bus.subscribe("hitl.response.#", "task-tracker", (msg: BusMessage) => {
+      const resp = msg.payload as HITLResponse | undefined;
+      if (!resp || resp.type !== "hitl_response") return;
+      void this._resumeFromHitl(resp);
+    });
   }
 
   /** Register a task for tracking. Dispatcher calls this after executor returns working. */
@@ -71,6 +88,10 @@ export class TaskTracker {
     pollIntervalMs?: number;
     /** Per-task token for authenticating push callbacks. Generated if omitted. */
     callbackToken?: string;
+    /** Source interface/channel/user — reused to route input-required HITL requests. */
+    sourceInterface?: string;
+    sourceChannelId?: string;
+    sourceUserId?: string;
   }): void {
     const now = Date.now();
     this.tasks.set(params.correlationId, {
@@ -84,6 +105,9 @@ export class TaskTracker {
       lastPolledAt: now,
       pollIntervalMs: params.pollIntervalMs ?? this.defaultPollIntervalMs,
       callbackToken: params.callbackToken ?? crypto.randomUUID(),
+      sourceInterface: params.sourceInterface,
+      sourceChannelId: params.sourceChannelId,
+      sourceUserId: params.sourceUserId,
     });
     console.log(
       `[task-tracker] Tracking ${params.agentName} task ${params.taskId.slice(0, 8)}… (correlationId: ${params.correlationId.slice(0, 8)}…)`,
@@ -108,6 +132,14 @@ export class TaskTracker {
     const state = typeof status.state === "string" ? status.state : undefined;
 
     task.lastPolledAt = Date.now();
+
+    if (state === "input-required") {
+      const statusText = status.message?.parts
+        ? status.message.parts.filter(p => p.kind === "text").map(p => p.text ?? "").join("")
+        : "";
+      this._raiseHitl(task, statusText);
+      return;
+    }
 
     if (!state || !TERMINAL_STATES.has(state)) {
       // Non-terminal update — just refresh the polled timestamp
@@ -169,6 +201,9 @@ export class TaskTracker {
         continue;
       }
 
+      // Awaiting human input — don't poll, just wait for hitl.response.*
+      if (task.awaitingHuman) continue;
+
       // Not yet due
       if (now - task.lastPolledAt < task.pollIntervalMs) continue;
 
@@ -177,6 +212,11 @@ export class TaskTracker {
       try {
         const result = await task.executor.pollTask(task.taskId, task.correlationId, task.parentId);
         const state = result.data?.taskState;
+
+        if (state === "input-required") {
+          this._raiseHitl(task, result.text);
+          continue;
+        }
 
         if (state && TERMINAL_STATES.has(state)) {
           this._publishResponse(task, result.text, result.isError ? result.text : undefined);
@@ -191,6 +231,81 @@ export class TaskTracker {
           err instanceof Error ? err.message : String(err),
         );
       }
+    }
+  }
+
+  /**
+   * Emit a HITL request for a task that hit input-required. HITLPlugin will
+   * route to the registered renderer (Discord approval buttons, etc). The
+   * response flows back via hitl.response.# which we subscribe to.
+   */
+  private _raiseHitl(task: TrackedTask, question: string | undefined): void {
+    if (task.awaitingHuman) return; // already raised, avoid duplicate
+    task.awaitingHuman = true;
+
+    const req: HITLRequest = {
+      type: "hitl_request",
+      correlationId: task.correlationId,
+      title: `Input needed from ${task.agentName}`,
+      summary: question || "The agent is requesting input to continue.",
+      options: ["approve", "reject"],
+      expiresAt: new Date(Date.now() + HITL_TTL_MS).toISOString(),
+      replyTopic: `hitl.response.${task.correlationId}`,
+      sourceMeta: {
+        interface: task.sourceInterface ?? "discord",
+        channelId: task.sourceChannelId,
+        userId: task.sourceUserId,
+      },
+    };
+
+    this.bus.publish(`hitl.request.${task.correlationId}`, {
+      id: crypto.randomUUID(),
+      correlationId: task.correlationId,
+      topic: `hitl.request.${task.correlationId}`,
+      timestamp: Date.now(),
+      payload: req,
+    });
+
+    console.log(
+      `[task-tracker] input-required from ${task.agentName} — raised HITL request (correlationId: ${task.correlationId.slice(0, 8)}…)`,
+    );
+  }
+
+  /**
+   * When a HITL response arrives for a tracked task, resume the agent by
+   * sending a new message in the same taskId. Uses executor.execute() with
+   * the original skill context so memory enrichment still applies.
+   */
+  private async _resumeFromHitl(resp: HITLResponse): Promise<void> {
+    const task = this.tasks.get(resp.correlationId);
+    if (!task || !task.awaitingHuman) return;
+
+    const decisionText = [
+      `Human decision: ${resp.decision}`,
+      resp.feedback ? `Feedback: ${resp.feedback}` : "",
+      `Decided by: ${resp.decidedBy}`,
+    ].filter(Boolean).join("\n");
+
+    try {
+      await task.executor.resumeTask(
+        task.taskId,
+        task.correlationId,
+        decisionText,
+        task.correlationId,
+        task.parentId,
+      );
+      task.awaitingHuman = false;
+      task.lastPolledAt = Date.now();
+      console.log(
+        `[task-tracker] Resumed ${task.taskId.slice(0, 8)}… with decision "${resp.decision}" — polling resumes`,
+      );
+    } catch (err) {
+      console.error(
+        `[task-tracker] Failed to resume ${task.taskId.slice(0, 8)}…:`,
+        err instanceof Error ? err.message : String(err),
+      );
+      this._publishResponse(task, undefined, `Resume failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.tasks.delete(task.correlationId);
     }
   }
 

@@ -66,9 +66,6 @@ skills:
   - name: plan
     description: Build a feature plan from a PRD (requires HITL approval)
     keywords: [plan, idea, build, proposal, project idea, /plan, i want to, let's build]
-  - name: plan_resume
-    description: Resume plan execution after HITL approval
-    # no keywords — dispatched programmatically via HITLPlugin
   - name: triage
     description: Triage an incoming message and decide next action
     keywords: [help, question, not sure, what should, /triage]

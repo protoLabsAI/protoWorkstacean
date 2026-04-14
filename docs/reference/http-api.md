@@ -745,6 +745,70 @@ Fire-and-forget task dispatch to a remote agent. Publishes to `agent.skill.reque
 
 ---
 
+## GET /.well-known/agent-card.json
+
+Served by `src/api/agent-card.ts`. Exposes workstacean as an A2A-compliant agent — external agents fetch this URL to discover what skills they can dispatch. Skills are aggregated from the `ExecutorRegistry`, so any skill registered (yaml-declared + auto-discovered Phase 4 skills) shows up without a restart.
+
+A legacy alias at `GET /.well-known/agent.json` returns the same body for clients that resolve the older path.
+
+**Auth**: None (discovery is always public)
+
+**Response** (`200`) — an [AgentCard](https://a2a-protocol.org/latest/specification/#agent-card):
+```json
+{
+  "name": "workstacean",
+  "description": "protoLabs Studio operational gateway...",
+  "protocolVersion": "0.3.0",
+  "version": "1.0.0",
+  "url": "https://workstacean.example.com/a2a",
+  "preferredTransport": "JSONRPC",
+  "capabilities": { "streaming": true, "pushNotifications": true },
+  "skills": [
+    { "id": "plan", "name": "plan", "description": "...", "tags": ["routed", "ava"] },
+    { "id": "bug_triage", "name": "bug_triage", "description": "...", "tags": ["routed", "quinn"] }
+  ]
+}
+```
+
+`url` is derived from `WORKSTACEAN_BASE_URL` (falling back to `http://localhost:$WORKSTACEAN_HTTP_PORT` when unset).
+
+---
+
+## POST /a2a
+
+A2A JSON-RPC 2.0 endpoint. Accepts every method in the A2A protocol (`message/send`, `message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`, `tasks/pushNotificationConfig/*`) and bridges them into the internal bus pipeline via `BusAgentExecutor` (`src/api/a2a-server.ts`).
+
+**Auth**: When `WORKSTACEAN_API_KEY` is set, callers must supply it as `Authorization: Bearer <key>` or `X-API-Key: <key>`. Unset → open access (dev mode).
+
+**Flow for `message/send`**:
+1. SDK `JsonRpcTransportHandler` receives the request
+2. `BusAgentExecutor.execute()` emits an initial `submitted` Task event, transitions to `working`, publishes to `agent.skill.request` on the bus
+3. `SkillDispatcherPlugin` resolves an executor via `ExecutorRegistry` and runs the skill
+4. Response lands on `agent.skill.response.{taskId}` → adapter emits a terminal `completed`/`failed` status update with the text in `status.message.parts`
+5. Response returns as `{ jsonrpc: "2.0", id, result: <Task> }`
+
+`message/stream` uses the same pipeline but returns a `text/event-stream` where each `data:` frame is a JSON-RPC response wrapping one A2A event.
+
+Skill routing: metadata fields control which skill is invoked.
+- `metadata.skillHint` or `metadata.skill` — skill name, defaults to `"chat"`
+- `metadata.targets` — array of agent names, passed through to `ExecutorRegistry.resolve()`
+
+---
+
+## POST /api/a2a/callback/:taskId
+
+Push-notification webhook for long-running A2A tasks (Phase 3). External agents POST Task snapshots here when they reach terminal state (or at configurable checkpoints) so workstacean doesn't need to hold an HTTP connection open for minutes.
+
+**Auth**: Per-task token passed as `Authorization: Bearer <token>` or `X-A2A-Notification-Token: <token>`. The token is generated per-task and registered with the agent when the skill is dispatched; workstacean looks it up by `taskId` in `TaskTracker`.
+
+**Request body**: Full A2A `Task` object (not a delta).
+
+**Response** (`200`): `{ "success": true }`
+
+Non-terminal states just refresh `lastPolledAt`. `input-required` states raise a HITL request. Terminal states publish the response and untrack the task.
+
+---
+
 ## POST /api/github/issues
 
 File an issue on a managed GitHub repository. Only repos listed in `projects.yaml` are allowed.

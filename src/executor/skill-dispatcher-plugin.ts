@@ -316,6 +316,9 @@ export class SkillDispatcherPlugin implements Plugin {
           executor: a2aExecutor,
           parentId,
           callbackToken,
+          sourceInterface: sourcePlatform,
+          sourceChannelId: sourceChannelId,
+          sourceUserId: sourceUserId,
         });
 
         // Try to register a push-notification webhook so the agent can POST

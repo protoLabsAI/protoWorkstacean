@@ -80,10 +80,10 @@ Only `issue` events (create/update/delete) are subscribed. Project/cycle/module 
    f. Store {planeIssueId, planeProjectId} in pendingIssues Map keyed by correlationId
 4. RouterPlugin routes to Ava (skillHint "plan" → plan skill)
 5. Ava runs SPARC PRD + antagonistic review (Ava operational lens + Jon strategic lens)
-6. HITL gate:
-   - "auto" label → skip gate, emit HITLResponse(approve) internally
-   - "plan" label → emit HITLRequest to plane.reply.{correlationId}
-7. On approval: Ava's plan_resume creates board features, stamps correlationId
+6. HITL gate (native A2A):
+   - "auto" label → Ava short-circuits and returns a completed Task directly
+   - "plan" label → Ava returns Task with state "input-required" → TaskTracker raises HITLRequest on plane.reply.{correlationId}
+7. On approval: TaskTracker sends message/send with the same taskId, Ava resumes in-context and creates board features (same correlationId throughout)
 8. PlanePlugin outbound handler picks up plane.reply.# events → syncs back to Plane
 ```
 
