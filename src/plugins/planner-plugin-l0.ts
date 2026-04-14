@@ -21,8 +21,11 @@ import type {
   PlannerEscalatePayload,
 } from "../event-bus/action-events.ts";
 import type { GoalViolatedEventPayload } from "../types/events.ts";
+import type { Action } from "../planner/types/action.ts";
+import type { EffectRegistration } from "../executor/types.ts";
 import { TOPICS } from "../event-bus/topics.ts";
 import { ActionRegistry } from "../planner/action-registry.ts";
+import { ExecutorRegistry } from "../executor/executor-registry.ts";
 import { matchActions, evaluatePrecondition } from "../planner/pattern-matcher.ts";
 import { LoopDetector } from "../planner/loop-detector.ts";
 import { CooldownManager } from "../planner/cooldown-manager.ts";
@@ -41,6 +44,12 @@ export interface PlannerPluginL0Config {
    * feedback loop without infinite re-dispatch.
    */
   successCooldownMs?: number;
+  /**
+   * ExecutorRegistry to query when a goal violation carries a desiredEffect.
+   * When provided, violations with (domain, path, targetValue) use effect-based
+   * candidate selection (resolveByEffect) instead of ActionRegistry.getByGoal().
+   */
+  executorRegistry?: ExecutorRegistry;
 }
 
 const DEFAULT_LOOP_CONFIG = { maxAttempts: 3, windowMinutes: 5 };
@@ -120,8 +129,27 @@ export class PlannerPluginL0 implements Plugin {
       async (msg: BusMessage) => {
         const payload = msg.payload as GoalViolatedEventPayload;
         const violation = payload.violation;
-        const matchingActions = this.registry.getByGoal(violation.goalId);
         const currentState = this.lastWorldState;
+        const executorRegistry = this.pluginConfig.executorRegistry;
+
+        let matchingActions: Action[];
+
+        if (violation.desiredEffect && executorRegistry) {
+          // Effect-based selection: query ExecutorRegistry for skills whose
+          // declared effect moves world state toward the desired (domain, path).
+          // Candidates are sorted by confidence desc (Arc 6 tiebreak: cost).
+          const { domain, path } = violation.desiredEffect;
+          const candidates = executorRegistry
+            .resolveByEffect({ domain, path })
+            .sort((a, b) => b.confidence - a.confidence);
+          matchingActions = candidates.map((reg) =>
+            this.synthesizeActionFromEffect(reg, violation.goalId, domain, path)
+          );
+        } else {
+          // Legacy: goal.id → ActionRegistry lookup
+          matchingActions = this.registry.getByGoal(violation.goalId);
+        }
+
         for (const action of matchingActions) {
           if (this.inFlightGoals.has(action.goalId)) continue;
           if (this.cooldownManager.isOnCooldown(action.goalId, action.id)) continue;
@@ -187,8 +215,38 @@ export class PlannerPluginL0 implements Plugin {
     return this.cooldownManager;
   }
 
+  /**
+   * Build a synthetic Action from an EffectRegistration.
+   * Used when a goal violation specifies a desiredEffect and candidates are
+   * resolved via ExecutorRegistry rather than ActionRegistry.
+   * Priority is seeded from confidence (0–100) so Arc 6 cost/confidence
+   * ranking can be layered on top without changes to the dispatch path.
+   */
+  private synthesizeActionFromEffect(
+    reg: EffectRegistration,
+    goalId: string,
+    domain: string,
+    path: string
+  ): Action {
+    return {
+      id: `effect::${reg.skill}::${domain}::${path}`,
+      name: reg.skill,
+      description: `Effect-driven: ${reg.skill} moves ${domain}.${path}`,
+      goalId,
+      tier: "tier_0",
+      preconditions: [],
+      effects: [],
+      cost: 0,
+      priority: Math.round(reg.confidence * 100),
+      meta: {
+        skillHint: reg.skill,
+        ...(reg.agentName ? { agentId: reg.agentName } : {}),
+      },
+    };
+  }
+
   private dispatchAction(
-    action: import("../planner/types/action.ts").Action,
+    action: Action,
     _worldState: WorldState,
     parentCorrelationId: string
   ): void {
