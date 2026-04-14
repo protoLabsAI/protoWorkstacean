@@ -79,6 +79,59 @@ export interface HITLRenderer {
   onExpired?(request: HITLRequest, bus: EventBus): Promise<void>;
 }
 
+// ── Config-change gate types ──────────────────────────────────────────────────
+// Distinct from HITLRequest so operators see "this changes the rules of the
+// system" vs "this is a one-shot operational approval".
+
+export interface ConfigChangeRequest {
+  type: "config_change_request";
+  correlationId: string;
+  /** Which workspace config file is being changed. */
+  configFile: "goals.yaml" | "actions.yaml";
+  title: string;
+  summary: string;
+  /** Unified diff of the proposed change (before → after). */
+  yamlDiff: string;
+  /** Dry-run GOAP impact — which goals/actions are affected. */
+  goapImpact?: {
+    addedGoals?: string[];
+    removedGoals?: string[];
+    modifiedGoals?: string[];
+    addedActions?: string[];
+    removedActions?: string[];
+    modifiedActions?: string[];
+    /** Human-readable GOAP evaluation summary. */
+    summary: string;
+  };
+  /** Test coverage impact summary. */
+  coverageImpact?: {
+    affectedTestFiles: string[];
+    summary: string;
+  };
+  options: string[];   // ["approve", "reject"]
+  expiresAt: string;   // ISO timestamp
+  replyTopic: string;  // where to publish ConfigChangeResponse
+  sourceMeta?: BusMessage["source"];
+}
+
+export interface ConfigChangeResponse {
+  type: "config_change_response";
+  correlationId: string;
+  decision: "approve" | "reject";
+  feedback?: string;
+  decidedBy: string;
+}
+
+/**
+ * ConfigChangeRenderer — the contract a channel plugin implements to
+ * participate in config-change HITL flows. Register during install() via
+ * configChangePlugin.registerRenderer().
+ */
+export interface ConfigChangeRenderer {
+  render(request: ConfigChangeRequest, bus: EventBus): Promise<void>;
+  onExpired?(request: ConfigChangeRequest, bus: EventBus): Promise<void>;
+}
+
 export interface Plugin {
   name: string;
   description: string;

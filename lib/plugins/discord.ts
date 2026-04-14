@@ -36,8 +36,9 @@ import {
   type ChatInputCommandInteraction,
   type TextChannel,
 } from "discord.js";
-import type { EventBus, BusMessage, Plugin, HITLRequest } from "../types.ts";
+import type { EventBus, BusMessage, Plugin, HITLRequest, ConfigChangeRequest, ConfigChangeResponse } from "../types.ts";
 import type { HITLPlugin } from "./hitl.ts";
+import type { ConfigChangeHITLPlugin } from "./config-change-hitl.ts";
 import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer, type TurnData } from "../conversation/conversation-tracer.ts";
 import { GraphitiClient } from "../memory/graphiti-client.ts";
@@ -273,6 +274,7 @@ export interface DiscordPluginOptions {
   dataDir?: string;
   channelRegistry?: ChannelRegistry;
   hitlPlugin?: HITLPlugin;
+  configChangePlugin?: ConfigChangeHITLPlugin;
   mailbox?: ContextMailbox;
   /** Check if an agent execution is in-flight for a given correlationId. */
   isExecutionActive?: (correlationId: string) => boolean;
@@ -297,11 +299,15 @@ export class DiscordPlugin implements Plugin {
 
   private channelRegistry?: ChannelRegistry;
   private hitlPlugin?: HITLPlugin;
+  private configChangePlugin?: ConfigChangeHITLPlugin;
   private mailbox?: ContextMailbox;
   private isExecutionActive?: (correlationId: string) => boolean;
 
   // correlationId → { message, replyTopic } for active HITL approvals
   private pendingHITLMessages = new Map<string, { message: Message; replyTopic: string }>();
+
+  // correlationId → { message, replyTopic } for active config-change approvals
+  private pendingConfigChangeMessages = new Map<string, { message: Message; replyTopic: string }>();
 
   // Multi-turn conversation tracking
   private conversationManager = new ConversationManager();
@@ -329,6 +335,7 @@ export class DiscordPlugin implements Plugin {
     this.dataDir = opts.dataDir ? resolve(opts.dataDir) : null;
     this.channelRegistry = opts.channelRegistry;
     this.hitlPlugin = opts.hitlPlugin;
+    this.configChangePlugin = opts.configChangePlugin;
     this.mailbox = opts.mailbox;
     this.isExecutionActive = opts.isExecutionActive;
 
@@ -634,6 +641,60 @@ export class DiscordPlugin implements Plugin {
         return;
       }
 
+      // ── Config-change button interactions ────────────────────────────────
+      if (interaction.isButton() && interaction.customId.startsWith("config_change:")) {
+        try {
+          await interaction.deferUpdate();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[discord] config_change deferUpdate failed (${msg}) — processing decision anyway`);
+        }
+
+        const [, decision, correlationId] = interaction.customId.split(":");
+        if (!decision || !correlationId) {
+          console.warn(`[discord] config_change button with malformed customId: ${interaction.customId}`);
+          return;
+        }
+
+        const entry = this.pendingConfigChangeMessages.get(correlationId);
+        const replyTopic = entry?.replyTopic ?? `config.change.response.${correlationId}`;
+
+        try {
+          bus.publish(replyTopic, {
+            id: crypto.randomUUID(),
+            correlationId,
+            topic: replyTopic,
+            timestamp: Date.now(),
+            payload: {
+              type: "config_change_response",
+              correlationId,
+              decision: decision as ConfigChangeResponse["decision"],
+              decidedBy: interaction.user.id,
+            } satisfies ConfigChangeResponse,
+          });
+        } catch (err) {
+          console.error(`[discord] config_change bus publish failed for ${correlationId}:`, err);
+        }
+
+        if (entry) this.pendingConfigChangeMessages.delete(correlationId);
+
+        const COLOR_APPROVE = 0x22c55e;
+        const COLOR_REJECT = 0xef4444;
+        let color: number;
+        if (decision === "approve") color = COLOR_APPROVE;
+        else color = COLOR_REJECT;
+        const label = decision.charAt(0).toUpperCase() + decision.slice(1);
+        const decidedEmbed = new EmbedBuilder()
+          .setTitle(interaction.message.embeds[0]?.title ?? "Config change decision recorded")
+          .setDescription(`**${label}** by <@${interaction.user.id}>`)
+          .setColor(color);
+
+        await interaction.message.edit({ embeds: [decidedEmbed], components: [] }).catch(err => {
+          console.warn(`[discord] config_change message edit failed for ${correlationId}:`, err instanceof Error ? err.message : err);
+        });
+        return;
+      }
+
       if (!interaction.isChatInputCommand()) return;
 
       // Pre-warm DM channel so subsequent DMs from this user are delivered via gateway.
@@ -873,6 +934,43 @@ export class DiscordPlugin implements Plugin {
       });
     }
 
+    // ── Config-change renderer registration ──────────────────────────────────
+    if (this.configChangePlugin) {
+      this.configChangePlugin.registerRenderer("discord", {
+        render: async (request, _busRef) => {
+          const channelId = request.sourceMeta?.channelId;
+          if (!channelId) {
+            console.warn(`[discord] config_change ${request.correlationId} missing channelId — cannot render`);
+            return;
+          }
+          const ch = this.client.channels.cache.get(channelId) as TextChannel | undefined;
+          if (!ch) {
+            console.warn(`[discord] config_change channel ${channelId} not in cache — cannot render`);
+            return;
+          }
+          const embeds = this._buildConfigChangeEmbeds(request);
+          const row = this._buildConfigChangeButtons(request);
+          const msg = await ch.send({ embeds, components: [row] });
+          this.pendingConfigChangeMessages.set(request.correlationId, {
+            message: msg,
+            replyTopic: request.replyTopic,
+          });
+          console.log(`[discord] config_change ${request.correlationId} rendered in channel ${channelId}`);
+        },
+        onExpired: async (request, _busRef) => {
+          const entry = this.pendingConfigChangeMessages.get(request.correlationId);
+          if (!entry) return;
+          this.pendingConfigChangeMessages.delete(request.correlationId);
+          const expiredEmbed = new EmbedBuilder()
+            .setTitle(request.title)
+            .setDescription("**Config change approval expired** — re-trigger if still needed.")
+            .setColor(0x6b7280);
+          await entry.message.edit({ embeds: [expiredEmbed], components: [] }).catch(console.error);
+          console.log(`[discord] config_change ${request.correlationId} marked expired`);
+        },
+      });
+    }
+
     // ── Hot-reload discord.yaml ───────────────────────────────────────────────
     // watchFile works even if the file doesn't exist yet (detects creation too).
     const configPath = join(this.workspaceDir, "discord.yaml");
@@ -918,6 +1016,7 @@ export class DiscordPlugin implements Plugin {
     this.conversationManager.destroy();
     this.pendingTurns.clear();
     this.pendingHITLMessages.clear();
+    this.pendingConfigChangeMessages.clear();
 
     // Destroy agent pool clients
     for (const [name, client] of this.agentClients) {
@@ -1144,6 +1243,94 @@ export class DiscordPlugin implements Plugin {
       row.addComponents(
         new ButtonBuilder()
           .setCustomId(`hitl:${option}:${request.correlationId}`)
+          .setLabel(option.charAt(0).toUpperCase() + option.slice(1))
+          .setStyle(style),
+      );
+    }
+    return row;
+  }
+
+  /**
+   * Build the embed array for a config-change approval request.
+   * Purple colour signals "system rules are changing" vs operational HITL amber.
+   * Renders up to three embeds: main info, YAML diff, GOAP/coverage impact.
+   */
+  private _buildConfigChangeEmbeds(request: ConfigChangeRequest): EmbedBuilder[] {
+    const embeds: EmbedBuilder[] = [];
+
+    // ── Main info embed ────────────────────────────────────────────────
+    const main = new EmbedBuilder()
+      .setTitle(`⚙️ Config Change — ${request.configFile}`)
+      .setDescription(
+        `**${request.title}**\n\n${request.summary.slice(0, 3800)}`,
+      )
+      .setColor(0x8b5cf6); // Purple — "rules of the system are changing"
+
+    main.setFooter({
+      text: `config.change gate  •  Expires ${new Date(request.expiresAt).toLocaleString()}`,
+    });
+    embeds.push(main);
+
+    // ── YAML diff embed ────────────────────────────────────────────────
+    if (request.yamlDiff) {
+      // Discord code block limit is 2000 chars per field; truncate gracefully.
+      const diff = request.yamlDiff.slice(0, 1900);
+      const diffEmbed = new EmbedBuilder()
+        .setTitle("Proposed diff")
+        .setDescription(`\`\`\`diff\n${diff}\n\`\`\``)
+        .setColor(0x8b5cf6);
+      embeds.push(diffEmbed);
+    }
+
+    // ── GOAP + coverage impact embed ──────────────────────────────────
+    const impactLines: string[] = [];
+    if (request.goapImpact) {
+      impactLines.push(`**GOAP dry-run:** ${request.goapImpact.summary}`);
+      if (request.goapImpact.addedGoals?.length)
+        impactLines.push(`+ Goals added: ${request.goapImpact.addedGoals.join(", ")}`);
+      if (request.goapImpact.removedGoals?.length)
+        impactLines.push(`- Goals removed: ${request.goapImpact.removedGoals.join(", ")}`);
+      if (request.goapImpact.modifiedGoals?.length)
+        impactLines.push(`~ Goals modified: ${request.goapImpact.modifiedGoals.join(", ")}`);
+      if (request.goapImpact.addedActions?.length)
+        impactLines.push(`+ Actions added: ${request.goapImpact.addedActions.join(", ")}`);
+      if (request.goapImpact.removedActions?.length)
+        impactLines.push(`- Actions removed: ${request.goapImpact.removedActions.join(", ")}`);
+      if (request.goapImpact.modifiedActions?.length)
+        impactLines.push(`~ Actions modified: ${request.goapImpact.modifiedActions.join(", ")}`);
+    }
+    if (request.coverageImpact) {
+      impactLines.push(`**Coverage:** ${request.coverageImpact.summary}`);
+      if (request.coverageImpact.affectedTestFiles.length) {
+        impactLines.push(
+          `Affected test files: ${request.coverageImpact.affectedTestFiles.join(", ")}`,
+        );
+      }
+    }
+    if (impactLines.length) {
+      const impactEmbed = new EmbedBuilder()
+        .setTitle("Impact analysis")
+        .setDescription(impactLines.join("\n").slice(0, 4096))
+        .setColor(0x8b5cf6);
+      embeds.push(impactEmbed);
+    }
+
+    return embeds;
+  }
+
+  private _buildConfigChangeButtons(
+    request: ConfigChangeRequest,
+  ): ActionRowBuilder<ButtonBuilder> {
+    const row = new ActionRowBuilder<ButtonBuilder>();
+    const STYLE_BY_OPTION: Record<string, ButtonStyle> = {
+      approve: ButtonStyle.Success,
+      reject: ButtonStyle.Danger,
+    };
+    for (const option of request.options) {
+      const style = STYLE_BY_OPTION[option] ?? ButtonStyle.Secondary;
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`config_change:${option}:${request.correlationId}`)
           .setLabel(option.charAt(0).toUpperCase() + option.slice(1))
           .setStyle(style),
       );
