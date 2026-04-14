@@ -8,7 +8,6 @@ workspace/crons/
 workspace/*.log.automaker-lock
 workspace/incidents.yaml
 workspace/projects.yaml
-workspace/agents.yaml
 workspace/agents/*.yaml
 workspace/discord.yaml
 workspace/github.yaml

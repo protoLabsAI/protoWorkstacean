@@ -12,6 +12,7 @@ All environment variables recognised by protoWorkstacean, their defaults, and wh
 | `WORKSTACEAN_API_KEY` | _(none)_ | HTTP server | API key required for authenticated endpoints. If unset, auth is skipped. |
 | `WORKSTACEAN_PUBLIC_URL` | _(none)_ | HTTP server | Public base URL (used for webhook registration and self-links) |
 | `WORKSPACE_DIR` | `./workspace` | All loaders | Path to the workspace directory containing agent, goal, action, ceremony, and domain YAML files |
+| `PROTOLABS_AGENTS_JSON` | _(none)_ | SkillBrokerPlugin | If set, overrides `workspace/agents.yaml`. Expected shape: `{ "agents": [ { name, url, auth, ... } ] }`. Intended for Infisical-backed deployments where pushing a yaml file to every host is inconvenient — ship the whole registry through a single secret instead. |
 | `DATA_DIR` | `./data` | LoggerPlugin, SQLite | Directory for the SQLite event log (`events.db`) |
 | `TZ` | system default | SchedulerPlugin | Timezone for cron schedule evaluation |
 | `DEBUG` | _(none)_ | All | Set to any value to enable verbose debug logging |

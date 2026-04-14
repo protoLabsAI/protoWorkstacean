@@ -51,6 +51,25 @@ interface AgentDef {
 }
 
 const CARD_REFRESH_INTERVAL_MS = 10 * 60_000; // 10 min
+const HEARTBEAT_INTERVAL_MS = 60_000;          // 1 min — fleet liveness
+
+/**
+ * Liveness probe result for a single A2A agent, refreshed on the heartbeat
+ * cadence. Exposed via getFleetHealth() so the /api/agent-health endpoint
+ * and the `agent_health` world-state domain can surface fleet availability.
+ */
+export interface AgentHealthProbe {
+  agentName: string;
+  url: string;
+  reachable: boolean;
+  latencyMs?: number;
+  lastProbedAt: number;
+  cardAvailable?: boolean;
+  streaming?: boolean;
+  pushNotifications?: boolean;
+  skillCount?: number;
+  error?: string;
+}
 
 export class SkillBrokerPlugin implements Plugin {
   readonly name = "skill-broker";
@@ -60,12 +79,24 @@ export class SkillBrokerPlugin implements Plugin {
   private readonly workspaceDir: string;
   private readonly executorRegistry: ExecutorRegistry;
   private refreshTimer?: ReturnType<typeof setInterval>;
+  private heartbeatTimer?: ReturnType<typeof setInterval>;
   /** Tracks skills we registered per agent so we can cleanly re-register on refresh. */
   private registeredSkills = new Map<string, Set<string>>();
+  /** Per-agent liveness probe cache, refreshed every HEARTBEAT_INTERVAL_MS. */
+  private fleetHealth = new Map<string, AgentHealthProbe>();
 
   constructor(workspaceDir: string, executorRegistry: ExecutorRegistry) {
     this.workspaceDir = workspaceDir;
     this.executorRegistry = executorRegistry;
+  }
+
+  /**
+   * Fleet liveness snapshot. One entry per A2A agent registered at install.
+   * `/api/agent-health` merges this with ExecutorRegistry to surface both
+   * "what skills are wired" and "is the agent actually reachable right now".
+   */
+  getFleetHealth(): AgentHealthProbe[] {
+    return Array.from(this.fleetHealth.values());
   }
 
   install(bus: EventBus): void {
@@ -124,10 +155,66 @@ export class SkillBrokerPlugin implements Plugin {
       }
     }, CARD_REFRESH_INTERVAL_MS);
     this.refreshTimer.unref?.();
+
+    // Fleet liveness heartbeat — probes each agent's card on a faster
+    // cadence than the 10-min skill-discovery refresh. Exposed via
+    // getFleetHealth() so /api/agent-health can report reachability +
+    // latency for on-demand agents alongside the persistent DeepAgents.
+    this.heartbeatTimer = setInterval(() => {
+      for (const agent of agents) {
+        void this._probeAgentHealth(agent, resolveEnvVars(agent.url, "skill-broker"));
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer.unref?.();
+    // Kick off an initial probe immediately so the first /api/agent-health
+    // request doesn't return an empty snapshot.
+    for (const agent of agents) {
+      void this._probeAgentHealth(agent, resolveEnvVars(agent.url, "skill-broker"));
+    }
   }
 
   uninstall(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+  }
+
+  /**
+   * Single-agent liveness probe. Fetches the agent card with a 3s timeout
+   * and records reachability + latency. Also mirrors the discovery side-
+   * effect of updating the executor's capability flags so heartbeat and
+   * discovery converge to the same truth.
+   *
+   * Never throws — bad fetches just produce a `reachable: false` probe
+   * entry. `/api/agent-health` surfaces the error for the operator.
+   */
+  private async _probeAgentHealth(agent: AgentDef, url: string): Promise<void> {
+    const startedAt = Date.now();
+    const probe: AgentHealthProbe = {
+      agentName: agent.name,
+      url,
+      reachable: false,
+      lastProbedAt: startedAt,
+    };
+
+    try {
+      const card = await this._fetchCard(url);
+      const elapsed = Date.now() - startedAt;
+      if (card) {
+        probe.reachable = true;
+        probe.cardAvailable = true;
+        probe.latencyMs = elapsed;
+        probe.streaming = card.capabilities?.streaming === true;
+        probe.pushNotifications = card.capabilities?.pushNotifications === true;
+        probe.skillCount = (card.skills ?? []).length;
+      } else {
+        probe.error = "card fetch returned null (agent unreachable or malformed card)";
+      }
+    } catch (err) {
+      probe.latencyMs = Date.now() - startedAt;
+      probe.error = err instanceof Error ? err.message : String(err);
+    }
+
+    this.fleetHealth.set(agent.name, probe);
   }
 
   /**
@@ -138,6 +225,23 @@ export class SkillBrokerPlugin implements Plugin {
     try {
       const card = await this._fetchCard(url);
       if (!card) return;
+
+      // Refresh transport capability flags from the card — authoritative source
+      // for streaming + push-notifications. Without this, executors keep using
+      // the yaml bootstrap value even when the agent has changed its
+      // advertisement. Cost: one setter call per agent per refresh cycle.
+      const caps = card.capabilities ?? {};
+      const priorStreaming = executor.streaming;
+      const priorPush = executor.pushNotifications;
+      executor.setCapabilities({
+        streaming: caps.streaming === true,
+        pushNotifications: caps.pushNotifications === true,
+      });
+      if (priorStreaming !== executor.streaming || priorPush !== executor.pushNotifications) {
+        console.log(
+          `[skill-broker] ${agent.name}: capabilities updated — streaming=${executor.streaming} pushNotifications=${executor.pushNotifications}`,
+        );
+      }
 
       const registered = this.registeredSkills.get(agent.name) ?? new Set();
       let added = 0;
@@ -182,10 +286,40 @@ export class SkillBrokerPlugin implements Plugin {
     }
   }
 
+  /**
+   * Resolve the agent registry from one of two sources:
+   *
+   *   1. PROTOLABS_AGENTS_JSON env var — if set, parsed as JSON `{ agents: [...] }`.
+   *      Lets Infisical-backed deployments ship the entire registry through
+   *      a single secret without needing a file on disk.
+   *
+   *   2. workspace/agents.yaml — file on disk. The committed default covers
+   *      our standard fleet (Quinn, Jon, Researcher, Frank, protopen);
+   *      per-host overrides work by editing the file locally.
+   *
+   * If both are present, the env var wins. If neither resolves to a valid
+   * list, the broker registers zero external agents and logs a warning.
+   */
   private _loadAgents(): AgentDef[] {
+    // Try the env-var path first — deployments use this to avoid file state
+    const envOverride = process.env.PROTOLABS_AGENTS_JSON;
+    if (envOverride && envOverride.trim()) {
+      try {
+        const parsed = JSON.parse(envOverride) as { agents?: AgentDef[] };
+        if (Array.isArray(parsed.agents)) {
+          console.log(`[skill-broker] Loaded ${parsed.agents.length} agent(s) from PROTOLABS_AGENTS_JSON`);
+          return parsed.agents;
+        }
+        console.warn("[skill-broker] PROTOLABS_AGENTS_JSON parsed but has no `agents` array — falling back to yaml");
+      } catch (err) {
+        console.error("[skill-broker] Failed to parse PROTOLABS_AGENTS_JSON — falling back to yaml:", err);
+      }
+    }
+
+    // File path — committed default
     const agentsPath = join(this.workspaceDir, "agents.yaml");
     if (!existsSync(agentsPath)) {
-      console.warn("[skill-broker] agents.yaml not found — no A2A agents registered");
+      console.warn("[skill-broker] agents.yaml not found and PROTOLABS_AGENTS_JSON unset — no A2A agents registered");
       return [];
     }
     try {

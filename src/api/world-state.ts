@@ -5,6 +5,7 @@
 
 import type { Route, ApiContext } from "./types.ts";
 import type { TelemetryService } from "../telemetry/telemetry-service.ts";
+import type { Plugin } from "../../lib/types.ts";
 
 interface WorldStateAPI {
   getWorldState(opts?: { domain?: string; maxAgeMs?: number }): unknown;
@@ -102,15 +103,59 @@ export function createRoutes(ctx: ApiContext): Route[] {
   }
 
   function handleGetAgentHealth(): Response {
+    // Start from the ExecutorRegistry — who's wired at all
     const registrations = ctx.executorRegistry.list();
-    const agents: Record<string, { skills: string[]; executorType: string }> = {};
+    interface AgentView {
+      skills: string[];
+      executorType: string;
+      reachable?: boolean;
+      latencyMs?: number;
+      lastProbedAt?: number;
+      streaming?: boolean;
+      pushNotifications?: boolean;
+      cardAvailable?: boolean;
+      error?: string;
+    }
+    const agents: Record<string, AgentView> = {};
     for (const reg of registrations) {
       const name = reg.agentName ?? "_default";
       if (!agents[name]) agents[name] = { skills: [], executorType: reg.executor.type };
       if (reg.skill) agents[name].skills.push(reg.skill);
     }
+
+    // Overlay fleet liveness from SkillBrokerPlugin heartbeats (A2A agents only)
+    const broker = ctx.plugins.find(p => p.name === "skill-broker") as
+      | (Plugin & { getFleetHealth?: () => Array<{
+          agentName: string;
+          reachable: boolean;
+          latencyMs?: number;
+          lastProbedAt: number;
+          streaming?: boolean;
+          pushNotifications?: boolean;
+          cardAvailable?: boolean;
+          error?: string;
+        }> })
+      | undefined;
+
+    if (broker?.getFleetHealth) {
+      for (const probe of broker.getFleetHealth()) {
+        const view = agents[probe.agentName] ?? { skills: [], executorType: "a2a" };
+        view.reachable = probe.reachable;
+        view.latencyMs = probe.latencyMs;
+        view.lastProbedAt = probe.lastProbedAt;
+        view.streaming = probe.streaming;
+        view.pushNotifications = probe.pushNotifications;
+        view.cardAvailable = probe.cardAvailable;
+        if (probe.error) view.error = probe.error;
+        agents[probe.agentName] = view;
+      }
+    }
+
+    const reachableCount = Object.values(agents).filter(a => a.reachable === true).length;
+
     return Response.json({
       agentCount: Object.keys(agents).length,
+      reachableCount,
       agents,
       registrationCount: registrations.length,
     });
