@@ -25,6 +25,13 @@ export const TOPICS = {
 
   /** Published by ActionDispatcherPlugin to invoke an agent skill (unified dispatch). */
   AGENT_SKILL_REQUEST: "agent.skill.request",
+
+  /**
+   * Published by SkillDispatcherPlugin after every task reaches terminal state.
+   * Full topic is `autonomous.outcome.{systemActor}.{skill}`.
+   * Use this prefix to subscribe to all outcomes.
+   */
+  AUTONOMOUS_OUTCOME_PREFIX: "autonomous.outcome",
 } as const;
 
 export type TopicValue = (typeof TOPICS)[keyof typeof TOPICS];

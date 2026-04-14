@@ -16,7 +16,7 @@
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "./executor-registry.ts";
 import type { SkillRequest } from "./types.ts";
-import type { AgentSkillRequestPayload, FlowItemPayload } from "../event-bus/payloads.ts";
+import type { AgentSkillRequestPayload, AutonomousOutcomePayload, FlowItemPayload } from "../event-bus/payloads.ts";
 import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 import type { LoggerPlugin, ConversationTurn } from "../../lib/plugins/logger.ts";
@@ -319,6 +319,18 @@ export class SkillDispatcherPlugin implements Plugin {
           sourceInterface: sourcePlatform,
           sourceChannelId: sourceChannelId,
           sourceUserId: sourceUserId,
+          onTerminal: (content, isError, taskState) => {
+            this._publishAutonomousOutcome({
+              correlationId,
+              parentId,
+              systemActor: systemActor ?? "user",
+              skill,
+              success: !isError,
+              taskState,
+              text: content,
+              durationMs: Date.now() - dispatchedAt,
+            });
+          },
         });
 
         // Try to register a push-notification webhook so the agent can POST
@@ -354,6 +366,17 @@ export class SkillDispatcherPlugin implements Plugin {
           stage: "error",
           meta: { skill, error: result.text },
         });
+        this._publishAutonomousOutcome({
+          correlationId,
+          parentId,
+          systemActor: systemActor ?? "user",
+          skill,
+          success: false,
+          taskState: result.data?.taskState ?? "failed",
+          text: result.text,
+          usage: result.data?.usage,
+          durationMs: Date.now() - dispatchedAt,
+        });
       } else {
         // Log a preview of the response so we can see what the executor actually
         // returned — critical for debugging A2A/agent behaviour when the skill
@@ -365,20 +388,33 @@ export class SkillDispatcherPlugin implements Plugin {
         if (result.data?.stopReason === "max_turns") {
           console.warn("[skill-dispatcher] Agent hit maxTurns limit");
         }
+        const completedAt = Date.now();
+        const durationMs = completedAt - dispatchedAt;
         this._publishFlowEvent("flow.item.completed", {
           id: flowItemId,
           status: "complete",
           stage: "done",
-          completedAt: Date.now(),
+          completedAt,
           meta: {
             skill,
             executorType: executor.type,
-            durationMs: Date.now() - dispatchedAt,
+            durationMs,
             inputTokens: result.data?.usage?.input_tokens,
             outputTokens: result.data?.usage?.output_tokens,
             numTurns: result.data?.numTurns,
             stopReason: result.data?.stopReason,
           },
+        });
+        this._publishAutonomousOutcome({
+          correlationId,
+          parentId,
+          systemActor: systemActor ?? "user",
+          skill,
+          success: true,
+          taskState: result.data?.taskState ?? "completed",
+          text: result.text,
+          usage: result.data?.usage,
+          durationMs,
         });
       }
 
@@ -426,6 +462,16 @@ export class SkillDispatcherPlugin implements Plugin {
         stage: "error",
         meta: { skill, error: errorMsg },
       });
+      this._publishAutonomousOutcome({
+        correlationId,
+        parentId,
+        systemActor: systemActor ?? "user",
+        skill,
+        success: false,
+        taskState: "failed",
+        text: errorMsg,
+        durationMs: Date.now() - dispatchedAt,
+      });
       this._publishResponse(replyTopic, correlationId, undefined, errorMsg);
     } finally {
       this.activeExecutions.delete(correlationId);
@@ -471,6 +517,39 @@ export class SkillDispatcherPlugin implements Plugin {
       },
       source,
       reply: { topic: replyTopic },
+    });
+  }
+
+  private _publishAutonomousOutcome(opts: {
+    correlationId: string;
+    parentId: string | undefined;
+    systemActor: string;
+    skill: string;
+    success: boolean;
+    taskState?: string;
+    text?: string;
+    usage?: AutonomousOutcomePayload["usage"];
+    durationMs: number;
+  }): void {
+    if (!this.bus) return;
+    const topic = `autonomous.outcome.${opts.systemActor}.${opts.skill}`;
+    const payload: AutonomousOutcomePayload = {
+      correlationId: opts.correlationId,
+      parentId: opts.parentId,
+      systemActor: opts.systemActor,
+      skill: opts.skill,
+      success: opts.success,
+      taskState: opts.taskState,
+      textPreview: opts.text ? opts.text.slice(0, 500) : undefined,
+      usage: opts.usage,
+      durationMs: opts.durationMs,
+    };
+    this.bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId: opts.correlationId,
+      topic,
+      timestamp: Date.now(),
+      payload,
     });
   }
 

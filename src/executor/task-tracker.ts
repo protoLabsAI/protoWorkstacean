@@ -39,6 +39,12 @@ export interface TrackedTask {
   sourceChannelId?: string;
   /** User ID for HITL rendering. */
   sourceUserId?: string;
+  /**
+   * Optional callback invoked when the task reaches terminal state.
+   * Called before publishing the reply-topic response so the outcome
+   * event is always emitted first.
+   */
+  onTerminal?: (content: string | undefined, isError: boolean, taskState: string) => void;
 }
 
 export interface TaskTrackerOptions {
@@ -92,6 +98,8 @@ export class TaskTracker {
     sourceInterface?: string;
     sourceChannelId?: string;
     sourceUserId?: string;
+    /** Invoked when the task reaches terminal state — before the reply-topic response is published. */
+    onTerminal?: (content: string | undefined, isError: boolean, taskState: string) => void;
   }): void {
     const now = Date.now();
     this.tasks.set(params.correlationId, {
@@ -108,6 +116,7 @@ export class TaskTracker {
       sourceInterface: params.sourceInterface,
       sourceChannelId: params.sourceChannelId,
       sourceUserId: params.sourceUserId,
+      onTerminal: params.onTerminal,
     });
     console.log(
       `[task-tracker] Tracking ${params.agentName} task ${params.taskId.slice(0, 8)}… (correlationId: ${params.correlationId.slice(0, 8)}…)`,
@@ -159,7 +168,7 @@ export class TaskTracker {
     const content = artifactText || statusText;
     const isError = state === "failed" || state === "rejected";
 
-    this._publishResponse(task, isError ? undefined : content, isError ? (content || state) : undefined);
+    this._publishResponse(task, isError ? undefined : content, isError ? (content || state) : undefined, state);
     this.tasks.delete(correlationId);
     console.log(
       `[task-tracker] Callback for ${task.taskId.slice(0, 8)}… → terminal state "${state}" (via webhook)`,
@@ -219,7 +228,7 @@ export class TaskTracker {
         }
 
         if (state && TERMINAL_STATES.has(state)) {
-          this._publishResponse(task, result.text, result.isError ? result.text : undefined);
+          this._publishResponse(task, result.text, result.isError ? result.text : undefined, state);
           this.tasks.delete(task.correlationId);
           console.log(
             `[task-tracker] Task ${task.taskId.slice(0, 8)}… reached terminal state "${state}" after ${Math.round((now - task.registeredAt) / 1000)}s`,
@@ -309,7 +318,16 @@ export class TaskTracker {
     }
   }
 
-  private _publishResponse(task: TrackedTask, content: string | undefined, error: string | undefined): void {
+  private _publishResponse(
+    task: TrackedTask,
+    content: string | undefined,
+    error: string | undefined,
+    taskState?: string,
+  ): void {
+    const isError = error !== undefined;
+    const resolvedState = taskState ?? (isError ? "failed" : "completed");
+    task.onTerminal?.(content, isError, resolvedState);
+
     const payload: AgentSkillResponsePayload = {
       content,
       error,
