@@ -13,6 +13,7 @@ import { DiscordLogger } from "../integrations/discord_logger.ts";
 import type { GoalViolatedEventPayload } from "../types/events.ts";
 import type { TelemetryService } from "../telemetry/telemetry-service.ts";
 import { GOAL_EVENTS } from "../telemetry/telemetry-service.ts";
+import { TOPICS } from "../event-bus/topics.ts";
 
 /**
  * GoalEvaluatorPlugin — observe-only goal registry + evaluator.
@@ -66,6 +67,13 @@ export class GoalEvaluatorPlugin implements Plugin, IGoalEvaluatorPlugin {
       await this._handleWorldState(msg);
     });
     this.subscriptionIds.push(subId);
+
+    // Subscribe to config.reload — re-reads goals.yaml and atomically swaps loaded goals
+    const reloadId = bus.subscribe(TOPICS.CONFIG_RELOAD, this.name, () => {
+      console.info("[goal-evaluator] config.reload received — reloading goals from disk");
+      this.reloadGoals();
+    });
+    this.subscriptionIds.push(reloadId);
 
     // Flush any buffered violations now that bus is available
     if (this.violationBuffer.length > 0) {

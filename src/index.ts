@@ -49,6 +49,9 @@ function loadActionsYaml(): void {
   try {
     const raw = parseYaml(readFileSync(actionsPath, "utf8")) as { actions?: Record<string, unknown>[] };
     const actionsData = raw?.actions ?? [];
+
+    // Parse and validate all actions before mutating the registry (fail-fast)
+    const parsed: Action[] = [];
     for (const a of actionsData) {
       try {
         const action: Action = {
@@ -75,10 +78,16 @@ function loadActionsYaml(): void {
             : [],
           meta: typeof a.meta === "object" && a.meta !== null ? (a.meta as Action["meta"]) : {},
         };
-        actionRegistry.upsert(action);
+        parsed.push(action);
       } catch (err) {
         console.warn(`[actions-loader] Skipping invalid action '${a.id}':`, err);
       }
+    }
+
+    // Atomic swap: clear existing registry then upsert all validated actions
+    actionRegistry.clear();
+    for (const action of parsed) {
+      actionRegistry.upsert(action);
     }
     console.info(`[actions-loader] Loaded ${actionRegistry.size} action(s) from workspace/actions.yaml`);
   } catch (err) {
@@ -499,6 +508,18 @@ cli?.showPrompt();
 // --- HTTP API server (POST /publish, GET /health, GET /api/*) ---
 const HTTP_PORT = parseInt(process.env.WORKSTACEAN_HTTP_PORT || "3000", 10);
 const API_KEY = process.env.WORKSTACEAN_API_KEY;
+
+// ── config.reload — hot-reload goals.yaml + actions.yaml without restart ──────
+import { TOPICS } from "./event-bus/topics.ts";
+bus.subscribe(TOPICS.CONFIG_RELOAD, "config-reloader", () => {
+  console.info("[config-reload] Reloading actions from disk...");
+  loadActionsYaml();
+  // Re-register newly added actions with telemetry for zero-count audit rows
+  for (const action of actionRegistry.getAll()) {
+    telemetry.registerKnown("action", action.id, ACTION_EVENTS);
+  }
+  console.info(`[config-reload] Actions reloaded: ${actionRegistry.size} active. Goals reload handled by goal-evaluator plugin.`);
+});
 
 // ── API routes (modular) ──────────────────────────────────────────────────────
 import { createAllRoutes, matchPath } from "./api/index.ts";

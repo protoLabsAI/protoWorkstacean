@@ -211,6 +211,16 @@ export interface WorktreeRecoveredPayload {
   recoveredAt: string;
 }
 
+// ── config.reload ─────────────────────────────────────────────────────────────
+
+/** Payload for `config.reload` — triggers hot reload of goals.yaml and actions.yaml. */
+export interface ConfigReloadPayload {
+  /** What triggered the reload (e.g. "api", "hitl", "ava"). */
+  source?: string;
+  /** Optional request ID for tracing. */
+  requestId?: string;
+}
+
 // ── autonomous.outcome.* ─────────────────────────────────────────────────────
 
 /**

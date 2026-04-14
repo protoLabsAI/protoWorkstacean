@@ -32,6 +32,13 @@ export const TOPICS = {
    * Use this prefix to subscribe to all outcomes.
    */
   AUTONOMOUS_OUTCOME_PREFIX: "autonomous.outcome",
+
+  /**
+   * Published to trigger a hot reload of goals.yaml and actions.yaml from disk.
+   * GoalEvaluatorPlugin and the actions loader both subscribe to this topic.
+   * Subscribers re-read, re-validate, and atomically swap their loaded config.
+   */
+  CONFIG_RELOAD: "config.reload",
 } as const;
 
 export type TopicValue = (typeof TOPICS)[keyof typeof TOPICS];
