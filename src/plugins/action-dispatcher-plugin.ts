@@ -313,18 +313,13 @@ export class ActionDispatcherPlugin implements Plugin {
       payload: outcomePayload,
     });
 
-    // Close the outcome → state feedback loop: re-publish world.state so goals
-    // re-evaluate immediately instead of waiting for the next domain poll (60s).
-    // Prevents duplicate dispatches for the same violation that was just remediated.
-    if (success && action.effects && action.effects.length > 0) {
-      this.bus.publish("world.state.updated", {
-        id: crypto.randomUUID(),
-        correlationId: parentCorrelationId,
-        topic: "world.state.updated",
-        timestamp: completedAt,
-        payload: this.worldState,
-      });
-    }
+    // NOTE: Previously re-published world.state.updated here to close the
+    // outcome → state feedback loop. Removed — caused infinite loops in tests
+    // because re-publish triggered re-evaluation of a still-violated goal
+    // (effects are optimistic, real domain hasn't caught up), which dispatched
+    // the same action again. The correct fix lives in the planner: stronger
+    // in-flight tracking that waits for domain confirmation, not optimistic
+    // effects. Filed as a follow-up.
 
     // Complete in WIP queue and dispatch next if available
     const next = this.queue.complete(correlationId);

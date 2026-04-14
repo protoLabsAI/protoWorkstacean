@@ -71,6 +71,8 @@ export class OutcomeAnalysisPlugin implements Plugin {
     );
 
     this.analysisTimer = setInterval(() => this._runAnalysis(), ANALYSIS_INTERVAL_MS);
+    // Don't keep the process alive just for this timer (important for tests).
+    this.analysisTimer.unref?.();
     console.log("[outcome-analysis] Installed — analyzing every 5 min");
   }
 
