@@ -35,6 +35,18 @@ const contextMailbox = new ContextMailbox();
 import { TaskTracker } from "./executor/task-tracker.ts";
 const taskTracker = new TaskTracker({ bus });
 
+// --- A2A extensions — register observability interceptors (cost, confidence,
+//     effect-domain, blast, hitl-mode, worldstate-delta). A2AExecutor.execute()
+//     runs the before/after hooks on every skill call; the extensions
+//     self-gate on the presence of their advertised fields, so registering
+//     all of them is safe even when an agent doesn't opt in via its card.
+import { registerCostExtension } from "./executor/extensions/cost.ts";
+import { registerConfidenceExtension } from "./executor/extensions/confidence.ts";
+import { registerEffectDomainExtension } from "./executor/extensions/effect-domain.ts";
+registerCostExtension(bus);
+registerConfidenceExtension(bus);
+registerEffectDomainExtension(bus);
+
 // --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
 import { ChannelRegistry } from "../lib/channels/channel-registry.js";
 const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));
