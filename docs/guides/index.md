@@ -8,7 +8,9 @@ Task-oriented guides for common operations in protoWorkstacean.
 
 | Guide | Description |
 |-------|-------------|
-| [Add an agent](./add-an-agent) | Register an in-process agent (YAML + ProtoSdkExecutor) or an external A2A agent |
+| [Add an agent](./add-an-agent) | Register an in-process agent (YAML + ProtoSdkExecutor) or an external A2A agent (with auth schemes + card auto-discovery) |
+| [A2A streaming](./a2a-streaming) | Enable SSE streaming, artifact chunking, long-running tasks, and native `input-required` HITL |
+| [HITL](./hitl) | Human-in-the-loop approval gates (plan gate + operational gate, both built on the A2A `input-required` state) |
 | [Add a domain](./add-a-domain) | Poll a custom HTTP endpoint and expose it as a world-state domain |
 | [Add goals and actions](./add-goals-and-actions) | Write goal definitions (Invariant, Threshold, Distribution) and matching actions with preconditions and effects |
 | [Create a ceremony](./create-a-ceremony) | Schedule a recurring fleet ritual — a skill dispatched on a cron expression |

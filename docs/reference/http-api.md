@@ -751,6 +751,8 @@ Served by `src/api/agent-card.ts`. Exposes workstacean as an A2A-compliant agent
 
 A legacy alias at `GET /.well-known/agent.json` returns the same body for clients that resolve the older path.
 
+> **Reachability**: this endpoint is served by the main HTTP server on `WORKSTACEAN_HTTP_PORT` (default `3000`, **not** the `8080` dashboard/event-viewer port which only proxies `/api/*`). Inside the Docker network, agents call `http://workstacean:3000/...` directly. To expose it to external networks, add a proxy rule (Caddy / Cloudflare tunnel) forwarding `/a2a` and `/.well-known/agent-card.json` to port 3000.
+
 **Auth**: None (discovery is always public)
 
 **Response** (`200`) — an [AgentCard](https://a2a-protocol.org/latest/specification/#agent-card):
@@ -930,3 +932,5 @@ Update an existing feature on the protoMaker board.
 ## Dashboard proxy
 
 The event-viewer plugin (port `8080`, disabled by `DISABLE_EVENT_VIEWER`) serves the Astro dashboard from `dashboard/dist/` and proxies unmatched `/api/*` requests plus the `/ws` WebSocket to the main HTTP server on `WORKSTACEAN_HTTP_PORT`. The dashboard's client-side API client talks only to the event-viewer port, so CORS is never an issue. See [Dashboard](./dashboard) for details.
+
+> **A2A endpoints bypass the dashboard proxy.** `/a2a`, `/.well-known/agent-card.json`, and `/api/a2a/callback/:taskId` are all served directly by the main HTTP server on port `3000`. External agents calling workstacean over A2A must hit that port (inside the Docker network via `http://workstacean:3000`, or externally via a Caddy/Cloudflare rule forwarding those paths).

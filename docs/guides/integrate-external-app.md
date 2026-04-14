@@ -148,8 +148,14 @@ If the app has an A2A endpoint, create or append to `workspace/agents.yaml`:
 agents:
   - name: myapp
     url: "${MYAPP_BASE_URL}/a2a"
+    # Legacy apiKey shorthand:
     apiKeyEnv: MYAPP_API_KEY
-    skills:
+    # ...or structured auth (Phase 8):
+    # auth:
+    #   scheme: bearer
+    #   credentialsEnv: MYAPP_TOKEN
+    streaming: false            # set true if the agent's card declares it
+    skills:                     # omit to auto-discover from /.well-known/agent-card.json
       - name: diagnose
         description: Run diagnostics and attempt self-healing
       - name: status
@@ -157,8 +163,9 @@ agents:
 ```
 
 - `url` supports `${ENV_VAR}` interpolation
-- `apiKeyEnv` is the **name** of the env var (not the value)
+- `apiKeyEnv` / `auth.credentialsEnv` is the **name** of the env var (not the value)
 - Skills are registered with the `ExecutorRegistry` and become routable via `agent.skill.request`
+- Agent card is re-fetched every 10 min so new skills land without a restart
 
 See [Add an agent](./add-an-agent) for the full A2A schema.
 

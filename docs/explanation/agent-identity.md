@@ -121,7 +121,7 @@ The split is conceptual:
 
 All per-agent secrets live in Infisical (AI project `11e172e0`). The workstacean container receives them via `infisical run` at deploy time. The homelab-iac `docker-compose.yml` is the canonical reference for which secrets map to which services.
 
-No secrets are stored in this repository. `workspace/agents.yaml` uses `apiKeyEnv` to reference the env var name (e.g., `AVA_API_KEY`), not the key value itself.
+No secrets are stored in this repository. `workspace/agents.yaml` references env var names — either via the legacy `apiKeyEnv: AVA_API_KEY` shorthand or the structured `auth: { scheme, credentialsEnv }` form (Phase 8). The env var name is the reference; the value lives only in Infisical.
 
 ---
 
@@ -129,12 +129,12 @@ No secrets are stored in this repository. `workspace/agents.yaml` uses `apiKeyEn
 
 ### External (A2A) agent
 
-1. Create the agent runtime in its own repo with a JSON-RPC `/a2a` endpoint
+1. Create the agent runtime in its own repo with a JSON-RPC `/a2a` endpoint + `/.well-known/agent-card.json`
 2. (Optional) Create a GitHub App for bot attribution; generate and store the private key in Infisical
-3. Add `APP_ID`, `APP_PRIVATE_KEY`, and any `API_KEY` env vars to `homelab-iac/stacks/ai/docker-compose.yml`
-4. Add an entry to `workspace/agents.yaml` with `name`, `url`, `apiKeyEnv`, and declared `skills`
+3. Add `APP_ID`, `APP_PRIVATE_KEY`, and any auth env vars (API key / bearer token / HMAC secret) to `homelab-iac/stacks/ai/docker-compose.yml`
+4. Add an entry to `workspace/agents.yaml` with `name`, `url`, auth config (`apiKeyEnv` or `auth.credentialsEnv`). Skills are optional — if omitted, the broker auto-discovers them from the agent card
 5. (Optional) If the agent should have its own Discord bot, add `discordBotTokenEnvKey` pointing at a new `DISCORD_BOT_TOKEN_*` env var
-6. Restart workstacean — `[skill-broker] Registered N A2A agent(s)` in logs should increment
+6. Restart workstacean — `[skill-broker] Registered N A2A agent(s) (skills from yaml; discovery in progress)` in logs should increment
 
 ### In-process agent
 

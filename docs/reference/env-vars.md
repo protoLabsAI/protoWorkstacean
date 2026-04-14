@@ -9,8 +9,9 @@ All environment variables recognised by protoWorkstacean, their defaults, and wh
 | Variable | Default | Plugin | Description |
 |----------|---------|--------|-------------|
 | `WORKSTACEAN_HTTP_PORT` | `3000` | HTTP server | Port the HTTP API listens on |
-| `WORKSTACEAN_API_KEY` | _(none)_ | HTTP server | API key required for authenticated endpoints. If unset, auth is skipped. |
-| `WORKSTACEAN_PUBLIC_URL` | _(none)_ | HTTP server | Public base URL (used for webhook registration and self-links) |
+| `WORKSTACEAN_API_KEY` | _(none)_ | HTTP server | API key required for authenticated endpoints. If unset, auth is skipped. Also gates `POST /a2a` (accepts `Authorization: Bearer <key>` or `X-API-Key`). |
+| `WORKSTACEAN_BASE_URL` | _(none)_ | A2AExecutor, agent-card | Public base URL of this workstacean instance (e.g. `https://workstacean.example.com`). Used to (a) register push-notification webhook URLs with external agents, (b) populate the `url` field of `/.well-known/agent-card.json`. Falls back to `http://localhost:$WORKSTACEAN_HTTP_PORT` when unset. |
+| `WORKSTACEAN_PUBLIC_URL` | _(none)_ | HTTP server | Legacy public base URL (used for webhook registration). Prefer `WORKSTACEAN_BASE_URL` for new deployments. |
 | `WORKSPACE_DIR` | `./workspace` | All loaders | Path to the workspace directory containing agent, goal, action, ceremony, and domain YAML files |
 | `DATA_DIR` | `./data` | LoggerPlugin, SQLite | Directory for the SQLite event log (`events.db`) |
 | `TZ` | system default | SchedulerPlugin | Timezone for cron schedule evaluation |

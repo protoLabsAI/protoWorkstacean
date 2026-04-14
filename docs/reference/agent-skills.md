@@ -76,14 +76,19 @@ Available tools: `publish_event`, `get_world_state`, `get_incidents`, `report_in
 agents:
   - name: my-agent
     url: http://my-agent:PORT/a2a
+    # Either the legacy shorthand...
     apiKeyEnv: MY_AGENT_API_KEY
+    # ...or the structured form (Phase 8):
+    # auth: { scheme: bearer, credentialsEnv: MY_AGENT_TOKEN }
     skills:
       - my_skill
+    # skills can be omitted — SkillBrokerPlugin discovers them from
+    # /.well-known/agent-card.json (10-min refresh).
 ```
 
 2. Restart: `docker restart workstacean`
 
-`SkillBrokerPlugin` dispatches via JSON-RPC 2.0. In-process agents take priority for any skill they declare — external A2A is the fallback.
+`SkillBrokerPlugin` dispatches via the `@a2a-js/sdk` client (JSON-RPC 2.0 + SSE). In-process agents take priority for any skill they declare — external A2A is the fallback.
 
 ---
 

@@ -44,7 +44,8 @@ bun run src/index.ts
 | `AVA_BASE_URL` | For domain polling | Base URL of the protoMaker team server (env var name kept for historical reasons; e.g. `http://localhost:3008`) |
 | `AVA_API_KEY` | For domain polling | protoMaker team API key (`X-API-Key`) |
 | `WORKSTACEAN_HTTP_PORT` | No | HTTP API port (default: `3000`) |
-| `WORKSTACEAN_API_KEY` | No | API key for `/publish` endpoint |
+| `WORKSTACEAN_API_KEY` | No | API key for `/publish` + `POST /a2a` endpoints |
+| `WORKSTACEAN_BASE_URL` | For A2A server/webhooks | Public base URL — populates the agent card `url` and webhook callback URLs |
 | `ANTHROPIC_API_KEY` | For in-process agents | Claude API key |
 
 Full list: see `.env.dist`.
@@ -67,8 +68,9 @@ Plugins are loaded in `src/index.ts`. Each implements `install(bus) / uninstall(
 |---|---|---|
 | `RouterPlugin` | always | Translates inbound messages + cron events → `agent.skill.request` |
 | `AgentRuntimePlugin` | always | Registers `ProtoSdkExecutor` per `workspace/agents/*.yaml` into `ExecutorRegistry` |
-| `SkillBrokerPlugin` | always | Registers `A2AExecutor` per `workspace/agents.yaml` into `ExecutorRegistry` |
-| `SkillDispatcherPlugin` | always | Sole `agent.skill.request` subscriber; dispatches via `ExecutorRegistry` |
+| `SkillBrokerPlugin` | always | Registers `A2AExecutor` per `workspace/agents.yaml` + auto-discovers skills from each agent's card (10-min refresh) |
+| `SkillDispatcherPlugin` | always | Sole `agent.skill.request` subscriber; dispatches via `ExecutorRegistry`. Hands long-running A2A tasks off to `TaskTracker`. |
+| `TaskTracker` | always | In-process tracker for long-running A2A tasks — polls `tasks/get` (or uses `tasks/resubscribe`) until terminal, raises HITL on `input-required`, publishes the final response. |
 | `WorldStateEngine` | always | Generic domain poller; domains registered via `discoverAndRegister()` at startup |
 | `GoalEvaluatorPlugin` | always | Evaluates `workspace/goals.yaml` against world state |
 | `PlannerPluginL0` | always | Maps violated goals → actions from `ActionRegistry` |
