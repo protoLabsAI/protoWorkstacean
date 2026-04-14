@@ -2,24 +2,42 @@
 title: HITL — Human-in-the-Loop Gate
 ---
 
-HITL is the approval gate that sits between an autonomous decision and its permanent side effects. It exists because some actions — board feature creation, infrastructure changes, high-cost agent runs — should not happen without a human in the loop.
+HITL is what happens when an executor returns `input-required` — or when any plugin decides a human must make a call before a side effect lands. It is not a separate flow. It is a pause point on the unified dispatch pipeline.
 
 `correlationId` is the spine that connects every hop.
 
 ---
 
+## The unified pipeline
+
+Every skill request — whether triggered by a Discord DM, a Plane webhook, or an autonomous GOAP action — travels the same path:
+
+```
+inbound event
+  → RouterPlugin
+    → agent.skill.request (bus)
+      → SkillDispatcherPlugin
+        → ExecutorRegistry.resolve(skill, targets?)
+          → executor.execute(SkillRequest)
+            → result published to replyTopic
+```
+
+HITL enters this pipeline at the executor boundary. When an executor returns a task with state `input-required`, the pipeline pauses — the task stays open, and control transfers to a human. When the human responds, the pipeline resumes from the same task.
+
+The HITL renderer is a **pure UI thin client** over `input-required`. It presents the pause point to a human on whichever interface originated the request (Discord, Plane, Signal, API). It has no business logic, no routing opinion, and no knowledge of what the agent is doing. It collects a decision and publishes an `HITLResponse` to the bus. That is its entire job.
+
+---
+
 ## Overview
 
-When any system component needs a human decision, it publishes an `HITLRequest` to the bus. `HITLPlugin` routes it to the registered renderer for the originating interface (Discord, Plane, Signal, API). A human responds. The interface plugin publishes an `HITLResponse`. The bus delivers it to whichever plugin subscribed to the `replyTopic`.
+Two classes of HITL request share the same infrastructure:
 
-Two types of HITL flow coexist on the same infrastructure:
-
-| Flow | Publisher | Callback path | Example |
+| Class | Who raises it | How it resumes | Example |
 |---|---|---|---|
-| **Plan gate** | A2A agent returns `input-required` | `TaskTracker` sends `message/send` with same `taskId` | Ava asks for approval mid-task |
-| **Operational gate** | Any plugin | `replyTopic` on the bus | Budget L3 escalation, goal violation, queue saturation |
+| **Executor gate** | A2A agent returns `input-required` | `TaskTracker` sends `message/send` with same `taskId` | Ava asks for plan approval mid-task |
+| **Operational gate** | Any plugin | Subscriber on `replyTopic` | Budget L3 escalation, goal violation, queue saturation |
 
-Both use the same `HITLRequest`/`HITLResponse` shapes, the same topic conventions, and the same renderer interface. The plan-gate path uses the native A2A `input-required` state machine — no custom `plan_resume` skill is required.
+Both use the same `HITLRequest`/`HITLResponse` shapes, the same topic conventions, and the same renderer interface.
 
 ---
 
@@ -41,10 +59,10 @@ interface HITLRequest {
     channelId?: string;
     userId?: string;
   };
-  // ── Plan gate fields (populated by Ava) ────────────────────────────────────
+  // ── Executor gate fields (populated by Ava) ────────────────────────────────
   avaVerdict?: { score: number; concerns: string[]; verdict: string };
   jonVerdict?: { score: number; concerns: string[]; verdict: string };
-  // ── Operational gate fields (populated by BudgetPlugin L3, etc.) ───────────
+  // ── Operational gate fields (populated by BudgetPlugin L3, etc.) ──────────
   escalation_reason?: string;
   escalationContext?: {
     estimatedCost: number;
@@ -102,6 +120,8 @@ Both paths are triggered by the single publish from the renderer. The A2A resume
 ---
 
 ## The renderer interface
+
+The renderer is a pure UI thin client. It receives an `HITLRequest`, surfaces it on the originating platform, and publishes an `HITLResponse` when the human responds. It has no awareness of what the agent is doing or what happens after the decision.
 
 Every channel plugin that wants to render HITL approvals implements two methods:
 
@@ -274,25 +294,27 @@ if (interaction.isButton() && interaction.customId.startsWith("hitl:")) {
 
 ---
 
-## Plan gate flow (Ava)
+## Executor gate flow (Ava / plan approval)
 
-The plan gate is one specific use of HITL, triggered after Ava generates a SPARC PRD and antagonistic review.
+This is the executor gate in action. The inbound message enters the unified pipeline like any other skill request:
 
 ```
 1. Inbound message with skillHint "plan"
+   → RouterPlugin → agent.skill.request → SkillDispatcherPlugin → A2AExecutor
 2. Ava generates SPARC PRD + antagonistic review
    - Ava verdict: operational feasibility, risk score
    - Jon verdict: strategic value, ROI score
-3. Ava returns Task { status: { state: "input-required", message: <PRD summary> } }
-4. TaskTracker detects input-required → raises HITLRequest
+3. A2AExecutor receives Task { status: { state: "input-required", message: <PRD summary> } }
+4. TaskTracker detects input-required → raises HITLRequest on the bus
 5. HITLPlugin routes to the registered renderer (Discord embed)
+   — the renderer is a pure UI thin client: it shows the PRD summary, nothing more
 6. Human approves/rejects/modifies
 7. Renderer publishes HITLResponse on hitl.response.{correlationId}
-8. TaskTracker intercepts the response → sends message/send with same taskId
+8. TaskTracker intercepts → sends message/send with same taskId
    carrying the decision text; Ava resumes the task natively
 ```
 
-### plan decisions (resume payload)
+### Plan decisions (resume payload)
 
 The decision is relayed verbatim as the resume message text. Ava parses it and takes the branch:
 
@@ -368,7 +390,7 @@ bus.publish(request.replyTopic, {
 });
 ```
 
-That's it. The rest — routing to `replyTopic`, A2A callback to Ava — is handled by `HITLPlugin`.
+That's it. The renderer handles presentation only. The rest — routing to `replyTopic`, A2A task resume — is handled by `HITLPlugin` and `TaskTracker`.
 
 ---
 
@@ -445,8 +467,10 @@ curl http://localhost:3000/api/hitl/pending
 
 ## Design principles
 
-**The bus routes. Interface plugins render. Requesters own their response logic.**
+**The pipeline is unified. The renderer is dumb. The requester owns the decision.**
 
+- Every skill request — human-initiated or autonomous — enters the same `agent.skill.request` pipeline. HITL is not a special path; it is a pause state within that path.
+- The HITL renderer is a pure UI thin client. It shows a prompt, collects a response, publishes to the bus. It has no knowledge of what comes before or after.
 - `HITLPlugin` is a router — it stores state, dispatches to renderers, and routes responses. It has no opinion on format, display, or what to do with the decision.
 - Each interface plugin (Discord, Plane, Signal, Slack, API) owns rendering for its platform.
 - The requester (BudgetPlugin, GoalEvaluator, Ava) owns what to do with the response — HITL doesn't know or care.
