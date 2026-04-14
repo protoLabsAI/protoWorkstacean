@@ -30,6 +30,7 @@ export class ProtoSdkExecutor implements IExecutor {
     const result = await this.executor.run({
       prompt,
       correlationId: req.correlationId,
+      resume: req.resume,
     });
 
     return {
@@ -40,6 +41,7 @@ export class ProtoSdkExecutor implements IExecutor {
         usage: result.usage,
         numTurns: result.numTurns,
         stopReason: result.stopReason,
+        sessionId: result.sessionId,
       },
     };
   }

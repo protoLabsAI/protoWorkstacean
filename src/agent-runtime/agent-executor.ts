@@ -27,6 +27,11 @@ export interface AgentRunOptions {
   correlationId: string;
   /** Working directory for the agent's file operations. Defaults to process.cwd(). */
   cwd?: string;
+  /**
+   * SDK session ID to resume from a previous run.
+   * When set, the query() call passes this as `resume` to continue conversation context.
+   */
+  resume?: string;
 }
 
 export interface AgentRunResult {
@@ -40,6 +45,11 @@ export interface AgentRunResult {
   usage?: ExtendedUsage;
   /** Number of agentic turns taken. */
   numTurns?: number;
+  /**
+   * SDK session ID from this run — use as `resume` on the next call to continue
+   * the conversation within the same session context.
+   */
+  sessionId?: string;
 }
 
 /**
@@ -71,7 +81,7 @@ export class AgentExecutor {
   }
 
   async run(opts: AgentRunOptions): Promise<AgentRunResult> {
-    const { prompt, correlationId, cwd } = opts;
+    const { prompt, correlationId, cwd, resume } = opts;
     const agentTools = this.toolRegistry.forAgent(this.agentDef.tools);
 
     // Build the embedded MCP server with this agent's whitelisted tools.
@@ -98,7 +108,9 @@ export class AgentExecutor {
         permissionMode: "yolo",
         systemPrompt: this.agentDef.systemPrompt,
         maxSessionTurns: this.agentDef.maxTurns,
-        sessionId: correlationId,
+        // When resuming, the session ID comes from the previous run. Otherwise
+        // use correlationId so LangFuse traces stay grouped under the same ID.
+        ...(resume ? { resume } : { sessionId: correlationId }),
         cwd: cwd ?? process.cwd(),
         stderr: (line: string) => console.error(`[agent:${this.agentDef.name}:stderr]`, line),
         ...(this.agentDef.allowedTools?.length ? { allowedTools: this.agentDef.allowedTools } : {}),
@@ -155,6 +167,7 @@ export class AgentExecutor {
 
     if (resultText.length > 0) process.stdout.write("\n");
 
-    return { text: resultText, isError, stopReason, usage, numTurns };
+    const sessionId = session.getSessionId();
+    return { text: resultText, isError, stopReason, usage, numTurns, sessionId };
   }
 }

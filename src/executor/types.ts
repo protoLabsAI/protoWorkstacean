@@ -31,6 +31,12 @@ export interface SkillRequest {
   /** A2A context ID for multi-turn conversations. When set, A2AExecutor uses
    *  this instead of correlationId, enabling conversation continuity across turns. */
   contextId?: string;
+  /**
+   * SDK session ID to resume from a previous ProtoSdkExecutor run.
+   * Set by SkillDispatcherPlugin when a prior session exists for this
+   * correlationId+agentName pair. Only consumed by ProtoSdkExecutor.
+   */
+  resume?: string;
   /** Topic to publish the response on. */
   replyTopic: string;
   /** Full original bus message payload — typed with known agent.skill.request fields. */
@@ -57,6 +63,12 @@ export interface SkillResult {
     taskState?: string;
     /** Raw A2A artifacts from the terminal task — used by TaskTracker for worldstate-delta extraction. */
     artifacts?: unknown[];
+    /**
+     * SDK session ID from a completed ProtoSdkExecutor run.
+     * SkillDispatcherPlugin stores this in SessionStore so the next invocation
+     * for the same correlationId+agentName can resume the session.
+     */
+    sessionId?: string;
   };
 }
 
