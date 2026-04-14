@@ -10,8 +10,9 @@ All bus topics published and subscribed across all plugins and subsystems. Topic
 
 | Topic | Direction | Publisher | Subscriber | Description |
 |-------|-----------|-----------|------------|-------------|
-| `agent.skill.request` | Internal | RouterPlugin, ActionDispatcherPlugin, CeremonyPlugin | SkillDispatcherPlugin | Requests execution of a named skill |
+| `agent.skill.request` | Internal | RouterPlugin, ActionDispatcherPlugin, CeremonyPlugin, OutcomeAnalysisPlugin | SkillDispatcherPlugin | Requests execution of a named skill. `plan` / `onboard_project` / `deep_research` all flow through here (no per-skill routing table) |
 | `agent.skill.response.<correlationId>` | Internal | SkillDispatcherPlugin | Caller (varies) | Result of a skill execution |
+| `skill.progress` | Internal | ProtoSdkExecutor (via AgentExecutor `onProgress`) | Optional subscribers (UI, logs) | Intermediate tool_use + assistant text blocks streamed during skill execution. Payload is a `SkillProgressEvent`; useful for dashboards that want to render live agent reasoning. Not guaranteed in-order, not for correctness. |
 
 **`agent.skill.request` payload** (`SkillRequest`):
 ```typescript
@@ -91,9 +92,11 @@ All bus topics published and subscribed across all plugins and subsystems. Topic
 
 | Topic | Direction | Publisher | Subscriber | Description |
 |-------|-----------|-----------|------------|-------------|
-| `world.state.updated` | Internal | WorldStateEngine | GoalEvaluatorPlugin | Domain data refreshed |
-| `world.goal.violated` | Internal | GoalEvaluatorPlugin | PlannerPluginL0 | A goal evaluation failed |
-| `world.action.plan` | Internal | PlannerPluginL0 | ActionDispatcherPlugin | A set of actions to execute |
+| `world.state.updated` | Internal | WorldStateEngine | GoalEvaluatorPlugin, PlannerPluginL0, ActionDispatcherPlugin | Domain data refreshed |
+| `world.state.delta` | Internal | A2AExecutor (via `effect-domain-v1` interceptor), TaskTracker | WorldStateEngine | Agent-observed mutations applied in-process without waiting for next poll |
+| `world.goal.violated` | Internal | GoalEvaluatorPlugin | PlannerPluginL0, OutcomeAnalysisPlugin | A goal evaluation failed |
+| `world.action.dispatch` | Internal | PlannerPluginL0 | ActionDispatcherPlugin | A single action ready to execute (superseded the older `world.action.plan` batch shape) |
+| `world.action.queue_full` | Internal | ActionDispatcherPlugin | alert-bridge → Discord | WIP limit reached; action queued |
 
 **`world.state.updated` payload**:
 ```typescript
@@ -115,18 +118,50 @@ All bus topics published and subscribed across all plugins and subsystems. Topic
 }
 ```
 
-**`world.action.plan` payload**:
+**`world.action.dispatch` payload** (`ActionDispatchPayload`):
 ```typescript
 {
-  actions: Array<{
-    id: string;
-    goalId: string;
-    tier: string;
-    meta: { topic: string; fireAndForget?: boolean; agentId?: string };
-  }>;
+  type: "dispatch";
+  actionId: string;
+  goalId: string;
+  action: Action;                 // full Action record with effects + meta
   correlationId: string;
+  timestamp: number;
+  optimisticEffectsApplied: boolean;
 }
 ```
+
+---
+
+## Autonomous observation stream
+
+Emitted by extensions running inside `A2AExecutor` and by `ActionDispatcherPlugin`'s terminal outcomes. `OutcomeAnalysisPlugin` and `AgentFleetHealthPlugin` subscribe to `autonomous.outcome.#` to aggregate per-agent + per-skill rollups. `PlannerPluginL0` reads the per-skill stores (populated by the cost + confidence extensions) when ranking candidates (Arc 6.4).
+
+| Topic | Direction | Publisher | Subscriber | Description |
+|-------|-----------|-----------|------------|-------------|
+| `autonomous.outcome.{systemActor}.{skill}` | Internal | ActionDispatcherPlugin, SkillDispatcherPlugin | OutcomeAnalysisPlugin, AgentFleetHealthPlugin, PlannerPluginL0 | Terminal-state outcome for every autonomous skill execution — unified stream across GOAP, ceremony, FAF, and user-initiated dispatches |
+| `autonomous.cost.{systemActor}.{skill}` | Internal | `cost-v1` extension (after-hook in A2AExecutor) | Dashboard collectors, external telemetry | Per-(agent, skill) token + wall-time actuals; `CostStore` is the in-memory aggregate |
+| `autonomous.confidence.{systemActor}.{skill}` | Internal | `confidence-v1` extension | Calibration dashboard, OutcomeAnalysis | Agent-reported confidence 0.0–1.0 per call; `ConfidenceStore` aggregates |
+| `ops.alert.action_quality` | Internal | OutcomeAnalysisPlugin | alert-bridge → Discord | Skill with <50% success rate over 10+ attempts |
+| `ops.alert.hitl_escalation` | Internal | OutcomeAnalysisPlugin | alert-bridge → Discord | 3+ HITL escalations for the same (kind, target) |
+
+**`AutonomousOutcomePayload`**:
+```typescript
+{
+  correlationId: string;
+  systemActor: "user" | "goap" | "ceremony:<id>" | ...;
+  skill: string;
+  actionId?: string;   // set for GOAP dispatches
+  goalId?: string;     // set for GOAP dispatches
+  success: boolean;
+  error?: string;
+  taskState: "completed" | "failed" | "canceled" | "rejected" | ...;
+  durationMs: number;
+  usage?: AnthropicUsage;
+}
+```
+
+See [`self-improving-loop.md`](../explanation/self-improving-loop.md) for the end-to-end observation → planner-ranking path and [`cost-v1`](../extensions/cost-v1.md) / [`confidence-v1`](../extensions/confidence-v1.md) for the extension-specific payload shapes.
 
 ---
 
