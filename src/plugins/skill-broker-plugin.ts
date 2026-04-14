@@ -182,10 +182,40 @@ export class SkillBrokerPlugin implements Plugin {
     }
   }
 
+  /**
+   * Resolve the agent registry from one of two sources:
+   *
+   *   1. PROTOLABS_AGENTS_JSON env var — if set, parsed as JSON `{ agents: [...] }`.
+   *      Lets Infisical-backed deployments ship the entire registry through
+   *      a single secret without needing a file on disk.
+   *
+   *   2. workspace/agents.yaml — file on disk. The committed default covers
+   *      our standard fleet (Quinn, Jon, Researcher, Frank, protopen);
+   *      per-host overrides work by editing the file locally.
+   *
+   * If both are present, the env var wins. If neither resolves to a valid
+   * list, the broker registers zero external agents and logs a warning.
+   */
   private _loadAgents(): AgentDef[] {
+    // Try the env-var path first — deployments use this to avoid file state
+    const envOverride = process.env.PROTOLABS_AGENTS_JSON;
+    if (envOverride && envOverride.trim()) {
+      try {
+        const parsed = JSON.parse(envOverride) as { agents?: AgentDef[] };
+        if (Array.isArray(parsed.agents)) {
+          console.log(`[skill-broker] Loaded ${parsed.agents.length} agent(s) from PROTOLABS_AGENTS_JSON`);
+          return parsed.agents;
+        }
+        console.warn("[skill-broker] PROTOLABS_AGENTS_JSON parsed but has no `agents` array — falling back to yaml");
+      } catch (err) {
+        console.error("[skill-broker] Failed to parse PROTOLABS_AGENTS_JSON — falling back to yaml:", err);
+      }
+    }
+
+    // File path — committed default
     const agentsPath = join(this.workspaceDir, "agents.yaml");
     if (!existsSync(agentsPath)) {
-      console.warn("[skill-broker] agents.yaml not found — no A2A agents registered");
+      console.warn("[skill-broker] agents.yaml not found and PROTOLABS_AGENTS_JSON unset — no A2A agents registered");
       return [];
     }
     try {

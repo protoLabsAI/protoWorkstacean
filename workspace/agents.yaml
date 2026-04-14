@@ -1,0 +1,74 @@
+# protoLabs A2A Agent Registry
+#
+# This file wires the external A2A agent fleet into workstacean:
+#   1. SkillBroker — creates one A2AExecutor per entry; skills are
+#      auto-discovered from each agent's /.well-known/agent-card.json
+#      (refreshed every 10 min). Yaml skills take precedence as overrides.
+#   2. DiscordPlugin agent pool — when `discordBotTokenEnvKey` is set,
+#      spins up a dedicated Client() per agent so users can DM each bot.
+#
+# No secrets live here — only env var NAMES. The actual credentials are
+# provided by Infisical at container startup (homelab-iac/stacks/ai).
+#
+# URLs use the docker-ai network service names (e.g. `quinn`, `protocontent`),
+# which resolve inside the container. For out-of-Docker deployments use
+# ${ENV_VAR} interpolation (see protopen at the bottom).
+#
+# Override the entire list via PROTOLABS_AGENTS_JSON env var if a deploy
+# needs per-environment wiring without editing this file.
+
+agents:
+  # Quinn — QA engineer (code review, bug triage, PR auditing)
+  - name: quinn
+    url: http://quinn:7873/a2a
+    auth:
+      scheme: apiKey
+      credentialsEnv: QUINN_API_KEY
+    streaming: true
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_QUINN
+    subscribesTo:
+      - message.inbound.discord.#
+      - message.inbound.github.#
+
+  # Jon — content + communications (protoContent pipeline)
+  - name: jon
+    url: http://protocontent:18791/a2a
+    auth:
+      scheme: apiKey
+      credentialsEnv: PROTOCONTENT_API_KEY
+    streaming: true
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_JON
+    subscribesTo:
+      - message.inbound.discord.#
+
+  # Researcher — rabbit-hole.io deep research agent
+  - name: researcher
+    url: http://research-langgraph-agent:7874/a2a
+    auth:
+      scheme: apiKey
+      credentialsEnv: RESEARCHER_API_KEY
+    streaming: true
+    subscribesTo:
+      - message.inbound.discord.#
+
+  # Frank — CI/CD + infrastructure
+  - name: frank
+    url: http://frank:7880/a2a
+    auth:
+      scheme: apiKey
+      credentialsEnv: FRANK_API_KEY
+    streaming: true
+    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_FRANK
+    subscribesTo:
+      - message.inbound.discord.#
+      - message.inbound.github.#
+
+  # protopen — security/pentest/RF recon (remote via Tailscale)
+  - name: protopen
+    url: ${PROTOPEN_BASE_URL}/a2a
+    auth:
+      scheme: apiKey
+      credentialsEnv: PROTOPEN_API_KEY
+    streaming: false
+    subscribesTo:
+      - message.inbound.discord.#
