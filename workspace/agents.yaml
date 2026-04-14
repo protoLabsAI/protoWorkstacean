@@ -18,9 +18,11 @@
 # needs per-environment wiring without editing this file.
 
 agents:
-  # Quinn — QA engineer (code review, bug triage, PR auditing)
+  # Quinn — QA engineer (code review, bug triage, PR auditing).
+  # NOTE: Quinn's internal container port is 7870 (host-mapped to 7873).
+  # Inside the docker-ai network we must use the internal port.
   - name: quinn
-    url: http://quinn:7873/a2a
+    url: http://quinn:7870/a2a
     auth:
       scheme: apiKey
       credentialsEnv: QUINN_API_KEY
@@ -41,9 +43,10 @@ agents:
     subscribesTo:
       - message.inbound.discord.#
 
-  # Researcher — rabbit-hole.io deep research agent
+  # Researcher — rabbit-hole.io deep research agent.
+  # Same host→container port mapping as Quinn: internal listen is 7870.
   - name: researcher
-    url: http://research-langgraph-agent:7874/a2a
+    url: http://research-langgraph-agent:7870/a2a
     auth:
       scheme: apiKey
       credentialsEnv: RESEARCHER_API_KEY
