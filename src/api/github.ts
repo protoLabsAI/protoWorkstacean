@@ -51,7 +51,6 @@ export function createRoutes(ctx: ApiContext): Route[] {
     }> = [];
     let totalAll = 0;
     let failedAll = 0;
-    let failingMainCount = 0;
 
     for (const repo of repoList) {
       try {
@@ -77,7 +76,6 @@ export function createRoutes(ctx: ApiContext): Route[] {
           ) as { workflow_runs?: Array<{ conclusion: string }> };
           const latestMain = mainRuns.workflow_runs?.[0];
           mainBranchLastPushGreen = !latestMain || latestMain.conclusion === "success" || latestMain.conclusion === "skipped";
-          if (!mainBranchLastPushGreen) failingMainCount += 1;
         } catch {
           // Keep optimistic default on lookup errors to avoid false positives.
         }
@@ -94,6 +92,13 @@ export function createRoutes(ctx: ApiContext): Route[] {
         projects.push({ repo, successRate: 0, totalRuns: 0, failedRuns: 0, latestConclusion: null, mainBranchLastPushGreen: true });
       }
     }
+
+    // Derive failingMainCount from the per-repo mainBranchLastPushGreen values so
+    // the two signals share a single source of truth and can't disagree. Previously
+    // this was an independent counter incremented inside the loop, which diverged
+    // from mainBranchLastPushGreen in edge cases and caused ~60 false alerts/day
+    // for the ci.main_last_push_green goal (see issue #163).
+    const failingMainCount = projects.filter(p => !p.mainBranchLastPushGreen).length;
 
     const successRate = totalAll > 0 ? Math.round(((totalAll - failedAll) / totalAll) * 100) / 100 : 1;
     return Response.json({ successRate, totalRuns: totalAll, failedRuns: failedAll, failingMainCount, projects });
