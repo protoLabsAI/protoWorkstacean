@@ -33,6 +33,14 @@ export interface HITLRequest {
   expiresAt: string;      // ISO timestamp
   replyTopic: string;     // where to publish HITLResponse
   sourceMeta?: BusMessage["source"]; // carry source through so HITL plugin knows how to render
+  /**
+   * Time-to-live in ms before auto-action. 0 = immediate.
+   * When combined with onTimeout: 'approve', the request behaves as a pure
+   * broadcast notification — auto-approved immediately, no human gate.
+   */
+  ttlMs?: number;
+  /** Action to take when TTL elapses. */
+  onTimeout?: "approve" | "reject";
   // ── Cost escalation fields (populated by BudgetPlugin L3 requests) ────────
   escalation_reason?: string;
   cost_trail?: Array<{

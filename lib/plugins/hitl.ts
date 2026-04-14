@@ -129,11 +129,38 @@ export class HITLPlugin implements Plugin {
         );
       }
 
-      // Store in pending map
-      pendingRequests.set(req.correlationId, req);
-
       const iface = req.sourceMeta?.interface ?? "unknown";
       const renderer = renderers.get(iface);
+
+      // ── Immediate auto-approve (notification-only broadcast) ────────────
+      // When ttlMs === 0 and onTimeout === 'approve', the request is a pure
+      // broadcast. Publish an auto-approved HITLResponse immediately and
+      // invoke the renderer for a read-only notification display.
+      if (req.ttlMs === 0 && req.onTimeout === "approve") {
+        console.log(`[hitl] Auto-approving broadcast HITLRequest (${req.correlationId}) — notification-only`);
+        const autoResponse: HITLResponse = {
+          type: "hitl_response",
+          correlationId: req.correlationId,
+          decision: "approve",
+          decidedBy: "auto-approve",
+        };
+        bus.publish(req.replyTopic, {
+          id: crypto.randomUUID(),
+          correlationId: req.correlationId,
+          topic: req.replyTopic,
+          timestamp: Date.now(),
+          payload: autoResponse,
+        });
+        if (renderer) {
+          renderer.render(req, bus).catch(err =>
+            console.error(`[hitl] renderer.render (notification) failed for ${req.correlationId}:`, err),
+          );
+        }
+        return;
+      }
+
+      // Store in pending map
+      pendingRequests.set(req.correlationId, req);
 
       if (!renderer) {
         unrenderedCorrelationIds.add(req.correlationId);
