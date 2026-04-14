@@ -22,6 +22,8 @@ const HITL_TTL_MS = 30 * 60_000; // 30 min default input-required window
 export interface TrackedTask {
   correlationId: string;
   taskId: string;
+  /** A2A context ID for multi-turn continuity — preserved across HITL checkpoints. */
+  contextId?: string;
   agentName: string;
   replyTopic: string;
   executor: A2AExecutor;
@@ -33,6 +35,8 @@ export interface TrackedTask {
   callbackToken?: string;
   /** Set when the task has asked for human input — suppresses polling until resumed. */
   awaitingHuman?: boolean;
+  /** Number of HITL checkpoints raised so far — incremented on each input-required gate. */
+  hitlCount: number;
   /** The Discord/etc interface that originated the request — reused for HITL routing. */
   sourceInterface?: string;
   /** Source channel ID for HITL rendering. */
@@ -87,6 +91,8 @@ export class TaskTracker {
   track(params: {
     correlationId: string;
     taskId: string;
+    /** A2A context ID — preserved across HITL checkpoints for multi-turn continuity. */
+    contextId?: string;
     agentName: string;
     replyTopic: string;
     executor: A2AExecutor;
@@ -105,6 +111,7 @@ export class TaskTracker {
     this.tasks.set(params.correlationId, {
       correlationId: params.correlationId,
       taskId: params.taskId,
+      contextId: params.contextId,
       agentName: params.agentName,
       replyTopic: params.replyTopic,
       executor: params.executor,
@@ -113,6 +120,7 @@ export class TaskTracker {
       lastPolledAt: now,
       pollIntervalMs: params.pollIntervalMs ?? this.defaultPollIntervalMs,
       callbackToken: params.callbackToken ?? crypto.randomUUID(),
+      hitlCount: 0,
       sourceInterface: params.sourceInterface,
       sourceChannelId: params.sourceChannelId,
       sourceUserId: params.sourceUserId,
@@ -141,6 +149,11 @@ export class TaskTracker {
     const state = typeof status.state === "string" ? status.state : undefined;
 
     task.lastPolledAt = Date.now();
+
+    // Preserve contextId from push notification body for multi-turn continuity.
+    if (typeof body.contextId === "string" && body.contextId) {
+      task.contextId = body.contextId;
+    }
 
     if (state === "input-required") {
       const statusText = status.message?.parts
@@ -220,6 +233,10 @@ export class TaskTracker {
 
       try {
         const result = await task.executor.pollTask(task.taskId, task.correlationId, task.parentId);
+
+        // Persist contextId for multi-turn continuity across HITL checkpoints.
+        if (result.data?.contextId) task.contextId = result.data.contextId;
+
         const state = result.data?.taskState;
 
         if (state === "input-required") {
@@ -251,11 +268,13 @@ export class TaskTracker {
   private _raiseHitl(task: TrackedTask, question: string | undefined): void {
     if (task.awaitingHuman) return; // already raised, avoid duplicate
     task.awaitingHuman = true;
+    task.hitlCount++;
 
+    const checkpointSuffix = task.hitlCount > 1 ? ` (checkpoint ${task.hitlCount})` : "";
     const req: HITLRequest = {
       type: "hitl_request",
       correlationId: task.correlationId,
-      title: `Input needed from ${task.agentName}`,
+      title: `Input needed from ${task.agentName}${checkpointSuffix}`,
       summary: question || "The agent is requesting input to continue.",
       options: ["approve", "reject"],
       expiresAt: new Date(Date.now() + HITL_TTL_MS).toISOString(),
@@ -298,7 +317,7 @@ export class TaskTracker {
     try {
       await task.executor.resumeTask(
         task.taskId,
-        task.correlationId,
+        task.contextId ?? task.correlationId,
         decisionText,
         task.correlationId,
         task.parentId,
