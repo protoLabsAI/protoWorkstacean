@@ -6,6 +6,8 @@
  * selection, delegation rules, and bus subscription patterns.
  */
 
+import type { Action } from "../planner/types/action.ts";
+
 export type AgentRole =
   | "orchestrator"   // Ava — delegates to subagents, drives plans
   | "qa"             // Quinn — code review, bug triage
@@ -85,6 +87,13 @@ export interface AgentDefinition {
   skills: AgentSkillDefinition[];
 
   /**
+   * GOAP actions owned by this agent. Populated into the ActionRegistry at startup.
+   * Replaces the global workspace/actions.yaml — actions live alongside the agent
+   * that executes them.
+   */
+  actions?: Action[];
+
+  /**
    * Optional Discord bot token env var. When set, DiscordPlugin's agent
    * pool spins up a dedicated Client() for this agent so users can @-mention
    * or DM the agent's bot directly instead of routing through the shared
@@ -107,5 +116,6 @@ export interface RawAgentYaml {
   canDelegate?: unknown;
   maxTurns?: unknown;
   skills?: unknown;
+  actions?: unknown;
   discordBotTokenEnvKey?: unknown;
 }

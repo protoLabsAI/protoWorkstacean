@@ -13,6 +13,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AgentDefinition, AgentRole, AgentSkillDefinition, RawAgentYaml } from "./types.ts";
+import type { Action } from "../planner/types/action.ts";
 
 const VALID_ROLES: AgentRole[] = [
   "orchestrator",
@@ -97,6 +98,8 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
         .filter((s): s is AgentSkillDefinition => s !== null)
     : [];
 
+  const actions: Action[] | undefined = parseActions(raw.actions, fileName);
+
   const discordBotTokenEnvKey =
     typeof raw.discordBotTokenEnvKey === "string" && raw.discordBotTokenEnvKey.length > 0
       ? raw.discordBotTokenEnvKey
@@ -113,8 +116,64 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
     ...(canDelegate !== undefined ? { canDelegate } : {}),
     maxTurns,
     skills,
+    ...(actions?.length ? { actions } : {}),
     ...(discordBotTokenEnvKey ? { discordBotTokenEnvKey } : {}),
   };
+}
+
+/**
+ * Parse the optional `actions` array from a raw agent YAML.
+ * Invalid entries are skipped with a warning rather than throwing.
+ */
+function parseActions(raw: unknown, fileName: string): Action[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+
+  const actions: Action[] = [];
+  for (const a of raw) {
+    if (typeof a !== "object" || a === null) continue;
+    const entry = a as Record<string, unknown>;
+    if (typeof entry.id !== "string" || !entry.id) {
+      console.warn(`[agent-definition-loader] Skipping action in ${fileName}: missing 'id'`);
+      continue;
+    }
+    if (typeof entry.goalId !== "string" || !entry.goalId) {
+      console.warn(`[agent-definition-loader] Skipping action '${entry.id}' in ${fileName}: missing 'goalId'`);
+      continue;
+    }
+    try {
+      const action: Action = {
+        id: entry.id as string,
+        name: typeof entry.name === "string" ? entry.name : entry.id as string,
+        description: typeof entry.description === "string" ? entry.description : "",
+        goalId: entry.goalId as string,
+        tier: (typeof entry.tier === "string" ? entry.tier : "tier_0") as Action["tier"],
+        priority: typeof entry.priority === "number" ? entry.priority : 0,
+        cost: typeof entry.cost === "number" ? entry.cost : 0,
+        preconditions: Array.isArray(entry.preconditions)
+          ? (entry.preconditions as Array<Record<string, unknown>>).map((p) => ({
+              path: p.path as string,
+              operator: p.operator as Action["preconditions"][number]["operator"],
+              value: p.value,
+            }))
+          : [],
+        effects: Array.isArray(entry.effects)
+          ? (entry.effects as Array<Record<string, unknown>>).map((e) => ({
+              path: e.path as string,
+              operation: ((e.operation ?? e.op) as Action["effects"][number]["operation"]),
+              value: e.value,
+            }))
+          : [],
+        meta: typeof entry.meta === "object" && entry.meta !== null
+          ? (entry.meta as Action["meta"])
+          : {},
+      };
+      actions.push(action);
+    } catch (err) {
+      console.warn(`[agent-definition-loader] Skipping action '${entry.id}' in ${fileName}:`, err);
+    }
+  }
+
+  return actions.length > 0 ? actions : undefined;
 }
 
 /**

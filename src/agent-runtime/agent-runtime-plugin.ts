@@ -4,6 +4,9 @@
  * Reads workspace/agents/*.yaml on install, creates one DeepAgentExecutor per agent
  * definition, and registers each skill declared in that agent's YAML.
  *
+ * Also populates the ActionRegistry with any `actions` declared in agent YAML files,
+ * replacing the former global workspace/actions.yaml loader.
+ *
  * Uses deepagents (LangGraph-native) instead of @protolabsai/sdk — no subprocess
  * spawning, no coding-agent verification prompts. LLM calls go through
  * LiteLLM gateway via ChatOpenAI.
@@ -14,6 +17,7 @@
 
 import type { Plugin, EventBus } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
+import type { ActionRegistry } from "../planner/action-registry.ts";
 import { DeepAgentExecutor } from "../executor/executors/deep-agent-executor.ts";
 import { loadAgentDefinitions } from "./agent-definition-loader.ts";
 import { BUS_TOOL_NAMES } from "./tools/bus-tools.ts";
@@ -34,15 +38,19 @@ export class AgentRuntimePlugin implements Plugin {
 
   private readonly config: AgentRuntimeConfig;
   private readonly executorRegistry: ExecutorRegistry;
+  private readonly actionRegistry?: ActionRegistry;
 
-  constructor(config: AgentRuntimeConfig, executorRegistry: ExecutorRegistry) {
+  constructor(config: AgentRuntimeConfig, executorRegistry: ExecutorRegistry, actionRegistry?: ActionRegistry) {
     this.config = config;
     this.executorRegistry = executorRegistry;
+    this.actionRegistry = actionRegistry;
   }
 
   install(_bus: EventBus): void {
     const definitions = loadAgentDefinitions(this.config.workspaceDir);
     const knownTools = new Set(BUS_TOOL_NAMES as readonly string[]);
+
+    let totalActions = 0;
 
     for (const def of definitions) {
       const unknownTools = (def.tools ?? []).filter(t => !knownTools.has(t));
@@ -65,10 +73,21 @@ export class AgentRuntimePlugin implements Plugin {
           priority: 10,
         });
       }
+
+      // Populate ActionRegistry with any actions declared in this agent's YAML
+      if (this.actionRegistry && def.actions?.length) {
+        for (const action of def.actions) {
+          this.actionRegistry.upsert(action);
+          totalActions++;
+        }
+      }
     }
 
     const agentNames = definitions.map(d => d.name).join(", ") || "(none)";
     console.log(`[agent-runtime] Registered ${definitions.length} deep agent(s): ${agentNames}`);
+    if (totalActions > 0) {
+      console.info(`[agent-runtime] Loaded ${totalActions} action(s) from agent YAML files`);
+    }
   }
 
   uninstall(): void {}

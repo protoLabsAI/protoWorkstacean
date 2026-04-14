@@ -1,6 +1,5 @@
-import { existsSync, readdirSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, mkdirSync } from "node:fs";
 import { resolve, join, extname } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { InMemoryEventBus } from "../lib/bus";
 import { DebugPlugin } from "../lib/plugins/debug";
 import { LoggerPlugin } from "../lib/plugins/logger";
@@ -9,7 +8,6 @@ import { SignalPlugin } from "../lib/plugins/signal";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { ActionRegistry } from "./planner/action-registry";
 import type { Plugin, } from "../lib/types";
-import type { Action } from "./planner/types/action";
 import { parseEnv } from "./config/env.ts";
 // Fail-fast env validation — exits immediately on misconfiguration.
 parseEnv();
@@ -40,64 +38,16 @@ import { ChannelRegistry } from "../lib/channels/channel-registry.js";
 const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));
 channelRegistry.startWatching();
 
-// --- Shared ActionRegistry — populated from workspace/actions.yaml ---
+// --- Shared ActionRegistry — populated from workspace/agents/*.yaml (actions field) ---
 const actionRegistry = new ActionRegistry();
-
-function loadActionsYaml(): void {
-  const actionsPath = join(workspaceDir, "actions.yaml");
-  if (!existsSync(actionsPath)) return;
-  try {
-    const raw = parseYaml(readFileSync(actionsPath, "utf8")) as { actions?: Record<string, unknown>[] };
-    const actionsData = raw?.actions ?? [];
-    for (const a of actionsData) {
-      try {
-        const action: Action = {
-          id: a.id as string,
-          name: a.name as string,
-          description: (a.description as string) ?? "",
-          goalId: a.goalId as string,
-          tier: a.tier as Action["tier"],
-          priority: typeof a.priority === "number" ? a.priority : 0,
-          cost: typeof a.cost === "number" ? a.cost : 0,
-          preconditions: Array.isArray(a.preconditions)
-            ? (a.preconditions as Array<{ path: string; operator: string; value?: unknown }>).map((p) => ({
-                path: p.path,
-                operator: p.operator as Action["preconditions"][number]["operator"],
-                value: p.value,
-              }))
-            : [],
-          effects: Array.isArray(a.effects)
-            ? (a.effects as Array<{ path: string; op?: string; operation?: string; value?: unknown }>).map((e) => ({
-                path: e.path,
-                operation: ((e.operation ?? e.op) as Action["effects"][number]["operation"]),
-                value: e.value,
-              }))
-            : [],
-          meta: typeof a.meta === "object" && a.meta !== null ? (a.meta as Action["meta"]) : {},
-        };
-        actionRegistry.upsert(action);
-      } catch (err) {
-        console.warn(`[actions-loader] Skipping invalid action '${a.id}':`, err);
-      }
-    }
-    console.info(`[actions-loader] Loaded ${actionRegistry.size} action(s) from workspace/actions.yaml`);
-  } catch (err) {
-    console.error("[actions-loader] Failed to parse workspace/actions.yaml:", err);
-  }
-}
-loadActionsYaml();
 
 // --- Telemetry: per-goal and per-action counters persisted to knowledge.db ---
 // Hosts the audit view ("is this action actually used?") exposed via
 // /api/telemetry/* endpoints. Goal and action counters are bumped by the
-// goal-evaluator and action-dispatcher respectively. Loaded actions are
-// registered here at startup so zero-count rows exist for the audit.
-import { TelemetryService, ACTION_EVENTS } from "./telemetry/telemetry-service.js";
+// goal-evaluator and action-dispatcher respectively.
+import { TelemetryService } from "./telemetry/telemetry-service.js";
 const telemetry = new TelemetryService(`${dataDir}/knowledge.db`);
 telemetry.init();
-for (const action of actionRegistry.getAll()) {
-  telemetry.registerKnown("action", action.id, ACTION_EVENTS);
-}
 
 // Core plugins — always loaded, statically imported (no dynamic overhead needed)
 const debugPlugin = new DebugPlugin();
@@ -237,6 +187,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
           apiKey: process.env.WORKSTACEAN_API_KEY,
         },
         executorRegistry,
+        actionRegistry,
       );
     },
   },
