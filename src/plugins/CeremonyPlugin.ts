@@ -27,9 +27,13 @@
  *  10. Deploy default ceremony YAML files on first run
  *
  * Topics published:
- *   ceremony.{id}.execute    — ceremony cron fired
- *   ceremony.{id}.completed  — ceremony run finished
- *   world.state.snapshot     — (via CeremonyStateExtension) ceremony state update
+ *   ceremony.{id}.execute                    — ceremony cron fired
+ *   ceremony.{id}.completed                  — ceremony run finished (kept for back-compat;
+ *                                              subscribe to autonomous.outcome.ceremony.{id}.{skill}
+ *                                              as the canonical unified outcome topic instead)
+ *   autonomous.outcome.ceremony.{id}.{skill} — canonical unified outcome; emitted automatically by
+ *                                              SkillDispatcherPlugin for every terminal task
+ *   world.state.snapshot                     — (via CeremonyStateExtension) ceremony state update
  *
  * Topics subscribed:
  *   ceremony.#               — intercepts completed events for persistence/notification
@@ -387,7 +391,7 @@ export class CeremonyPlugin implements Plugin {
             targets: ceremony.targets,
             runId: context.runId,
             projectPaths: context.projectPaths,
-            meta: { systemActor: `ceremony/${ceremony.id}` },
+            meta: { systemActor: `ceremony.${ceremony.id}` },
           },
           reply: { topic: replyTopic },
         });
@@ -418,7 +422,10 @@ export class CeremonyPlugin implements Plugin {
       error,
     };
 
-    // Publish completed event
+    // Publish completed event.
+    // NOTE: SkillDispatcherPlugin already emits autonomous.outcome.ceremony.{id}.{skill}
+    // for every terminal task — that is the canonical unified outcome topic. This publish
+    // is retained for back-compat with any subscribers listening on ceremony.{id}.completed.
     const completedTopic = `ceremony.${ceremony.id}.completed`;
     const completedPayload: CeremonyCompletedPayload = {
       type: "ceremony.completed",
