@@ -51,6 +51,25 @@ interface AgentDef {
 }
 
 const CARD_REFRESH_INTERVAL_MS = 10 * 60_000; // 10 min
+const HEARTBEAT_INTERVAL_MS = 60_000;          // 1 min — fleet liveness
+
+/**
+ * Liveness probe result for a single A2A agent, refreshed on the heartbeat
+ * cadence. Exposed via getFleetHealth() so the /api/agent-health endpoint
+ * and the `agent_health` world-state domain can surface fleet availability.
+ */
+export interface AgentHealthProbe {
+  agentName: string;
+  url: string;
+  reachable: boolean;
+  latencyMs?: number;
+  lastProbedAt: number;
+  cardAvailable?: boolean;
+  streaming?: boolean;
+  pushNotifications?: boolean;
+  skillCount?: number;
+  error?: string;
+}
 
 export class SkillBrokerPlugin implements Plugin {
   readonly name = "skill-broker";
@@ -60,12 +79,24 @@ export class SkillBrokerPlugin implements Plugin {
   private readonly workspaceDir: string;
   private readonly executorRegistry: ExecutorRegistry;
   private refreshTimer?: ReturnType<typeof setInterval>;
+  private heartbeatTimer?: ReturnType<typeof setInterval>;
   /** Tracks skills we registered per agent so we can cleanly re-register on refresh. */
   private registeredSkills = new Map<string, Set<string>>();
+  /** Per-agent liveness probe cache, refreshed every HEARTBEAT_INTERVAL_MS. */
+  private fleetHealth = new Map<string, AgentHealthProbe>();
 
   constructor(workspaceDir: string, executorRegistry: ExecutorRegistry) {
     this.workspaceDir = workspaceDir;
     this.executorRegistry = executorRegistry;
+  }
+
+  /**
+   * Fleet liveness snapshot. One entry per A2A agent registered at install.
+   * `/api/agent-health` merges this with ExecutorRegistry to surface both
+   * "what skills are wired" and "is the agent actually reachable right now".
+   */
+  getFleetHealth(): AgentHealthProbe[] {
+    return Array.from(this.fleetHealth.values());
   }
 
   install(bus: EventBus): void {
@@ -124,10 +155,66 @@ export class SkillBrokerPlugin implements Plugin {
       }
     }, CARD_REFRESH_INTERVAL_MS);
     this.refreshTimer.unref?.();
+
+    // Fleet liveness heartbeat — probes each agent's card on a faster
+    // cadence than the 10-min skill-discovery refresh. Exposed via
+    // getFleetHealth() so /api/agent-health can report reachability +
+    // latency for on-demand agents alongside the persistent DeepAgents.
+    this.heartbeatTimer = setInterval(() => {
+      for (const agent of agents) {
+        void this._probeAgentHealth(agent, resolveEnvVars(agent.url, "skill-broker"));
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer.unref?.();
+    // Kick off an initial probe immediately so the first /api/agent-health
+    // request doesn't return an empty snapshot.
+    for (const agent of agents) {
+      void this._probeAgentHealth(agent, resolveEnvVars(agent.url, "skill-broker"));
+    }
   }
 
   uninstall(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+  }
+
+  /**
+   * Single-agent liveness probe. Fetches the agent card with a 3s timeout
+   * and records reachability + latency. Also mirrors the discovery side-
+   * effect of updating the executor's capability flags so heartbeat and
+   * discovery converge to the same truth.
+   *
+   * Never throws — bad fetches just produce a `reachable: false` probe
+   * entry. `/api/agent-health` surfaces the error for the operator.
+   */
+  private async _probeAgentHealth(agent: AgentDef, url: string): Promise<void> {
+    const startedAt = Date.now();
+    const probe: AgentHealthProbe = {
+      agentName: agent.name,
+      url,
+      reachable: false,
+      lastProbedAt: startedAt,
+    };
+
+    try {
+      const card = await this._fetchCard(url);
+      const elapsed = Date.now() - startedAt;
+      if (card) {
+        probe.reachable = true;
+        probe.cardAvailable = true;
+        probe.latencyMs = elapsed;
+        probe.streaming = card.capabilities?.streaming === true;
+        probe.pushNotifications = card.capabilities?.pushNotifications === true;
+        probe.skillCount = (card.skills ?? []).length;
+      } else {
+        probe.error = "card fetch returned null (agent unreachable or malformed card)";
+      }
+    } catch (err) {
+      probe.latencyMs = Date.now() - startedAt;
+      probe.error = err instanceof Error ? err.message : String(err);
+    }
+
+    this.fleetHealth.set(agent.name, probe);
   }
 
   /**
