@@ -180,6 +180,37 @@ export interface CeremonyExecutePayload {
   ceremonyId?: string;
 }
 
+// ── worktree.recovered ───────────────────────────────────────────────────────
+
+/** Classification of a dirty-worktree recovery attempt on automaker restart. */
+export type WorktreeRecoveryOutcome = 'auto_recovered' | 'unrecoverable';
+
+/**
+ * Payload for `worktree.recovered` — published by the automaker server when it
+ * encounters a dirty worktree on restart and attempts self-healing.
+ *
+ * `outcome: 'auto_recovered'` → WIP was committed to a recovery/ branch; the
+ *   feature will be resumed automatically.
+ * `outcome: 'unrecoverable'` → merge conflicts or no branch; HITL intervention
+ *   is required.
+ */
+export interface WorktreeRecoveredPayload {
+  /** Feature ID that owned the dirty worktree. */
+  featureId: string;
+  /** Absolute path to the project root. */
+  projectPath: string;
+  /** Absolute path to the affected worktree (if known). */
+  worktreePath?: string;
+  /** Recovery outcome classification. */
+  outcome: WorktreeRecoveryOutcome;
+  /** Human-readable description of what happened. */
+  reason: string;
+  /** The `recovery/<id>-<ts>` branch where WIP was committed (auto_recovered only). */
+  recoveryBranch?: string;
+  /** ISO 8601 timestamp when the recovery event occurred. */
+  recoveredAt: string;
+}
+
 // ── world.goal.violated ──────────────────────────────────────────────────────
 // Defined in src/types/events.ts — re-exported here for convenience.
 export type { GoalViolatedEventPayload } from "../types/events.ts";
