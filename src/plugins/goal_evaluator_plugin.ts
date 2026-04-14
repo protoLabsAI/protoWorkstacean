@@ -67,6 +67,13 @@ export class GoalEvaluatorPlugin implements Plugin, IGoalEvaluatorPlugin {
     });
     this.subscriptionIds.push(subId);
 
+    // Hot-reload: re-read goals.yaml when GoalHotReloadPlugin approves a proposal
+    const reloadSubId = bus.subscribe("goals.reload", this.name, () => {
+      console.log("[goal-evaluator] goals.reload received — reloading goals from disk");
+      this.reloadGoals();
+    });
+    this.subscriptionIds.push(reloadSubId);
+
     // Flush any buffered violations now that bus is available
     if (this.violationBuffer.length > 0) {
       console.info(`[goal-evaluator] Flushing ${this.violationBuffer.length} buffered violation(s)`);
