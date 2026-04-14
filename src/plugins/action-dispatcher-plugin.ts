@@ -184,6 +184,7 @@ export class ActionDispatcherPlugin implements Plugin {
           source: { interface: "cron" },
           payload: {
             skill: action.meta.skillHint ?? action.id,
+            content: this._describeDispatch(action),
             goalId: action.goalId,
             meta: { ...action.meta, systemActor: "goap", actionId: action.id, goalId: action.goalId },
           },
@@ -222,6 +223,7 @@ export class ActionDispatcherPlugin implements Plugin {
           reply: { topic: replyTopic },
           payload: {
             skill: action.meta.skillHint ?? action.id,
+            content: this._describeDispatch(action),
             goalId: action.goalId,
             meta: { ...action.meta, systemActor: "goap", actionId: action.id, goalId: action.goalId },
           },
@@ -340,5 +342,18 @@ export class ActionDispatcherPlugin implements Plugin {
     if (next) {
       await this.executeAction(next.action, next.correlationId, next.parentCorrelationId, crypto.randomUUID(), next.enqueuedAt);
     }
+  }
+
+  /**
+   * Build a human-readable description of a GOAP dispatch. Carried as
+   * `payload.content` so skill-dispatcher has a non-empty "user message"
+   * for the episodic memory write under the `system_goap` group.
+   * Without this, GOAP dispatches produce no episodes because
+   * skill-dispatcher's addEpisode requires both groupId AND originalContent.
+   */
+  private _describeDispatch(action: import("../planner/types/action.ts").Action): string {
+    const goal = action.goalId ? ` to satisfy goal ${action.goalId}` : "";
+    const desc = action.description ? ` — ${action.description}` : "";
+    return `Autonomous dispatch: ${action.name || action.id}${goal}${desc}`;
   }
 }
