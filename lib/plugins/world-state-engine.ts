@@ -24,6 +24,7 @@
  * Inbound topics:
  *   tool.world_state.get       — bus-based world state query
  *   mcp.tool.get_world_state   — MCP tool invocation
+ *   world.state.delta          — agent-emitted delta; applied in-process, triggers goal re-evaluation
  *
  * Outbound topics:
  *   world.state.{domain}       — after each domain tick
@@ -37,6 +38,7 @@ import { dirname, resolve } from "node:path";
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import type { WorldState, WorldStateDomain, WorldStateSnapshot } from "../types/world-state.ts";
 import { HttpClient } from "../../src/services/http-client.ts";
+import type { WorldStateDeltaPayload } from "../../src/executor/extensions/effect-domain.ts";
 
 // ── Domain registration ───────────────────────────────────────────────────────
 
@@ -187,6 +189,11 @@ export class WorldStateEngine implements Plugin {
       await this._handleGetWorldState(msg);
     });
     this.subscriptionIds.push(mcpSubId);
+
+    const deltaSubId = bus.subscribe("world.state.delta", this.name, async (msg: BusMessage) => {
+      await this._handleStateDelta(msg);
+    });
+    this.subscriptionIds.push(deltaSubId);
 
     // Start tickers for any domains registered before install()
     for (const reg of this.domains.values()) {
@@ -557,6 +564,75 @@ export class WorldStateEngine implements Plugin {
         ? { success: true, data: result }
         : { success: false, error: domain ? `No data for domain "${domain}"` : "World state not yet collected" },
     });
+  }
+
+  // ── Delta subscriber ───────────────────────────────────────────────────────
+
+  private async _handleStateDelta(msg: BusMessage): Promise<void> {
+    const payload = msg.payload as WorldStateDeltaPayload | undefined;
+    if (!payload?.delta?.length) return;
+
+    let appliedCount = 0;
+    for (const d of payload.delta) {
+      const domainData = this.worldState.domains[d.domain];
+      if (!domainData) {
+        console.warn(`[world-state-engine] Delta for unknown domain "${d.domain}" — skipping`);
+        continue;
+      }
+
+      if (this._applyNumericDelta(domainData, d.path, d.delta)) {
+        appliedCount++;
+      }
+    }
+
+    if (appliedCount === 0) return;
+
+    this.worldState.timestamp = Date.now();
+
+    if (this.bus) {
+      this.bus.publish("world.state.updated", {
+        id: crypto.randomUUID(),
+        correlationId: msg.correlationId,
+        topic: "world.state.updated",
+        timestamp: Date.now(),
+        payload: this.worldState,
+      });
+    }
+
+    console.log(
+      `[world-state-engine] Applied ${appliedCount} delta(s) from ${payload.source}/${payload.skill} — goal evaluation re-fired`,
+    );
+  }
+
+  /**
+   * Walk `path` into `domainData` (e.g. "data.blockedPRs") and add `delta`
+   * to the numeric value found there. Returns true if applied, false if the
+   * path does not resolve to a number.
+   */
+  private _applyNumericDelta(domainData: WorldStateDomain<unknown>, path: string, delta: number): boolean {
+    const parts = path.split(".");
+    let cursor: unknown = domainData;
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (cursor === null || typeof cursor !== "object") return false;
+      cursor = (cursor as Record<string, unknown>)[parts[i]];
+    }
+
+    const lastKey = parts[parts.length - 1];
+    if (cursor === null || typeof cursor !== "object") return false;
+
+    const obj = cursor as Record<string, unknown>;
+    const current = obj[lastKey];
+
+    if (typeof current !== "number") {
+      console.warn(
+        `[world-state-engine] Delta path "${path}" is not a number (got ${typeof current}) — skipping`,
+      );
+      return false;
+    }
+
+    obj[lastKey] = current + delta;
+    return true;
   }
 
   private _persistSnapshot(): void {
