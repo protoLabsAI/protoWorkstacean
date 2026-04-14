@@ -20,6 +20,17 @@ import type { SDKResultMessageSuccess, SDKResultMessageError, ExtendedUsage } fr
 import type { AgentDefinition } from "./types.ts";
 import type { ToolRegistry } from "./tool-registry.ts";
 
+export interface SkillProgressEvent {
+  /** Discriminates between tool invocations and assistant text chunks. */
+  eventType: "tool_call" | "text";
+  /** Propagated trace ID from the originating bus message. */
+  correlationId: string;
+  /** Tool name — present when eventType === 'tool_call'. */
+  toolName?: string;
+  /** Text content — present when eventType === 'text'. */
+  text?: string;
+}
+
 export interface AgentRunOptions {
   /** The prompt / task to send to the agent. */
   prompt: string;
@@ -27,6 +38,8 @@ export interface AgentRunOptions {
   correlationId: string;
   /** Working directory for the agent's file operations. Defaults to process.cwd(). */
   cwd?: string;
+  /** Optional callback invoked for each tool_use block and assistant text block in the stream. */
+  onProgress?: (event: SkillProgressEvent) => void;
 }
 
 export interface AgentRunResult {
@@ -71,7 +84,7 @@ export class AgentExecutor {
   }
 
   async run(opts: AgentRunOptions): Promise<AgentRunResult> {
-    const { prompt, correlationId, cwd } = opts;
+    const { prompt, correlationId, cwd, onProgress } = opts;
     const agentTools = this.toolRegistry.forAgent(this.agentDef.tools);
 
     // Build the embedded MCP server with this agent's whitelisted tools.
@@ -136,7 +149,7 @@ export class AgentExecutor {
           break;
         }
       }
-      // Stream text blocks for logging / debugging
+      // Stream assistant content blocks for logging and progress events
       if (
         message.type === "assistant" &&
         "message" in message &&
@@ -147,6 +160,9 @@ export class AgentExecutor {
             if (block.type === "text" && "text" in block) {
               // Progress visible in logs when running
               process.stdout.write(".");
+              onProgress?.({ eventType: "text", correlationId, text: String((block as { text: unknown }).text) });
+            } else if (block.type === "tool_use" && "name" in block) {
+              onProgress?.({ eventType: "tool_call", correlationId, toolName: String((block as { name: unknown }).name) });
             }
           }
         }
