@@ -512,6 +512,7 @@ const apiContext: ApiContext = {
   telemetry,
   apiKey: API_KEY,
   mailbox: contextMailbox,
+  taskTracker,
 };
 
 const routes = createAllRoutes(apiContext);

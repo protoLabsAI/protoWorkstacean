@@ -16,6 +16,7 @@ import { createRoutes as avaToolRoutes } from "./ava-tools.ts";
 import { createRoutes as boardRoutes } from "./board.ts";
 import { createRoutes as mailboxRoutes } from "./mailbox.ts";
 import { createRoutes as discordRoutes } from "./discord.ts";
+import { createRoutes as a2aCallbackRoutes } from "./a2a-callback.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
@@ -31,5 +32,6 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...boardRoutes(ctx),
     ...(ctx.mailbox ? mailboxRoutes(ctx.mailbox, ctx) : []),
     ...discordRoutes(ctx),
+    ...(ctx.taskTracker ? a2aCallbackRoutes(ctx.taskTracker, ctx) : []),
   ];
 }

@@ -306,14 +306,30 @@ export class SkillDispatcherPlugin implements Plugin {
         && taskId
         && executor.type === "a2a"
       ) {
+        const a2aExecutor = executor as A2AExecutor;
+        const callbackToken = crypto.randomUUID();
         this.taskTracker.track({
           correlationId,
           taskId,
           agentName: targets[0] ?? "unknown",
           replyTopic,
-          executor: executor as A2AExecutor,
+          executor: a2aExecutor,
           parentId,
+          callbackToken,
         });
+
+        // Try to register a push-notification webhook so the agent can POST
+        // completion back instead of us polling. Falls back to polling silently.
+        const callbackBaseUrl = process.env.WORKSTACEAN_BASE_URL;
+        if (callbackBaseUrl) {
+          const callbackUrl = `${callbackBaseUrl.replace(/\/$/, "")}/api/a2a/callback/${encodeURIComponent(taskId)}`;
+          void a2aExecutor.registerPushNotification(taskId, callbackUrl, callbackToken, correlationId, parentId)
+            .then(ok => {
+              if (ok) console.log(`[skill-dispatcher] Push-notification registered for ${taskId.slice(0, 8)}…`);
+            })
+            .catch(err => console.debug("[skill-dispatcher] push-notification register failed:", err));
+        }
+
         this._publishFlowEvent("flow.item.updated", {
           id: flowItemId,
           status: "active",
