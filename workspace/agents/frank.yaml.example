@@ -29,9 +29,20 @@ skills:
   - name: ci_debug
     description: Debug a CI failure — read logs, identify root cause
     keywords: [ci, pipeline, build failed, workflow, action failed, test failed, deploy failed]
+    effects:
+      - domain: ci
+        path: data.failingMainCount
+        delta: -1
+        confidence: 0.6
+      - domain: pr_pipeline
+        path: data.failingCi
+        delta: -1
+        confidence: 0.6
+
   - name: health_check
     description: Run a comprehensive health check across all services
     keywords: [health, unhealthy, down, unreachable, service, container, infra, /health]
+
   - name: deploy_check
     description: Verify a deployment is healthy after rollout
     keywords: [deploy, deployment, rollout, release, ship, pushed, /deploy]
