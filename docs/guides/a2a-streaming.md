@@ -8,7 +8,7 @@ How to add Server-Sent Events (SSE) streaming to an A2A agent so consumers (like
 
 By default, A2A agents handle `message/send` — the client blocks until the agent finishes. For long-running skills (deep research, multi-step triage), this creates dead air. SSE streaming solves this:
 
-1. Client sends `message/sendStream` instead of `message/send`
+1. Client sends `message/stream` instead of `message/send`
 2. Agent returns `text/event-stream` with intermediate updates
 3. Client reads events as they arrive, publishes them to Discord for o11y
 4. Agent sends final artifact + `[DONE]` to close the stream
@@ -25,9 +25,9 @@ AGENT_CARD = {
 }
 ```
 
-### 2. Handle `message/sendStream` in your `/a2a` endpoint
+### 2. Handle `message/stream` in your `/a2a` endpoint
 
-Accept both `message/send` (blocking) and `message/sendStream` (SSE):
+Accept both `message/send` (blocking) and `message/stream` (SSE):
 
 ```python
 from fastapi.responses import StreamingResponse
@@ -37,7 +37,7 @@ import json, asyncio, queue
 async def a2a_handler(req: dict):
     method = req.get("method", "")
     
-    if method == "message/sendStream":
+    if method == "message/stream":
         return StreamingResponse(
             sse_generator(req),
             media_type="text/event-stream",
@@ -128,7 +128,7 @@ Ava calls chat_with_agent(agent="researcher", ...)
     ↓
 ava-tools.ts POST /api/a2a/chat → ExecutorRegistry → A2AExecutor
     ↓
-A2AExecutor sees streaming:true → sends message/sendStream
+A2AExecutor sees streaming:true → sends message/stream
     ↓
 protoResearcher returns text/event-stream:
     data: {"status":{"state":"working","message":"Scanning HuggingFace..."}}
@@ -155,3 +155,19 @@ Final artifact → returned as chat_with_agent response to Ava
 If the agent doesn't support streaming (card says `streaming: false` or omits it), A2AExecutor falls back to blocking `message/send`. No code changes needed on the client side.
 
 If the agent supports streaming but the SSE connection fails, the executor catches the error and falls back to `message/send` automatically.
+
+## Artifact chunking
+
+Agents can progressively stream a long artifact in multiple frames using `append` + `lastChunk` on `TaskArtifactUpdateEvent`:
+
+- `append: false` (or omitted) → the incoming `parts` **replace** the buffer for that `artifactId`
+- `append: true` → the incoming `parts` are **concatenated** to the existing buffer
+- `lastChunk: true` → finalize the artifact; A2AExecutor fires `onStreamUpdate({ type: "artifact_complete", ... })`
+
+This lets a researcher stream a 2000-word report as 20 × 100-word chunks. Each chunk surfaces live via `onStreamUpdate({ type: "artifact_chunk", ... })` to Discord, the dashboard, etc. The final concatenated text is what lands in the `SkillResult.text`.
+
+## Long-running tasks + input-required
+
+If your agent returns a non-terminal task (`working`, `submitted`, `input-required`) rather than a final result, workstacean's `TaskTracker` polls `tasks/get` (or uses `tasks/resubscribe` for streaming agents) and publishes the response on the original reply topic once terminal. No caller-side timeout tuning needed.
+
+For `input-required`, the tracker raises a HITL request automatically and resumes the task via `message/send` with the same `taskId` once a human decides. See [HITL guide](./hitl.md) for the full flow.

@@ -164,7 +164,6 @@ agents:
       - board_health
       - onboard_project
       - plan
-      - plan_resume
 
   - name: quinn
     team: dev

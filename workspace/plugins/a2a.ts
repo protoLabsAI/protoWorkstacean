@@ -191,7 +191,6 @@ const SKILL_KEYWORDS: Record<string, string[]> = {
   pr_review:    ["pr", "pull request", "review", "merge", "ci", "/review"],
   // Ava
   plan:           ["build", "create feature", "new feature", "idea:", "let's build", "plan:", "i want to"],
-  plan_resume:    ["approve", "reject", "modify"],
   sitrep:         ["status", "sitrep", "situation", "what's up", "summary", "/status", "/sitrep"],
   manage_feature: ["unblock", "assign", "move to", "add to board"],
   board_health:   ["blocked", "stalled", "stuck", "health", "unhealthy"],

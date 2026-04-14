@@ -98,7 +98,7 @@ Accept: text/event-stream       (if streaming enabled)
 
 ## SSE streaming
 
-When the agent card declares `capabilities.streaming: true`, the executor sends `message/sendStream` and reads Server-Sent Events:
+When the agent card declares `capabilities.streaming: true`, the executor sends `message/stream` and reads Server-Sent Events:
 
 - **TaskStatusUpdateEvent** — intermediate status changes with optional message
 - **TaskArtifactUpdateEvent** — progressive artifact chunks
@@ -124,7 +124,7 @@ The executor resolves the API key from the environment variable named in `apiKey
 
 ## Agent card discovery
 
-On startup, `SkillBrokerPlugin` fetches `GET /.well-known/agent.json` from each agent's base URL (5s timeout). The card's `skills` array is merged into the executor registry, allowing runtime skill discovery.
+On startup, `SkillBrokerPlugin` fetches `GET /.well-known/agent-card.json` (with a fallback to the legacy `/.well-known/agent.json`) from each agent's base URL. The card's `skills` array is merged into the executor registry, allowing runtime skill discovery. The card is re-fetched every 10 min so new skills land without a restart; when the yaml lists skills too, the yaml entries take precedence as explicit overrides.
 
 ## Agent YAML entry
 

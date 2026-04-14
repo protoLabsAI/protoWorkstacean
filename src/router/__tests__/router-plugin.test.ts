@@ -356,14 +356,14 @@ describe("RouterPlugin", () => {
       } finally { cleanup(); }
     });
 
-    test("skips plan, plan_resume, deep_research", async () => {
+    test("skips plan, deep_research", async () => {
       const { workspaceDir, cleanup } = makeWorkspace({ agents: { "ava.yaml": onboardingAgent } });
       try {
         const bus = new InMemoryEventBus();
         const plugin = new RouterPlugin({ workspaceDir });
         plugin.install(bus);
 
-        for (const skill of ["plan", "plan_resume", "deep_research"]) {
+        for (const skill of ["plan", "deep_research"]) {
           const req = waitForSkillRequest(bus, 80);
           bus.publish(
             "message.inbound.discord.faf",

@@ -21,6 +21,10 @@ import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 import type { LoggerPlugin, ConversationTurn } from "../../lib/plugins/logger.ts";
 import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
+import type { TaskTracker } from "./task-tracker.ts";
+import type { A2AExecutor } from "./executors/a2a-executor.ts";
+
+const WORKING_STATES = new Set(["submitted", "working"]);
 
 /**
  * Assemble a structured context envelope for the agent prompt.
@@ -95,6 +99,7 @@ export class SkillDispatcherPlugin implements Plugin {
   private readonly identityRegistry: IdentityRegistry;
   private readonly loggerPlugin: LoggerPlugin | undefined;
   private readonly mailbox: ContextMailbox | undefined;
+  private readonly taskTracker: TaskTracker | undefined;
 
   /**
    * In-flight execution tracking — set at the TOP of _dispatch() (before any
@@ -113,11 +118,14 @@ export class SkillDispatcherPlugin implements Plugin {
     loggerPlugin?: LoggerPlugin,
     /** Optional mailbox for mid-execution DM queuing. */
     mailbox?: ContextMailbox,
+    /** Optional tracker for long-running A2A tasks. */
+    taskTracker?: TaskTracker,
   ) {
     this.graphiti = graphiti ?? new GraphitiClient();
     this.identityRegistry = new IdentityRegistry(workspaceDir);
     this.loggerPlugin = loggerPlugin;
     this.mailbox = mailbox;
+    this.taskTracker = taskTracker;
   }
 
   /** Check if an execution is currently active for a given correlationId. */
@@ -283,6 +291,58 @@ export class SkillDispatcherPlugin implements Plugin {
 
     try {
       const result = await executor.execute(req);
+
+      // Long-running A2A task — agent returned non-terminal state with a taskId.
+      // Hand off to TaskTracker; dispatcher exits without publishing response.
+      // Tracker will publish to replyTopic once the task reaches terminal state.
+      const taskState = result.data?.taskState;
+      const taskId = result.data?.taskId;
+      if (
+        this.taskTracker
+        && !result.isError
+        && taskState
+        && typeof taskState === "string"
+        && WORKING_STATES.has(taskState)
+        && taskId
+        && executor.type === "a2a"
+      ) {
+        const a2aExecutor = executor as A2AExecutor;
+        const callbackToken = crypto.randomUUID();
+        this.taskTracker.track({
+          correlationId,
+          taskId,
+          agentName: targets[0] ?? "unknown",
+          replyTopic,
+          executor: a2aExecutor,
+          parentId,
+          callbackToken,
+          sourceInterface: sourcePlatform,
+          sourceChannelId: sourceChannelId,
+          sourceUserId: sourceUserId,
+        });
+
+        // Try to register a push-notification webhook so the agent can POST
+        // completion back instead of us polling. Falls back to polling silently.
+        const callbackBaseUrl = process.env.WORKSTACEAN_BASE_URL;
+        if (callbackBaseUrl) {
+          const callbackUrl = `${callbackBaseUrl.replace(/\/$/, "")}/api/a2a/callback/${encodeURIComponent(taskId)}`;
+          void a2aExecutor.registerPushNotification(taskId, callbackUrl, callbackToken, correlationId, parentId)
+            .then(ok => {
+              if (ok) console.log(`[skill-dispatcher] Push-notification registered for ${taskId.slice(0, 8)}…`);
+            })
+            .catch(err => console.debug("[skill-dispatcher] push-notification register failed:", err));
+        }
+
+        this._publishFlowEvent("flow.item.updated", {
+          id: flowItemId,
+          status: "active",
+          stage: "running",
+          meta: { skill, taskId, taskState, trackedBy: "task-tracker" },
+        });
+        // Don't publish a response — tracker will do it. Still fall through to
+        // finally block so activeExecutions gets cleaned up.
+        return;
+      }
 
       if (result.isError) {
         console.error(

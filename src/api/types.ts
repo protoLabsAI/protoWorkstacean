@@ -12,6 +12,7 @@ import type { Plugin, EventBus } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { TelemetryService } from "../telemetry/telemetry-service.ts";
 import type { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
+import type { TaskTracker } from "../executor/task-tracker.ts";
 
 export type Params = Record<string, string>;
 export type RouteHandler = (req: Request, params: Params) => Response | Promise<Response>;
@@ -34,6 +35,7 @@ export interface ApiContext {
   telemetry?: TelemetryService;
   apiKey?: string;
   mailbox?: ContextMailbox;
+  taskTracker?: TaskTracker;
 }
 
 /** Match a path against a pattern like "/api/foo/:id/run". Returns params or null. */

@@ -22,6 +22,5 @@
 export const FIRE_AND_FORGET_SKILLS: ReadonlySet<string> = new Set([
   "onboard_project",
   "plan",
-  "plan_resume",
   "deep_research",
 ]);

@@ -31,6 +31,10 @@ const bus = new InMemoryEventBus();
 import { ContextMailbox } from "../lib/dm/context-mailbox.ts";
 const contextMailbox = new ContextMailbox();
 
+// --- Task tracker — tracks long-running A2A tasks that returned non-terminal state ---
+import { TaskTracker } from "./executor/task-tracker.ts";
+const taskTracker = new TaskTracker({ bus });
+
 // --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
 import { ChannelRegistry } from "../lib/channels/channel-registry.js";
 const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));
@@ -252,7 +256,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { SkillDispatcherPlugin } = await import("./executor/skill-dispatcher-plugin.js");
-      return new SkillDispatcherPlugin(executorRegistry, workspaceDir, undefined, loggerPlugin, contextMailbox);
+      return new SkillDispatcherPlugin(executorRegistry, workspaceDir, undefined, loggerPlugin, contextMailbox, taskTracker);
     },
   },
   {
@@ -508,6 +512,7 @@ const apiContext: ApiContext = {
   telemetry,
   apiKey: API_KEY,
   mailbox: contextMailbox,
+  taskTracker,
 };
 
 const routes = createAllRoutes(apiContext);
