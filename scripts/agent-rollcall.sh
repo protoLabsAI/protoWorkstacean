@@ -27,7 +27,7 @@ AGENTS=(
   # Ava + protoBot are in-process DeepAgents inside workstacean — checked separately below.
   "quinn:7873:a2a:Quinn (QA Engineer)"
   "protocontent:18791:a2a:protoContent / Jon (Content Pipeline)"
-  "protoresearcher:7872:a2a:protoResearcher (Deep Research)"
+  "research-langgraph-agent:7874:a2a:Researcher (rabbit-hole.io deep research)"
   "protovoice:7880:http:protoVoice (Voice Agent)"
   "protoaudio:8210:health:protoAudio (Audio Pipeline)"
   "workstacean:8081:http:Workstacean (Orchestrator — hosts Ava + protoBot DeepAgents)"
