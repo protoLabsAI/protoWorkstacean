@@ -56,8 +56,18 @@ export interface A2AAgentConfig {
   extraHeaders?: Record<string, string>;
   /** Request timeout in ms. Default: 300_000 (5 min). */
   timeoutMs?: number;
-  /** Whether the remote agent supports SSE streaming (from agent card). */
+  /**
+   * Whether the remote agent supports SSE streaming. Authoritative source is
+   * the agent card's `capabilities.streaming`, refreshed by SkillBrokerPlugin
+   * every 10 min via setCapabilities(). YAML value in agents.yaml is a
+   * bootstrap default used before the first card fetch lands.
+   */
   streaming?: boolean;
+  /**
+   * Whether the remote agent accepts push-notification registrations. Same
+   * source-of-truth story as streaming — card advertises, broker refreshes.
+   */
+  pushNotifications?: boolean;
   /** Callback for intermediate streaming updates (e.g. publish to bus). */
   onStreamUpdate?: (update: { type: string; text?: string; state?: string }) => void;
   /**
@@ -130,7 +140,36 @@ function buildFetch(
 export class A2AExecutor implements IExecutor {
   readonly type = "a2a";
 
-  constructor(private readonly config: A2AAgentConfig) {}
+  constructor(private config: A2AAgentConfig) {}
+
+  /** Expose name for diagnostics / registry wiring. */
+  get name(): string {
+    return this.config.name;
+  }
+
+  /**
+   * Update the streaming + pushNotifications capability flags from the agent
+   * card. Called by SkillBrokerPlugin after every card discovery pass so the
+   * executor picks the right transport path based on what the agent actually
+   * advertises, not stale YAML config.
+   */
+  setCapabilities(caps: { streaming?: boolean; pushNotifications?: boolean }): void {
+    this.config = {
+      ...this.config,
+      streaming: caps.streaming ?? this.config.streaming,
+      pushNotifications: caps.pushNotifications ?? this.config.pushNotifications,
+    };
+  }
+
+  /** Whether this executor is currently configured to use SSE streaming. */
+  get streaming(): boolean {
+    return this.config.streaming === true;
+  }
+
+  /** Whether push-notification registration should be attempted. */
+  get pushNotifications(): boolean {
+    return this.config.pushNotifications === true;
+  }
 
   async execute(req: SkillRequest): Promise<SkillResult> {
     const text = req.content ?? req.prompt ?? this._buildText(req);
