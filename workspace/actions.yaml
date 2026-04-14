@@ -143,6 +143,25 @@ actions:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
 
+  - id: ci.debug_failures
+    goalId: ci.success_rate_healthy
+    tier: tier_0
+    priority: 20
+    cost: 1
+    name: "Dispatch agent to investigate CI failures across projects"
+    preconditions:
+      - path: "extensions.ci_available"
+        operator: eq
+        value: true
+      - path: "domains.ci.data.successRate"
+        operator: lt
+        value: 0.70
+    effects: []
+    meta:
+      topic: "agent.skill.request"
+      skillHint: debug_ci_failures
+      fireAndForget: true
+
   # alert.pr_conflicts was retired in favour of action.pr_update_branch below.
   # The planner-plugin-l0 violation path dispatches one action per goal per
   # tick (src/plugins/planner-plugin-l0.ts:114 claims the inFlightGoals slot
