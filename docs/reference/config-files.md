@@ -22,8 +22,8 @@ _This is a reference doc. It covers all `workspace/*.yaml` schemas and environme
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AGENTS_YAML` | No | Path to external A2A agent registry (default: `/workspace/agents.yaml`) |
-| `AVA_API_KEY` | If using external Ava | API key injected as `X-API-Key` header |
-| `AVA_APP_ID` | For chain comments | GitHub App ID — chain responses post as `protoava[bot]` |
+| `AVA_API_KEY` | If using the protoMaker team | API key injected as `X-API-Key` header. Env var name kept for historical reasons — the logical agent slug is `protomaker`. |
+| `AVA_APP_ID` | For chain comments | GitHub App ID — chain responses post as `@ava[bot]` |
 | `AVA_APP_PRIVATE_KEY` | For chain comments | GitHub App private key (PKCS#1 PEM) |
 
 ### GitHub Plugin
@@ -135,8 +135,8 @@ skills:
 ```
 
 **`role`** drives the agent profile and delegation rules:
-- `orchestrator` — Ava pattern; can delegate to `canDelegate` agents
-- `qa`, `devops`, `content`, `research`, `general` — ReAct subagent; no delegation
+- `orchestrator` — protoMaker team pattern; can delegate to `canDelegate` agents
+- `qa`, `devops`, `content`, `research`, `general` — ReAct subagent; no delegation. Use `general` for conversational agents like the in-process `ava` chat agent.
 
 **`tools`** is a whitelist — the agent subprocess only sees the tools listed here, plus proto CLI built-ins (file, bash, search).
 
@@ -150,7 +150,10 @@ Source of truth for the **external A2A** agent registry. Used by `SkillBrokerPlu
 
 ```yaml
 agents:
-  - name: ava
+  # protoMaker team — multi-agent runtime for board ops, feature lifecycle,
+  # onboarding, and planning. Historical env var name AVA_* kept; the
+  # logical agent slug is `protomaker`.
+  - name: protomaker
     team: dev
     url: http://automaker-server:3008/a2a
     apiKeyEnv: AVA_API_KEY       # env var holding the API key (not the key itself)
@@ -161,7 +164,6 @@ agents:
       - board_health
       - onboard_project
       - plan
-      - plan_resume
 
   - name: quinn
     team: dev
@@ -171,8 +173,9 @@ agents:
       - board_audit
       - bug_triage
       - pr_review
+      - security_triage
     chain:
-      bug_triage: ava            # after bug_triage, call ava/manage_feature
+      bug_triage: protomaker     # after bug_triage, call protomaker/manage_feature
 
   - name: frank
     team: dev
@@ -185,7 +188,7 @@ agents:
 
 **`chain`** is optional. When `chain[skill]` is set, the named agent is called with the first agent's response as context. One level deep only.
 
-> **Migration note:** `workspace/agents/<name>.yaml` (in-process) and `workspace/agents.yaml` (external A2A) coexist. `AgentRuntimePlugin` handles agents it knows about and lets unknown skills fall through to `SkillBrokerPlugin`. Set `DISABLE_SKILL_BROKER=true` once all agents are migrated in-process.
+> **Note:** `workspace/agents/<name>.yaml` (in-process) and `workspace/agents.yaml` (external A2A) coexist. In-process agents like the `ava` chat agent run inside workstacean via `ProtoSdkExecutor`; external agents like the protoMaker team are called via `A2AExecutor`. Both register into the same `ExecutorRegistry`, so skill dispatch is identical from the bus's perspective.
 
 ---
 
@@ -202,7 +205,7 @@ projects:
     github: your-org/your-repo
     defaultBranch: main
     status: active
-    agents: [ava, quinn]
+    agents: [protomaker, quinn]
     discord:
       dev:
         channelId: ""
@@ -251,7 +254,7 @@ commands:
 ## workspace/github.yaml
 
 ```yaml
-mentionHandle: "@quinn"       # case-insensitive handle to watch for
+mentionHandle: "@protoquinn"  # case-insensitive handle to watch for
 
 skillHints:
   issue_comment: bug_triage              # comment @mention on issue

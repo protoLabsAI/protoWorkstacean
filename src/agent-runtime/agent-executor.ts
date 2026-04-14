@@ -16,9 +16,20 @@
  */
 
 import { query, createSdkMcpServer, isSDKResultMessage } from "@protolabsai/sdk";
-import type { SDKResultMessageSuccess } from "@protolabsai/sdk";
+import type { SDKResultMessageSuccess, SDKResultMessageError, ExtendedUsage } from "@protolabsai/sdk";
 import type { AgentDefinition } from "./types.ts";
 import type { ToolRegistry } from "./tool-registry.ts";
+
+export interface SkillProgressEvent {
+  /** Discriminates between tool invocations and assistant text chunks. */
+  eventType: "tool_call" | "text";
+  /** Propagated trace ID from the originating bus message. */
+  correlationId: string;
+  /** Tool name — present when eventType === 'tool_call'. */
+  toolName?: string;
+  /** Text content — present when eventType === 'text'. */
+  text?: string;
+}
 
 export interface AgentRunOptions {
   /** The prompt / task to send to the agent. */
@@ -27,6 +38,8 @@ export interface AgentRunOptions {
   correlationId: string;
   /** Working directory for the agent's file operations. Defaults to process.cwd(). */
   cwd?: string;
+  /** Optional callback invoked for each tool_use block and assistant text block in the stream. */
+  onProgress?: (event: SkillProgressEvent) => void;
 }
 
 export interface AgentRunResult {
@@ -36,6 +49,10 @@ export interface AgentRunResult {
   isError: boolean;
   /** Raw stop reason from the SDK result message. */
   stopReason?: string;
+  /** Token usage reported by the SDK. */
+  usage?: ExtendedUsage;
+  /** Number of agentic turns taken. */
+  numTurns?: number;
 }
 
 /**
@@ -67,7 +84,7 @@ export class AgentExecutor {
   }
 
   async run(opts: AgentRunOptions): Promise<AgentRunResult> {
-    const { prompt, correlationId, cwd } = opts;
+    const { prompt, correlationId, cwd, onProgress } = opts;
     const agentTools = this.toolRegistry.forAgent(this.agentDef.tools);
 
     // Build the embedded MCP server with this agent's whitelisted tools.
@@ -107,6 +124,8 @@ export class AgentExecutor {
     let resultText = "";
     let isError = false;
     let stopReason: string | undefined;
+    let usage: ExtendedUsage | undefined;
+    let numTurns: number | undefined;
 
     for await (const message of session) {
       if (isSDKResultMessage(message)) {
@@ -117,14 +136,20 @@ export class AgentExecutor {
             resultText = success.result ?? "";
             const rawStopReason = (success as Record<string, unknown>).stop_reason;
             stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined;
+            usage = success.usage;
+            numTurns = success.num_turns;
           } else if ("error" in message) {
             // SDKResultMessageError
+            const errMsg = message as SDKResultMessageError;
             isError = true;
-            resultText = String((message as { error: unknown }).error ?? "Unknown error");
+            resultText = String((errMsg as { error: unknown }).error ?? "Unknown error");
+            usage = errMsg.usage;
+            numTurns = errMsg.num_turns;
           }
+          break;
         }
       }
-      // Stream text blocks for logging / debugging
+      // Stream assistant content blocks for logging and progress events
       if (
         message.type === "assistant" &&
         "message" in message &&
@@ -135,6 +160,9 @@ export class AgentExecutor {
             if (block.type === "text" && "text" in block) {
               // Progress visible in logs when running
               process.stdout.write(".");
+              onProgress?.({ eventType: "text", correlationId, text: String((block as { text: unknown }).text) });
+            } else if (block.type === "tool_use" && "name" in block) {
+              onProgress?.({ eventType: "tool_call", correlationId, toolName: String((block as { name: unknown }).name) });
             }
           }
         }
@@ -143,6 +171,6 @@ export class AgentExecutor {
 
     if (resultText.length > 0) process.stdout.write("\n");
 
-    return { text: resultText, isError, stopReason };
+    return { text: resultText, isError, stopReason, usage, numTurns };
   }
 }

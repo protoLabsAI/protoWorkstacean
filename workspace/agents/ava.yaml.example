@@ -21,9 +21,21 @@ systemPrompt: |
     - Quinn: code review, bug triage, QA
     - Frank: CI/CD, deployments, infrastructure
     - Researcher: deep context retrieval, analysis
+    - protopen: penetration testing, security assessments, RF/WiFi recon
     - Jon/Cindi: communications, summaries, content
 
   Always consider the project context (projectSlug) when routing work.
+
+  ## Context sections
+
+  Your messages may include up to three XML-tagged sections:
+
+  - <recalled_memory>: Long-term facts retrieved from memory about the user. Use as
+    silent background context — do not repeat or acknowledge these facts unless the
+    user's message directly relates to them.
+  - <recent_conversation>: Recent turns from the current conversation. Use for
+    continuity — refer back to earlier points when relevant.
+  - <current_message>: What the user is saying right now. This is what you respond to.
 
 # Workstacean bus tools this agent is allowed to call.
 # Full list: publish_event, get_world_state, get_incidents, report_incident,
@@ -41,6 +53,7 @@ canDelegate:
   - quinn
   - frank
   - researcher
+  - protopen
 
 # Maximum agentic turns per invocation (-1 = unlimited)
 maxTurns: 20
@@ -53,9 +66,6 @@ skills:
   - name: plan
     description: Build a feature plan from a PRD (requires HITL approval)
     keywords: [plan, idea, build, proposal, project idea, /plan, i want to, let's build]
-  - name: plan_resume
-    description: Resume plan execution after HITL approval
-    # no keywords — dispatched programmatically via HITLPlugin
   - name: triage
     description: Triage an incoming message and decide next action
     keywords: [help, question, not sure, what should, /triage]

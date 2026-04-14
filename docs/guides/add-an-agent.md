@@ -4,8 +4,8 @@ title: Add an Agent
 
 protoWorkstacean supports two agent patterns:
 
-- **In-process** — the agent runs inside the workstacean process, powered by `@protolabsai/sdk`. Skills execute as @protolabsai/sdk sessions with a configurable system prompt and tool whitelist.
-- **External A2A** — the agent runs in a separate service (e.g. ava/protoMaker). protoWorkstacean calls it over HTTP using JSON-RPC 2.0. This is the right choice for stateful agents with their own infrastructure.
+- **In-process** — the agent runs inside the workstacean process, powered by `@protolabsai/sdk`. Skills execute as @protolabsai/sdk sessions with a configurable system prompt and tool whitelist. Example today: `ava` (conversational chat agent, no tools).
+- **External A2A** — the agent runs in a separate service with its own HTTP surface. protoWorkstacean calls it over JSON-RPC 2.0. Right choice for stateful agents with their own infrastructure. Examples today: the **protoMaker team** (at `${AVA_BASE_URL}/a2a`, handles board ops and planning), **Quinn** (PR review, bug triage), **protoContent** (Jon/Cindi content), **Frank** (infra).
 
 Both patterns register into `ExecutorRegistry` and are dispatched by `SkillDispatcherPlugin`. From the bus's perspective they are identical — both consume `agent.skill.request` and reply on `agent.skill.response.<correlationId>`.
 
@@ -125,9 +125,17 @@ agents:
   - name: my-service
     # Full URL of the agent's /a2a endpoint (JSON-RPC 2.0).
     url: http://my-service:8080/a2a
-    # Environment variable holding the API key. Optional.
-    apiKeyEnv: MY_SERVICE_API_KEY
-    # Skills this agent handles.
+    # Auth — either the legacy apiKeyEnv shorthand OR a structured auth block.
+    apiKeyEnv: MY_SERVICE_API_KEY   # legacy: X-API-Key: <env>
+    # auth:                          # preferred (Phase 8):
+    #   scheme: bearer               # "apiKey" | "bearer" | "hmac"
+    #   credentialsEnv: MY_SERVICE_TOKEN
+    # Optional: stamp static headers (e.g. opt in to A2A extensions).
+    # headers:
+    #   a2a-extensions: "https://a2a-protocol.org/ext/cost-v1"
+    # Whether the agent supports SSE streaming (card-derived fallback).
+    streaming: false
+    # Skills this agent handles. Omit to auto-discover from the agent card.
     skills:
       - name: analyze_data
         description: Analyze a dataset and return a summary
@@ -138,7 +146,13 @@ agents:
       - message.inbound.#
 ```
 
-The `apiKeyEnv` value is the **name** of the environment variable (not the key itself). At request time, `A2AExecutor` reads `process.env[apiKeyEnv]` and sends it as `X-API-Key`.
+Auth resolution:
+- `apiKeyEnv: X` → sends `X-API-Key: $X` on every request (legacy shorthand).
+- `auth.scheme: apiKey` + `credentialsEnv: X` → same header, explicit scheme.
+- `auth.scheme: bearer` + `credentialsEnv: X` → sends `Authorization: Bearer $X`.
+- `auth.scheme: hmac` → reserved for future HMAC-signing extension.
+
+At request time, `A2AExecutor` reads `process.env[credentialsEnv]` (or `apiKeyEnv` as fallback) and stamps the right header based on scheme.
 
 ### How the A2A call is made
 
@@ -174,9 +188,30 @@ X-API-Key: <resolved key>
 
 The receiving service should propagate `contextId` / `X-Correlation-Id` through its own spans.
 
-### Skills refreshed from /.well-known/agent.json
+### Skills refreshed from the agent card
 
-You can omit `skills` from `agents.yaml` if your service exposes a `/.well-known/agent.json` discovery endpoint. `SkillBrokerPlugin` will fetch it at startup and register the declared skills automatically.
+You can omit `skills` from `agents.yaml` if your service exposes a `/.well-known/agent-card.json` (or legacy `/.well-known/agent.json`) discovery endpoint. `SkillBrokerPlugin` fetches it at startup and registers declared skills automatically, then re-fetches every 10 min so new skills land without a restart. When both yaml skills and card skills are present, the yaml entries take precedence as explicit overrides.
+
+### Long-running tasks
+
+If your agent returns a non-terminal `Task` (state: `submitted` or `working`) instead of an immediate reply, `SkillDispatcherPlugin` hands the task to `TaskTracker` which polls `tasks/get` every 30s (or uses `tasks/resubscribe` for streaming agents). When the task reaches a terminal state, the tracker publishes the response on the original reply topic — the caller sees exactly one response, just later.
+
+For agents that support push notifications (`capabilities.pushNotifications: true` in the card), workstacean registers `PushNotificationConfig` with a per-task HMAC token pointing at `${WORKSTACEAN_BASE_URL}/api/a2a/callback/:taskId`. The agent POSTs Task snapshots to that URL when the state changes, which is faster and cheaper than polling.
+
+### input-required → HITL
+
+When your agent returns `Task.status.state == "input-required"`, the tracker automatically raises a HITL request (Discord approval UI by default). Once a human responds, the tracker resumes the task with `message/send` on the same `taskId` carrying the decision text. No custom `plan_resume` skill is needed — this is the native A2A state machine.
+
+---
+
+## Workstacean as an A2A server
+
+Workstacean itself is an A2A agent too. It exposes:
+
+- `GET /.well-known/agent-card.json` — lists every skill registered in `ExecutorRegistry`
+- `POST /a2a` — JSON-RPC 2.0 endpoint (supports `message/send`, `message/stream`, `tasks/*`)
+
+External agents can call workstacean by resolving the card and dispatching skills with a `skillHint` in the message metadata. Auth is the same `WORKSTACEAN_API_KEY` via `Authorization: Bearer <key>` or `X-API-Key`. See [HTTP API reference — POST /a2a](../../reference/http-api#post-a2a) for full details.
 
 ---
 
@@ -192,8 +227,9 @@ Returns:
 
 ```json
 [
-  { "name": "ava", "type": "proto-sdk", "skills": ["sitrep", "plan"] },
-  { "name": "my-service", "type": "a2a", "skills": ["analyze_data", "generate_report"] }
+  { "name": "ava",        "type": "proto-sdk", "skills": ["chat"] },
+  { "name": "protomaker", "type": "a2a",       "skills": ["sitrep", "board_health", "manage_feature", "bug_triage"] },
+  { "name": "quinn",      "type": "a2a",       "skills": ["pr_review", "bug_triage", "security_triage"] }
 ]
 ```
 

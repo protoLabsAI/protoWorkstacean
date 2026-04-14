@@ -16,6 +16,7 @@
 import { readFileSync, watchFile, unwatchFile } from "node:fs";
 import { createSign } from "node:crypto";
 import { parse } from "yaml";
+import { FIRE_AND_FORGET_SKILLS } from "../../src/router/faf-skills.ts";
 
 // ── GitHub App auth ───────────────────────────────────────────────────────────
 // Ava posts chain responses as ava[bot] using her own App identity.
@@ -140,11 +141,23 @@ interface GitHubContext {
 
 const AGENTS_YAML = process.env.AGENTS_YAML ?? "/workspace/agents.yaml";
 
+function interpolateEnv(value: string): string {
+  // agents.yaml uses ${ENV_VAR} syntax for url/apiKeyEnv. The other consumers
+  // (skill-broker, domain-discovery) resolve these via a shared helper; this
+  // plugin had been reading them raw, which made fetch() choke on literal
+  // "${AVA_BASE_URL}/a2a" strings.
+  return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_m, name) => process.env[name] ?? "");
+}
+
 function loadAgents(): AgentDef[] {
   try {
     const raw = readFileSync(AGENTS_YAML, "utf-8");
     const cfg = parse(raw) as { agents?: AgentDef[] };
-    return cfg.agents ?? [];
+    const agents = cfg.agents ?? [];
+    for (const a of agents) {
+      if (typeof a.url === "string") a.url = interpolateEnv(a.url);
+    }
+    return agents;
   } catch (e) {
     console.error("[a2a] Failed to load agents.yaml:", e);
     return [];
@@ -178,7 +191,6 @@ const SKILL_KEYWORDS: Record<string, string[]> = {
   pr_review:    ["pr", "pull request", "review", "merge", "ci", "/review"],
   // Ava
   plan:           ["build", "create feature", "new feature", "idea:", "let's build", "plan:", "i want to"],
-  plan_resume:    ["approve", "reject", "modify"],
   sitrep:         ["status", "sitrep", "situation", "what's up", "summary", "/status", "/sitrep"],
   manage_feature: ["unblock", "assign", "move to", "add to board"],
   board_health:   ["blocked", "stalled", "stuck", "health", "unhealthy"],
@@ -197,26 +209,31 @@ function matchSkill(content: string, hint?: string): string | null {
   return null;
 }
 
-function routeToAgent(skill: string | null, agents: AgentDef[]): AgentDef {
+function routeToAgent(skill: string | null, agents: AgentDef[]): AgentDef | null {
+  // Asymmetric fallback semantics — INTENTIONAL, do not "fix" to be symmetric:
+  //
+  //   explicit-skill + no claimant  → null   (caller skips and logs)
+  //   no-skill (free-form content)  → Ava   (Chief-of-Staff default)
+  //
+  // The split exists because a message with an explicit skill is a routing
+  // decision the sender has already made — falling back to a different agent
+  // silently misroutes (previously produced pr_review being answered by Ava
+  // despite not being in her agent card). But a message with no skill at all
+  // is free-form chat, and Ava is the correct default handler for that —
+  // she routes it further based on content. Keep the two paths distinct.
   if (skill) {
     const match = agents.find(a => a.skills.includes(skill));
-    if (match) return match;
+    return match ?? null;
   }
-  // Default: Ava (Chief of Staff — she delegates further)
-  return agents.find(a => a.name === "ava") ?? agents[0];
+  return agents.find(a => a.name === "ava") ?? agents[0] ?? null;
 }
 
 // ── A2A protocol ────────────────────────────────────────────────────────────
 
-// Skills that involve multi-step orchestration (external APIs, agent chains).
-// These are dispatched fire-and-forget: workstacean acks immediately and the
-// agent posts back to the reply topic when done. No workstacean-side timeout.
-const FIRE_AND_FORGET_SKILLS = new Set([
-  "onboard_project",  // GitHub + Plane + Discord chain
-  "plan",             // SPARC PRD + antagonistic review
-  "plan_resume",      // checkpoint restore + feature creation
-  "deep_research",    // web + knowledge store traversal
-]);
+// FIRE_AND_FORGET_SKILLS is imported from src/router/faf-skills.ts so the
+// allowlist is owned in exactly one place — the router now filters the same
+// set (fix/router-skip-faf-skills) and both sides read from the shared module.
+// If you need to add a skill, do it there.
 
 // In-flight guard: tracks currently-running fire-and-forget operations.
 // Key: `{agentName}:{skill}:{contentHash}` — prevents duplicate concurrent runs
@@ -322,6 +339,23 @@ function reactToGitHubIssue(gh: GitHubContext, reaction: string): void {
 // ── Local memory skill handler ───────────────────────────────────────────────
 
 const MEMORY_SKILLS = new Set(["memory_recall", "memory_store"]);
+
+// ── Locally-owned skill surface ──────────────────────────────────────────────
+//
+// Single source of truth for which skills this plugin dispatches from the
+// `message.inbound.#` subscriber. The inbound handler's guard and the
+// downstream branches both read from this set, so there's no way for the
+// allowlist to drift from the actual handler logic. Any skill NOT in this
+// set falls through to the router + skill-dispatcher canonical path.
+//
+// When adding a skill to this plugin, add it to one of the source sets
+// (MEMORY_SKILLS or FIRE_AND_FORGET_SKILLS) — never hard-code a new string
+// here. onboard_project is already covered because it lives in
+// FIRE_AND_FORGET_SKILLS.
+const LOCALLY_OWNED_SKILLS = new Set<string>([
+  ...MEMORY_SKILLS,
+  ...FIRE_AND_FORGET_SKILLS,
+]);
 
 async function handleMemorySkill(
   bus: EventBus,
@@ -469,14 +503,49 @@ export default {
       if (msg.topic === "message.inbound.onboard" || msg.topic.startsWith("message.inbound.onboard.")) return;
 
       const p = msg.payload as Record<string, unknown>;
+
+      // Skip messages that already carry an explicit agent target via
+      // meta.agentId — those go through skill-dispatcher → A2AExecutor with
+      // full projectPath metadata. If this plugin also handles them, both
+      // paths fire for the same inbound event, producing the double-triage
+      // pattern tracked in protoMaker#3300. The skill-dispatcher is the
+      // canonical owner for explicitly-targeted dispatches; this plugin
+      // remains the fallback for keyword-matched, untargeted content.
+      const meta = p.meta as { agentId?: string } | undefined;
+      if (meta?.agentId) return;
+
       const content = String(p.content ?? "").trim();
       if (!content) return;
 
       const channelKey = String(p.channel ?? msg.topic.split(".").slice(2).join("-"));
       const skill = matchSkill(content, p.skillHint as string | undefined);
-      const agent = routeToAgent(skill, agents);
       const outboundTopic = msg.reply?.topic
         ?? `message.outbound.${msg.topic.split(".").slice(1).join(".")}`;
+
+      // ── Local ownership guard ──────────────────────────────────────────────
+      // This plugin only handles skills in LOCALLY_OWNED_SKILLS (memory ops +
+      // fire-and-forget orchestration, incl. onboard_project). Everything else
+      // — including skillHint-tagged webhooks like pr_review from github.ts —
+      // is the router + skill-dispatcher pipeline's responsibility. Without
+      // this guard the same inbound event triggers *both* plugins and the
+      // agent runs twice (observed on protoWorkstacean#104 as paired
+      // @protoquinn[bot] review comments).
+      //
+      // The symmetric half of this guard lives in src/router/router-plugin.ts
+      // where FIRE_AND_FORGET_SKILLS (from src/router/faf-skills.ts) is also
+      // filtered out — together they guarantee FAF dispatch is handled exactly
+      // once regardless of which subscriber fires first.
+      if (!skill || !LOCALLY_OWNED_SKILLS.has(skill)) return;
+
+      const agent = routeToAgent(skill, agents);
+      if (!agent) {
+        // routeToAgent now returns null when an explicit skill has no A2A
+        // claimant (was previously silently defaulting to Ava). For locally-
+        // owned skills this should never happen — but log it if it does so
+        // we don't silently drop.
+        console.warn(`[a2a] no registered agent for locally-owned skill "${skill}" — skipping`);
+        return;
+      }
 
       // Memory skills are handled locally — never forwarded to an external agent
       if (skill && MEMORY_SKILLS.has(skill)) {
@@ -541,10 +610,18 @@ export default {
       // end-to-end (plane plugin stores pendingIssues keyed by "plane-{issueId}").
       const contextId = msg.correlationId || `workstacean-${channelKey}`;
 
-      // Forward Plane context so the plan skill can update the originating issue
+      // Forward Plane context so the plan skill can update the originating issue.
+      // Forward project context so Ava's bug_triage / manage_feature skills
+      // have an authoritative projectPath (they refuse to run without it,
+      // emitting "metadata.projectPath missing — cannot target project
+      // tools without an authoritative path").
       const planeExtra: Record<string, unknown> = {};
       if (p.planeIssueId) planeExtra.planeIssueId = p.planeIssueId;
       if (p.planeProjectId) planeExtra.planeProjectId = p.planeProjectId;
+      if (typeof p.projectPath === "string") planeExtra.projectPath = p.projectPath;
+      if (typeof p.projectSlug === "string") planeExtra.projectSlug = p.projectSlug;
+      if (typeof p.projectRepo === "string") planeExtra.projectRepo = p.projectRepo;
+      if (typeof p.prNumber === "number") planeExtra.prNumber = p.prNumber;
 
       // Fire-and-forget for long-running skills: ack immediately, agent posts
       // back to the reply topic when done. No workstacean-side timeout.
@@ -615,6 +692,10 @@ export default {
       const cronId = msg.topic.replace("cron.", "");
       const skill = matchSkill(content, p.skillHint as string | undefined);
       const agent = routeToAgent(skill, agents);
+      if (!agent) {
+        console.warn(`[a2a-cron] ${cronId} — no agent claims skill "${skill}" — dropping`);
+        return;
+      }
 
       console.log(`[a2a-cron] ${cronId} → ${agent.name}`);
 

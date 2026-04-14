@@ -1,10 +1,11 @@
 /**
  * HITLPlugin — Human-in-the-Loop gate for the Workstacean bus.
  *
- * Dispatches HITLRequest messages to registered HITLRenderer instances (one per
- * interface), and routes HITLResponse messages back to requesters via two paths:
- *   1. Bus callback — publishes to request.replyTopic (operational callers)
- *   2. A2A plan_resume — calls Ava to resume a checkpointed plan
+ * Pure routing layer between HITL requests and registered renderers.
+ * TaskTracker owns the A2A native `input-required` resume path — when a
+ * response arrives for a tracked A2A task, the tracker re-sends via
+ * sendMessage(taskId, decisionText). This plugin just orchestrates the
+ * request/renderer/response bus plumbing.
  *
  * Interface plugins register a renderer during install():
  *   hitlPlugin.registerRenderer("discord", renderer)
@@ -16,27 +17,9 @@
  * Pending requests are tracked in-memory with expiry. On a 60s interval,
  * expired entries are removed, hitl.expired.{correlationId} is published,
  * and the renderer's onExpired() is called.
- *
- * Config: workspace/agents.yaml (to find Ava's A2A endpoint for plan_resume)
  */
 
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin, HITLRequest, HITLResponse, HITLRenderer } from "../types.ts";
-
-// ── Agent registry (minimal — just enough to find Ava) ──────────────────────
-
-interface AgentDef {
-  name: string;
-  url: string;
-  apiKeyEnv?: string;
-  skills: string[];
-}
-
-interface AgentsYaml {
-  agents: AgentDef[];
-}
 
 // ── Renderer registry ─────────────────────────────────────────────────────────
 // Maps interface name → HITLRenderer.
@@ -48,63 +31,56 @@ const renderers = new Map<string, HITLRenderer>();
 
 const pendingRequests = new Map<string, HITLRequest>();
 
-// ── A2A call to Ava for plan_resume ──────────────────────────────────────────
-
-async function callPlanResume(agent: AgentDef, response: HITLResponse): Promise<void> {
-  const apiKey = agent.apiKeyEnv ? (process.env[agent.apiKeyEnv] ?? "") : "";
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (apiKey) headers["X-API-Key"] = apiKey;
-
-  const content = [
-    `HITL Decision: ${response.decision}`,
-    response.feedback ? `Feedback: ${response.feedback}` : "",
-    `Decided by: ${response.decidedBy}`,
-  ].filter(Boolean).join("\n");
-
-  const resp = await fetch(agent.url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: crypto.randomUUID(),
-      method: "message/send",
-      params: {
-        message: { role: "user", parts: [{ kind: "text", text: content }] },
-        contextId: response.correlationId,
-        metadata: { skillHint: "plan_resume", hitlResponse: response },
-      },
-    }),
-    signal: AbortSignal.timeout(120_000),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`plan_resume A2A call failed (${resp.status}): ${errText}`);
-  }
-
-  const data = (await resp.json()) as { error?: { message: string } };
-  if (data.error) throw new Error(data.error.message);
-}
+/**
+ * CorrelationIds of requests that arrived without a matching renderer —
+ * they were published to hitl.pending but no channel can render them. A
+ * routing hole. Exposed via the hitl_queue domain so a goal can alert on
+ * it (see workspace/goals.yaml#hitl.no_unrendered_requests).
+ */
+const unrenderedCorrelationIds = new Set<string>();
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
 export class HITLPlugin implements Plugin {
   readonly name = "hitl";
-  readonly description = "Human-in-the-Loop gate — routes approval requests to interface plugins and responses back to callers";
+  readonly description = "Human-in-the-Loop gate — routes approval requests to interface plugins";
   readonly capabilities = ["hitl-routing"];
 
-  private workspaceDir: string;
-  private agents: AgentDef[] = [];
   private expiryTimer: ReturnType<typeof setInterval> | null = null;
   private busRef: EventBus | null = null;
 
-  constructor(workspaceDir: string) {
-    this.workspaceDir = workspaceDir;
+  constructor(_workspaceDir: string) {
+    // workspaceDir retained for API compat with existing plugin constructors,
+    // but not used — HITL is pure bus routing now.
   }
 
   /** All currently pending (unexpired, undecided) HITL requests. */
   getPendingRequests(): HITLRequest[] {
     return Array.from(pendingRequests.values());
+  }
+
+  /**
+   * Reset all module-level state. Intended for tests — clears the pending
+   * request map, unrendered-id set, and renderer registry so each test
+   * starts from a clean slate. Production code doesn't need this because
+   * the plugin is a singleton with process-lifetime state.
+   */
+  resetForTesting(): void {
+    pendingRequests.clear();
+    unrenderedCorrelationIds.clear();
+    renderers.clear();
+  }
+
+  /**
+   * Queue snapshot for the world-state `hitl_queue` domain.
+   * - pendingCount: all pending (rendered + unrendered)
+   * - unrenderedCount: pending that had no matching renderer (routing hole)
+   */
+  getQueueSnapshot(): { pendingCount: number; unrenderedCount: number } {
+    return {
+      pendingCount: pendingRequests.size,
+      unrenderedCount: unrenderedCorrelationIds.size,
+    };
   }
 
   /**
@@ -116,34 +92,67 @@ export class HITLPlugin implements Plugin {
     console.log(`[hitl] Registered renderer for interface "${interfaceName}"`);
   }
 
+  /**
+   * Sweep pending HITL requests whose `expiresAt` is at or before `nowMs`.
+   *
+   * For each expired request:
+   *   - `onTimeout === "approve" | "reject"` → publish a synthetic HITLResponse
+   *     on `hitl.response.{correlationId}` so the TaskTracker / replyTopic
+   *     consumer treats it as an auto-decision
+   *   - `onTimeout === "escalate"` or unset → publish `hitl.expired.{correlationId}`
+   *     and invoke the renderer's onExpired() hook so a human sees the timeout
+   *
+   * Exposed (not private) so tests can invoke it directly with a controlled
+   * `nowMs` instead of waiting for the 60s production sweep timer.
+   */
+  sweepExpired(bus: EventBus, nowMs: number): void {
+    for (const [correlationId, req] of pendingRequests) {
+      if (new Date(req.expiresAt).getTime() > nowMs) continue;
+
+      pendingRequests.delete(correlationId);
+      unrenderedCorrelationIds.delete(correlationId);
+
+      if (req.onTimeout === "approve" || req.onTimeout === "reject") {
+        console.log(`[hitl] TTL expired → auto-${req.onTimeout} (${correlationId})`);
+        const autoResp: HITLResponse = {
+          type: "hitl_response",
+          correlationId,
+          decision: req.onTimeout,
+          decidedBy: `auto-${req.onTimeout}`,
+        };
+        bus.publish(`hitl.response.${correlationId}`, {
+          id: crypto.randomUUID(),
+          correlationId,
+          topic: `hitl.response.${correlationId}`,
+          timestamp: nowMs,
+          payload: autoResp,
+        });
+      } else {
+        console.log(`[hitl] Expired HITLRequest (${correlationId})`);
+        bus.publish(`hitl.expired.${correlationId}`, {
+          id: crypto.randomUUID(),
+          correlationId,
+          topic: `hitl.expired.${correlationId}`,
+          timestamp: nowMs,
+          payload: { type: "hitl_expired", correlationId, originalRequest: req },
+        });
+        const iface = req.sourceMeta?.interface ?? "unknown";
+        const renderer = renderers.get(iface);
+        if (renderer?.onExpired) {
+          renderer.onExpired(req, bus).catch(err =>
+            console.error(`[hitl] renderer.onExpired failed for ${correlationId}:`, err),
+          );
+        }
+      }
+    }
+  }
+
   install(bus: EventBus): void {
     this.busRef = bus;
-    this.agents = this._loadAgents();
-    console.log(`[hitl] Loaded ${this.agents.length} agent(s) for plan_resume routing`);
 
     // ── Expiry sweep: every 60s, remove expired pending requests ─────────
     this.expiryTimer = setInterval(() => {
-      const now = Date.now();
-      for (const [correlationId, req] of pendingRequests) {
-        if (new Date(req.expiresAt).getTime() <= now) {
-          pendingRequests.delete(correlationId);
-          console.log(`[hitl] Expired HITLRequest (${correlationId})`);
-          bus.publish(`hitl.expired.${correlationId}`, {
-            id: crypto.randomUUID(),
-            correlationId,
-            topic: `hitl.expired.${correlationId}`,
-            timestamp: Date.now(),
-            payload: { type: "hitl_expired", correlationId, originalRequest: req },
-          });
-          const iface = req.sourceMeta?.interface ?? "unknown";
-          const renderer = renderers.get(iface);
-          if (renderer?.onExpired) {
-            renderer.onExpired(req, bus).catch(err =>
-              console.error(`[hitl] renderer.onExpired failed for ${correlationId}:`, err),
-            );
-          }
-        }
-      }
+      this.sweepExpired(bus, Date.now());
     }, 60_000);
 
     // ── Route HITLRequest to the correct interface ───────────────────────
@@ -173,7 +182,8 @@ export class HITLPlugin implements Plugin {
       const renderer = renderers.get(iface);
 
       if (!renderer) {
-        console.warn(`[hitl] No renderer for interface "${iface}" — publishing to hitl.pending`);
+        unrenderedCorrelationIds.add(req.correlationId);
+        console.warn(`[hitl] No renderer for interface "${iface}" — publishing to hitl.pending (correlationId=${req.correlationId}, unrendered=${unrenderedCorrelationIds.size})`);
         bus.publish(`hitl.pending.${req.correlationId}`, {
           id: crypto.randomUUID(),
           correlationId: req.correlationId,
@@ -190,39 +200,16 @@ export class HITLPlugin implements Plugin {
       );
     });
 
-    // ── Route HITLResponse back to Ava ───────────────────────────────────
-    bus.subscribe("hitl.response.#", this.name, async (msg: BusMessage) => {
+    // ── Clean up pending map when a response arrives ─────────────────────
+    // Bus delivery of the response is automatic — renderers published to
+    // request.replyTopic (a hitl.response.* topic) and callers subscribed
+    // directly. TaskTracker subscribes to hitl.response.# for A2A tasks
+    // and resumes via sendMessage(taskId, decisionText).
+    bus.subscribe("hitl.response.#", this.name, (msg: BusMessage) => {
       const resp = msg.payload as HITLResponse;
       if (resp?.type !== "hitl_response") return;
-
-      // Remove from pending map
-      const pending = pendingRequests.get(resp.correlationId);
-      if (pending) {
-        pendingRequests.delete(resp.correlationId);
-      } else {
-        console.warn(`[hitl] No pending request for correlationId ${resp.correlationId} — processing anyway`);
-      }
-
-      // ── Bus delivery is automatic via pub/sub ────────────────────────────
-      // The renderer published to request.replyTopic (a hitl.response.* topic).
-      // Operational callers subscribed directly to that topic — they already
-      // received the message. No re-publish needed from HITLPlugin.
-
-      // Find agent with plan_resume skill (should be Ava)
-      const planAgent = this.agents.find(a => a.skills.includes("plan_resume"));
-      if (!planAgent) {
-        console.error("[hitl] No agent with plan_resume skill found — cannot route HITLResponse");
-        return;
-      }
-
-      console.log(`[hitl] Routing HITLResponse (${resp.correlationId}, decision: ${resp.decision}) → ${planAgent.name}`);
-
-      try {
-        await callPlanResume(planAgent, resp);
-        console.log(`[hitl] plan_resume call to ${planAgent.name} succeeded`);
-      } catch (err) {
-        console.error(`[hitl] plan_resume call to ${planAgent.name} failed:`, err);
-      }
+      pendingRequests.delete(resp.correlationId);
+      unrenderedCorrelationIds.delete(resp.correlationId);
     });
   }
 
@@ -232,22 +219,5 @@ export class HITLPlugin implements Plugin {
       this.expiryTimer = null;
     }
     this.busRef = null;
-  }
-
-  private _loadAgents(): AgentDef[] {
-    const agentsPath = join(this.workspaceDir, "agents.yaml");
-    if (!existsSync(agentsPath)) {
-      console.warn("[hitl] agents.yaml not found — HITL response routing will be unavailable");
-      return [];
-    }
-
-    try {
-      const raw = readFileSync(agentsPath, "utf8");
-      const parsed = parseYaml(raw) as AgentsYaml;
-      return parsed.agents ?? [];
-    } catch (err) {
-      console.error("[hitl] Failed to parse agents.yaml:", err);
-      return [];
-    }
   }
 }

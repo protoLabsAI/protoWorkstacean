@@ -127,7 +127,6 @@ Append to `workspace/actions.yaml`. Every action must guard on domain availabili
         value: "ok"
     effects: []
     meta:
-      topic: "agent.skill.request"
       skillHint: diagnose
       agentId: myapp
       fireAndForget: true
@@ -135,7 +134,6 @@ Append to `workspace/actions.yaml`. Every action must guard on domain availabili
 
 Key fields:
 - `preconditions[0]` — **always guard on availability** to avoid firing on stale data
-- `meta.topic: "agent.skill.request"` — routes through SkillDispatcher to the A2A executor
 - `meta.skillHint` — which skill to invoke on the external agent
 - `meta.agentId` — which agent to route to (matches `name` in agents.yaml)
 - `meta.fireAndForget: true` — complete immediately (use `false` to wait for outcome)
@@ -193,14 +191,14 @@ curl http://localhost:3000/api/world-state | jq '.data.extensions.myapp_health_a
 curl http://localhost:3000/api/outcomes | jq '.recent[] | select(.actionId | startswith("myapp"))'
 ```
 
-## Reference: Ava integration
+## Reference: protoMaker team integration
 
-The Ava (protoMaker Studio) integration is the canonical example. It demonstrates:
+The protoMaker team integration (the multi-agent board runtime reached via AVA_BASE_URL) is the canonical example. It demonstrates:
 
-- **Two domains**: `ava_board` (blocked features) and `ava_pipeline` (auto-mode, running agents)
+- **Two domains**: `protomaker_board` (blocked features) and `protomaker_pipeline` (auto-mode, running agents)
 - **Five A2A skills**: sitrep, board_health, auto_mode, manage_feature, bug_triage
 - **Two goals**: board health (max 3 blocked) and auto-mode active
-- **Three actions**: alert on blocked, dispatch Ava to triage, alert auto-mode off
+- **Three actions**: alert on blocked, dispatch the protoMaker team to triage, alert auto-mode off
 
 Files:
 - `workspace/domains.yaml` — domain definitions
@@ -217,7 +215,7 @@ GoalEvaluator detects violation
     ↓
 L0 Planner matches action preconditions against world state
     ↓
-ActionDispatcher publishes to meta.topic (agent.skill.request)
+ActionDispatcher publishes to agent.skill.request
     ↓
 SkillDispatcher extracts skillHint + agentId
     ↓

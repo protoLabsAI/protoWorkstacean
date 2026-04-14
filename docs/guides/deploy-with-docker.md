@@ -117,8 +117,8 @@ docker compose logs -f workstacean
 Expected startup output:
 
 ```
-[agent-runtime] loaded agent: ava (orchestrator, 5 skills)
-[skill-broker] loaded 0 external agents
+[agent-runtime] loaded agent: ava (general, 1 skill)           ← in-process chat agent
+[skill-broker] Registered 3 A2A agent(s)                       ← protomaker, quinn, etc.
 [ceremony-plugin] loaded 5 ceremonies
 [world-state] domain discovery: 3 domains registered
 [http] listening on :3000

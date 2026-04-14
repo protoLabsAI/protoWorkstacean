@@ -11,6 +11,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import type { BusMessage } from "../../lib/types.ts";
+import { TOPICS } from "../event-bus/topics.ts";
 
 interface ProjectDiscordChannels {
   general?: string;
@@ -58,18 +59,28 @@ export class ProjectEnricher {
         continue;
       }
 
-      // Support both flat discord shape (discord.dev) and nested (discord.channels.dev)
+      // Each channel field may be a string, an object { channelId, webhook },
+      // or be nested under a `channels` key. Normalize via channelIdOf.
       const disc = p.discord as Record<string, unknown> | undefined;
-      const channels = (disc?.channels as Record<string, string> | undefined) ?? disc;
+      const channels = (disc?.channels as Record<string, unknown> | undefined) ?? disc;
+
+      const toId = (v: unknown): string | undefined => {
+        if (typeof v === "string") return v || undefined;
+        if (v && typeof v === "object" && "channelId" in v) {
+          const id = (v as { channelId?: unknown }).channelId;
+          return typeof id === "string" ? id : undefined;
+        }
+        return undefined;
+      };
 
       this.index.set(github, {
         projectSlug: slug,
         discordChannels: {
-          general: channels?.general as string | undefined,
-          updates: channels?.updates as string | undefined,
-          dev: channels?.dev as string | undefined,
-          alerts: channels?.alerts as string | undefined,
-          releases: channels?.releases as string | undefined,
+          general: toId(channels?.general),
+          updates: toId(channels?.updates),
+          dev: toId(channels?.dev),
+          alerts: toId(channels?.alerts),
+          releases: toId(channels?.releases),
         },
       });
     }
@@ -90,7 +101,7 @@ export class ProjectEnricher {
     if (payload.projectSlug !== undefined) return null;
 
     // Only enrich GitHub inbound messages
-    if (!msg.topic.startsWith("message.inbound.github.")) return null;
+    if (!msg.topic.startsWith(TOPICS.MESSAGE_INBOUND_GITHUB_PREFIX)) return null;
 
     const github = payload.github as Record<string, unknown> | undefined;
     const owner = github?.owner as string | undefined;

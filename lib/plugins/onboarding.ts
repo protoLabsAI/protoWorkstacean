@@ -68,7 +68,7 @@ interface OnboardRequest {
   github: string;            // "owner/repo"
   defaultBranch?: string;    // default: "main"
   team?: string;             // "dev" | "gtm" | etc.
-  agents?: string[];         // ["ava", "quinn", "frank"]
+  agents?: string[];         // ["protomaker", "quinn", "frank"]
   discord?: {
     general?: string;
     updates?: string;
@@ -499,7 +499,7 @@ export class OnboardingPlugin implements Plugin {
         defaultBranch: req.defaultBranch ?? "main",
         status: "active",
         onboardedAt: new Date().toISOString(),
-        agents: req.agents ?? ["ava", "quinn"],
+        agents: req.agents ?? ["protomaker", "quinn"],
         // Ensure discord.dev is always present (required by schema)
         discord: {
           dev: "",
@@ -568,7 +568,7 @@ export class OnboardingPlugin implements Plugin {
         github: req.github,
         defaultBranch: req.defaultBranch ?? "main",
         team: req.team ?? "dev",
-        agents: req.agents ?? ["ava", "quinn"],
+        agents: req.agents ?? ["protomaker", "quinn"],
         discord: req.discord ?? {},
         planeProjectId: steps.planeProject?.data?.projectId,
         driveFolderId: steps.driveFolder?.data?.folderId,

@@ -33,8 +33,8 @@ describe("IdentityRegistry — no users.yaml", () => {
     expect(registry.resolve("discord", "12345")).toBeNull();
   });
 
-  it("groupId() falls back to user:{platform}_{id} when unknown", () => {
-    expect(registry.groupId("discord", "12345")).toBe("user:discord_12345");
+  it("groupId() falls back to user_{platform}_{id} when unknown", () => {
+    expect(registry.groupId("discord", "12345")).toBe("user_discord_12345");
   });
 
   it("memoryEnabledUsers() returns empty array", () => {
@@ -101,13 +101,13 @@ users:
     expect(registry.resolve("telegram", "111222333444555")).toBeNull();
   });
 
-  it("groupId() returns user:{id} for known user", () => {
-    expect(registry.groupId("discord", "111222333444555")).toBe("user:josh");
-    expect(registry.groupId("github", "bioshazard")).toBe("user:josh");
+  it("groupId() returns user_{id} for known user", () => {
+    expect(registry.groupId("discord", "111222333444555")).toBe("user_josh");
+    expect(registry.groupId("github", "bioshazard")).toBe("user_josh");
   });
 
-  it("groupId() falls back to user:{platform}_{id} for unknown user", () => {
-    expect(registry.groupId("discord", "unknown999")).toBe("user:discord_unknown999");
+  it("groupId() falls back to user_{platform}_{id} for unknown user", () => {
+    expect(registry.groupId("discord", "unknown999")).toBe("user_discord_unknown999");
   });
 
   it("adminIds() returns admin platform IDs for given platform", () => {
@@ -174,7 +174,7 @@ users:
     expect(user?.id).toBe("alice");
   });
 
-  it("groupId for slack user returns user:alice", () => {
-    expect(registry.groupId("slack", "U01ABCDEF")).toBe("user:alice");
+  it("groupId for slack user returns user_alice", () => {
+    expect(registry.groupId("slack", "U01ABCDEF")).toBe("user_alice");
   });
 });

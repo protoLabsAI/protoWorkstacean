@@ -4,6 +4,8 @@
  */
 
 import type { Route, ApiContext } from "./types.ts";
+import type { TelemetryService } from "../telemetry/telemetry-service.ts";
+import type { Plugin } from "../../lib/types.ts";
 
 interface WorldStateAPI {
   getWorldState(opts?: { domain?: string; maxAgeMs?: number }): unknown;
@@ -17,6 +19,31 @@ interface ActionDispatcherAPI {
   getOutcomes(): { getAll(): unknown[]; summary(): unknown; getRecent(n: number): unknown[] };
 }
 
+interface HITLPluginAPI {
+  getQueueSnapshot(): { pendingCount: number; unrenderedCount: number };
+}
+
+interface OutcomeAnalysisAPI {
+  getActionStats(): Array<{
+    actionId: string;
+    total: number;
+    success: number;
+    failure: number;
+    timeout: number;
+    successRate: number;
+    lastEvaluatedAt: number;
+    alertedAt?: number;
+  }>;
+  getHitlStats(): Array<{
+    kind: string;
+    target: string;
+    count: number;
+    firstSeenAt: number;
+    lastSeenAt: number;
+    alertedAt?: number;
+  }>;
+}
+
 function resolveGithubAuthType(): string | null {
   if (process.env.QUINN_APP_PRIVATE_KEY) return "app";
   if (process.env.GITHUB_TOKEN) return "token";
@@ -27,6 +54,8 @@ export function createRoutes(ctx: ApiContext): Route[] {
   const wsEngine = ctx.plugins.find(p => p.name === "world-state-engine") as (WorldStateAPI & { name: string }) | undefined;
   const flowMonitor = ctx.plugins.find(p => p.name === "flow-monitor") as (FlowMonitorAPI & { name: string }) | undefined;
   const actionDispatcher = ctx.plugins.find(p => p.name === "action-dispatcher") as (ActionDispatcherAPI & { name: string }) | undefined;
+  const hitlPlugin = ctx.plugins.find(p => p.name === "hitl") as (HITLPluginAPI & { name: string }) | undefined;
+  const outcomeAnalysis = ctx.plugins.find(p => p.name === "outcome-analysis") as (OutcomeAnalysisAPI & { name: string }) | undefined;
 
   function handleGetWorldState(domain?: string): Response {
     if (!wsEngine) return Response.json({ success: false, error: "world-state-engine not available" }, { status: 503 });
@@ -74,15 +103,71 @@ export function createRoutes(ctx: ApiContext): Route[] {
   }
 
   function handleGetAgentHealth(): Response {
+    // Start from the ExecutorRegistry — who's wired at all
     const registrations = ctx.executorRegistry.list();
-    const agents: Record<string, { skills: string[]; executorType: string }> = {};
+    interface AgentView {
+      skills: string[];
+      executorType: string;
+      reachable?: boolean;
+      latencyMs?: number;
+      lastProbedAt?: number;
+      streaming?: boolean;
+      pushNotifications?: boolean;
+      cardAvailable?: boolean;
+      error?: string;
+    }
+    const agents: Record<string, AgentView> = {};
     for (const reg of registrations) {
       const name = reg.agentName ?? "_default";
       if (!agents[name]) agents[name] = { skills: [], executorType: reg.executor.type };
       if (reg.skill) agents[name].skills.push(reg.skill);
     }
+
+    // Overlay fleet liveness from SkillBrokerPlugin heartbeats (A2A agents only)
+    const broker = ctx.plugins.find(p => p.name === "skill-broker") as
+      | (Plugin & { getFleetHealth?: () => Array<{
+          agentName: string;
+          reachable: boolean;
+          latencyMs?: number;
+          lastProbedAt: number;
+          streaming?: boolean;
+          pushNotifications?: boolean;
+          cardAvailable?: boolean;
+          error?: string;
+        }> })
+      | undefined;
+
+    if (broker?.getFleetHealth) {
+      for (const probe of broker.getFleetHealth()) {
+        const view = agents[probe.agentName] ?? { skills: [], executorType: "a2a" };
+        view.reachable = probe.reachable;
+        view.latencyMs = probe.latencyMs;
+        view.lastProbedAt = probe.lastProbedAt;
+        view.streaming = probe.streaming;
+        view.pushNotifications = probe.pushNotifications;
+        view.cardAvailable = probe.cardAvailable;
+        if (probe.error) view.error = probe.error;
+        agents[probe.agentName] = view;
+      }
+    }
+
+    // Deep-agents run in-process — if they're in the ExecutorRegistry,
+    // the runtime loaded them and they're reachable by definition. Stamp
+    // a synthetic probe so the UI doesn't render them as "Not probed".
+    const now = Date.now();
+    for (const view of Object.values(agents)) {
+      if (view.executorType === "deep-agent" && view.reachable === undefined) {
+        view.reachable = true;
+        view.latencyMs = 0;
+        view.lastProbedAt = now;
+      }
+    }
+
+    const reachableCount = Object.values(agents).filter(a => a.reachable === true).length;
+
     return Response.json({
       agentCount: Object.keys(agents).length,
+      reachableCount,
       agents,
       registrationCount: registrations.length,
     });
@@ -94,6 +179,62 @@ export function createRoutes(ctx: ApiContext): Route[] {
     return Response.json({ summary: tracker.summary(), recent: tracker.getRecent(50) });
   }
 
+  function handleGetOutcomesAnalysis(): Response {
+    if (!outcomeAnalysis) {
+      return Response.json({ success: false, error: "outcome-analysis plugin not available" }, { status: 503 });
+    }
+    return Response.json({
+      success: true,
+      data: {
+        actions: outcomeAnalysis.getActionStats(),
+        hitl: outcomeAnalysis.getHitlStats(),
+      },
+      collectedAt: Date.now(),
+    });
+  }
+
+  function handleGetHitlQueue(): Response {
+    if (!hitlPlugin) return Response.json({ pendingCount: 0, unrenderedCount: 0 });
+    return Response.json(hitlPlugin.getQueueSnapshot());
+  }
+
+  async function handleGetMemoryHealth(): Promise<Response> {
+    // Probes Graphiti's /healthcheck (200 = service up) and issues a
+    // trivial /search (detects vector-function / embedder / neo4j
+    // wiring issues that healthcheck alone doesn't catch). Exposed
+    // as the `memory` domain so memory.graphiti_healthy can alert
+    // when either side goes dark.
+    const url = process.env.GRAPHITI_URL ?? "http://graphiti:8000";
+    const result = { healthy: 0, searchOk: 0, error: "" };
+    try {
+      const hc = await fetch(`${url}/healthcheck`, { signal: AbortSignal.timeout(3_000) });
+      if (hc.ok) result.healthy = 1;
+      const search = await fetch(`${url}/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "health probe", group_ids: ["user_josh"], max_facts: 1 }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (search.ok) result.searchOk = 1;
+      else result.error = `search ${search.status}`;
+    } catch (err) {
+      result.error = err instanceof Error ? err.message : String(err);
+    }
+    return Response.json(result);
+  }
+
+  function handleGetTelemetry(kind: "goal" | "action"): Response {
+    if (!ctx.telemetry) return Response.json([]);
+    return Response.json(ctx.telemetry.aggregate(kind));
+  }
+
+  function handleGetTelemetryUnused(kind: "goal" | "action", hoursParam?: string): Response {
+    if (!ctx.telemetry) return Response.json([]);
+    const hours = hoursParam ? Number(hoursParam) : 72;
+    const maxQuietMs = Number.isFinite(hours) ? hours * 60 * 60 * 1000 : 72 * 60 * 60 * 1000;
+    return Response.json(ctx.telemetry.unused(kind, maxQuietMs));
+  }
+
   return [
     { method: "GET", path: "/api/world-state",          handler: () => handleGetWorldState() },
     { method: "GET", path: "/api/world-state/:domain",  handler: (_, p) => handleGetWorldState(p.domain) },
@@ -102,5 +243,20 @@ export function createRoutes(ctx: ApiContext): Route[] {
     { method: "GET", path: "/api/flow-metrics",         handler: () => handleGetFlowMetrics() },
     { method: "GET", path: "/api/flow-metrics/:metric", handler: (_, p) => handleGetFlowMetrics(p.metric) },
     { method: "GET", path: "/api/outcomes",             handler: () => handleGetOutcomes() },
+    { method: "GET", path: "/api/outcomes/analysis",    handler: () => handleGetOutcomesAnalysis() },
+    { method: "GET", path: "/api/hitl-queue",           handler: () => handleGetHitlQueue() },
+    { method: "GET", path: "/api/memory-health",        handler: () => handleGetMemoryHealth() },
+    { method: "GET", path: "/api/telemetry/goals",      handler: () => handleGetTelemetry("goal") },
+    { method: "GET", path: "/api/telemetry/actions",    handler: () => handleGetTelemetry("action") },
+    {
+      method: "GET",
+      path: "/api/telemetry/unused/:kind",
+      handler: (req, p) => {
+        const kind = p.kind === "goal" || p.kind === "action" ? p.kind : null;
+        if (!kind) return Response.json({ error: "kind must be 'goal' or 'action'" }, { status: 400 });
+        const hours = new URL(req.url).searchParams.get("hours") ?? undefined;
+        return handleGetTelemetryUnused(kind, hours);
+      },
+    },
   ];
 }

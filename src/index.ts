@@ -10,6 +10,9 @@ import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { ActionRegistry } from "./planner/action-registry";
 import type { Plugin, } from "../lib/types";
 import type { Action } from "./planner/types/action";
+import { parseEnv } from "./config/env.ts";
+// Fail-fast env validation — exits immediately on misconfiguration.
+parseEnv();
 // --- Workspace config ---
 const workspaceDir = resolve(
   process.env.WORKSPACE_DIR || join(process.cwd(), "workspace")
@@ -23,6 +26,26 @@ const dataDir = resolve(
 );
 
 const bus = new InMemoryEventBus();
+
+// --- Context mailbox — mid-execution DM queue for debounced message injection ---
+import { ContextMailbox } from "../lib/dm/context-mailbox.ts";
+const contextMailbox = new ContextMailbox();
+
+// --- Task tracker — tracks long-running A2A tasks that returned non-terminal state ---
+import { TaskTracker } from "./executor/task-tracker.ts";
+const taskTracker = new TaskTracker({ bus });
+
+// --- A2A extensions — register observability interceptors (cost, confidence,
+//     effect-domain, blast, hitl-mode, worldstate-delta). A2AExecutor.execute()
+//     runs the before/after hooks on every skill call; the extensions
+//     self-gate on the presence of their advertised fields, so registering
+//     all of them is safe even when an agent doesn't opt in via its card.
+import { registerCostExtension } from "./executor/extensions/cost.ts";
+import { registerConfidenceExtension } from "./executor/extensions/confidence.ts";
+import { registerEffectDomainExtension } from "./executor/extensions/effect-domain.ts";
+registerCostExtension(bus);
+registerConfidenceExtension(bus);
+registerEffectDomainExtension(bus);
 
 // --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
 import { ChannelRegistry } from "../lib/channels/channel-registry.js";
@@ -76,13 +99,27 @@ function loadActionsYaml(): void {
 }
 loadActionsYaml();
 
+// --- Telemetry: per-goal and per-action counters persisted to knowledge.db ---
+// Hosts the audit view ("is this action actually used?") exposed via
+// /api/telemetry/* endpoints. Goal and action counters are bumped by the
+// goal-evaluator and action-dispatcher respectively. Loaded actions are
+// registered here at startup so zero-count rows exist for the audit.
+import { TelemetryService, ACTION_EVENTS } from "./telemetry/telemetry-service.js";
+const telemetry = new TelemetryService(`${dataDir}/knowledge.db`);
+telemetry.init();
+for (const action of actionRegistry.getAll()) {
+  telemetry.registerKnown("action", action.id, ACTION_EVENTS);
+}
+
 // Core plugins — always loaded, statically imported (no dynamic overhead needed)
 const debugPlugin = new DebugPlugin();
 debugPlugin.install(bus);
 
+const loggerPlugin = new LoggerPlugin(dataDir);
+
 const corePlugins: Plugin[] = [
   debugPlugin,
-  new LoggerPlugin(dataDir),
+  loggerPlugin,
   new CLIPlugin(),
   new SignalPlugin(),
   new SchedulerPlugin(dataDir),
@@ -130,7 +167,17 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => !!process.env.DISCORD_BOT_TOKEN,
     factory: async () => {
       const { DiscordPlugin } = await import("../lib/plugins/discord");
-      return new DiscordPlugin(workspaceDir, dataDir, channelRegistry, hitlPlugin);
+      return new DiscordPlugin({
+        workspaceDir,
+        dataDir,
+        channelRegistry,
+        hitlPlugin,
+        mailbox: contextMailbox,
+        isExecutionActive: (correlationId: string) => {
+          const dispatcher = registeredPlugins.find(p => p.name === "skill-dispatcher");
+          return !!(dispatcher as any)?.isActive?.(correlationId);
+        },
+      });
     },
   },
   {
@@ -158,11 +205,11 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
-    name: "plane-hitl",
+    name: "plane-discord-notifier",
     condition: () => true,
     factory: async () => {
-      const { PlaneHITLPlugin } = await import("../lib/plugins/plane-hitl");
-      return new PlaneHITLPlugin(workspaceDir);
+      const { PlaneDiscordNotifierPlugin } = await import("../lib/plugins/plane-discord-notifier");
+      return new PlaneDiscordNotifierPlugin(workspaceDir);
     },
   },
   {
@@ -178,7 +225,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { GoalEvaluatorPlugin } = await import("./plugins/goal_evaluator_plugin.js");
-      return new GoalEvaluatorPlugin({ workspaceDir });
+      return new GoalEvaluatorPlugin({ workspaceDir }, telemetry);
     },
   },
   {
@@ -186,7 +233,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { PlannerPluginL0 } = await import("./plugins/planner-plugin-l0.js");
-      return new PlannerPluginL0(actionRegistry);
+      return new PlannerPluginL0(actionRegistry, { executorRegistry });
     },
   },
   {
@@ -221,7 +268,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { SkillDispatcherPlugin } = await import("./executor/skill-dispatcher-plugin.js");
-      return new SkillDispatcherPlugin(executorRegistry, workspaceDir);
+      return new SkillDispatcherPlugin(executorRegistry, workspaceDir, undefined, loggerPlugin, contextMailbox, taskTracker);
     },
   },
   {
@@ -245,7 +292,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { ActionDispatcherPlugin } = await import("./plugins/action-dispatcher-plugin.js");
-      return new ActionDispatcherPlugin({ wipLimit: 5 });
+      return new ActionDispatcherPlugin({ wipLimit: 5 }, telemetry);
     },
   },
   {
@@ -270,6 +317,14 @@ const pluginRegistry: PluginRegistryEntry[] = [
     factory: async () => {
       const { FlowMonitorPlugin } = await import("../lib/plugins/flow-monitor.js");
       return new FlowMonitorPlugin();
+    },
+  },
+  {
+    name: "outcome-analysis",
+    condition: () => true,
+    factory: async () => {
+      const { OutcomeAnalysisPlugin } = await import("./plugins/outcome-analysis-plugin.js");
+      return new OutcomeAnalysisPlugin();
     },
   },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
@@ -391,29 +446,55 @@ const allPlugins = [...corePlugins, ...registeredPlugins, ...workspacePlugins];
 // ops.alert.budget and world.action.queue_full are published but had no consumers.
 // Forward both to message.outbound.discord.alert so they surface to operators.
 
-bus.subscribe("ops.alert.budget", "alert-bridge", (msg) => {
+bus.subscribe(TOPICS.FLOW_ALERT_BUDGET, "alert-bridge", (msg) => {
   const p = (msg.payload ?? {}) as Record<string, unknown>;
   const text = p.type === "cost_discrepancy"
     ? `Budget alert — cost discrepancy on request \`${p.requestId}\``
     : `Budget alert — ${String(p.type ?? "unknown")}: ${String(p.report ?? "")}`;
-  bus.publish("message.outbound.discord.alert", {
+  bus.publish(TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT, {
     id: crypto.randomUUID(),
     correlationId: msg.correlationId,
-    topic: "message.outbound.discord.alert",
+    topic: TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT,
     timestamp: Date.now(),
     payload: { text, level: "warn", source: "budget" },
   });
 });
 
-bus.subscribe("world.action.queue_full", "alert-bridge", (msg) => {
+bus.subscribe(TOPICS.WORLD_ACTION_QUEUE_FULL, "alert-bridge", (msg) => {
   const p = (msg.payload ?? {}) as Record<string, unknown>;
   const text = `Action queue full — WIP ${p.wipCount}/${p.wipLimit}, pending: \`${p.pendingActionId}\``;
-  bus.publish("message.outbound.discord.alert", {
+  bus.publish(TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT, {
     id: crypto.randomUUID(),
     correlationId: msg.correlationId,
-    topic: "message.outbound.discord.alert",
+    topic: TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT,
     timestamp: Date.now(),
     payload: { text, level: "warn", source: "action-dispatcher" },
+  });
+});
+
+// Outcome analysis alerts — chronic failures and repeated HITL escalations
+bus.subscribe(TOPICS.FLOW_ALERT_ACTION_QUALITY, "alert-bridge", (msg) => {
+  const p = (msg.payload ?? {}) as Record<string, unknown>;
+  const rate = typeof p.successRate === "number" ? (p.successRate * 100).toFixed(0) : "?";
+  const text = `🔻 Action quality alert — \`${p.actionId}\` success rate ${rate}% (${p.success}/${p.total}). ${p.recommendation ?? ""}`;
+  bus.publish(TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT, {
+    id: crypto.randomUUID(),
+    correlationId: msg.correlationId,
+    topic: TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT,
+    timestamp: Date.now(),
+    payload: { text, level: "warn", source: "outcome-analysis" },
+  });
+});
+
+bus.subscribe(TOPICS.FLOW_ALERT_HITL_ESCALATION, "alert-bridge", (msg) => {
+  const p = (msg.payload ?? {}) as Record<string, unknown>;
+  const text = `🔧 Feature-request signal — \`${p.kind}\` escalated to HITL ${p.count}× for \`${p.target}\`. ${p.recommendation ?? ""}`;
+  bus.publish(TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT, {
+    id: crypto.randomUUID(),
+    correlationId: msg.correlationId,
+    topic: TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT,
+    timestamp: Date.now(),
+    payload: { text, level: "warn", source: "outcome-analysis" },
   });
 });
 
@@ -434,13 +515,17 @@ const API_KEY = process.env.WORKSTACEAN_API_KEY;
 // ── API routes (modular) ──────────────────────────────────────────────────────
 import { createAllRoutes, matchPath } from "./api/index.ts";
 import type { ApiContext } from "./api/index.ts";
+import { TOPICS } from "./event-bus/topics.ts";
 
 const apiContext: ApiContext = {
   workspaceDir,
   bus,
   plugins: allPlugins,
   executorRegistry,
+  telemetry,
   apiKey: API_KEY,
+  mailbox: contextMailbox,
+  taskTracker,
 };
 
 const routes = createAllRoutes(apiContext);
@@ -476,7 +561,16 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     engine.registerDomain("ci", createHttpCollector(`${base}/api/ci-health`), 300_000); // 5min — GitHub rate limits
     engine.registerDomain("pr_pipeline", createHttpCollector(`${base}/api/pr-pipeline`), 120_000); // 2min
     engine.registerDomain("branch_drift", createHttpCollector(`${base}/api/branch-drift`), 600_000); // 10min
+    engine.registerDomain("branch_protection", createHttpCollector(`${base}/api/branch-protection`), 600_000); // 10min — rulesets change rarely
+    engine.registerDomain("hitl_queue", createHttpCollector(`${base}/api/hitl-queue`), 30_000); // 30s — catch routing holes fast
+    engine.registerDomain("plane", createHttpCollector(`${base}/api/plane-board`), 120_000); // 2min — Plane REST list across projects
+    engine.registerDomain("memory", createHttpCollector(`${base}/api/memory-health`), 60_000); // 1min — Graphiti health + search probe
 
-    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift");
+    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue, plane, memory");
+
+    // All local + workspace/domains.yaml + per-project domains are now
+    // registered. Defer prune briefly so any async per-project domain
+    // discovery has a chance to finish before we drop orphans.
+    setTimeout(() => engine.pruneOrphanDomains(), 10_000);
   }
 }

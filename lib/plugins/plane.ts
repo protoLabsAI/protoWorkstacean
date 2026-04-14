@@ -255,25 +255,52 @@ export class PlanePlugin implements Plugin {
     const issue = data as PlaneIssue;
     const topic = `message.inbound.plane.issue.${action}`;
 
-    // Determine if this issue should trigger planning
+    // Determine if this issue should trigger planning and which skill it
+    // routes to. Label → skill mapping (evaluated in order):
+    //
+    //   security → security_triage  — always high priority
+    //   bug      → bug_triage        — file a fix feature on the board
+    //   research → plan              — research spike, treated as planning
+    //   plan     → plan              — explicit planning request
+    //   auto     → plan (autoApprove) — planning + auto-execute
+    //
+    // Top-level issues (no parent) with NO matching label fall through to
+    // "plan" as the epic path. Leaf issues with no matching label are
+    // skipped — they're just notes, not actionable work.
     let shouldRoute = false;
+    let skillHint = "plan";
     let autoApprove = false;
 
     if (action === "created") {
-      // Check for plan/auto labels
       if (apiCache && issue.labels.length > 0) {
-        const hasPlanLabel = await apiCache.hasLabel(issue.project, issue.labels, "plan");
-        const hasAutoLabel = await apiCache.hasLabel(issue.project, issue.labels, "auto");
+        // Resolve all labels once and match in priority order
+        const hasLabel = async (name: string) =>
+          apiCache!.hasLabel(issue.project, issue.labels, name);
 
-        if (hasPlanLabel || hasAutoLabel) {
+        if (await hasLabel("security")) {
           shouldRoute = true;
-          autoApprove = hasAutoLabel;
+          skillHint = "security_triage";
+        } else if (await hasLabel("bug")) {
+          shouldRoute = true;
+          skillHint = "bug_triage";
+        } else if (await hasLabel("research")) {
+          shouldRoute = true;
+          skillHint = "plan";
+        } else if (await hasLabel("plan")) {
+          shouldRoute = true;
+          skillHint = "plan";
+        } else if (await hasLabel("auto")) {
+          shouldRoute = true;
+          skillHint = "plan";
+          autoApprove = true;
         }
       }
 
-      // Top-level issues (no parent) are potential epics — always route
-      if (!issue.parent) {
+      // Top-level issues (no parent) are potential epics — fall through to
+      // plan if no explicit skill label matched.
+      if (!shouldRoute && !issue.parent) {
         shouldRoute = true;
+        skillHint = "plan";
       }
     }
 
@@ -285,8 +312,14 @@ export class PlanePlugin implements Plugin {
     const correlationId = `plane-${issue.id}`;
     this.pendingIssues.set(correlationId, { planeIssueId: issue.id, planeProjectId: issue.project });
 
-    // Register this issue as a flow item so FlowMonitorPlugin can track its lifecycle
-    const flowItemType = issue.priority === "urgent" ? "defect" : "feature";
+    // Register this issue as a flow item so FlowMonitorPlugin can track its
+    // lifecycle. Derive the flow type from the resolved skill so distribution
+    // metrics reflect reality (security_triage → risk, bug_triage → defect,
+    // anything else → feature). Urgent priority overrides feature → defect.
+    let flowItemType: "feature" | "defect" | "risk" | "debt" = "feature";
+    if (skillHint === "security_triage") flowItemType = "risk";
+    else if (skillHint === "bug_triage") flowItemType = "defect";
+    else if (issue.priority === "urgent") flowItemType = "defect";
     bus.publish("flow.item.created", {
       id: crypto.randomUUID(),
       correlationId,
@@ -302,6 +335,14 @@ export class PlanePlugin implements Plugin {
       },
     });
 
+    // The content prefix hints at the skill so agents reading the bus
+    // message see what they're being asked to do at a glance.
+    const contentPrefix: Record<string, string> = {
+      plan: "Plan:",
+      bug_triage: "Bug:",
+      security_triage: "Security:",
+    };
+    const prefix = contentPrefix[skillHint] ?? "Plan:";
     bus.publish(topic, {
       id: crypto.randomUUID(),
       correlationId,
@@ -314,11 +355,11 @@ export class PlanePlugin implements Plugin {
         planeSequenceId: issue.sequence_id,
         title: issue.name,
         description: issue.description_stripped ?? issue.name,
-        content: `Plan: ${issue.name}\n\n${issue.description_stripped ?? issue.name}`,
+        content: `${prefix} ${issue.name}\n\n${issue.description_stripped ?? issue.name}`,
         priority: issue.priority,
         labels: issue.labels,
         autoApprove,
-        skillHint: "plan",
+        skillHint,
       },
       source: {
         interface: "plane" as const,
@@ -332,7 +373,7 @@ export class PlanePlugin implements Plugin {
     });
 
     console.log(
-      `[plane] ${event}.${action} on issue "${issue.name}" (${issue.id}) → plan` +
+      `[plane] ${event}.${action} on issue "${issue.name}" (${issue.id}) → ${skillHint}` +
       `${autoApprove ? " (auto-approve)" : ""}`,
     );
   }

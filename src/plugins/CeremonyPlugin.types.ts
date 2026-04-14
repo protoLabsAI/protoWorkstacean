@@ -20,6 +20,8 @@ export interface Ceremony {
   notifyChannel?: string;
   /** Whether this ceremony is active */
   enabled: boolean;
+  /** Optional per-ceremony timeout in milliseconds. Defaults to no timeout. */
+  timeoutMs?: number;
 }
 
 export interface CeremonyRunContext {

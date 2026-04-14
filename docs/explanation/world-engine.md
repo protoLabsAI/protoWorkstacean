@@ -60,7 +60,7 @@ When a goal is violated, it emits `world.goal.violated` with the goal ID, severi
 
 **PlannerPluginL0** subscribes to `world.goal.violated`. It queries `ActionRegistry` for actions whose `goalId` matches the violated goal and whose `preconditions` are satisfied against the current world state. It packages the selected actions into a `world.action.plan` message.
 
-**ActionDispatcherPlugin** subscribes to `world.action.plan`. It fires each action by publishing to `action.meta.topic`, subject to a WIP (work-in-progress) limit to prevent runaway firing.
+**ActionDispatcherPlugin** subscribes to `world.action.plan`. It fires each action by publishing to `agent.skill.request`, subject to a WIP (work-in-progress) limit to prevent runaway firing.
 
 ## Why tier_0 vs tier_1 vs tier_2
 
@@ -68,6 +68,6 @@ Tier_0 actions are deterministic and cheap: send an alert, trigger a ceremony. T
 
 Tier_1 actions require A*-based sequencing. When multiple goals are violated simultaneously, the planner needs to reason about which combination of actions resolves them efficiently. The `cost` field and `effects` array are used by the planner to simulate state transitions and find a minimum-cost plan.
 
-Tier_2 actions delegate to an LLM agent. The planner hands off to ava or another agent to decide what to do. This is appropriate when the required action is contextual — it depends on information outside the world state (e.g. reading a CI log, understanding a PR description).
+Tier_2 actions delegate to an LLM agent. The planner hands off to the protoMaker team, Quinn, or another agent to decide what to do. This is appropriate when the required action is contextual — it depends on information outside the world state (e.g. reading a CI log, understanding a PR description).
 
 Most production goals should be tier_0 (alert) + tier_0 (ceremony trigger). Tier_1 and tier_2 are for workflows that require multi-step recovery or autonomous judgment.

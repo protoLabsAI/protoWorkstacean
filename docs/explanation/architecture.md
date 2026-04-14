@@ -50,9 +50,9 @@ flowchart TD
         ADP["ActionDispatcherPlugin\nWIP limit: 5"]
     end
 
-    subgraph Ava["ava (protoMaker)"]
-        AVA_A2A["POST /a2a\nJSON-RPC 2.0"]
-        AVA_WORLD["/api/world/board\n/api/world/agent-health"]
+    subgraph ProtoMakerTeam["protoMaker team (external A2A runtime)"]
+        PM_A2A["POST /a2a\nJSON-RPC 2.0"]
+        PM_WORLD["/api/world/board\n/api/world/agent-health"]
     end
 
     GH --> GHP
@@ -72,10 +72,10 @@ flowchart TD
     ART -- "register ProtoSdkExecutor" --> REG
     SKB -- "register A2AExecutor" --> REG
 
-    A2AE --> AVA_A2A
+    A2AE --> PM_A2A
 
     DD -- "registerDomain\nupsert(action)" --> WSE
-    WSE -- "HTTP poll" --> AVA_WORLD
+    WSE -- "HTTP poll" --> PM_WORLD
     WSE -- "world.state.updated" --> GEP
     GEP -- "world.goal.violated" --> BUS
     BUS --> PL0
@@ -123,7 +123,7 @@ See [Executor Layer](./executor-layer) for the full design rationale.
 
 ## World Engine — GOAP homeostatic loop
 
-The `WorldStateEngine` is completely generic. It knows nothing about boards, agents, or CI. All domain knowledge lives in ava's `workspace/domains.yaml`.
+The `WorldStateEngine` is completely generic. It knows nothing about boards, agents, or CI. All domain knowledge lives in the protoMaker team's `workspace/domains.yaml`.
 
 Domain discovery runs at startup:
 
@@ -134,11 +134,11 @@ WORKSPACE_DIR/projects.yaml
       {projectPath}/workspace/actions.yaml   → actionRegistry.upsert(action)
 ```
 
-Domain URLs support `${ENV_VAR}` interpolation. ava exposes `/api/world/board` and `/api/world/agent-health` as pollable endpoints.
+Domain URLs support `${ENV_VAR}` interpolation. The protoMaker team server exposes `/api/world/board` and `/api/world/agent-health` as pollable endpoints.
 
 ```mermaid
 flowchart LR
-    subgraph Domains["ava/workspace/domains.yaml"]
+    subgraph Domains["protomaker/workspace/domains.yaml"]
         D1["board — 30s"]
         D2["agent-health — 15s"]
     end
@@ -163,7 +163,7 @@ Every `BusMessage` carries:
 | `correlationId` | W3C trace-id — links every message in a request tree | Never |
 | `parentId` | Parent span-id — = triggering message's `id` | At each hop |
 
-`RouterPlugin` sets `parentId` when translating inbound messages to `agent.skill.request`. `A2AExecutor` forwards both as `X-Correlation-Id` and `X-Parent-Id` HTTP headers. ava propagates `X-Correlation-Id` into its internal chat calls.
+`RouterPlugin` sets `parentId` when translating inbound messages to `agent.skill.request`. `A2AExecutor` forwards both as `X-Correlation-Id` and `X-Parent-Id` HTTP headers. External A2A agents (the protoMaker team, Quinn, protoContent) propagate `X-Correlation-Id` into their internal chat calls.
 
 See [Distributed Tracing](./distributed-tracing).
 

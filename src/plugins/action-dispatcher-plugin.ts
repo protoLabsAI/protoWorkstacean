@@ -3,25 +3,28 @@
  * optimistic state updates.
  *
  * Subscribes to: world.action.dispatch
- * Publishes:     world.action.outcome, world.action.queue_full
+ * Publishes:     agent.skill.request, autonomous.outcome.goap.{skill}, world.action.queue_full
  *
  * On receiving a dispatch event:
  *   1. Checks WIP limit; if at capacity, queues action and publishes queue_full
  *   2. Applies optimistic state effects via StateUpdater
- *   3. If action has meta.topic, publishes to that topic and waits for outcome
- *   4. For free/internal (tier_0, no meta.topic) actions: resolves immediately as success
- *   5. Publishes world.action.outcome with result
+ *   3. Publishes to agent.skill.request with source.interface='cron',
+ *      payload.meta.systemActor='goap', and reply.topic=`agent.skill.response.${correlationId}`
+ *   4. Publishes autonomous.outcome.goap.{skill} with the unified outcome payload
  *   6. On failure: triggers rollback via StateRollbackRegistry
  */
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
-import type { ActionDispatchPayload, ActionOutcomePayload, ActionQueueFullPayload } from "../event-bus/action-events.ts";
+import type { ActionDispatchPayload, ActionQueueFullPayload } from "../event-bus/action-events.ts";
+import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
+import type { AgentSkillResponsePayload } from "../event-bus/payloads.ts";
 import type { WorldState } from "../../lib/types/world-state.ts";
 import { TOPICS } from "../event-bus/topics.ts";
 import { DispatchQueue } from "../dispatcher/dispatch-queue.ts";
 import { OutcomeTracker } from "../dispatcher/outcome-tracker.ts";
 import { applyEffects } from "../planner/state-updater.ts";
 import { StateRollbackRegistry } from "../planner/state-rollback.ts";
+import type { TelemetryService } from "../telemetry/telemetry-service.ts";
 
 export interface ActionDispatcherConfig {
   wipLimit: number;
@@ -46,7 +49,10 @@ export class ActionDispatcherPlugin implements Plugin {
   /** Pending action timeouts: correlationId → timer. */
   private readonly pendingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(private readonly config: ActionDispatcherConfig) {
+  constructor(
+    private readonly config: ActionDispatcherConfig,
+    private readonly telemetry?: TelemetryService,
+  ) {
     this.queue = new DispatchQueue({ wipLimit: config.wipLimit });
     this.outcomes = new OutcomeTracker();
   }
@@ -110,6 +116,10 @@ export class ActionDispatcherPlugin implements Plugin {
     const { action, correlationId } = payload;
     const startedAt = Date.now();
 
+    // Telemetry: this action was selected and is entering dispatch.
+    // Counted even when queued by WIP — they still get dispatched later.
+    this.telemetry?.bump("action", action.id, "dispatched");
+
     // Try to dispatch immediately; queue if at WIP limit
     const dispatched = this.queue.tryDispatch(action, correlationId, msg.correlationId);
 
@@ -153,33 +163,39 @@ export class ActionDispatcherPlugin implements Plugin {
     }
 
     try {
-      // For tier_0 / no-topic actions: resolve immediately as success
-      if (!action.meta.topic) {
+      // Tier-0 actions are declarative world-state-only effects that don't require a
+      // skill call — their effects were already applied above. Resolve immediately as
+      // success without a dispatch. (Arc 1.4 removed the meta.topic indirection which
+      // used to gate this; the tier check preserves the original semantics.)
+      if (action.tier === "tier_0") {
         await this.completeAction(action, correlationId, parentCorrelationId, startedAt, true);
         return;
       }
 
-      // For fire-and-forget actions: publish to topic then immediately succeed.
+      // For fire-and-forget actions: publish to agent.skill.request then immediately succeed.
       // Use meta.fireAndForget for alerts, ceremony triggers, and other side-effect-only dispatches.
       if (action.meta.fireAndForget) {
-        this.bus.publish(action.meta.topic, {
+        this.bus.publish(TOPICS.AGENT_SKILL_REQUEST, {
           id: crypto.randomUUID(),
           correlationId,
           parentId: parentMsgId,
-          topic: action.meta.topic,
+          topic: TOPICS.AGENT_SKILL_REQUEST,
           timestamp: Date.now(),
+          source: { interface: "cron" },
           payload: {
-            actionId: action.id,
+            skill: action.meta.skillHint ?? action.id,
+            content: this._describeDispatch(action),
             goalId: action.goalId,
-            meta: action.meta,
+            meta: { ...action.meta, systemActor: "goap", actionId: action.id, goalId: action.goalId },
           },
         });
         await this.completeAction(action, correlationId, parentCorrelationId, startedAt, true);
         return;
       }
 
-      // For actions with a dispatch topic, publish and wait for outcome via timeout
+      // For actions with a dispatch topic, publish to agent.skill.request and wait for skill response
       const timeoutMs = action.meta.timeout ?? this.config.defaultTimeoutMs ?? 30_000;
+      const replyTopic = `agent.skill.response.${correlationId}`;
 
       await new Promise<void>((resolve) => {
         // Set up timeout
@@ -196,27 +212,29 @@ export class ActionDispatcherPlugin implements Plugin {
         }, timeoutMs);
         this.pendingTimeouts.set(correlationId, timer);
 
-        // Publish to action's target topic
-        this.bus.publish(action.meta.topic!, {
+        // Publish to unified skill dispatch topic
+        this.bus.publish(TOPICS.AGENT_SKILL_REQUEST, {
           id: crypto.randomUUID(),
           correlationId,
           parentId: parentMsgId,
-          topic: action.meta.topic!,
+          topic: TOPICS.AGENT_SKILL_REQUEST,
           timestamp: Date.now(),
+          source: { interface: "cron" },
+          reply: { topic: replyTopic },
           payload: {
-            actionId: action.id,
+            skill: action.meta.skillHint ?? action.id,
+            content: this._describeDispatch(action),
             goalId: action.goalId,
-            meta: action.meta,
+            meta: { ...action.meta, systemActor: "goap", actionId: action.id, goalId: action.goalId },
           },
         });
 
-        // Subscribe to outcome for this specific correlationId
-        const outcomeSubId = this.bus.subscribe(
-          TOPICS.WORLD_ACTION_OUTCOME,
+        // Subscribe to skill response for this specific correlationId
+        const responseSubId = this.bus.subscribe(
+          replyTopic,
           this.name + ".await." + correlationId,
-          (outcomeMsg: BusMessage) => {
-            const outcome = outcomeMsg.payload as ActionOutcomePayload;
-            if (outcome.correlationId !== correlationId) return;
+          (responseMsg: BusMessage) => {
+            const response = responseMsg.payload as AgentSkillResponsePayload;
 
             // Cancel timeout
             const t = this.pendingTimeouts.get(correlationId);
@@ -224,15 +242,15 @@ export class ActionDispatcherPlugin implements Plugin {
               clearTimeout(t);
               this.pendingTimeouts.delete(correlationId);
             }
-            this.bus.unsubscribe(outcomeSubId);
+            this.bus.unsubscribe(responseSubId);
 
             void this.completeAction(
               action,
               correlationId,
               parentCorrelationId,
               startedAt,
-              outcome.success,
-              outcome.error
+              !response.error,
+              response.error
             ).then(resolve);
           }
         );
@@ -270,41 +288,72 @@ export class ActionDispatcherPlugin implements Plugin {
     }
 
     // Record outcome
+    const status: "success" | "failure" | "timeout" = success
+      ? "success"
+      : (error?.includes("Timeout") ? "timeout" : "failure");
     this.outcomes.record({
       correlationId,
       actionId: action.id,
       goalId: action.goalId,
-      status: success ? "success" : (error?.includes("Timeout") ? "timeout" : "failure"),
+      status,
       startedAt,
       completedAt,
       durationMs: completedAt - startedAt,
       error,
     });
+    this.telemetry?.bump("action", action.id, status);
 
-    // Publish outcome event
-    const outcomePayload: ActionOutcomePayload = {
-      type: "outcome",
+    // Publish unified outcome event. ActionDispatcher is the outcome source
+    // for tier_0 (short-circuit) actions — for other tiers, SkillDispatcher
+    // emits the outcome after the skill completes. Both use the same topic
+    // shape so OutcomeAnalysis sees one unified stream.
+    const skill = action.meta.skillHint ?? action.id;
+    const outcomeTopic = `autonomous.outcome.goap.${skill}`;
+    const outcomePayload: AutonomousOutcomePayload = {
+      correlationId,
+      systemActor: "goap",
+      skill,
       actionId: action.id,
       goalId: action.goalId,
-      correlationId,
-      timestamp: completedAt,
       success,
       error,
+      taskState: success ? "completed" : (status === "timeout" ? "canceled" : "failed"),
       durationMs: completedAt - startedAt,
     };
 
-    this.bus.publish(TOPICS.WORLD_ACTION_OUTCOME, {
+    this.bus.publish(outcomeTopic, {
       id: crypto.randomUUID(),
       correlationId: parentCorrelationId,
-      topic: TOPICS.WORLD_ACTION_OUTCOME,
+      topic: outcomeTopic,
       timestamp: completedAt,
       payload: outcomePayload,
     });
+
+    // NOTE: Previously re-published world.state.updated here to close the
+    // outcome → state feedback loop. Removed — caused infinite loops in tests
+    // because re-publish triggered re-evaluation of a still-violated goal
+    // (effects are optimistic, real domain hasn't caught up), which dispatched
+    // the same action again. The correct fix lives in the planner: stronger
+    // in-flight tracking that waits for domain confirmation, not optimistic
+    // effects. Filed as a follow-up.
 
     // Complete in WIP queue and dispatch next if available
     const next = this.queue.complete(correlationId);
     if (next) {
       await this.executeAction(next.action, next.correlationId, next.parentCorrelationId, crypto.randomUUID(), next.enqueuedAt);
     }
+  }
+
+  /**
+   * Build a human-readable description of a GOAP dispatch. Carried as
+   * `payload.content` so skill-dispatcher has a non-empty "user message"
+   * for the episodic memory write under the `system_goap` group.
+   * Without this, GOAP dispatches produce no episodes because
+   * skill-dispatcher's addEpisode requires both groupId AND originalContent.
+   */
+  private _describeDispatch(action: import("../planner/types/action.ts").Action): string {
+    const goal = action.goalId ? ` to satisfy goal ${action.goalId}` : "";
+    const desc = action.description ? ` — ${action.description}` : "";
+    return `Autonomous dispatch: ${action.name || action.id}${goal}${desc}`;
   }
 }

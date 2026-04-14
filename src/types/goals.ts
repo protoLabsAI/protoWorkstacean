@@ -53,6 +53,19 @@ export interface GoalViolation {
   expected: unknown;
   timestamp: number;
   projectSlug?: string;
+  /**
+   * Desired world-state change that would resolve this violation.
+   * When present, PlannerPluginL0 queries ExecutorRegistry.resolveByEffect()
+   * instead of ActionRegistry.getByGoal() to select candidate skills.
+   */
+  desiredEffect?: {
+    /** World-state domain (e.g. "ci", "plane"). */
+    domain: string;
+    /** Dot-separated path into the domain's data object (e.g. "data.blockedPRs"). */
+    path: string;
+    /** The value the planner is trying to achieve at this path. */
+    targetValue: unknown;
+  };
 }
 
 export interface GoalsFile {

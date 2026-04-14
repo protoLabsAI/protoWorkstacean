@@ -110,7 +110,6 @@ actions:
         type: set
         value: true
     meta:
-      topic: "message.outbound.discord.push.1234567890"
       fireAndForget: true
 ```
 
@@ -190,10 +189,9 @@ Most alert and ceremony-trigger actions should be `tier_0`. Reserve higher tiers
 | `name` | No | string | Human-readable name. |
 | `preconditions` | No | array | Guard conditions. All must be true. |
 | `effects` | No | array | World state mutations applied after execution. |
-| `meta.topic` | Yes | string | Bus topic to publish on when the action fires. |
+| `meta.skillHint` | No | string | Skill name to invoke. Defaults to the action `id`. |
 | `meta.agentId` | No | string | Hint to route the action to a specific agent. |
 | `meta.fireAndForget` | No | boolean | Do not wait for a response. Default: `false`. |
-| `meta.payload` | No | object | Extra payload fields merged into the dispatched message. |
 
 ---
 
@@ -222,7 +220,6 @@ actions:
         operator: exists
     effects: []
     meta:
-      topic: "message.outbound.discord.push.ops-channel"
       fireAndForget: true
 
   - id: ceremony.health_check
@@ -236,7 +233,7 @@ actions:
         operator: exists
     effects: []
     meta:
-      topic: "ceremony.health_check.execute"
+      skillHint: health_check
       fireAndForget: true
 ```
 

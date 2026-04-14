@@ -31,11 +31,14 @@
 import { existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
+import type { InboundMessagePayload, CronPayload } from "../event-bus/payloads.ts";
 import { SkillResolver } from "./skill-resolver.ts";
 import { ProjectEnricher } from "./project-enricher.ts";
+import { FIRE_AND_FORGET_SKILLS } from "./faf-skills.ts";
 import { loadAgentDefinitions } from "../agent-runtime/agent-definition-loader.ts";
 import type { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
 import { TTLCache } from "../../lib/ttl-cache.ts";
+import { TOPICS } from "../event-bus/topics.ts";
 
 export interface RouterConfig {
   workspaceDir: string;
@@ -113,14 +116,14 @@ export class RouterPlugin implements Plugin {
 
     // Subscribe to inbound messages from all surfaces
     this.subscriptionIds.push(
-      bus.subscribe("message.inbound.#", this.name, (msg) => {
+      bus.subscribe(TOPICS.MESSAGE_INBOUND_ALL, this.name, (msg) => {
         void this._handleInbound(msg);
       }),
     );
 
     // Subscribe to cron events from SchedulerPlugin
     this.subscriptionIds.push(
-      bus.subscribe("cron.#", this.name, (msg) => {
+      bus.subscribe(TOPICS.CRON_ALL, this.name, (msg) => {
         void this._handleCron(msg);
       }),
     );
@@ -155,7 +158,7 @@ export class RouterPlugin implements Plugin {
   private async _handleInbound(msg: BusMessage): Promise<void> {
     if (!this.bus) return;
 
-    const payload = msg.payload as Record<string, unknown>;
+    const payload = msg.payload as InboundMessagePayload;
 
     // Skip system/internal messages that surface plugins re-publish for their
     // own routing (e.g., enriched GitHub messages from the old A2APlugin).
@@ -167,11 +170,15 @@ export class RouterPlugin implements Plugin {
     // not a GitHub message, or the repo isn't in the project registry.
     const enriched = this.enricher.enrich(msg);
     const workingMsg = enriched ?? msg;
-    const workingPayload = workingMsg.payload as Record<string, unknown>;
+    const workingPayload = workingMsg.payload as InboundMessagePayload;
 
-    const skillHint = workingPayload.skillHint as string | undefined;
-    const content = workingPayload.content as string | undefined;
+    const skillHint = workingPayload.skillHint;
+    const content = workingPayload.content;
     const isDM = workingPayload.isDM === true;
+
+    // Agent pool DMs bypass the router entirely — DiscordPlugin publishes
+    // directly to agent.skill.request with the target agent. Only main bot
+    // DMs (no agentId) come through here.
 
     // Channel-based agent assignment — takes priority over keyword agent matching.
     // If channels.yaml assigns this channel to a specific agent, prefer that.
@@ -201,6 +208,20 @@ export class RouterPlugin implements Plugin {
         `[router] No skill match for topic "${msg.topic}"` +
         (content ? ` content="${content.slice(0, 60)}"` : "") +
         " — dropping",
+      );
+      return;
+    }
+
+    // Fire-and-forget skills are owned by workspace/plugins/a2a.ts, which has
+    // its own ack-immediately + in-flight dedup pipeline. If the router also
+    // dispatched them through skill-dispatcher the same inbound event would
+    // run twice — the workspace plugin's timing-based inFlightFAF guard can
+    // mask the visible dup but is race-prone. Skipping them here is the
+    // symmetric filter half of the fix.
+    const resolvedSkill = match?.skill ?? storedSession?.skill;
+    if (resolvedSkill && FIRE_AND_FORGET_SKILLS.has(resolvedSkill)) {
+      console.log(
+        `[router] Skill "${resolvedSkill}" is fire-and-forget — owned by workspace/a2a, skipping dispatch`,
       );
       return;
     }
@@ -244,7 +265,7 @@ export class RouterPlugin implements Plugin {
       id: crypto.randomUUID(),
       correlationId: workingMsg.correlationId,
       parentId: workingMsg.id,
-      topic: "agent.skill.request",
+      topic: TOPICS.AGENT_SKILL_REQUEST,
       timestamp: Date.now(),
       payload: {
         // Forward enriched payload fields (includes projectSlug if enriched)
@@ -261,17 +282,17 @@ export class RouterPlugin implements Plugin {
       source: workingMsg.source,
     };
 
-    this.bus.publish("agent.skill.request", skillRequest);
+    this.bus.publish(TOPICS.AGENT_SKILL_REQUEST, skillRequest);
   }
 
   private async _handleCron(msg: BusMessage): Promise<void> {
     if (!this.bus) return;
 
-    const payload = msg.payload as Record<string, unknown>;
-    const content = payload.content as string | undefined;
-    const skillHint = payload.skillHint as string | undefined;
-    const channel = (payload.channel as string | undefined) ?? "cli";
-    const recipient = payload.recipient as string | undefined;
+    const payload = msg.payload as CronPayload;
+    const content = payload.content;
+    const skillHint = payload.skillHint;
+    const channel = payload.channel ?? "cli";
+    const recipient = payload.recipient;
 
     const match = this.resolver.resolve(skillHint, content);
 
@@ -293,7 +314,7 @@ export class RouterPlugin implements Plugin {
       id: crypto.randomUUID(),
       correlationId: msg.correlationId,
       parentId: msg.id,
-      topic: "agent.skill.request",
+      topic: TOPICS.AGENT_SKILL_REQUEST,
       timestamp: Date.now(),
       payload: {
         ...payload,
@@ -307,6 +328,6 @@ export class RouterPlugin implements Plugin {
       source: msg.source ?? { interface: "cron" },
     };
 
-    this.bus.publish("agent.skill.request", skillRequest);
+    this.bus.publish(TOPICS.AGENT_SKILL_REQUEST, skillRequest);
   }
 }

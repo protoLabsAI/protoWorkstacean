@@ -58,28 +58,48 @@ const getGithubToken = makeGitHubAuth();
  * create_feature / start_auto_mode tool calls to the right board.
  * The map is loaded lazily on first use and cached per-process.
  */
-let projectPathMapCache: Map<string, string> | null = null;
-function loadProjectPathMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? "workspace"): Map<string, string> {
-  if (projectPathMapCache) return projectPathMapCache;
-  const map = new Map<string, string>();
+interface ProjectMeta {
+  projectPath?: string;
+  devChannelId?: string;
+}
+let projectMetaCache: Map<string, ProjectMeta> | null = null;
+function loadProjectMetaMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? "workspace"): Map<string, ProjectMeta> {
+  if (projectMetaCache) return projectMetaCache;
+  const map = new Map<string, ProjectMeta>();
   const yamlPath = join(workspaceDir, "projects.yaml");
   if (!existsSync(yamlPath)) {
-    console.warn(`[pr-remediator] projects.yaml not found at ${yamlPath} — projectPath metadata will be empty`);
-    projectPathMapCache = map;
+    console.warn(`[pr-remediator] projects.yaml not found at ${yamlPath} — project metadata will be empty`);
+    projectMetaCache = map;
     return map;
   }
   try {
     const parsed = parseYaml(readFileSync(yamlPath, "utf8")) as {
-      projects?: Array<{ github?: string; projectPath?: string }>;
+      projects?: Array<{
+        github?: string;
+        projectPath?: string;
+        discord?: { dev?: { channelId?: string } };
+      }>;
     };
     for (const p of parsed.projects ?? []) {
-      if (p.github && p.projectPath) map.set(p.github, p.projectPath);
+      if (!p.github) continue;
+      map.set(p.github, {
+        projectPath: p.projectPath,
+        devChannelId: p.discord?.dev?.channelId,
+      });
     }
   } catch (err) {
     console.warn(`[pr-remediator] failed to parse projects.yaml: ${String(err)}`);
   }
-  projectPathMapCache = map;
+  projectMetaCache = map;
   return map;
+}
+function loadProjectPathMap(workspaceDir?: string): Map<string, string> {
+  const meta = loadProjectMetaMap(workspaceDir);
+  const out = new Map<string, string>();
+  for (const [repo, m] of meta) {
+    if (m.projectPath) out.set(repo, m.projectPath);
+  }
+  return out;
 }
 
 /**
@@ -94,11 +114,18 @@ function loadProjectPathMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? 
  * Idempotent: the endpoint returns `alreadyRunning: true` when auto-mode
  * is already active for the project, so repeated calls are cheap.
  */
-async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; message: string }> {
+type KickStatus = "ok" | "not_configured" | "error";
+
+async function startAvaAutoMode(projectPath: string): Promise<{ status: KickStatus; message: string }> {
   const base = process.env.AVA_BASE_URL;
   const apiKey = process.env.AVA_API_KEY;
-  if (!base) return { ok: false, message: "AVA_BASE_URL not set" };
-  if (!apiKey) return { ok: false, message: "AVA_API_KEY not set" };
+  // "not_configured" is the distinct state for test / local-dev environments
+  // where Ava isn't plumbed in at all. Plugin treats this as a silent skip,
+  // distinct from "configured but the request failed" which is a loud alert.
+  if (!base || !apiKey) {
+    const missing = [!base && "AVA_BASE_URL", !apiKey && "AVA_API_KEY"].filter(Boolean).join(", ");
+    return { status: "not_configured", message: `${missing} not set (Ava integration disabled)` };
+  }
 
   try {
     const resp = await fetch(`${base}/api/auto-mode/start`, {
@@ -112,7 +139,7 @@ async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; mes
     });
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
-      return { ok: false, message: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+      return { status: "error", message: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
     }
     const data = (await resp.json()) as {
       success?: boolean;
@@ -120,11 +147,11 @@ async function startAvaAutoMode(projectPath: string): Promise<{ ok: boolean; mes
       alreadyRunning?: boolean;
     };
     return {
-      ok: data.success === true,
+      status: data.success === true ? "ok" : "error",
       message: data.alreadyRunning ? "already running" : (data.message ?? "started"),
     };
   } catch (err) {
-    return { ok: false, message: String(err) };
+    return { status: "error", message: String(err) };
   }
 }
 
@@ -139,8 +166,13 @@ const ATTEMPT_COOLDOWN_MS = 5 * 60 * 1000;
 // escalates to HITL once. Further triggers are silently ignored until a
 // human clears the entry (by the PR leaving pr_pipeline, e.g. merged/closed).
 const MAX_ATTEMPTS_PER_PR = 3;
+// After this many update_branch 422 failures, run diagnose_pr_stuck before
+// attempting another retry. The diagnose skill classifies the conflict so the
+// loop picks the right recovery path instead of banging on the same wall.
+const DIAGNOSE_AFTER_ATTEMPTS = 2;
 
-type RemediationKind = "fix_ci" | "address_feedback" | "merge_ready";
+type RemediationKind = "fix_ci" | "address_feedback" | "merge_ready" | "update_branch";
+type DiagnosisVerdict = "redundant" | "rebasable" | "decomposable" | "genuine";
 
 interface InFlightEntry {
   kind: RemediationKind;
@@ -164,11 +196,11 @@ interface InFlightEntry {
   escalated?: boolean;
 }
 
-// ── Allowlist: titles / authors that may auto-merge without HITL ─────────────
-
-const AUTO_MERGE_AUTHORS = new Set(["dependabot[bot]", "renovate[bot]"]);
-const AUTO_MERGE_TITLE_PREFIXES = ["promote:", "chore(deps"];
-const AUTO_MERGE_LABEL = "auto-merge";
+// No author/title allowlist — readyToMerge semantics (passing CI + approved
+// review) are the authorization gate. Anything that reaches the merge path
+// has already passed both, so there's no class of PR that needs a separate
+// "can this merge itself?" check. The HITL ask survives only as an
+// error-path fallback when ghMerge() fails.
 
 /**
  * Derive the workstacean/ava project slug from a GitHub `owner/repo` string.
@@ -208,15 +240,6 @@ interface PrDomainData {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function isAutoMergeEligible(pr: PrDomainEntry): boolean {
-  if (AUTO_MERGE_AUTHORS.has(pr.author)) return true;
-  if (pr.labels.includes(AUTO_MERGE_LABEL)) return true;
-  for (const prefix of AUTO_MERGE_TITLE_PREFIXES) {
-    if (pr.title.startsWith(prefix)) return true;
-  }
-  return false;
-}
-
 async function ghMerge(repo: string, num: number): Promise<{ ok: boolean; status: number; error?: string }> {
   if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)" };
   const [owner, repoName] = repo.split("/");
@@ -242,7 +265,238 @@ async function ghMerge(repo: string, num: number): Promise<{ ok: boolean; status
   }
 }
 
+/**
+ * Submit an APPROVED review on a PR as Quinn. Used by the auto-approve
+ * path for structurally-safe PR classes (dependabot/renovate, promote,
+ * chore(deps) where the content is either machine-generated or already
+ * reviewed upstream.
+ *
+ * GitHub rejects review submissions on your own PRs (422 Unprocessable),
+ * so this path only ever runs for PRs opened by a different identity
+ * than Quinn — the safe classes above are all opened by dependabot,
+ * renovate, or human users, so that constraint is naturally satisfied.
+ */
+async function ghApprove(repo: string, num: number): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(`https://api.github.com/repos/${repo}/pulls/${num}/reviews`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        event: "APPROVE",
+        body: "Auto-approved by Quinn: safe PR class (dependabot/renovate/promote/chore(deps)) with passing CI.",
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (resp.ok) return { ok: true, status: resp.status };
+    const body = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: body.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
+/**
+ * Update a PR's head branch to incorporate the latest changes from its base.
+ *
+ * Uses GitHub's `update-branch` endpoint which merges the base into the head
+ * (merge strategy, not rebase — that's a GitHub API limitation). The result
+ * is a new merge commit on the PR branch bringing in whatever landed on the
+ * base since the PR was opened. Squash-merge at the end flattens everything
+ * so the history impact is zero for repos using squash merges.
+ *
+ * Purpose: close the stale-base gap in the autonomous merge loop. Before
+ * this, any PR whose base advanced after it was opened went `mergeable=dirty`
+ * and just sat there — even if CI was green and review was approved — until
+ * a human rebased. With this in the loop, pr-remediator calls update-branch
+ * on any dirty bot-origin PR and the PR flows through the rest of the gates
+ * normally on the next tick.
+ *
+ * Returns 202 when the update is queued (async), 200 when applied inline,
+ * 422 when GitHub can't auto-merge (real conflict in the merge itself —
+ * that's the case we can't fix and must escalate).
+ */
+async function ghUpdateBranch(
+  repo: string,
+  num: number,
+  expectedHeadSha?: string,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const body: Record<string, unknown> = {};
+    if (expectedHeadSha) body.expected_head_sha = expectedHeadSha;
+    const resp = await fetch(`https://api.github.com/repos/${repo}/pulls/${num}/update-branch`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (resp.ok || resp.status === 202) return { ok: true, status: resp.status };
+    const errBody = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: errBody.slice(0, 300) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
+/**
+ * Is this PR in a class that Quinn can auto-approve?
+ *
+ *   - dependabot / renovate authors (automated dep bumps)
+ *   - "promote:" title prefix (release pipeline — content already reviewed)
+ *   - "chore(deps" title prefix (manual dep bump)
+ *
+ * All three classes are structurally safe: they either contain no
+ * hand-written code (dep bumps) or are re-promoting content that's
+ * already passed review on the upstream branch.
+ */
+const AUTO_APPROVE_AUTHORS = new Set(["dependabot[bot]", "renovate[bot]"]);
+const AUTO_APPROVE_TITLE_PREFIXES = ["promote:", "chore(deps"];
+
+function isAutoApproveClass(pr: PrDomainEntry): boolean {
+  if (AUTO_APPROVE_AUTHORS.has(pr.author)) return true;
+  for (const prefix of AUTO_APPROVE_TITLE_PREFIXES) {
+    if (pr.title.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/**
+ * Trigger a GitHub Actions workflow_dispatch event for the auto back-merge
+ * workflow on a repo's default branch. The workflow filename and the ref
+ * it runs on are both configurable via env so repos that use a different
+ * workflow name or run back-merge from dev (protoWorkstacean pattern) can
+ * still participate.
+ */
+async function ghDispatchBackmerge(
+  repo: string,
+  defaultBranch: string,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+
+  const workflowFile = process.env.BACKMERGE_WORKFLOW_FILE ?? "backmerge-from-main.yml";
+  const ref = process.env.BACKMERGE_WORKFLOW_REF ?? defaultBranch;
+
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(
+      `https://api.github.com/repos/${repo}/actions/workflows/${workflowFile}/dispatches`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ref }),
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    if (resp.ok || resp.status === 204) return { ok: true, status: resp.status };
+    const body = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: body.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
+/**
+ * Close a PR on GitHub. Used by diagnose_pr_stuck verdicts (redundant,
+ * decomposable) to automatically close PRs that won't benefit from further
+ * retry attempts.
+ */
+async function ghClosePr(
+  repo: string,
+  num: number,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(`https://api.github.com/repos/${repo}/pulls/${num}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ state: "closed" }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (resp.ok) return { ok: true, status: resp.status };
+    const body = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: body.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
+/**
+ * Post a comment on a PR/issue. Used by diagnose_pr_stuck to explain the
+ * auto-close decision before closing (redundant, decomposable verdicts).
+ */
+async function ghComment(
+  repo: string,
+  num: number,
+  body: string,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(`https://api.github.com/repos/${repo}/issues/${num}/comments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ body }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (resp.ok) return { ok: true, status: resp.status };
+    const errBody = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: errBody.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
 // ── Plugin ───────────────────────────────────────────────────────────────────
+
+type BranchDriftData = {
+  projects: Array<{
+    repo: string;
+    devToMain?: number;
+    devToStaging?: number | null;
+    stagingToMain?: number | null;
+    defaultBranch?: string;
+  }>;
+  maxDrift: number;
+};
 
 export class PrRemediatorPlugin implements Plugin {
   readonly name = "pr-remediator";
@@ -252,10 +506,23 @@ export class PrRemediatorPlugin implements Plugin {
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
   private latestPrData: PrDomainData | null = null;
+  private latestBranchDrift: BranchDriftData | null = null;
   /** Map correlationId → PR identity, so HITL response can find the PR to merge. */
   private readonly pendingApprovals = new Map<string, { repo: string; number: number; title: string }>();
   /** Map `${repo}#${number}:${kind}` → in-flight dispatch metadata. */
   private readonly inFlight = new Map<string, InFlightEntry>();
+  /** Repo → timestamp of last backmerge dispatch (cooldown). */
+  private readonly backmergeDispatchedAt = new Map<string, number>();
+  /** `slug:reason` → timestamp of last auto-mode kick alert (5-min dedupe). */
+  private readonly autoModeKickAlertsAt = new Map<string, number>();
+  /** `repo#number` → timestamp of last auto-approve attempt (avoid re-submitting on every tick while GitHub catches up). */
+  private readonly autoApprovedAt = new Map<string, number>();
+  /**
+   * `repo#number` → correlationId of the in-flight diagnose_pr_stuck skill
+   * request. Prevents further update_branch retries while diagnosis is running
+   * and routes the skill response to _handleDiagnoseResponse.
+   */
+  private readonly diagnosisInFlight = new Map<string, string>();
 
   install(bus: EventBus): void {
     this.bus = bus;
@@ -265,15 +532,28 @@ export class PrRemediatorPlugin implements Plugin {
     // clear the cache so stale PRs don't trigger bogus remediation.
     this.subscriptionIds.push(bus.subscribe("world.state.updated", this.name, (msg) => {
       const state = msg.payload as WorldState | undefined;
-      const domain = state?.domains?.pr_pipeline;
-      if (domain?.data) {
-        this.latestPrData = domain.data as PrDomainData;
+      const prDomain = state?.domains?.pr_pipeline;
+      if (prDomain?.data) {
+        this.latestPrData = prDomain.data as PrDomainData;
         // Drop in-flight entries for PRs no longer in the pipeline (merged/closed).
         // This lets exhausted entries clear naturally without a timer.
         this._pruneInFlight();
+        // Auto-approve any safe-class PR that's CI-passing but still waiting
+        // on a review — Quinn submits an APPROVED review, next world state
+        // tick flips readyToMerge, _handleMergeReady auto-merges.
+        void this._runAutoApprovePass().catch(err =>
+          console.error("[pr-remediator] auto-approve pass error:", err),
+        );
       } else if (state?.domains) {
         // Domain missing from a valid state update — drop stale cache
         this.latestPrData = null;
+      }
+
+      const driftDomain = state?.domains?.branch_drift;
+      if (driftDomain?.data) {
+        this.latestBranchDrift = driftDomain.data as BranchDriftData;
+      } else if (state?.domains) {
+        this.latestBranchDrift = null;
       }
     }));
 
@@ -294,6 +574,12 @@ export class PrRemediatorPlugin implements Plugin {
     }));
     this.subscriptionIds.push(bus.subscribe("pr.remediate.address_feedback", this.name, (msg) => {
       void this._handleAddressFeedback(msg);
+    }));
+    this.subscriptionIds.push(bus.subscribe("pr.remediate.update_branch", this.name, (msg) => {
+      void this._handleUpdateBranch(msg);
+    }));
+    this.subscriptionIds.push(bus.subscribe("pr.backmerge.dispatch", this.name, () => {
+      void this._handleBackmergeDispatch();
     }));
 
     // HITL response handler — fires when a human approves/rejects via Discord.
@@ -316,6 +602,7 @@ export class PrRemediatorPlugin implements Plugin {
     this.latestPrData = null;
     this.pendingApprovals.clear();
     this.inFlight.clear();
+    this.diagnosisInFlight.clear();
   }
 
   // ── Loop protection helpers ────────────────────────────────────────────────
@@ -341,6 +628,15 @@ export class PrRemediatorPlugin implements Plugin {
     number: number,
     kind: RemediationKind,
   ): { ok: true } | { ok: false; reason: string } {
+    // Block update_branch retries while diagnose_pr_stuck is classifying the conflict.
+    if (kind === "update_branch") {
+      const prKey = `${repo}#${number}`;
+      const diagCid = this.diagnosisInFlight.get(prKey);
+      if (diagCid !== undefined) {
+        return { ok: false, reason: `diagnose_pr_stuck in-flight (correlationId: ${diagCid})` };
+      }
+    }
+
     const key = this._inFlightKey(repo, number, kind);
     const entry = this.inFlight.get(key);
     if (!entry) return { ok: true };
@@ -401,12 +697,28 @@ export class PrRemediatorPlugin implements Plugin {
     number: number,
     kind: RemediationKind,
     entry: InFlightEntry,
+    conflictDetails?: string,
   ): void {
     if (!this.bus) return;
 
+    // Suppress escalations for PRs that have left the pipeline (closed /
+    // merged) between the attempts hitting MAX_ATTEMPTS_PER_PR and the
+    // escalation firing. latestPrData is the cached pr_pipeline snapshot;
+    // if the PR is no longer in it, the remediation is moot — no point
+    // asking a human to unstick a closed PR. Silently drop and clear the
+    // in-flight entry so it doesn't linger.
     const pr = (this.latestPrData?.prs ?? []).find((p) => p.repo === repo && p.number === number);
+    if (!pr) {
+      console.log(
+        `[pr-remediator] suppressing stuck HITL escalation for ${repo}#${number} — PR no longer in pipeline (closed/merged)`,
+      );
+      this.inFlight.delete(this._inFlightKey(repo, number, kind));
+      return;
+    }
+
     const correlationId = crypto.randomUUID();
     const replyTopic = `hitl.response.pr.remediation_stuck.${correlationId}`;
+    const devChannelId = loadProjectMetaMap().get(repo)?.devChannelId;
 
     const durationMs = Date.now() - entry.startedAt;
     const durationMin = Math.round(durationMs / 60_000);
@@ -425,6 +737,7 @@ export class PrRemediatorPlugin implements Plugin {
         `**Last correlationId**: \`${entry.correlationId}\``,
         ``,
         `The auto-remediation loop has dispatched ${kind} to Ava ${entry.attempts} times and the PR is still stuck. This is a bottleneck — either a new agent capability is needed, the root cause is outside Ava's reach, or a human merge / manual fix will break the cycle.`,
+        conflictDetails ? `\n**Conflict diagnosis (genuine)**:\n${conflictDetails}` : "",
         ``,
         `**Treat every stuck PR as a feature request**: what would have unblocked this automatically? That's the next thing to build on the board.`,
         ``,
@@ -433,6 +746,7 @@ export class PrRemediatorPlugin implements Plugin {
       options: ["investigate", "mark_non_remediable", "manual_unblock"],
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       replyTopic,
+      sourceMeta: { interface: "discord", ...(devChannelId ? { channelId: devChannelId } : {}) },
     };
 
     const topic = `hitl.request.pr.remediation_stuck.${correlationId}`;
@@ -497,6 +811,59 @@ export class PrRemediatorPlugin implements Plugin {
     }
   }
 
+  // ── auto-approve (dependabot / promote / chore(deps) ─────────────────────
+  //
+  // CodeRabbit doesn't submit APPROVED reviews on clean PRs (verified
+  // empirically — see the audit of recent PRs across all managed repos),
+  // which means the tightened readyToMerge = "approved review" check was
+  // leaving safe-class PRs stuck forever. This pass closes the gap: Quinn
+  // submits an APPROVED review on every PR whose author/title marks it as
+  // structurally safe, whose CI is passing, and whose review state is
+  // still pending/none.
+  //
+  // The pass is rate-limited per PR via autoApprovedAt — GitHub takes a
+  // few seconds to reflect the new review, and the world state domain
+  // polls every couple of minutes, so we skip any PR approved in the last
+  // 10 minutes to avoid double-posting while the state catches up.
+
+  private static readonly AUTO_APPROVE_COOLDOWN_MS = 10 * 60 * 1000;
+
+  private async _runAutoApprovePass(): Promise<void> {
+    if (!AUTO_MERGE_ENABLED) return; // same env gate as the merge path
+    const prs = this.latestPrData?.prs ?? [];
+    const now = Date.now();
+
+    for (const pr of prs) {
+      if (!isAutoApproveClass(pr)) continue;
+      if (pr.ciStatus !== "pass") continue;
+      if (pr.reviewState === "approved") continue;
+      if (pr.reviewState === "changes_requested") continue; // don't override real feedback
+      if (pr.isDraft) continue;
+
+      const key = `${pr.repo}#${pr.number}`;
+      const lastApproval = this.autoApprovedAt.get(key);
+      if (lastApproval !== undefined && now - lastApproval < PrRemediatorPlugin.AUTO_APPROVE_COOLDOWN_MS) {
+        continue;
+      }
+
+      this.autoApprovedAt.set(key, now);
+      const result = await ghApprove(pr.repo, pr.number);
+      if (result.ok) {
+        console.log(`[pr-remediator] auto-approved ${key} (class=${AUTO_APPROVE_AUTHORS.has(pr.author) ? pr.author : "title-prefix"})`);
+      } else if (result.status === 422) {
+        // Usually "Can not approve your own pull request" — Quinn opened it.
+        // Drop the cooldown entry so we don't rapidly re-attempt; set it far
+        // in the future instead.
+        this.autoApprovedAt.set(key, now + 24 * 60 * 60 * 1000);
+        console.log(`[pr-remediator] skip auto-approve ${key}: 422 (likely Quinn-authored PR)`);
+      } else {
+        console.warn(`[pr-remediator] auto-approve failed ${key}: ${result.status} ${result.error}`);
+        // Drop cooldown so we retry on next tick after a real failure.
+        this.autoApprovedAt.delete(key);
+      }
+    }
+  }
+
   // ── merge_ready ────────────────────────────────────────────────────────────
 
   private async _handleMergeReady(msg: BusMessage): Promise<void> {
@@ -513,26 +880,103 @@ export class PrRemediatorPlugin implements Plugin {
         continue;
       }
 
-      if (isAutoMergeEligible(pr)) {
-        if (!AUTO_MERGE_ENABLED) {
-          console.log(`[pr-remediator] DRY-RUN — would auto-merge ${pr.repo}#${pr.number} (${pr.author})`);
-          continue;
-        }
-        // Claim the slot before the network call so a concurrent trigger
-        // can't race into the same merge. The correlationId is synthetic
-        // since no skill dispatch happens — the entry clears on pipeline prune.
-        this._recordDispatch(pr.repo, pr.number, "merge_ready", `merge-${crypto.randomUUID()}`);
-        const result = await ghMerge(pr.repo, pr.number);
-        if (result.ok) {
-          console.log(`[pr-remediator] auto-merged ${pr.repo}#${pr.number}`);
-          this._publishAlert(`Auto-merged ${pr.repo}#${pr.number}`, pr);
-        } else {
-          console.warn(`[pr-remediator] auto-merge failed ${pr.repo}#${pr.number}: ${result.error}`);
-          this._emitHitlApproval(pr, msg.correlationId, `Auto-merge failed (${result.status}): ${result.error}`);
-        }
+      if (!AUTO_MERGE_ENABLED) {
+        console.log(`[pr-remediator] DRY-RUN — would auto-merge ${pr.repo}#${pr.number} (${pr.author})`);
+        continue;
+      }
+
+      // readyToMerge already enforces: not draft, clean mergeable, CI pass,
+      // approved review. There's no additional gate — every ready PR merges.
+      // Claim the slot before the network call so a concurrent trigger
+      // can't race into the same merge.
+      this._recordDispatch(pr.repo, pr.number, "merge_ready", `merge-${crypto.randomUUID()}`);
+      const result = await ghMerge(pr.repo, pr.number);
+      if (result.ok) {
+        console.log(`[pr-remediator] auto-merged ${pr.repo}#${pr.number}`);
+        this._publishAlert(`Auto-merged ${pr.repo}#${pr.number}`, pr);
       } else {
-        this._recordDispatch(pr.repo, pr.number, "merge_ready", `hitl-${crypto.randomUUID()}`);
-        this._emitHitlApproval(pr, msg.correlationId);
+        // Error-path fallback: the PR was ready but the merge API call
+        // failed (rare — e.g. branch protection changed between the
+        // readiness check and the merge, network glitch). Escalate to
+        // HITL so an operator can look. This is the only remaining
+        // _emitHitlApproval call site.
+        console.warn(`[pr-remediator] auto-merge failed ${pr.repo}#${pr.number}: ${result.error}`);
+        this._emitHitlApproval(pr, msg.correlationId, `Auto-merge failed (${result.status}): ${result.error}`);
+      }
+    }
+  }
+
+  // ── update_branch ──────────────────────────────────────────────────────────
+  //
+  // Closes the stale-base gap in the autonomous merge loop. When a PR goes
+  // `mergeable=dirty` because its base branch advanced underneath it, there
+  // used to be nothing to unstick it — human had to rebase by hand. Now the
+  // remediator calls GitHub's `update-branch` endpoint which merges the base
+  // into the head branch, giving the PR a fresh CI run against current state.
+  //
+  // Scope: any dirty PR. GitHub's update-branch is a no-op if there's no new
+  // base content, and fails loudly (422) if the merge itself has conflicts,
+  // so the filter is intentionally loose. The dedup gate via _shouldDispatch
+  // prevents thrashing on repeated tick-cycles.
+  //
+  // We do NOT restrict to bot authors because (a) Ava authors PRs as the
+  // token-holder identity, not a bot account — we can't distinguish her from
+  // a human author at the GitHub level until task #77 lands, and (b) dirty
+  // human PRs also benefit from an auto-update; if the API can't merge
+  // cleanly it returns 422 and we bail, same as a bot PR.
+
+  private async _handleUpdateBranch(msg: BusMessage): Promise<void> {
+    const dirty = (this.latestPrData?.prs ?? []).filter((p) => p.mergeable === "dirty");
+    if (dirty.length === 0) {
+      console.log("[pr-remediator] update_branch fired but no PRs match mergeable=dirty");
+      return;
+    }
+
+    for (const pr of dirty) {
+      const gate = this._shouldDispatch(pr.repo, pr.number, "update_branch");
+      if (!gate.ok) {
+        console.log(`[pr-remediator] skip update_branch ${pr.repo}#${pr.number}: ${gate.reason}`);
+        continue;
+      }
+
+      // Claim the slot before the network call so a concurrent trigger can't
+      // race into a second update-branch against the same PR.
+      this._recordDispatch(pr.repo, pr.number, "update_branch", `update-${crypto.randomUUID()}`);
+
+      console.log(`[pr-remediator] dispatching update_branch for ${pr.repo}#${pr.number} (author: ${pr.author})`);
+      const result = await ghUpdateBranch(pr.repo, pr.number, pr.headSha);
+
+      if (result.ok) {
+        console.log(`[pr-remediator] update_branch queued for ${pr.repo}#${pr.number} (HTTP ${result.status})`);
+        // 202 means GitHub accepted the update and will process it
+        // asynchronously. 200 means it applied inline. Either way the PR
+        // will flip from mergeable=dirty to clean on the next pr_pipeline
+        // domain tick (~60s), at which point the normal merge_ready /
+        // address_feedback paths take over.
+      } else if (result.status === 422) {
+        // The merge itself has conflicts — GitHub can't auto-resolve.
+        console.warn(`[pr-remediator] update_branch rejected ${pr.repo}#${pr.number}: ${result.error}`);
+        // After DIAGNOSE_AFTER_ATTEMPTS consecutive 422 failures, run
+        // diagnose_pr_stuck to classify the conflict before retrying. The
+        // diagnose skill returns a verdict (redundant/rebasable/decomposable/
+        // genuine) that drives the appropriate recovery action, instead of
+        // blindly retrying the same failing operation.
+        const ubKey = this._inFlightKey(pr.repo, pr.number, "update_branch");
+        const ubEntry = this.inFlight.get(ubKey);
+        const prKey = `${pr.repo}#${pr.number}`;
+        if (
+          ubEntry &&
+          ubEntry.attempts >= DIAGNOSE_AFTER_ATTEMPTS &&
+          !this.diagnosisInFlight.has(prKey)
+        ) {
+          void this._dispatchDiagnose(pr, msg.correlationId);
+        }
+      } else if (result.status === 403) {
+        // App lacks write permission on this repo. Silent skip, log once —
+        // the goal will keep firing but the dedup gate will cool it down.
+        console.warn(`[pr-remediator] update_branch 403 on ${pr.repo}#${pr.number} — App lacks write permission`);
+      } else {
+        console.warn(`[pr-remediator] update_branch failed ${pr.repo}#${pr.number}: ${result.status} ${result.error}`);
       }
     }
   }
@@ -592,7 +1036,13 @@ Critical rules:
       // calling the tool, so we fire it in parallel as an idempotent fallback.
       if (projectPath) {
         const res = await startAvaAutoMode(projectPath);
-        console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ${res.ok ? "ok" : "fail"} — ${res.message}`);
+        if (res.status === "ok") {
+          console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ok — ${res.message}`);
+        } else if (res.status === "error") {
+          console.warn(`[pr-remediator] auto-mode kick for ${projectSlug}: fail — ${res.message}`);
+          this._reportAutoModeKickFailure(projectSlug, pr.repo, pr.number, res.message);
+        }
+        // "not_configured" = Ava integration disabled — skip silently.
       }
     }
   }
@@ -649,17 +1099,65 @@ Critical rules:
       // Deterministic safety net — see _handleFixCi for rationale
       if (projectPath) {
         const res = await startAvaAutoMode(projectPath);
-        console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ${res.ok ? "ok" : "fail"} — ${res.message}`);
+        if (res.status === "ok") {
+          console.log(`[pr-remediator] auto-mode kick for ${projectSlug}: ok — ${res.message}`);
+        } else if (res.status === "error") {
+          console.warn(`[pr-remediator] auto-mode kick for ${projectSlug}: fail — ${res.message}`);
+          this._reportAutoModeKickFailure(projectSlug, pr.repo, pr.number, res.message);
+        }
+        // "not_configured" = Ava integration disabled — skip silently.
       }
     }
   }
 
   // ── outbound helpers ───────────────────────────────────────────────────────
 
+  /**
+   * Raise a first-class ops signal when the deterministic Ava auto-mode kick
+   * fails. In normal operation this should NEVER happen — failure means one
+   * of:
+   *   - AVA_BASE_URL / AVA_API_KEY is missing or wrong in the environment
+   *   - Ava server is down or unreachable
+   *   - Ava's auto-mode endpoint is failing
+   *
+   * Without a loud signal, every remediation dispatch succeeds (feature filed
+   * on Ava's board) but Ava never starts working it, and the loop appears to
+   * run forever because the feature stays in `backlog`. Classic quiet-failure
+   * hole — surface it as a dedicated Discord alert so the misconfig is
+   * visible the moment it happens.
+   *
+   * Rate-limited per (projectSlug, reason) to avoid alert-spam when the same
+   * kick fails repeatedly within a short window.
+   */
+  private _reportAutoModeKickFailure(
+    projectSlug: string,
+    repo: string,
+    prNumber: number,
+    reason: string,
+  ): void {
+    if (!this.bus) return;
+    const key = `${projectSlug}:${reason}`;
+    const last = this.autoModeKickAlertsAt.get(key);
+    const now = Date.now();
+    if (last !== undefined && now - last < 5 * 60 * 1000) return; // 5-min dedupe
+    this.autoModeKickAlertsAt.set(key, now);
+
+    const text = `⚠️ Ava auto-mode kick FAILED for ${projectSlug} (${repo}#${prNumber}) — ${reason}. Remediation feature is filed on Ava's board but the agent loop won't pick it up until this is fixed.`;
+    this.bus.publish("message.outbound.discord.alert", {
+      id: crypto.randomUUID(),
+      correlationId: crypto.randomUUID(),
+      topic: "message.outbound.discord.alert",
+      timestamp: now,
+      payload: { content: text, severity: "high", source: "pr-remediator" },
+    });
+    console.warn(`[pr-remediator] ${text}`);
+  }
+
   private _emitHitlApproval(pr: PrDomainEntry, parentCorrelationId: string, note?: string): void {
     if (!this.bus) return;
     const correlationId = crypto.randomUUID();
     const replyTopic = `hitl.response.pr.merge.${correlationId}`;
+    const devChannelId = loadProjectMetaMap().get(pr.repo)?.devChannelId;
     const request: HITLRequest = {
       type: "hitl_request",
       correlationId,
@@ -675,6 +1173,7 @@ Critical rules:
       options: ["approve", "reject"],
       expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
       replyTopic,
+      sourceMeta: { interface: "discord", ...(devChannelId ? { channelId: devChannelId } : {}) },
     };
     // Record the pending approval so the response handler can act on it
     this.pendingApprovals.set(correlationId, {
@@ -698,6 +1197,62 @@ Critical rules:
    *   { type: "hitl_response", correlationId, decision: "approve" | "reject", ... }
    * On "approve" we execute the merge; on "reject" we drop the pending entry.
    */
+  // ── backmerge ──────────────────────────────────────────────────────────────
+  //
+  // Dispatched when branch.drift_low fires. Iterates the current branch_drift
+  // snapshot, finds repos with devToMain > threshold, and triggers the GitHub
+  // Actions workflow_dispatch for their configured back-merge workflow. A 6h
+  // per-repo cooldown prevents re-dispatch if the workflow is already running
+  // or just finished.
+
+  private static readonly DRIFT_THRESHOLD = 30;
+  private static readonly BACKMERGE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+
+  private async _handleBackmergeDispatch(): Promise<void> {
+    const drift = this.latestBranchDrift;
+    if (!drift) {
+      console.log("[pr-remediator] backmerge dispatch fired but no branch_drift data cached");
+      return;
+    }
+
+    const candidates = drift.projects.filter((p) => {
+      const dev = p.devToMain ?? 0;
+      const stg = p.stagingToMain ?? 0;
+      return dev > PrRemediatorPlugin.DRIFT_THRESHOLD || stg > PrRemediatorPlugin.DRIFT_THRESHOLD;
+    });
+
+    if (candidates.length === 0) {
+      console.log(`[pr-remediator] backmerge dispatch fired but no repo exceeds drift threshold ${PrRemediatorPlugin.DRIFT_THRESHOLD}`);
+      return;
+    }
+
+    const now = Date.now();
+    for (const project of candidates) {
+      const last = this.backmergeDispatchedAt.get(project.repo);
+      if (last !== undefined && now - last < PrRemediatorPlugin.BACKMERGE_COOLDOWN_MS) {
+        const ageMin = Math.round((now - last) / 60_000);
+        console.log(`[pr-remediator] skip backmerge ${project.repo}: cooldown (dispatched ${ageMin}m ago)`);
+        continue;
+      }
+
+      this.backmergeDispatchedAt.set(project.repo, now);
+      const result = await ghDispatchBackmerge(project.repo, project.defaultBranch ?? "main");
+      if (result.ok) {
+        console.log(
+          `[pr-remediator] backmerge workflow dispatched: ${project.repo} (devToMain=${project.devToMain}, stagingToMain=${project.stagingToMain})`,
+        );
+      } else if (result.status === 404) {
+        console.log(
+          `[pr-remediator] backmerge skipped ${project.repo}: workflow not found (404) — repo has no auto back-merge configured`,
+        );
+      } else {
+        console.warn(
+          `[pr-remediator] backmerge dispatch failed ${project.repo}: ${result.status} ${result.error}`,
+        );
+      }
+    }
+  }
+
   private async _handleHitlResponse(msg: BusMessage): Promise<void> {
     const response = msg.payload as {
       type?: string;
@@ -732,6 +1287,251 @@ Critical rules:
     }
   }
 
+  // ── diagnose_pr_stuck ──────────────────────────────────────────────────────
+  //
+  // Called after DIAGNOSE_AFTER_ATTEMPTS consecutive 422 failures from
+  // ghUpdateBranch. Dispatches the diagnose_pr_stuck skill to Ava which
+  // fetches the PR diff and recent base commits, then returns one of four
+  // verdicts: redundant, rebasable, decomposable, or genuine.
+  //
+  // The verdict is handled by _handleDiagnoseResponse:
+  //   redundant    → comment + close PR (intent already satisfied)
+  //   rebasable    → dispatch Ava merge-assist (textual conflicts only)
+  //   decomposable → comment proposing splits + close PR
+  //   genuine      → escalate HITL with conflict details (semantic conflict)
+
+  private _dispatchDiagnose(pr: PrDomainEntry, parentCorrelationId: string): void {
+    if (!this.bus) return;
+    const prKey = `${pr.repo}#${pr.number}`;
+    const correlationId = crypto.randomUUID();
+
+    // Mark as in-flight before publishing so concurrent world-state ticks
+    // can't race a second diagnose dispatch while we're publishing.
+    this.diagnosisInFlight.set(prKey, correlationId);
+    console.log(
+      `[pr-remediator] dispatching diagnose_pr_stuck for ${prKey} after ${DIAGNOSE_AFTER_ATTEMPTS} update_branch 422 failures`,
+    );
+
+    // Subscribe to the specific response topic before publishing so we
+    // never miss the reply even if the executor completes synchronously.
+    let subId: string;
+    subId = this.bus.subscribe(
+      `agent.skill.response.${correlationId}`,
+      this.name,
+      (msg) => {
+        this.bus?.unsubscribe(subId);
+        this.diagnosisInFlight.delete(prKey);
+        const responsePayload = msg.payload as { text?: string; result?: string; content?: string };
+        const responseText = responsePayload.text ?? responsePayload.result ?? responsePayload.content ?? "";
+        void this._handleDiagnoseResponse(pr, responseText, parentCorrelationId).catch((err) =>
+          console.error(`[pr-remediator] diagnose response handler error for ${prKey}:`, err),
+        );
+      },
+    );
+    this.subscriptionIds.push(subId);
+
+    this.bus.publish("agent.skill.request", {
+      id: crypto.randomUUID(),
+      correlationId,
+      parentId: parentCorrelationId,
+      topic: "agent.skill.request",
+      timestamp: Date.now(),
+      payload: {
+        skill: "diagnose_pr_stuck",
+        content: `Diagnose this stuck PR and return a JSON verdict.
+
+PR: ${pr.repo}#${pr.number} — ${pr.title}
+Author: ${pr.author}
+Base branch: ${pr.baseRef}
+Head SHA: ${pr.headSha}
+Mergeable: ${pr.mergeable}
+CI Status: ${pr.ciStatus}
+Review State: ${pr.reviewState}
+Labels: ${pr.labels.join(", ") || "none"}
+
+This PR has failed GitHub's update-branch API (merge base into head) ${DIAGNOSE_AFTER_ATTEMPTS} times with HTTP 422 (merge conflict).
+
+Analyze the PR and return a JSON object with this exact shape:
+\`\`\`json
+{
+  "verdict": "redundant" | "rebasable" | "decomposable" | "genuine",
+  "evidence": "explanation of your verdict",
+  "conflictingFiles": ["path/to/file1"],
+  "supersededBy": ["commit sha or description, only for redundant verdict"]
+}
+\`\`\`
+
+Verdict definitions:
+- "redundant": The PR's intent is already satisfied by commits on \`${pr.baseRef}\` since the PR was cut.
+- "rebasable": Conflicts are textual but non-semantic (whitespace, import order, doc section shuffle, auto-generated files). A three-way merge can resolve them without losing meaning.
+- "decomposable": Conflicts cluster in a small number of specific files. Splitting into smaller PRs would avoid the conflict.
+- "genuine": Semantic conflicts requiring human judgment — which lines mean what is ambiguous.
+
+Use your GitHub API tools to fetch:
+1. PR files diff: GET /repos/${pr.repo}/pulls/${pr.number}/files
+2. Recent base commits: GET /repos/${pr.repo}/commits?sha=${pr.baseRef}&per_page=20
+
+Return ONLY the JSON block. No other text.`,
+        meta: { agentId: "ava", skillHint: "diagnose_pr_stuck", systemActor: "pr-remediator" },
+        prRepo: pr.repo,
+        prNumber: pr.number,
+      },
+    });
+  }
+
+  private async _handleDiagnoseResponse(
+    pr: PrDomainEntry,
+    responseText: string,
+    parentCorrelationId: string,
+  ): Promise<void> {
+    const prKey = `${pr.repo}#${pr.number}`;
+
+    type DiagnosisResult = {
+      verdict: DiagnosisVerdict;
+      evidence: string;
+      conflictingFiles?: string[];
+      supersededBy?: string[];
+    };
+
+    let diagnosis: DiagnosisResult | null = null;
+
+    // Try to parse JSON from code block first, then bare object
+    const jsonBlockMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonBlockMatch?.[1]) {
+      try {
+        diagnosis = JSON.parse(jsonBlockMatch[1]) as DiagnosisResult;
+      } catch { /* fall through */ }
+    }
+    if (!diagnosis) {
+      const bareMatch = responseText.match(/\{[\s\S]*?"verdict"[\s\S]*?\}/);
+      if (bareMatch) {
+        try {
+          diagnosis = JSON.parse(bareMatch[0]) as DiagnosisResult;
+        } catch { /* fall through */ }
+      }
+    }
+    // Fallback: scan text for verdict keyword
+    if (!diagnosis) {
+      const kw = responseText.match(/\b(redundant|rebasable|decomposable|genuine)\b/i);
+      diagnosis = {
+        verdict: (kw?.[1]?.toLowerCase() ?? "genuine") as DiagnosisVerdict,
+        evidence: responseText.slice(0, 500),
+      };
+    }
+
+    console.log(`[pr-remediator] diagnose verdict for ${prKey}: ${diagnosis.verdict}`);
+
+    switch (diagnosis.verdict) {
+      case "redundant": {
+        const comment = [
+          `**Auto-remediation verdict: redundant** — closing automatically.`,
+          ``,
+          `This PR's intent appears to already be satisfied by recent commits on \`${pr.baseRef}\`.`,
+          ``,
+          `**Evidence:** ${diagnosis.evidence}`,
+          diagnosis.supersededBy?.length
+            ? `**Superseded by:** ${diagnosis.supersededBy.join(", ")}`
+            : "",
+          ``,
+          `If this is incorrect, reopen with a note on what still needs to be done.`,
+          ``,
+          `*Automated verdict by pr-remediator diagnose_pr_stuck skill.*`,
+        ].filter(Boolean).join("\n");
+        const commentResult = await ghComment(pr.repo, pr.number, comment);
+        if (!commentResult.ok) {
+          console.warn(`[pr-remediator] failed to post redundant comment on ${prKey}: ${commentResult.error}`);
+        }
+        const closeResult = await ghClosePr(pr.repo, pr.number);
+        if (closeResult.ok) {
+          console.log(`[pr-remediator] closed ${prKey} as redundant`);
+        } else {
+          console.warn(`[pr-remediator] failed to close ${prKey} as redundant: ${closeResult.error}`);
+        }
+        break;
+      }
+
+      case "rebasable": {
+        const fileList = diagnosis.conflictingFiles?.map((f) => `\`${f}\``).join(", ") ?? "unknown";
+        const content = `PR ${pr.repo}#${pr.number} has a dirty branch. Conflict diagnosis: **rebasable** (textual conflicts only).
+
+Evidence: ${diagnosis.evidence}
+Conflicting files: ${fileList}
+
+You are operating in **fully autonomous mode**. Perform a three-way merge assistance:
+1. Fetch the PR diff: GET /repos/${pr.repo}/pulls/${pr.number}/files
+2. For each conflicting file, resolve conflicts that are textual (whitespace, import order, doc reshuffling, auto-generated content) — do NOT touch semantic code changes
+3. If you can resolve all conflicts cleanly, commit the resolution and push to the PR branch
+4. If any conflict requires semantic judgment, stop and report exactly which hunks need human review
+
+Do NOT ask for confirmation. Act.`;
+        const correlationId = this._dispatchToAva(content, "bug_triage", parentCorrelationId, {
+          prRepo: pr.repo,
+          prNumber: pr.number,
+          diagnosisVerdict: "rebasable",
+        });
+        if (correlationId) {
+          this._recordDispatch(pr.repo, pr.number, "update_branch", correlationId);
+          console.log(`[pr-remediator] dispatched rebase-assist for ${prKey} (correlationId: ${correlationId})`);
+        }
+        break;
+      }
+
+      case "decomposable": {
+        const fileList = diagnosis.conflictingFiles?.length
+          ? diagnosis.conflictingFiles.map((f) => `- \`${f}\``).join("\n")
+          : "See diagnosis evidence above.";
+        const comment = [
+          `**Auto-remediation verdict: decomposable** — closing and proposing a split.`,
+          ``,
+          `This PR has merge conflicts that cluster into distinct file groups. Rather than attempting a complex merge, the recommended path is to split this PR into smaller, focused PRs — one per file cluster.`,
+          ``,
+          `**Conflicting file clusters:**`,
+          fileList,
+          ``,
+          `**Evidence:** ${diagnosis.evidence}`,
+          ``,
+          `Please re-cut this as smaller, focused PRs targeting each cluster independently. This avoids the conflict and makes each change easier to review.`,
+          ``,
+          `*Automated verdict by pr-remediator diagnose_pr_stuck skill.*`,
+        ].join("\n");
+        const commentResult = await ghComment(pr.repo, pr.number, comment);
+        if (!commentResult.ok) {
+          console.warn(`[pr-remediator] failed to post decomposable comment on ${prKey}: ${commentResult.error}`);
+        }
+        const closeResult = await ghClosePr(pr.repo, pr.number);
+        if (closeResult.ok) {
+          console.log(`[pr-remediator] closed ${prKey} as decomposable, proposed split`);
+        } else {
+          console.warn(`[pr-remediator] failed to close ${prKey} as decomposable: ${closeResult.error}`);
+        }
+        break;
+      }
+
+      case "genuine":
+      default: {
+        // Genuine semantic conflict — escalate to HITL immediately with the
+        // specific conflict details from the diagnosis, instead of waiting for
+        // the attempt budget to exhaust naturally.
+        const ubKey = this._inFlightKey(pr.repo, pr.number, "update_branch");
+        const entry = this.inFlight.get(ubKey);
+        if (entry) {
+          entry.exhausted = true;
+          entry.escalated = true;
+        }
+        const effectiveEntry: InFlightEntry = entry ?? {
+          kind: "update_branch",
+          startedAt: Date.now() - DIAGNOSE_AFTER_ATTEMPTS * IN_FLIGHT_TTL_MS,
+          correlationId: parentCorrelationId,
+          attempts: DIAGNOSE_AFTER_ATTEMPTS,
+          exhausted: true,
+          escalated: true,
+        };
+        this._emitStuckHitlEscalation(pr.repo, pr.number, "update_branch", effectiveEntry, diagnosis.evidence);
+        break;
+      }
+    }
+  }
+
   private _dispatchToAva(
     content: string,
     skillHint: string,
@@ -747,7 +1547,8 @@ Critical rules:
     //
     // A2AExecutor spreads the full payload into the JSON-RPC message metadata
     // (src/executor/executors/a2a-executor.ts line 58 — `...req.payload`), so
-    // anything in extraMeta reaches Ava's A2A handler as message.metadata.
+    // anything in extraMeta reaches the protoMaker team's A2A handler as
+    // message.metadata.
     this.bus.publish("agent.skill.request", {
       id: crypto.randomUUID(),
       correlationId,
@@ -757,7 +1558,11 @@ Critical rules:
       payload: {
         skill: skillHint,
         content,
-        meta: { agentId: "ava", skillHint },
+        // systemActor marks this as a bot-initiated dispatch for the
+        // memory layer — skill-dispatcher writes episodes to
+        // `system_pr-remediator` so the autonomous loop builds its own
+        // episodic history separate from user-chat memory.
+        meta: { agentId: "protomaker", skillHint, systemActor: "pr-remediator" },
         ...(extraMeta ?? {}),
       },
     });

@@ -137,7 +137,17 @@ List agents loaded from `workspace/agents.yaml`.
     {
       "name": "ava",
       "executor": "proto-sdk",
-      "skills": ["sitrep", "plan", "triage"]
+      "skills": ["chat"]
+    },
+    {
+      "name": "protomaker",
+      "executor": "a2a",
+      "skills": ["sitrep", "plan", "board_health", "manage_feature", "bug_triage"]
+    },
+    {
+      "name": "quinn",
+      "executor": "a2a",
+      "skills": ["pr_review", "bug_triage", "security_triage"]
     }
   ]
 }
@@ -219,14 +229,14 @@ Return the skills registered for a specific agent.
 **Auth**: None
 
 **Path params**:
-- `agentName` — agent name (e.g. `ava`, `quinn`)
+- `agentName` — agent name (e.g. `protomaker`, `quinn`, `ava`)
 
 **Response** (`200`):
 ```json
 {
   "success": true,
   "data": {
-    "name": "ava",
+    "name": "protomaker",
     "skills": [
       { "name": "sitrep", "description": "Generate a situational awareness report" }
     ]
@@ -357,12 +367,13 @@ Agent executor registry summary. **No envelope.**
 **Response** (`200`):
 ```json
 {
-  "agentCount": 2,
+  "agentCount": 3,
   "agents": {
-    "ava":   { "skills": ["sitrep", "plan"], "executorType": "proto-sdk" },
-    "quinn": { "skills": ["pr_review"],      "executorType": "a2a" }
+    "ava":        { "skills": ["chat"],                               "executorType": "proto-sdk" },
+    "protomaker": { "skills": ["sitrep", "plan", "manage_feature"],   "executorType": "a2a" },
+    "quinn":      { "skills": ["pr_review", "bug_triage"],            "executorType": "a2a" }
   },
-  "registrationCount": 3
+  "registrationCount": 6
 }
 ```
 
@@ -432,6 +443,29 @@ GOAP action dispatch outcomes tracked by the ActionDispatcher. Feeds the dashboa
 ```
 
 `recent` contains the last 50 outcomes in chronological order. Returns `{ summary: { success: 0, failure: 0, timeout: 0, total: 0 }, recent: [] }` if the ActionDispatcher is not registered.
+
+---
+
+## GET /api/memory-health
+
+Two-stage probe of the Graphiti episodic memory backend. Backs the `memory` world-state domain and the `memory.graphiti_healthy` / `memory.search_working` goals. **No envelope.**
+
+**Auth**: None
+
+**Response** (`200`):
+```json
+{
+  "healthy": 1,
+  "searchOk": 1,
+  "error": ""
+}
+```
+
+- `healthy` — `1` if `GET {GRAPHITI_URL}/healthcheck` returned `200`, else `0`
+- `searchOk` — `1` if a trivial `POST /search` succeeded, else `0`. Search probing catches the deeper wiring failures (Neo4j vector functions missing, embedder misconfigured, gateway model aliases missing) that `/healthcheck` alone can't see
+- `error` — empty string on success, otherwise a short failure reason (e.g. `"search 400"` or a connection error message)
+
+Both probes have short timeouts (3s for healthcheck, 5s for search) so the world-state tick isn't blocked by a hung Graphiti container.
 
 ---
 
@@ -640,6 +674,256 @@ Mark an incident as resolved. Rewrites `incidents.yaml` and republishes `securit
 ```
 
 Returns `404` if the ID is not found or `incidents.yaml` is missing.
+
+---
+
+## POST /api/a2a/chat
+
+Synchronous multi-turn conversation with a remote A2A agent. Calls the agent's executor directly (bypasses the bus) and returns the response. Used by Ava's `chat_with_agent` tool.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  agent: string;       // Agent name: "quinn", "protomaker", "protocontent", "frank"
+  message: string;     // What to say
+  contextId?: string;  // From prior turn — omit for new conversation
+  taskId?: string;     // From prior turn — continues a specific task
+  skill?: string;      // Skill hint (default: "chat")
+  done?: boolean;      // Set true on final message to end conversation
+}
+```
+
+**Response** (`200`):
+```json
+{
+  "success": true,
+  "data": {
+    "response": "Quinn's reply text...",
+    "contextId": "conv-uuid",
+    "taskId": "task-uuid",
+    "taskState": "completed",
+    "correlationId": "trace-uuid",
+    "agent": "quinn"
+  }
+}
+```
+
+When `done: true`, `contextId` and `taskId` are omitted from the response. `taskState` reflects the A2A task lifecycle: `working`, `input-required`, `completed`, `failed`, `canceled`, `rejected`.
+
+Publishes `agent.chat.outbound` (Ava's message) and `agent.chat.inbound` (agent's response) events to the bus for Discord o11y.
+
+---
+
+## POST /api/a2a/delegate
+
+Fire-and-forget task dispatch to a remote agent. Publishes to `agent.skill.request` on the bus and returns immediately without waiting for the agent's response.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  agent: string;        // Agent name
+  skill: string;        // Skill to invoke
+  message: string;      // Task description
+  projectSlug?: string; // Project scope for routing
+}
+```
+
+**Response** (`200`):
+```json
+{
+  "success": true,
+  "data": {
+    "correlationId": "trace-uuid",
+    "message": "Task delegated to quinn (skill: pr_review)"
+  }
+}
+```
+
+---
+
+## GET /.well-known/agent-card.json
+
+Served by `src/api/agent-card.ts`. Exposes workstacean as an A2A-compliant agent — external agents fetch this URL to discover what skills they can dispatch. Skills are aggregated from the `ExecutorRegistry`, so any skill registered (yaml-declared + auto-discovered Phase 4 skills) shows up without a restart.
+
+A legacy alias at `GET /.well-known/agent.json` returns the same body for clients that resolve the older path.
+
+**Auth**: None (discovery is always public)
+
+**Response** (`200`) — an [AgentCard](https://a2a-protocol.org/latest/specification/#agent-card):
+```json
+{
+  "name": "workstacean",
+  "description": "protoLabs Studio operational gateway...",
+  "protocolVersion": "0.3.0",
+  "version": "1.0.0",
+  "url": "https://workstacean.example.com/a2a",
+  "preferredTransport": "JSONRPC",
+  "capabilities": { "streaming": true, "pushNotifications": true },
+  "skills": [
+    { "id": "plan", "name": "plan", "description": "...", "tags": ["routed", "ava"] },
+    { "id": "bug_triage", "name": "bug_triage", "description": "...", "tags": ["routed", "quinn"] }
+  ]
+}
+```
+
+`url` is derived from `WORKSTACEAN_BASE_URL` (falling back to `http://localhost:$WORKSTACEAN_HTTP_PORT` when unset).
+
+---
+
+## POST /a2a
+
+A2A JSON-RPC 2.0 endpoint. Accepts every method in the A2A protocol (`message/send`, `message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`, `tasks/pushNotificationConfig/*`) and bridges them into the internal bus pipeline via `BusAgentExecutor` (`src/api/a2a-server.ts`).
+
+**Auth**: When `WORKSTACEAN_API_KEY` is set, callers must supply it as `Authorization: Bearer <key>` or `X-API-Key: <key>`. Unset → open access (dev mode).
+
+**Flow for `message/send`**:
+1. SDK `JsonRpcTransportHandler` receives the request
+2. `BusAgentExecutor.execute()` emits an initial `submitted` Task event, transitions to `working`, publishes to `agent.skill.request` on the bus
+3. `SkillDispatcherPlugin` resolves an executor via `ExecutorRegistry` and runs the skill
+4. Response lands on `agent.skill.response.{taskId}` → adapter emits a terminal `completed`/`failed` status update with the text in `status.message.parts`
+5. Response returns as `{ jsonrpc: "2.0", id, result: <Task> }`
+
+`message/stream` uses the same pipeline but returns a `text/event-stream` where each `data:` frame is a JSON-RPC response wrapping one A2A event.
+
+Skill routing: metadata fields control which skill is invoked.
+- `metadata.skillHint` or `metadata.skill` — skill name, defaults to `"chat"`
+- `metadata.targets` — array of agent names, passed through to `ExecutorRegistry.resolve()`
+
+---
+
+## POST /api/a2a/callback/:taskId
+
+Push-notification webhook for long-running A2A tasks (Phase 3). External agents POST Task snapshots here when they reach terminal state (or at configurable checkpoints) so workstacean doesn't need to hold an HTTP connection open for minutes.
+
+**Auth**: Per-task token passed as `Authorization: Bearer <token>` or `X-A2A-Notification-Token: <token>`. The token is generated per-task and registered with the agent when the skill is dispatched; workstacean looks it up by `taskId` in `TaskTracker`.
+
+**Request body**: Full A2A `Task` object (not a delta).
+
+**Response** (`200`): `{ "success": true }`
+
+Non-terminal states just refresh `lastPolledAt`. `input-required` states raise a HITL request. Terminal states publish the response and untrack the task.
+
+---
+
+## POST /api/github/issues
+
+File an issue on a managed GitHub repository. Only repos listed in `projects.yaml` are allowed.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  repo: string;        // "owner/name" format, e.g. "protoLabsAI/protoWorkstacean"
+  title: string;       // Issue title
+  body?: string;       // Issue body (markdown)
+  labels?: string[];   // Labels to apply
+}
+```
+
+**Response** (`200`):
+```json
+{
+  "success": true,
+  "data": { "number": 42, "html_url": "https://github.com/...", "title": "..." }
+}
+```
+
+Returns `403` if the repo is not in `projects.yaml`.
+
+---
+
+## POST /api/ceremonies/create
+
+Create a new scheduled ceremony. Writes YAML to `workspace/ceremonies/` and registers with the hot-reload watcher.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  id: string;            // Unique ID (alphanumeric, dots, dashes)
+  name: string;          // Human-readable name
+  schedule: string;      // Cron expression, e.g. "*/30 * * * *"
+  skill: string;         // Skill to invoke when ceremony fires
+  targets?: string[];    // Agent targets (default: ["all"])
+  enabled?: boolean;     // Default: true
+  notifyChannel?: string; // Discord channel ID for notifications
+}
+```
+
+**Response** (`200`):
+```json
+{ "success": true, "data": { "id": "my.ceremony", "name": "...", "schedule": "...", "..." } }
+```
+
+---
+
+## POST /api/ceremonies/:id/update
+
+Update an existing ceremony. Merges fields into the existing YAML.
+
+**Auth**: API key
+
+**Path params**: `id` — ceremony ID
+
+**Request body**: Same fields as create (all optional except `id`).
+
+---
+
+## POST /api/ceremonies/:id/delete
+
+Delete a ceremony. Removes the YAML file and unregisters from the scheduler.
+
+**Auth**: API key
+
+**Path params**: `id` — ceremony ID
+
+---
+
+## POST /api/board/features/create
+
+Create a feature on the protoMaker board. Proxies to the Studio MCP server at `AVA_BASE_URL`.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  projectPath: string;      // Absolute path to project directory
+  title: string;            // Feature title
+  description?: string;     // Feature description
+  status?: string;          // Default: "backlog"
+  priority?: number;        // 0=none, 1=urgent, 2=high, 3=normal, 4=low
+  complexity?: string;      // "small" | "medium" | "large" | "architectural"
+  projectSlug?: string;
+}
+```
+
+---
+
+## POST /api/board/features/update
+
+Update an existing feature on the protoMaker board.
+
+**Auth**: API key
+
+**Request body**:
+```typescript
+{
+  projectPath: string;
+  featureId: string;        // Feature UUID
+  title?: string;
+  description?: string;
+  status?: string;          // "backlog" | "in-progress" | "review" | "done"
+  priority?: number;
+  complexity?: string;
+}
+```
 
 ---
 

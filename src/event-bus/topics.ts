@@ -1,27 +1,34 @@
 /**
- * EventBus topic constants for the deterministic planner system.
+ * TOPICS — single barrel re-export of all bus topic constants.
+ *
+ * All domain groups are also exported individually for consumers that prefer
+ * a scoped import (e.g. `import { WORLD_TOPICS } from "./topics.ts"`).
  *
  * Convention: world.action.* for planner-related events.
  */
 
+export {
+  MESSAGE_TOPICS,
+  ACTION_TOPICS,
+  SECURITY_TOPICS,
+  FLOW_TOPICS,
+  WORLD_TOPICS,
+} from "./all-topics.ts";
+
+import {
+  MESSAGE_TOPICS,
+  ACTION_TOPICS,
+  SECURITY_TOPICS,
+  FLOW_TOPICS,
+  WORLD_TOPICS,
+} from "./all-topics.ts";
+
 export const TOPICS = {
-  /** Published by WorldStateCollector when a new snapshot is available. */
-  WORLD_STATE_UPDATED: "world.state.updated",
-
-  /** Published by ActionDispatcherPlugin when an action is dispatched. */
-  WORLD_ACTION_DISPATCH: "world.action.dispatch",
-
-  /** Published by ActionDispatcherPlugin when an action outcome is recorded. */
-  WORLD_ACTION_OUTCOME: "world.action.outcome",
-
-  /** Published by LoopDetector when oscillation threshold is breached. */
-  WORLD_ACTION_OSCILLATION: "world.action.oscillation",
-
-  /** Published by ActionDispatcherPlugin when WIP queue is at capacity. */
-  WORLD_ACTION_QUEUE_FULL: "world.action.queue_full",
-
-  /** Published by PlannerPluginL0 when escalation to tier_1 is needed. */
-  PLANNER_ESCALATE: "world.planner.escalate",
+  ...MESSAGE_TOPICS,
+  ...ACTION_TOPICS,
+  ...SECURITY_TOPICS,
+  ...FLOW_TOPICS,
+  ...WORLD_TOPICS,
 } as const;
 
 export type TopicValue = (typeof TOPICS)[keyof typeof TOPICS];

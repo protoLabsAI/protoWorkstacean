@@ -53,9 +53,13 @@ skills:
     description: Triage a bug report — severity, reproduction, root cause, Plane issue
     keywords: [bug, issue, broken, crash, error, fail, exception, triage, TypeError, ReferenceError, not working, regression]
 
-  - name: pr_review
-    description: Review a pull request diff for correctness and regressions
-    keywords: [pr, pull request, review, merge, /review, code review, lgtm, looks good]
+  # pr_review skill was migrated to the standalone labs/quinn A2A agent
+  # (workspace/agents.yaml:quinn). The standalone agent has pr_inspector +
+  # gh CLI + installation-token-based @protoquinn[bot] posting, so it can
+  # submit formal APPROVE/REQUEST_CHANGES reviews that close the
+  # pr-remediator readyToMerge / changesRequested loops. Task #73.
+  # Keeping chat/bug_triage/security_triage on the in-process agent for now
+  # pending a follow-up migration.
 
   - name: security_triage
     description: Triage a security incident — assess severity, draft remediation plan

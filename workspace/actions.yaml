@@ -20,26 +20,9 @@ actions:
         value: 0.35
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
-  - id: alert.distribution_drift
-    goalId: flow.distribution_balanced
-    tier: tier_0
-    priority: 10
-    cost: 0
-    name: "Alert on work distribution drift"
-    preconditions:
-      - path: "extensions.flow_available"
-        operator: eq
-        value: true
-      - path: "domains.flow.data.distribution.ratios.feature"
-        operator: lt
-        value: 0.40
-    effects: []
-    meta:
-      topic: "message.outbound.discord.alert"
-      fireAndForget: true
+  # alert.distribution_drift — REMOVED alongside flow.distribution_balanced goal
 
   - id: alert.security_incident
     goalId: security.no_open_incidents
@@ -56,7 +39,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: ceremony.security_triage
@@ -74,7 +56,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "ceremony.security-triage.execute"
       fireAndForget: true
 
   - id: alert.discord_disconnected
@@ -95,7 +76,6 @@ actions:
         value: true
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: alert.no_agents
@@ -113,7 +93,6 @@ actions:
         value: 1
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   # ── Service + Agent Ceremonies ─────────────────────────────────────
@@ -136,7 +115,6 @@ actions:
         value: false
     effects: []
     meta:
-      topic: "ceremony.service-health.execute"
       fireAndForget: true
 
   # ── CI + PR Pipeline ─────────────────────────────────────────────
@@ -156,15 +134,41 @@ actions:
         value: 0.70
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
-  - id: alert.pr_conflicts
-    goalId: pr.no_conflicts
+  - id: ci.debug_failures
+    goalId: ci.success_rate_healthy
     tier: tier_0
     priority: 20
-    cost: 0
-    name: "Alert on PRs with merge conflicts"
+    cost: 1
+    name: "Dispatch agent to investigate CI failures across projects"
+    preconditions:
+      - path: "extensions.ci_available"
+        operator: eq
+        value: true
+      - path: "domains.ci.data.successRate"
+        operator: lt
+        value: 0.70
+    effects: []
+    meta:
+      skillHint: debug_ci_failures
+      fireAndForget: true
+
+  # alert.pr_conflicts was retired in favour of action.pr_update_branch below.
+  # The planner-plugin-l0 violation path dispatches one action per goal per
+  # tick (src/plugins/planner-plugin-l0.ts:114 claims the inFlightGoals slot
+  # after the first matching action), so keeping both actions on pr.no_conflicts
+  # would starve remediation — the alert would always win the race. Remediation
+  # that actually fixes the problem is strictly better than a Discord ping.
+  # If remediation fails and exhausts attempts, pr-remediator's stuck-HITL
+  # escalation still reaches Discord via the HITL plugin.
+
+  - id: action.pr_update_branch
+    goalId: pr.no_conflicts
+    tier: tier_0
+    priority: 25
+    cost: 1
+    name: "Update dirty PR branches against their base via GitHub update-branch API"
     preconditions:
       - path: "extensions.pr_pipeline_available"
         operator: eq
@@ -174,7 +178,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: alert.pr_stale
@@ -192,7 +195,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   # ── PR Remediation — closes the loop via PrRemediatorPlugin ───────────────
@@ -212,8 +214,10 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "pr.remediate.merge_ready"
       fireAndForget: true
+      hitlPolicy:
+        ttlMs: 1800000   # 30 minutes — auto-approve if no human responds
+        onTimeout: approve
 
   - id: action.pr_fix_ci
     goalId: pr.no_failing_checks
@@ -230,7 +234,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "pr.remediate.fix_ci"
       fireAndForget: true
 
   - id: action.pr_address_feedback
@@ -248,7 +251,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "pr.remediate.address_feedback"
       fireAndForget: true
 
   - id: alert.branch_drift
@@ -266,89 +268,248 @@ actions:
         value: 30
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
-  # ── Ava / protoMaker Studio ───────────────────────────────────────
+  # ── protoMaker team (multi-agent board runtime) ──────────────────
 
-  - id: alert.ava_board_blocked
-    goalId: ava.board_healthy
+  - id: alert.protomaker_board_blocked
+    goalId: protomaker.board_healthy
     tier: tier_0
     priority: 10
     cost: 0
     name: "Alert on excessive blocked features"
     preconditions:
-      - path: "extensions.ava_board_available"
+      - path: "extensions.protomaker_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.blocked"
+      - path: "domains.protomaker_board.data.blocked_count"
         operator: gt
         value: 3
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
-  - id: action.ava_triage_blocked
-    goalId: ava.board_healthy
+  - id: action.protomaker_triage_blocked
+    goalId: protomaker.board_healthy
     tier: tier_0
     priority: 20
     cost: 1
-    name: "Dispatch board health triage to Ava"
+    name: "Dispatch board health triage to the protoMaker team"
     preconditions:
-      - path: "extensions.ava_board_available"
+      - path: "extensions.protomaker_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.blocked"
+      - path: "domains.protomaker_board.data.blocked_count"
         operator: gt
         value: 3
     effects: []
     meta:
-      topic: "agent.skill.request"
       skillHint: board_health
-      agentId: ava
+      agentId: protomaker
       fireAndForget: true
 
-  - id: alert.ava_backlog_piling
-    goalId: ava.backlog_not_piling
+  - id: alert.protomaker_backlog_piling
+    goalId: protomaker.backlog_not_piling
     tier: tier_0
     priority: 15
     cost: 0
     name: "Alert when backlog exceeds 10 features"
     preconditions:
-      - path: "extensions.ava_board_available"
+      - path: "extensions.protomaker_board_available"
         operator: eq
         value: true
-      - path: "domains.ava_board.data.backlog"
+      - path: "domains.protomaker_board.data.backlog_count"
         operator: gt
         value: 10
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
-  - id: action.ava_start_auto_mode
-    goalId: ava.backlog_not_piling
+  - id: action.protomaker_start_auto_mode
+    goalId: protomaker.backlog_not_piling
     tier: tier_0
     priority: 30
     cost: 1
-    name: "Dispatch Ava to start auto-mode when backlog has work"
+    name: "Dispatch the protoMaker team to start auto-mode when backlog has work"
     preconditions:
-      - path: "extensions.ava_board_available"
+      - path: "extensions.protomaker_board_available"
         operator: eq
         value: true
-      - path: "extensions.ava_pipeline_available"
+      - path: "extensions.protomaker_pipeline_available"
         operator: eq
         value: true
-      - path: "domains.ava_pipeline.data.runningCount"
+      - path: "domains.protomaker_pipeline.data.running_count"
         operator: eq
         value: 0
-      - path: "domains.ava_board.data.backlog"
+      - path: "domains.protomaker_board.data.backlog_count"
         operator: gt
         value: 0
     effects: []
     meta:
-      topic: "agent.skill.request"
       skillHint: auto_mode
-      agentId: ava
+      agentId: protomaker
       fireAndForget: true
+
+  # ── Branch protection ─────────────────────────────────────────────
+
+  - id: alert.branch_bypass_actors
+    goalId: branch.main_hardened
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Alert on bypass actors in main ruleset"
+    preconditions:
+      - path: "domains.branch_protection.data.totalBypassActors"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: alert.branch_unprotected
+    goalId: branch.main_protected
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Alert on repos missing main branch ruleset"
+    preconditions:
+      - path: "domains.branch_protection.data.unprotectedRepoCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: alert.ci_main_red
+    goalId: ci.main_last_push_green
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Alert when latest push to any repo's main is red"
+    preconditions:
+      - path: "domains.ci.data.failingMainCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      fireAndForget: true
+
+  # ── Branch drift remediation ──────────────────────────────────────
+  #
+  # Triggers a GitHub workflow_dispatch of each managed repo's auto
+  # back-merge workflows when dev/staging fall too far behind main.
+  # The pr-remediator plugin subscribes to this topic and drives the
+  # actual GitHub API calls. Idempotent — skipped if a backmerge is
+  # already in flight for the same repo.
+
+  - id: action.dispatch_backmerge
+    goalId: branch.drift_low
+    tier: tier_0
+    priority: 10
+    cost: 1
+    name: "Dispatch auto back-merge workflow when drift exceeds threshold"
+    preconditions:
+      - path: "domains.branch_drift.data.maxDrift"
+        operator: gt
+        value: 30
+    effects: []
+    meta:
+      fireAndForget: true
+
+  # ── Plane board health ────────────────────────────────────────────
+
+  - id: alert.plane_urgent_stale
+    goalId: plane.no_urgent_stale
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Alert on excessive urgent Plane issues"
+    preconditions:
+      - path: "domains.plane.data.urgentOpen"
+        operator: gt
+        value: 5
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: alert.plane_stale_backlog
+    goalId: plane.no_stale_backlog
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert when too many Plane issues are >14 days old"
+    preconditions:
+      - path: "domains.plane.data.staleOpen"
+        operator: gt
+        value: 10
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: alert.plane_unassigned_piling
+    goalId: plane.unassigned_not_piling
+    tier: tier_0
+    priority: 15
+    cost: 0
+    name: "Alert when unassigned Plane issues pile up"
+    preconditions:
+      - path: "domains.plane.data.unassignedOpen"
+        operator: gt
+        value: 20
+    effects: []
+    meta:
+      fireAndForget: true
+
+  # ── Memory / Graphiti health ──────────────────────────────────────
+
+  - id: alert.memory_down
+    goalId: memory.graphiti_healthy
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Alert when Graphiti healthcheck fails"
+    preconditions:
+      - path: "domains.memory.data.healthy"
+        operator: eq
+        value: 0
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: alert.memory_search_broken
+    goalId: memory.search_working
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert when Graphiti search probe fails"
+    preconditions:
+      - path: "domains.memory.data.searchOk"
+        operator: eq
+        value: 0
+    effects: []
+    meta:
+      fireAndForget: true
+
+  # ── HITL routing health ───────────────────────────────────────────
+  #
+  # This alert bypasses the HITL plugin entirely — if the HITL routing
+  # itself is broken (the very thing this goal catches), sending an
+  # approval request through the broken path would fail silently too.
+  # Direct-to-Discord is the right escape hatch here.
+
+  - id: alert.hitl_routing_broken
+    goalId: hitl.no_unrendered_requests
+    tier: tier_0
+    priority: 5
+    cost: 0
+    name: "Direct Discord alert when HITL requests fall into hitl.pending (renderer missing)"
+    preconditions:
+      - path: "domains.hitl_queue.data.unrenderedCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      fireAndForget: true
+      hitlPolicy:
+        ttlMs: 3600000  # 1 hour — escalate (no auto-action) so humans must intervene
+        onTimeout: escalate

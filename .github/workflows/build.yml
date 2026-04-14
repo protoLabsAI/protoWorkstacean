@@ -30,8 +30,42 @@ jobs:
       - name: Type check
         run: bun run tsc --noEmit
 
+  dashboard:
+    # Dashboard lives in a sub-project with its own tsconfig + build pipeline
+    # (Astro islands). The root `test` job does not cover `dashboard/src/` —
+    # discovered the hard way on 2026-04-11 when 31 unresolved git merge
+    # conflict markers landed on dev through the M3-M6 milestone merges
+    # because every PR CI went green while dashboard build would have blown
+    # up. See task #82 in the board. Keep this job fast (astro build is ~1s)
+    # and independent so the full CI cost is negligible.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Astro requires Node.js >= 22.12 at build time. GHA runners default
+      # to Node 20, which `bun run build` inherits when it invokes astro,
+      # causing a hard "not supported" failure. Set Node explicitly so the
+      # astro build runs against a supported runtime.
+      - name: Setup Node (for Astro build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dashboard deps
+        working-directory: dashboard
+        run: bun install --frozen-lockfile
+
+      - name: Build dashboard (astro build)
+        working-directory: dashboard
+        run: bun run build
+
   build-and-push:
-    needs: test
+    needs: [test, dashboard]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
