@@ -29,6 +29,9 @@ import { ExecutorRegistry } from "../executor/executor-registry.ts";
 import { matchActions, evaluatePrecondition } from "../planner/pattern-matcher.ts";
 import { LoopDetector } from "../planner/loop-detector.ts";
 import { CooldownManager } from "../planner/cooldown-manager.ts";
+import { defaultCostStore, type CostStore } from "../executor/extensions/cost.ts";
+import { defaultConfidenceStore, type ConfidenceStore } from "../executor/extensions/confidence.ts";
+import { rankByObservedMetrics, type RankContext } from "../planner/candidate-ranking.ts";
 
 export interface PlannerPluginL0Config {
   loopDetector?: {
@@ -50,6 +53,17 @@ export interface PlannerPluginL0Config {
    * candidate selection (resolveByEffect) instead of ActionRegistry.getByGoal().
    */
   executorRegistry?: ExecutorRegistry;
+  /**
+   * Observed-cost store for Arc 6.4 candidate ranking. Defaults to the
+   * singleton populated by the cost-v1 A2A extension. Tests can inject a
+   * fresh instance to avoid cross-test pollution.
+   */
+  costStore?: CostStore;
+  /**
+   * Observed-confidence store for Arc 6.4 candidate ranking. Defaults to
+   * the singleton populated by the confidence-v1 A2A extension.
+   */
+  confidenceStore?: ConfidenceStore;
 }
 
 const DEFAULT_LOOP_CONFIG = { maxAttempts: 3, windowMinutes: 5 };
@@ -142,11 +156,13 @@ export class PlannerPluginL0 implements Plugin {
         if (violation.desiredEffect && executorRegistry) {
           // Effect-based selection: query ExecutorRegistry for skills whose
           // declared effect moves world state toward the desired (domain, path).
-          // Candidates are sorted by confidence desc (Arc 6 tiebreak: cost).
+          // Arc 6.4: rank by observed cost/confidence once we have samples;
+          // fall back to the card-declared confidence on cold start.
           const { domain, path } = violation.desiredEffect;
-          const candidates = executorRegistry
-            .resolveByEffect({ domain, path })
-            .sort((a, b) => b.confidence - a.confidence);
+          const candidates = rankByObservedMetrics(
+            executorRegistry.resolveByEffect({ domain, path }),
+            this._rankingContext(),
+          );
           matchingActions = candidates.map((reg) =>
             this.synthesizeActionFromEffect(reg, violation.goalId, domain, path)
           );
@@ -218,6 +234,16 @@ export class PlannerPluginL0 implements Plugin {
   /** Expose cooldown manager for introspection. */
   getCooldownManager(): CooldownManager {
     return this.cooldownManager;
+  }
+
+  /** Build the lookup functions the ranker uses to query observed metrics. */
+  private _rankingContext(): RankContext {
+    const costStore = this.pluginConfig.costStore ?? defaultCostStore;
+    const confidenceStore = this.pluginConfig.confidenceStore ?? defaultConfidenceStore;
+    return {
+      costSummary: (agentName, skill) => costStore.summary(agentName, skill),
+      confidenceSummary: (agentName, skill) => confidenceStore.summary(agentName, skill),
+    };
   }
 
   /**
