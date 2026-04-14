@@ -77,3 +77,22 @@ export interface ExecutorRegistration {
   /** Higher priority wins when multiple registrations match the same skill. */
   priority: number;
 }
+
+/**
+ * A single entry in the effect-based secondary index.
+ * Maps a world-state (domain, path) target to the skill that can produce it.
+ */
+export interface EffectRegistration {
+  /** Skill name that produces this effect. */
+  skill: string;
+  /** Agent name for target-based routing (optional). */
+  agentName?: string;
+  /** World-state domain (e.g. "ci", "plane"). */
+  domain: string;
+  /** Dot-separated path into the domain's data object (e.g. "data.blockedPRs"). */
+  path: string;
+  /** Expected signed numeric change applied to the value at `path`. */
+  expectedDelta: number;
+  /** Planner weight in [0.0, 1.0]. */
+  confidence: number;
+}
