@@ -6,7 +6,8 @@ import { PlannerPluginL0 } from "./planner-plugin-l0.ts";
 import { TOPICS } from "../event-bus/topics.ts";
 import type { WorldState } from "../../lib/types/world-state.ts";
 import type { BusMessage } from "../../lib/types.ts";
-import type { ActionDispatchPayload, ActionOutcomePayload } from "../event-bus/action-events.ts";
+import type { ActionDispatchPayload } from "../event-bus/action-events.ts";
+import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 import type { Action } from "../planner/types/action.ts";
 import type { IExecutor, SkillRequest, SkillResult } from "../executor/types.ts";
 
@@ -178,26 +179,27 @@ describe("PlannerPluginL0", () => {
     expect(dispatched).toHaveLength(0);
   });
 
-  test("records outcome in loop detector on world.action.outcome", () => {
+  test("records outcome in loop detector on autonomous.outcome.#", () => {
     const action = makeAction();
     registry.register(action);
 
-    // Simulate a failure outcome
-    const outcomePayload: ActionOutcomePayload = {
-      type: "outcome",
+    // Simulate a failure outcome from a GOAP-originated skill dispatch
+    const outcomePayload: AutonomousOutcomePayload = {
+      correlationId: "corr-1",
+      systemActor: "goap",
+      skill: "test-action",
       actionId: "test-action",
       goalId: "test-goal",
-      correlationId: "corr-1",
-      timestamp: Date.now(),
       success: false,
       error: "Precondition failed at dispatch",
+      taskState: "failed",
       durationMs: 5,
     };
 
-    bus.publish(TOPICS.WORLD_ACTION_OUTCOME, {
+    bus.publish("autonomous.outcome.goap.test-action", {
       id: "1",
       correlationId: "corr-1",
-      topic: TOPICS.WORLD_ACTION_OUTCOME,
+      topic: "autonomous.outcome.goap.test-action",
       timestamp: Date.now(),
       payload: outcomePayload,
     });

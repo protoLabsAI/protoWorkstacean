@@ -19,18 +19,6 @@ export interface ActionDispatchPayload {
   optimisticEffectsApplied: boolean;
 }
 
-/** Payload for world.action.outcome — published when an action completes or fails. */
-export interface ActionOutcomePayload {
-  type: "outcome";
-  actionId: string;
-  goalId: string;
-  correlationId: string;
-  timestamp: number;
-  success: boolean;
-  error?: string;
-  durationMs: number;
-}
-
 /** Payload for world.action.oscillation — published on loop detection breach. */
 export interface ActionOscillationPayload {
   type: "oscillation";

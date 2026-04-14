@@ -3,19 +3,20 @@
  * optimistic state updates.
  *
  * Subscribes to: world.action.dispatch
- * Publishes:     agent.skill.request, world.action.outcome, world.action.queue_full
+ * Publishes:     agent.skill.request, autonomous.outcome.goap.{skill}, world.action.queue_full
  *
  * On receiving a dispatch event:
  *   1. Checks WIP limit; if at capacity, queues action and publishes queue_full
  *   2. Applies optimistic state effects via StateUpdater
  *   3. Publishes to agent.skill.request with source.interface='cron',
  *      payload.meta.systemActor='goap', and reply.topic=`agent.skill.response.${correlationId}`
- *   4. Publishes world.action.outcome with result
+ *   4. Publishes autonomous.outcome.goap.{skill} with the unified outcome payload
  *   6. On failure: triggers rollback via StateRollbackRegistry
  */
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
-import type { ActionDispatchPayload, ActionOutcomePayload, ActionQueueFullPayload } from "../event-bus/action-events.ts";
+import type { ActionDispatchPayload, ActionQueueFullPayload } from "../event-bus/action-events.ts";
+import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 import type { AgentSkillResponsePayload } from "../event-bus/payloads.ts";
 import type { WorldState } from "../../lib/types/world-state.ts";
 import { TOPICS } from "../event-bus/topics.ts";
@@ -184,7 +185,7 @@ export class ActionDispatcherPlugin implements Plugin {
           payload: {
             skill: action.meta.skillHint ?? action.id,
             goalId: action.goalId,
-            meta: { ...action.meta, systemActor: "goap" },
+            meta: { ...action.meta, systemActor: "goap", actionId: action.id, goalId: action.goalId },
           },
         });
         await this.completeAction(action, correlationId, parentCorrelationId, startedAt, true);
@@ -222,7 +223,7 @@ export class ActionDispatcherPlugin implements Plugin {
           payload: {
             skill: action.meta.skillHint ?? action.id,
             goalId: action.goalId,
-            meta: { ...action.meta, systemActor: "goap" },
+            meta: { ...action.meta, systemActor: "goap", actionId: action.id, goalId: action.goalId },
           },
         });
 
@@ -300,22 +301,28 @@ export class ActionDispatcherPlugin implements Plugin {
     });
     this.telemetry?.bump("action", action.id, status);
 
-    // Publish outcome event
-    const outcomePayload: ActionOutcomePayload = {
-      type: "outcome",
+    // Publish unified outcome event. ActionDispatcher is the outcome source
+    // for tier_0 (short-circuit) actions — for other tiers, SkillDispatcher
+    // emits the outcome after the skill completes. Both use the same topic
+    // shape so OutcomeAnalysis sees one unified stream.
+    const skill = action.meta.skillHint ?? action.id;
+    const outcomeTopic = `autonomous.outcome.goap.${skill}`;
+    const outcomePayload: AutonomousOutcomePayload = {
+      correlationId,
+      systemActor: "goap",
+      skill,
       actionId: action.id,
       goalId: action.goalId,
-      correlationId,
-      timestamp: completedAt,
       success,
       error,
+      taskState: success ? "completed" : (status === "timeout" ? "canceled" : "failed"),
       durationMs: completedAt - startedAt,
     };
 
-    this.bus.publish(TOPICS.WORLD_ACTION_OUTCOME, {
+    this.bus.publish(outcomeTopic, {
       id: crypto.randomUUID(),
       correlationId: parentCorrelationId,
-      topic: TOPICS.WORLD_ACTION_OUTCOME,
+      topic: outcomeTopic,
       timestamp: completedAt,
       payload: outcomePayload,
     });

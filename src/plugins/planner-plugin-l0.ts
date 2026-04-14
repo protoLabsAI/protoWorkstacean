@@ -1,7 +1,7 @@
 /**
  * PlannerPluginL0 — deterministic L0 rule-based pattern matcher.
  *
- * Subscribes to: world.state.updated, world.action.outcome
+ * Subscribes to: world.state.updated, autonomous.outcome.#
  * Publishes:     world.action.dispatch, world.planner.escalate, world.action.oscillation
  *
  * Flow:
@@ -16,10 +16,10 @@ import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { WorldState } from "../../lib/types/world-state.ts";
 import type {
   ActionDispatchPayload,
-  ActionOutcomePayload,
   ActionOscillationPayload,
   PlannerEscalatePayload,
 } from "../event-bus/action-events.ts";
+import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 import type { GoalViolatedEventPayload } from "../types/events.ts";
 import type { Action } from "../planner/types/action.ts";
 import type { EffectRegistration } from "../executor/types.ts";
@@ -96,12 +96,17 @@ export class PlannerPluginL0 implements Plugin {
     );
     this.subscriptionIds.push(wsId);
 
-    // Track action outcomes for loop detection
+    // Track action outcomes for loop detection. autonomous.outcome.# is the
+    // unified stream — every skill dispatch (GOAP, ceremony, FAF, user) emits
+    // here on terminal state. For GOAP-originated outcomes the payload carries
+    // actionId + goalId; other sources leave those unset and we ignore them.
     const outcomeId = bus.subscribe(
-      TOPICS.WORLD_ACTION_OUTCOME,
+      "autonomous.outcome.#",
       this.name,
       (msg: BusMessage) => {
-        const outcome = msg.payload as ActionOutcomePayload;
+        const outcome = msg.payload as AutonomousOutcomePayload;
+        if (!outcome.actionId || !outcome.goalId) return;
+
         this.loopDetector.record(outcome.goalId, outcome.actionId, outcome.success);
         this.inFlightGoals.delete(outcome.goalId);
 

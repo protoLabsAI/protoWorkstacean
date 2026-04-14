@@ -11,7 +11,6 @@
 // Re-export action event payloads (already defined)
 export type {
   ActionDispatchPayload,
-  ActionOutcomePayload,
   ActionOscillationPayload,
   ActionQueueFullPayload,
   PlannerEscalatePayload,
@@ -228,12 +227,21 @@ export interface AutonomousOutcomePayload {
   correlationId: string;
   /** Parent span ID — the bus message ID that triggered the skill request. */
   parentId?: string;
-  /** Autonomous subsystem actor (e.g. "pr-remediator", "sweep") or "user". */
+  /** Autonomous subsystem actor (e.g. "goap", "ceremony", "pr-remediator") or "user". */
   systemActor: string;
   /** Skill name that was executed. */
   skill: string;
+  /** GOAP action id when the outcome came from a planned action — optional,
+   *  unset for ad-hoc or ceremony dispatches. Kept distinct from `skill` so
+   *  the planner's loop-detector can reason about action identity even when
+   *  the skill name is shared across actions. */
+  actionId?: string;
+  /** Goal id that triggered this outcome (when originating from GOAP). */
+  goalId?: string;
   /** True if the task completed without error. */
   success: boolean;
+  /** Error message when success is false. */
+  error?: string;
   /** Final A2A task lifecycle state (completed, failed, canceled, etc.). */
   taskState?: string;
   /** First 500 chars of the result text — for quick inspection. */
