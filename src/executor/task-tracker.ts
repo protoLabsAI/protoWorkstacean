@@ -36,6 +36,12 @@ export interface TrackedTask {
   callbackToken?: string;
   /** Set when the task has asked for human input — suppresses polling until resumed. */
   awaitingHuman?: boolean;
+  /**
+   * Compound-gate counter (Arc 7.3). Incremented every time the task enters
+   * input-required. Passed into the raised HITLRequest so renderers can show
+   * "Checkpoint N" for multi-step tasks. Reset is never needed — monotonic.
+   */
+  checkpointCount?: number;
   /** The Discord/etc interface that originated the request — reused for HITL routing. */
   sourceInterface?: string;
   /** Source channel ID for HITL rendering. */
@@ -259,14 +265,20 @@ export class TaskTracker {
   private _raiseHitl(task: TrackedTask, question: string | undefined): void {
     if (task.awaitingHuman) return; // already raised, avoid duplicate
     task.awaitingHuman = true;
+    // Arc 7.3: increment checkpoint counter so compound-gated tasks (multi-step
+    // input-required) surface which prompt this is in the sequence. 1-based.
+    task.checkpointCount = (task.checkpointCount ?? 0) + 1;
 
     const req: HITLRequest = {
       type: "hitl_request",
       correlationId: task.correlationId,
-      title: `Input needed from ${task.agentName}`,
+      title: task.checkpointCount > 1
+        ? `Input needed from ${task.agentName} (checkpoint ${task.checkpointCount})`
+        : `Input needed from ${task.agentName}`,
       summary: question || "The agent is requesting input to continue.",
       options: ["approve", "reject"],
       expiresAt: new Date(Date.now() + HITL_TTL_MS).toISOString(),
+      checkpoint: { index: task.checkpointCount },
       replyTopic: `hitl.response.${task.correlationId}`,
       sourceMeta: {
         interface: task.sourceInterface ?? "discord",
