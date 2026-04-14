@@ -60,7 +60,7 @@ When a goal is violated, it emits `world.goal.violated` with the goal ID, severi
 
 **PlannerPluginL0** subscribes to `world.goal.violated`. It queries `ActionRegistry` for actions whose `goalId` matches the violated goal and whose `preconditions` are satisfied against the current world state. It packages the selected actions into a `world.action.plan` message.
 
-**ActionDispatcherPlugin** subscribes to `world.action.plan`. It fires each action by publishing to `action.meta.topic`, subject to a WIP (work-in-progress) limit to prevent runaway firing.
+**ActionDispatcherPlugin** subscribes to `world.action.plan`. It fires each action by publishing to `agent.skill.request`, subject to a WIP (work-in-progress) limit to prevent runaway firing.
 
 ## Why tier_0 vs tier_1 vs tier_2
 

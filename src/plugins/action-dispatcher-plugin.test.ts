@@ -60,7 +60,7 @@ describe("ActionDispatcherPlugin", () => {
       outcomes.push(msg.payload as ActionOutcomePayload);
     });
 
-    const action = makeAction({ tier: "tier_0" });
+    const action = makeAction({ tier: "tier_0", meta: { fireAndForget: true } });
     bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action));
 
     // Allow microtasks to process
@@ -77,6 +77,7 @@ describe("ActionDispatcherPlugin", () => {
 
     const action = makeAction({
       effects: [{ path: "planner.auto_mode_running", operation: "set", value: true }],
+      meta: { fireAndForget: true },
     });
 
     bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action));
@@ -96,11 +97,11 @@ describe("ActionDispatcherPlugin", () => {
       queueFullEvents.push(msg.payload as ActionQueueFullPayload);
     });
 
-    // Dispatch 3 actions with a topic (so they stay in-flight waiting for agent.skill.response.*)
+    // Dispatch 3 actions without fireAndForget (so they stay in-flight waiting for agent.skill.response.*)
     for (let i = 0; i < 3; i++) {
       const action = makeAction({
         id: `action-${i}`,
-        meta: { topic: "agent.execute", timeout: 30_000 },
+        meta: { timeout: 30_000 },
       });
       bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, `corr-${i}`));
     }
@@ -112,7 +113,7 @@ describe("ActionDispatcherPlugin", () => {
   });
 
   test("records outcome in tracker", async () => {
-    const action = makeAction();
+    const action = makeAction({ meta: { fireAndForget: true } });
     bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action));
     await new Promise((r) => setTimeout(r, 10));
 
@@ -129,7 +130,7 @@ describe("ActionDispatcherPlugin", () => {
 
     const action = makeAction({
       id: "skill-action",
-      meta: { topic: "agent.execute", skillHint: "my_skill", timeout: 30_000 },
+      meta: { skillHint: "my_skill", timeout: 30_000 },
     });
     bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "corr-skill"));
 
@@ -152,7 +153,7 @@ describe("ActionDispatcherPlugin", () => {
 
     const action = makeAction({
       id: "fallback-action",
-      meta: { topic: "agent.execute", timeout: 30_000 },
+      meta: { timeout: 30_000 },
     });
     bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "corr-fallback"));
 
@@ -171,7 +172,7 @@ describe("ActionDispatcherPlugin", () => {
 
     const action = makeAction({
       id: "response-action",
-      meta: { topic: "agent.execute", skillHint: "my_skill", timeout: 5_000 },
+      meta: { skillHint: "my_skill", timeout: 5_000 },
     });
     bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "corr-resp"));
     await new Promise((r) => setTimeout(r, 10));
