@@ -337,6 +337,16 @@ const pluginRegistry: PluginRegistryEntry[] = [
       return new GoalHotReloadPlugin(workspaceDir);
     },
   },
+  {
+    // Arc 8.1 — aggregates autonomous.outcome.# into per-agent 24h
+    // success/latency/cost rollups; exposed as agent_fleet_health domain.
+    name: "agent-fleet-health",
+    condition: () => true,
+    factory: async () => {
+      const { AgentFleetHealthPlugin } = await import("./plugins/agent-fleet-health-plugin.js");
+      return new AgentFleetHealthPlugin();
+    },
+  },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
   {
     name: "echo",
@@ -576,7 +586,18 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     engine.registerDomain("plane", createHttpCollector(`${base}/api/plane-board`), 120_000); // 2min — Plane REST list across projects
     engine.registerDomain("memory", createHttpCollector(`${base}/api/memory-health`), 60_000); // 1min — Graphiti health + search probe
 
-    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue, plane, memory");
+    // agent_fleet_health — bus-aggregated, no HTTP polling needed
+    const fleetHealth = registeredPlugins.find(p => p.name === "agent-fleet-health");
+    if (fleetHealth) {
+      type AgentFleetHealthPlugin = import("./plugins/agent-fleet-health-plugin.js").AgentFleetHealthPlugin;
+      engine.registerDomain(
+        "agent_fleet_health",
+        () => Promise.resolve((fleetHealth as unknown as AgentFleetHealthPlugin).getFleetHealth()),
+        60_000,
+      );
+    }
+
+    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue, plane, memory, agent_fleet_health");
 
     // All local + workspace/domains.yaml + per-project domains are now
     // registered. Defer prune briefly so any async per-project domain
