@@ -23,6 +23,11 @@ import {
   WORLDSTATE_DELTA_MIME_TYPE,
   type WorldStateDeltaArtifactData,
 } from "../../../lib/types/worldstate-delta.ts";
+import {
+  defaultExtensionRegistry,
+  type ExtensionContext,
+  type ExtensionInterceptor,
+} from "../extension-registry.ts";
 
 /**
  * Auth scheme the executor applies on outbound requests.
@@ -174,6 +179,28 @@ export class A2AExecutor implements IExecutor {
   async execute(req: SkillRequest): Promise<SkillResult> {
     const text = req.content ?? req.prompt ?? this._buildText(req);
 
+    // Run extension before-hooks — each interceptor may stamp keys onto
+    // ctx.metadata, which gets merged into the outbound JSON-RPC metadata.
+    // Interceptors self-gate on agent-specific data (they no-op when the
+    // agent card doesn't advertise their URI or the response lacks the
+    // expected fields), so running all registered extensions is safe.
+    const interceptors = defaultExtensionRegistry.list()
+      .map(d => d.interceptor)
+      .filter((i): i is ExtensionInterceptor => !!i);
+    const extCtx: ExtensionContext = {
+      agentName: this.config.name,
+      skill: req.skill,
+      correlationId: req.correlationId,
+      metadata: {},
+    };
+    for (const i of interceptors) {
+      try {
+        await i.before?.(extCtx);
+      } catch (err) {
+        console.debug(`[a2a-executor] extension before-hook error:`, err);
+      }
+    }
+
     try {
       // Per-request client so trace headers get stamped via the fetch wrapper.
       const client = await this._buildClient(req.correlationId, req.parentId);
@@ -191,13 +218,25 @@ export class A2AExecutor implements IExecutor {
           correlationId: req.correlationId,
           parentId: req.parentId,
           ...req.payload,
+          ...extCtx.metadata,
         },
       };
 
-      if (this.config.streaming) {
-        return await this._executeStream(client, params, req);
+      const result = this.config.streaming
+        ? await this._executeStream(client, params, req)
+        : await this._executeBlocking(client, params, req);
+
+      // Run extension after-hooks — they read result.data (usage, confidence,
+      // worldstate-delta) and emit observability events or record samples.
+      for (const i of interceptors) {
+        try {
+          await i.after?.(extCtx, { text: result.text, data: result.data });
+        } catch (err) {
+          console.debug(`[a2a-executor] extension after-hook error:`, err);
+        }
       }
-      return await this._executeBlocking(client, params, req);
+
+      return result;
     } catch (err) {
       return {
         text: err instanceof Error ? err.message : String(err),
