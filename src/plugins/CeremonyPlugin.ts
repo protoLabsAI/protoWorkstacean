@@ -48,7 +48,6 @@ import { CeremonyNotifier } from "../integrations/discord/CeremonyNotifier.ts";
 
 const DEBUG = process.env.DEBUG === "1" || process.env.DEBUG === "true";
 const HOT_RELOAD_INTERVAL_MS = 5_000;
-const SKILL_DISPATCH_TIMEOUT_MS = 120_000; // 2 minutes
 
 function debug(...args: unknown[]): void {
   if (DEBUG) console.log("[DEBUG][ceremony]", ...args);
@@ -351,14 +350,10 @@ export class CeremonyPlugin implements Plugin {
       const replyTopic = `agent.skill.response.${context.runId}`;
 
       const skillResult = await new Promise<string | null>((resolve) => {
-        // Set up reply subscription with timeout
-        const timeoutTimer = setTimeout(() => {
-          if (this.bus) this.bus.unsubscribe(subId);
-          resolve(null);
-        }, SKILL_DISPATCH_TIMEOUT_MS);
+        let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
         const subId = this.bus!.subscribe(replyTopic, this.name, (msg: BusMessage) => {
-          clearTimeout(timeoutTimer);
+          if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
           this.bus?.unsubscribe(subId);
           const payload = msg.payload as { result?: string; error?: string };
           if (payload?.error) {
@@ -369,6 +364,14 @@ export class CeremonyPlugin implements Plugin {
           }
           resolve(payload?.result ?? null);
         });
+
+        // Set up per-ceremony timeout only if configured
+        if (ceremony.timeoutMs !== undefined) {
+          timeoutTimer = setTimeout(() => {
+            this.bus?.unsubscribe(subId);
+            resolve(null);
+          }, ceremony.timeoutMs);
+        }
 
         // Publish skill request
         this.bus!.publish(skillRequestTopic, {
@@ -388,10 +391,10 @@ export class CeremonyPlugin implements Plugin {
         });
       });
 
-      if (skillResult === null && !error) {
-        // Timeout
+      if (skillResult === null && !error && ceremony.timeoutMs !== undefined) {
+        // Per-ceremony timeout fired
         status = "timeout";
-        error = `Skill dispatch timed out after ${SKILL_DISPATCH_TIMEOUT_MS / 1000}s`;
+        error = `Skill dispatch timed out after ${ceremony.timeoutMs / 1000}s`;
         console.warn(`[ceremony] Skill dispatch timeout for ${ceremony.id} (run ${context.runId})`);
       }
     } catch (err) {
