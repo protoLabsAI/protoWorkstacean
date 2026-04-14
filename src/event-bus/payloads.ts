@@ -211,6 +211,24 @@ export interface WorktreeRecoveredPayload {
   recoveredAt: string;
 }
 
+// ── world.action.confidence ──────────────────────────────────────────────────
+
+/**
+ * Payload for `world.action.confidence` — published by the confidence-v1
+ * extension interceptor after each skill execution where the agent included
+ * an `x-protolabs-confidence` block in its terminal artifact data.
+ */
+export interface WorldActionConfidencePayload {
+  /** Agent that produced this confidence score. */
+  source: string;
+  /** Skill that was executed. */
+  skill: string;
+  /** Agent's stated confidence that the task succeeded, in [0.0, 1.0]. */
+  confidence: number;
+  /** Optional human-readable justification from the agent. */
+  explanation?: string;
+}
+
 // ── autonomous.outcome.* ─────────────────────────────────────────────────────
 
 /**

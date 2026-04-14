@@ -14,12 +14,21 @@
  * own failures become inputs to its own improvement backlog.
  *
  * Inbound:
- *   world.action.outcome  — every action completion
- *   hitl.escalation       — every HITL timeout/exhaustion (per pr-remediator)
+ *   world.action.outcome      — every action completion
+ *   world.action.confidence   — agent confidence scores from confidence-v1 extension
+ *   hitl.escalation           — every HITL timeout/exhaustion (per pr-remediator)
  *
  * Outbound:
  *   ops.alert.action_quality   — action with poor success rate
  *   ops.alert.hitl_escalation  — repeated human-needed action
+ *
+ * Confidence weighting:
+ *   When world.action.confidence arrives before or alongside a failure, the
+ *   failure contributes `confidence` (not 1) to the weighted failure accumulator.
+ *   A high-confidence failure (agent was sure → worse signal) drives faster
+ *   alerts than a low-confidence failure (agent was uncertain).
+ *
+ *   adjustedRate = success / (success + weightedFailure + timeout)
  */
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
@@ -30,6 +39,8 @@ interface ActionStats {
   success: number;
   failure: number;
   timeout: number;
+  /** Sum of confidence scores for failures — higher means more confident bad outcomes. */
+  weightedFailure: number;
   lastEvaluatedAt: number;
   alertedAt?: number;
 }
@@ -58,6 +69,12 @@ export class OutcomeAnalysisPlugin implements Plugin {
   private readonly subscriptionIds: string[] = [];
   private readonly actionStats = new Map<string, ActionStats>();
   private readonly hitlStats = new Map<string, HitlStats>();
+  /**
+   * Pending confidence scores keyed by correlationId.
+   * The interceptor may publish world.action.confidence before or after
+   * world.action.outcome arrives; we buffer until outcome is received.
+   */
+  private readonly pendingConfidence = new Map<string, number>();
   private analysisTimer?: ReturnType<typeof setInterval>;
 
   install(bus: EventBus): void {
@@ -65,6 +82,9 @@ export class OutcomeAnalysisPlugin implements Plugin {
 
     this.subscriptionIds.push(
       bus.subscribe("world.action.outcome", this.name, (msg) => this._onOutcome(msg)),
+    );
+    this.subscriptionIds.push(
+      bus.subscribe("world.action.confidence", this.name, (msg) => this._onConfidence(msg)),
     );
     this.subscriptionIds.push(
       bus.subscribe("hitl.escalation", this.name, (msg) => this._onHitlEscalation(msg)),
@@ -85,6 +105,18 @@ export class OutcomeAnalysisPlugin implements Plugin {
     this.bus = undefined;
   }
 
+  private _onConfidence(msg: BusMessage): void {
+    const p = msg.payload as Record<string, unknown> | undefined;
+    const confidence = typeof p?.confidence === "number" ? p.confidence : undefined;
+    if (confidence === undefined) return;
+
+    // Store keyed by correlationId so _onOutcome can look it up
+    const correlationId = typeof msg.correlationId === "string" ? msg.correlationId : undefined;
+    if (correlationId) {
+      this.pendingConfidence.set(correlationId, confidence);
+    }
+  }
+
   private _onOutcome(msg: BusMessage): void {
     const p = msg.payload as Record<string, unknown> | undefined;
     const actionId = typeof p?.actionId === "string" ? p.actionId : undefined;
@@ -100,13 +132,27 @@ export class OutcomeAnalysisPlugin implements Plugin {
       success: 0,
       failure: 0,
       timeout: 0,
+      weightedFailure: 0,
       lastEvaluatedAt: 0,
     };
 
     stats.total += 1;
-    if (success) stats.success += 1;
-    else if (isTimeout) stats.timeout += 1;
-    else stats.failure += 1;
+    if (success) {
+      stats.success += 1;
+    } else if (isTimeout) {
+      stats.timeout += 1;
+    } else {
+      stats.failure += 1;
+      // Weight this failure by the agent's stated confidence.
+      // High confidence → larger contribution to weightedFailure.
+      // Falls back to 1.0 if no confidence score was attached.
+      const correlationId = typeof msg.correlationId === "string" ? msg.correlationId : undefined;
+      const confidence = correlationId
+        ? (this.pendingConfidence.get(correlationId) ?? 1.0)
+        : 1.0;
+      stats.weightedFailure += confidence;
+      if (correlationId) this.pendingConfidence.delete(correlationId);
+    }
     stats.lastEvaluatedAt = Date.now();
 
     this.actionStats.set(actionId, stats);
@@ -131,10 +177,15 @@ export class OutcomeAnalysisPlugin implements Plugin {
   }
 
   /** Per-action success rate snapshot, sorted worst-first. Exposed for /api. */
-  getActionStats(): Array<ActionStats & { successRate: number }> {
+  getActionStats(): Array<ActionStats & { successRate: number; adjustedRate: number }> {
     return Array.from(this.actionStats.values())
-      .map(s => ({ ...s, successRate: s.total > 0 ? s.success / s.total : 0 }))
-      .sort((a, b) => a.successRate - b.successRate);
+      .map(s => {
+        const successRate = s.total > 0 ? s.success / s.total : 0;
+        const adjustedDenominator = s.success + s.weightedFailure + s.timeout;
+        const adjustedRate = adjustedDenominator > 0 ? s.success / adjustedDenominator : 0;
+        return { ...s, successRate, adjustedRate };
+      })
+      .sort((a, b) => a.adjustedRate - b.adjustedRate);
   }
 
   /** HITL escalation clusters, sorted most-frequent first. */
@@ -150,7 +201,10 @@ export class OutcomeAnalysisPlugin implements Plugin {
     // Detect chronically-failing actions
     for (const stats of this.actionStats.values()) {
       if (stats.total < MIN_ATTEMPTS_BEFORE_ALERT) continue;
-      const rate = stats.success / stats.total;
+
+      // Use confidence-adjusted rate when weighted failures exist
+      const adjustedDenominator = stats.success + stats.weightedFailure + stats.timeout;
+      const rate = adjustedDenominator > 0 ? stats.success / adjustedDenominator : 0;
       if (rate >= POOR_SUCCESS_THRESHOLD) continue;
 
       // Cooldown between repeat alerts for the same action
@@ -169,7 +223,8 @@ export class OutcomeAnalysisPlugin implements Plugin {
           success: stats.success,
           failure: stats.failure,
           timeout: stats.timeout,
-          recommendation: `Action "${stats.actionId}" succeeded ${stats.success}/${stats.total} times (${(rate * 100).toFixed(0)}%). Consider rewriting preconditions, replacing the skill, or filing a feature to build a better capability.`,
+          weightedFailure: stats.weightedFailure,
+          recommendation: `Action "${stats.actionId}" succeeded ${stats.success}/${stats.total} times (${(rate * 100).toFixed(0)}% confidence-adjusted). Consider rewriting preconditions, replacing the skill, or filing a feature to build a better capability.`,
         },
       });
       console.warn(`[outcome-analysis] chronic failure: ${stats.actionId} ${(rate * 100).toFixed(0)}% over ${stats.total} attempts`);
