@@ -10,6 +10,7 @@ These docs explain the *why* behind protoWorkstacean's architecture. Read them w
 |----------|-----------------|
 | [Executor layer](../integrations/runtimes/) | Why the executor layer exists, how resolution works, the registrar pattern, and why `SkillDispatcherPlugin` is the sole `agent.skill.request` subscriber |
 | [World engine](./world-engine) | Why `WorldState` is a generic record, the GOAP loop design, domain discovery rationale |
+| [Self-improving loop](./self-improving-loop) | How A2A extensions feed observations into `PlannerPluginL0`'s candidate ranking, how episodic memory writes to Graphiti, and why the convergence loops don't diverge |
 | [Distributed tracing](./distributed-tracing) | How `correlationId` (trace-id) and `parentId` (span-id) flow from the bus through RouterPlugin, A2AExecutor, external agents (protoMaker team, Quinn), and back |
 | [Plugin system](./plugin-system) | The plugin lifecycle, core vs integration vs workspace plugins, ordering guarantees |
 

@@ -1,6 +1,8 @@
 # protoWorkstacean
 
-Homeostatic agent orchestration platform. Monitors world state, evaluates goals, and drives the protoLabs agent fleet — the protoMaker team, Quinn, Ava, Jon, Frank — to close deviations continuously and autonomously.
+Homeostatic agent orchestration platform. Monitors world state, evaluates goals, and drives the protoLabs agent fleet — **Ava** (chief-of-staff), **protoBot** (Discord infrastructure: channels, categories, webhooks), **Quinn** (QA/PR review), **Researcher** (deep research), **Jon** (content strategy), **protoPen** (security/pentest), plus the protoMaker team — to close deviations continuously and autonomously.
+
+The loop observes skill execution through A2A extensions, writes episodic memory to Graphiti, and ranks future candidates by observed cost/confidence — so the planner gets better the more it runs. See [docs/explanation/self-improving-loop.md](docs/explanation/self-improving-loop.md).
 
 ---
 
@@ -45,6 +47,8 @@ bun run src/index.ts
 | `AVA_API_KEY` | For domain polling | protoMaker team API key (`X-API-Key`) |
 | `WORKSTACEAN_HTTP_PORT` | No | HTTP API port (default: `3000`) |
 | `WORKSTACEAN_API_KEY` | No | API key for `/publish` endpoint |
+| `WORKSTACEAN_BASE_URL` | For A2A push notifications | Externally-reachable URL of the workstacean API (e.g. `http://ava:8081`). Stamped into push-notification callback URLs registered with remote A2A agents that advertise `capabilities.pushNotifications: true`. Unset → silently falls back to task polling. |
+| `GRAPHITI_URL` | For memory enrichment | Base URL of the Graphiti knowledge-graph service (default: `http://graphiti:8000`). Skill dispatcher pulls `<recalled_memory>` context before every user-originated skill call and writes episodic memory on success. |
 | `ANTHROPIC_API_KEY` | For in-process agents | Claude API key |
 
 Full list: see `.env.dist`.
@@ -139,14 +143,17 @@ Every bus message carries `correlationId` (trace-id, never changes) and `parentI
 | `workspace/goals.yaml` | GOAP goal definitions | yes |
 | `workspace/actions.yaml` | GOAP action rules (workstacean-level) | yes |
 | `workspace/ceremonies/*.yaml` | Ceremony schedules + skill routing | yes |
-| `workspace/agents/*.yaml` | In-process agent definitions | gitignored |
-| `workspace/agents.yaml` | External A2A agent registry | gitignored |
+| `workspace/agents/*.yaml` | In-process agent definitions (ava, protobot) | yes |
+| `workspace/agents.yaml` | External A2A agent registry (quinn, researcher, jon, protopen) | yes |
+| `workspace/channels.yaml` | Communication channel registry | yes |
 | `workspace/projects.yaml` | Project registry + domain discovery source | gitignored |
 | `workspace/domains.yaml` | Local domain registrations (optional) | gitignored |
-| `workspace/discord.yaml` | Discord bot config | gitignored |
+| `workspace/discord.yaml` | Discord bot config (env var names, channel IDs) | gitignored |
 | `workspace/incidents.yaml` | Live security incident state | gitignored |
 
-Copy `*.example` counterparts to bootstrap a new deployment.
+Agent and channel definitions are shared schema — no secrets live there (only env var *names* for bot tokens and API keys). The actual credentials come from Infisical at container start. Per-environment overrides can ship through `PROTOLABS_AGENTS_JSON` without editing files.
+
+Copy `*.example` counterparts where they exist to bootstrap a new deployment.
 
 ---
 
@@ -181,7 +188,14 @@ protoWorkstacean is a first-class [A2A](https://a2a-protocol.org) client **and**
 - **Client** — `A2AExecutor` speaks the full A2A v0.3 protocol: `message/send`, `message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`, push notifications, artifact chunking, and native `input-required` HITL.
 - **Server** — workstacean exposes `/.well-known/agent-card.json` + `POST /a2a` so external agents can call it. Incoming calls bridge through the bus and back via `BusAgentExecutor`.
 - **Auth** — per-agent structured auth config in `workspace/agents.yaml` (apiKey / bearer / hmac schemes).
-- **Extensions** — `ExtensionRegistry` scaffolding for opt-in A2A extensions; no extensions shipped by default.
+- **Push notifications** — when a remote agent advertises `capabilities.pushNotifications: true` (e.g. protoPen), the dispatcher registers a webhook at `{WORKSTACEAN_BASE_URL}/api/a2a/callback/{taskId}` with a per-task HMAC-unguessable bearer token. On task state changes the agent POSTs the Task snapshot and the tracker routes it to the original reply topic. Falls back to polling when the agent doesn't advertise push.
+- **Extensions** — `ExtensionRegistry` runs before/after interceptors on every A2A call. Shipped by default:
+  - [`cost-v1`](docs/extensions/cost-v1.md) — records per-(agent, skill) token + wall-time actuals, publishes `autonomous.cost.*`
+  - [`confidence-v1`](docs/extensions/confidence-v1.md) — captures agent-reported confidence (0.0–1.0), flags high-confidence failures
+  - [`effect-domain-v1`](docs/extensions/effect-domain-v1.md) — parses worldstate-delta artifacts, publishes `world.state.delta`
+  - [`worldstate-delta-v1`](docs/extensions/worldstate-delta-v1.md) — DataPart content type for observed domain mutations
+
+  Observations from cost-v1 + confidence-v1 feed `PlannerPluginL0`'s candidate ranking ([Arc 6.4](docs/explanation/self-improving-loop.md)): once a candidate has ≥5 samples the planner ranks by observed success rate × confidence × wall-time penalty; cold candidates fall back to the card's self-declared confidence.
 
 See [`docs/guides/add-an-agent.md`](docs/guides/add-an-agent.md) for the full agent-onboarding flow.
 
