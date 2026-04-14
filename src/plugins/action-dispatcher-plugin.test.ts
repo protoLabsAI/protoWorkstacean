@@ -19,7 +19,10 @@ const makeAction = (overrides: Partial<Action> = {}): Action => ({
   name: "Test Action",
   description: "Test",
   goalId: "test-goal",
-  tier: "tier_0",
+  // tier_1 by default — exercises the skill-dispatch path. Tier_0 actions
+  // are declarative world-state-only and short-circuit to success; tests that
+  // need that path override explicitly.
+  tier: "tier_1",
   preconditions: [],
   effects: [],
   cost: 0,
