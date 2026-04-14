@@ -10,27 +10,44 @@ import type { AgentDefinition } from "../../agent-runtime/types.ts";
 import type { ToolRegistry } from "../../agent-runtime/tool-registry.ts";
 import type { AgentExecutorConfig } from "../../agent-runtime/agent-executor.ts";
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
+import type { EventBus } from "../../../lib/types.ts";
 
 export class ProtoSdkExecutor implements IExecutor {
   readonly type = "proto-sdk";
 
   private readonly executor: AgentExecutor;
+  private readonly bus?: EventBus;
 
   constructor(
     agentDef: AgentDefinition,
     toolRegistry: ToolRegistry,
     config: AgentExecutorConfig = {},
+    bus?: EventBus,
   ) {
     this.executor = new AgentExecutor(agentDef, toolRegistry, config);
+    this.bus = bus;
   }
 
   async execute(req: SkillRequest): Promise<SkillResult> {
     const prompt = req.content ?? req.prompt ?? this._buildPrompt(req);
+    const { bus } = this;
+    const { correlationId } = req;
 
     const result = await this.executor.run({
       prompt,
-      correlationId: req.correlationId,
+      correlationId,
       resume: req.resume,
+      onProgress: bus
+        ? (event) => {
+            bus.publish("skill.progress", {
+              id: crypto.randomUUID(),
+              correlationId,
+              topic: "skill.progress",
+              timestamp: Date.now(),
+              payload: event,
+            });
+          }
+        : undefined,
     });
 
     return {

@@ -1,9 +1,13 @@
-import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, mock, spyOn, beforeEach, afterEach } from "bun:test";
 import { SkillDispatcherPlugin, assembleContext } from "../skill-dispatcher-plugin.ts";
 import { ExecutorRegistry } from "../executor-registry.ts";
 import { FunctionExecutor } from "../executors/function-executor.ts";
+import { ProtoSdkExecutor } from "../executors/proto-sdk-executor.ts";
+import { AgentExecutor } from "../../agent-runtime/agent-executor.ts";
+import { ToolRegistry } from "../../agent-runtime/tool-registry.ts";
 import type { BusMessage } from "../../../lib/types.ts";
 import type { SkillRequest, SkillResult } from "../types.ts";
+import type { AgentDefinition } from "../../agent-runtime/types.ts";
 import type { GraphitiClient } from "../../../lib/memory/graphiti-client.ts";
 import type { ConversationTurn } from "../../../lib/plugins/logger.ts";
 
@@ -431,5 +435,143 @@ describe("assembleContext", () => {
     const result = assembleContext("", [], "Hello");
     expect(result).not.toContain("<recalled_memory>");
     expect(result).toBe("<current_message>\nHello\n</current_message>");
+  });
+});
+
+// ── skill.progress emission ────────────────────────────────────────────────────
+
+const minimalAgentDef: AgentDefinition = {
+  name: "test-agent",
+  role: "general",
+  model: "test-model",
+  systemPrompt: "You are a test agent.",
+  tools: [],
+  maxTurns: 5,
+  skills: [{ name: "test_skill" }],
+};
+
+describe("SkillDispatcherPlugin — skill.progress events", () => {
+  it("subscribes to skill.progress and observes tool_call events from ProtoSdkExecutor", async () => {
+    const bus = makeBus();
+    const registry = new ExecutorRegistry();
+
+    // Stub AgentExecutor.run to simulate a tool_use event via onProgress
+    const runSpy = spyOn(AgentExecutor.prototype, "run").mockImplementation(
+      async (opts) => {
+        opts.onProgress?.({
+          eventType: "tool_call",
+          correlationId: opts.correlationId,
+          toolName: "bash",
+        });
+        return { text: "done", isError: false };
+      },
+    );
+
+    const toolRegistry = new ToolRegistry();
+    const executor = new ProtoSdkExecutor(minimalAgentDef, toolRegistry, {}, bus as never);
+    registry.register("test_skill", executor);
+
+    const plugin = new SkillDispatcherPlugin(registry, "/tmp");
+    plugin.install(bus as never);
+
+    const progressEvents: BusMessage[] = [];
+    bus.subscribe("skill.progress", "test-observer", (msg) => progressEvents.push(msg));
+
+    bus.publish("agent.skill.request", makeMsg({
+      payload: { skill: "test_skill" },
+      reply: { topic: "reply.progress-test" },
+    }));
+
+    await new Promise(r => setTimeout(r, 30));
+
+    expect(progressEvents.length).toBeGreaterThan(0);
+    const ev = progressEvents[0]!;
+    expect((ev.payload as Record<string, unknown>).eventType).toBe("tool_call");
+    expect((ev.payload as Record<string, unknown>).toolName).toBe("bash");
+    expect(ev.topic).toBe("skill.progress");
+
+    runSpy.mockRestore();
+    plugin.uninstall();
+  });
+
+  it("emits skill.progress with text eventType for assistant text blocks", async () => {
+    const bus = makeBus();
+    const registry = new ExecutorRegistry();
+
+    const runSpy = spyOn(AgentExecutor.prototype, "run").mockImplementation(
+      async (opts) => {
+        opts.onProgress?.({
+          eventType: "text",
+          correlationId: opts.correlationId,
+          text: "thinking...",
+        });
+        return { text: "final result", isError: false };
+      },
+    );
+
+    const toolRegistry = new ToolRegistry();
+    const executor = new ProtoSdkExecutor(minimalAgentDef, toolRegistry, {}, bus as never);
+    registry.register("test_skill", executor);
+
+    const plugin = new SkillDispatcherPlugin(registry, "/tmp");
+    plugin.install(bus as never);
+
+    const progressEvents: BusMessage[] = [];
+    bus.subscribe("skill.progress", "test-observer-text", (msg) => progressEvents.push(msg));
+
+    bus.publish("agent.skill.request", makeMsg({
+      payload: { skill: "test_skill" },
+      reply: { topic: "reply.progress-text-test" },
+    }));
+
+    await new Promise(r => setTimeout(r, 30));
+
+    expect(progressEvents.length).toBeGreaterThan(0);
+    const ev = progressEvents[0]!;
+    expect((ev.payload as Record<string, unknown>).eventType).toBe("text");
+    expect((ev.payload as Record<string, unknown>).text).toBe("thinking...");
+
+    runSpy.mockRestore();
+    plugin.uninstall();
+  });
+
+  it("does not emit skill.progress when ProtoSdkExecutor has no bus", async () => {
+    const bus = makeBus();
+    const registry = new ExecutorRegistry();
+
+    const runSpy = spyOn(AgentExecutor.prototype, "run").mockImplementation(
+      async (opts) => {
+        // onProgress should be undefined when no bus is provided
+        opts.onProgress?.({
+          eventType: "tool_call",
+          correlationId: opts.correlationId,
+          toolName: "bash",
+        });
+        return { text: "done", isError: false };
+      },
+    );
+
+    const toolRegistry = new ToolRegistry();
+    // No bus passed — progress events should not be emitted
+    const executor = new ProtoSdkExecutor(minimalAgentDef, toolRegistry, {});
+    registry.register("test_skill", executor);
+
+    const plugin = new SkillDispatcherPlugin(registry, "/tmp");
+    plugin.install(bus as never);
+
+    const progressEvents: BusMessage[] = [];
+    bus.subscribe("skill.progress", "test-no-bus", (msg) => progressEvents.push(msg));
+
+    bus.publish("agent.skill.request", makeMsg({
+      payload: { skill: "test_skill" },
+      reply: { topic: "reply.no-bus-test" },
+    }));
+
+    await new Promise(r => setTimeout(r, 30));
+
+    expect(progressEvents.length).toBe(0);
+
+    runSpy.mockRestore();
+    plugin.uninstall();
   });
 });
