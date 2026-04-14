@@ -376,6 +376,7 @@ export class CeremonyPlugin implements Plugin {
           correlationId: context.runId,
           topic: skillRequestTopic,
           timestamp: Date.now(),
+          source: { interface: "cron" },
           payload: {
             skill: ceremony.skill,
             ceremonyId: ceremony.id,
@@ -383,6 +384,7 @@ export class CeremonyPlugin implements Plugin {
             targets: ceremony.targets,
             runId: context.runId,
             projectPaths: context.projectPaths,
+            meta: { systemActor: `ceremony/${ceremony.id}` },
           },
           reply: { topic: replyTopic },
         });
