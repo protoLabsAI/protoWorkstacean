@@ -5,10 +5,11 @@
  * and HITL escalation frequency, and emits signals on chronic issues:
  *
  *   - Actions with <50% success rate over 10+ attempts → publishes
- *     ops.alert.action_quality so the fleet knows to investigate/replace it.
+ *     ops.alert.action_quality so the fleet knows to investigate/replace it,
+ *     and emits agent.skill.request { skill: 'goal_proposal' } targeting Ava.
  *   - Actions with repeated HITL escalations → treated as feature-request
- *     signals ("what would have unblocked this automatically?") and logged
- *     for Ava to file on the board.
+ *     signals ("what would have unblocked this automatically?") and emits
+ *     agent.skill.request { skill: 'goal_proposal' } targeting Ava.
  *
  * This is the "bottlenecks are growth" principle operationalized: the system's
  * own failures become inputs to its own improvement backlog.
@@ -20,6 +21,7 @@
  * Outbound:
  *   ops.alert.action_quality   — action with poor success rate
  *   ops.alert.hitl_escalation  — repeated human-needed action
+ *   agent.skill.request        — goal_proposal skill request to Ava on threshold breach
  */
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
@@ -172,6 +174,28 @@ export class OutcomeAnalysisPlugin implements Plugin {
           recommendation: `Action "${stats.actionId}" succeeded ${stats.success}/${stats.total} times (${(rate * 100).toFixed(0)}%). Consider rewriting preconditions, replacing the skill, or filing a feature to build a better capability.`,
         },
       });
+
+      const correlationId = crypto.randomUUID();
+      this.bus.publish("agent.skill.request", {
+        id: crypto.randomUUID(),
+        correlationId,
+        topic: "agent.skill.request",
+        timestamp: now,
+        source: { interface: "outcome-analysis" },
+        payload: {
+          skill: "goal_proposal",
+          targets: ["ava"],
+          cluster: {
+            type: "action_quality",
+            actionId: stats.actionId,
+            successRate: rate,
+            total: stats.total,
+            failures: stats.failure + stats.timeout,
+          },
+          suggestedGoal: `Investigate and improve action "${stats.actionId}" which has a ${(rate * 100).toFixed(0)}% success rate over ${stats.total} attempts`,
+          meta: { systemActor: "outcome-analysis" },
+        },
+      });
       console.warn(`[outcome-analysis] chronic failure: ${stats.actionId} ${(rate * 100).toFixed(0)}% over ${stats.total} attempts`);
     }
 
@@ -193,6 +217,29 @@ export class OutcomeAnalysisPlugin implements Plugin {
           firstSeenAt: stats.firstSeenAt,
           lastSeenAt: stats.lastSeenAt,
           recommendation: `"${stats.kind}" has escalated to HITL ${stats.count} times for ${stats.target}. This is a feature-request signal — what capability would unblock this automatically?`,
+        },
+      });
+
+      const correlationId = crypto.randomUUID();
+      this.bus.publish("agent.skill.request", {
+        id: crypto.randomUUID(),
+        correlationId,
+        topic: "agent.skill.request",
+        timestamp: now,
+        source: { interface: "outcome-analysis" },
+        payload: {
+          skill: "goal_proposal",
+          targets: ["ava"],
+          cluster: {
+            type: "hitl_escalation",
+            kind: stats.kind,
+            target: stats.target,
+            count: stats.count,
+            firstSeenAt: stats.firstSeenAt,
+            lastSeenAt: stats.lastSeenAt,
+          },
+          suggestedGoal: `Build capability to automate "${stats.kind}" — it has required HITL intervention ${stats.count} times for ${stats.target}`,
+          meta: { systemActor: "outcome-analysis" },
         },
       });
       console.warn(`[outcome-analysis] repeated HITL: ${stats.kind} × ${stats.count} for ${stats.target}`);
