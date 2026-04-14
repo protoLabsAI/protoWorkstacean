@@ -557,6 +557,27 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       plugin.uninstall();
     });
 
+    test("update_branch is blocked while diagnose_pr_stuck is in-flight", async () => {
+      const bus = new InMemoryEventBus();
+      const plugin = new PrRemediatorPlugin();
+      plugin.install(bus);
+
+      pushWorldState(bus, [makePr({ number: 42, mergeable: "dirty", readyToMerge: false })]);
+
+      // Manually mark a diagnosis as in-flight for this PR
+      const diagnosisInFlight = (plugin as unknown as { diagnosisInFlight: Map<string, string> }).diagnosisInFlight;
+      diagnosisInFlight.set("acme/app#42", "fake-diagnosis-cid");
+
+      // The world-state poller fires update_branch — should be blocked
+      const skillCaptured = captureOn(bus, "agent.skill.request");
+      dispatch(bus, "pr.remediate.update_branch");
+      await flushMicrotasks();
+      // No agent.skill.request dispatched because diagnosis is blocking retries
+      expect(skillCaptured.length).toBe(0);
+
+      plugin.uninstall();
+    });
+
     test("address_feedback is guarded independently from fix_ci on the same PR", async () => {
       const bus = new InMemoryEventBus();
       const plugin = new PrRemediatorPlugin();
@@ -589,5 +610,190 @@ describe("PrRemediatorPlugin — world state tracking", () => {
 
       plugin.uninstall();
     });
+  });
+});
+
+// ── diagnose_pr_stuck ─────────────────────────────────────────────────────────
+//
+// Tests exercise the private API via `as unknown as` casting — same pattern as
+// the loop-protection tests that manipulate the inFlight map directly.
+
+describe("PrRemediatorPlugin — diagnose_pr_stuck", () => {
+  type PluginPrivate = {
+    _dispatchDiagnose(pr: PrEntry, correlationId: string): void;
+    diagnosisInFlight: Map<string, string>;
+  };
+
+  function privateOf(plugin: PrRemediatorPlugin): PluginPrivate {
+    return plugin as unknown as PluginPrivate;
+  }
+
+  test("_dispatchDiagnose publishes diagnose_pr_stuck skill request targeting Ava", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+    const pr = makePr({ number: 55, mergeable: "dirty", readyToMerge: false });
+
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    expect(skillCaptured.length).toBe(1);
+    const p = skillCaptured[0]!.payload as {
+      skill: string;
+      meta: { agentId: string; skillHint: string; systemActor: string };
+      content: string;
+    };
+    expect(p.skill).toBe("diagnose_pr_stuck");
+    expect(p.meta.agentId).toBe("ava");
+    expect(p.meta.skillHint).toBe("diagnose_pr_stuck");
+    expect(p.meta.systemActor).toBe("pr-remediator");
+    expect(p.content).toContain("#55");
+    expect(p.content).toContain("acme/app");
+
+    plugin.uninstall();
+  });
+
+  test("diagnosisInFlight is set while dispatch is in-flight and cleared after response", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [makePr({ number: 88, mergeable: "dirty", readyToMerge: false })]);
+
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+    const pr = makePr({ number: 88, mergeable: "dirty", readyToMerge: false });
+
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    // While diagnosis is running, the entry should be present
+    expect(privateOf(plugin).diagnosisInFlight.has("acme/app#88")).toBe(true);
+
+    // Publish a response to clear it
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: { text: '{"verdict":"genuine","evidence":"semantic conflict"}' },
+    });
+    await flushMicrotasks();
+
+    // After response, diagnosisInFlight must be cleared
+    expect(privateOf(plugin).diagnosisInFlight.has("acme/app#88")).toBe(false);
+
+    plugin.uninstall();
+  });
+
+  test("genuine verdict escalates to HITL with conflict details in summary", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [makePr({ number: 55, mergeable: "dirty", readyToMerge: false })]);
+
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+
+    const pr = makePr({ number: 55, mergeable: "dirty", readyToMerge: false });
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: {
+        text: '```json\n{"verdict":"genuine","evidence":"conflicting logic in src/auth.ts cannot be auto-resolved","conflictingFiles":["src/auth.ts"]}\n```',
+      },
+    });
+    await flushMicrotasks();
+
+    expect(hitlCaptured.length).toBeGreaterThan(0);
+    const req = hitlCaptured[0]!.payload as HITLRequest;
+    expect(req.type).toBe("hitl_request");
+    expect(req.title).toContain("#55");
+    expect(req.title).toContain("update_branch");
+    expect(req.summary).toContain("genuine");
+    expect(req.summary).toContain("conflicting logic in src/auth.ts");
+    expect(req.sourceMeta?.interface).toBe("discord");
+
+    plugin.uninstall();
+  });
+
+  test("rebasable verdict dispatches merge-assist via bug_triage to protomaker", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [makePr({ number: 77, mergeable: "dirty", readyToMerge: false })]);
+
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+    const pr = makePr({ number: 77, mergeable: "dirty", readyToMerge: false });
+
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: {
+        text: '```json\n{"verdict":"rebasable","evidence":"conflicts in docs/ are whitespace-only","conflictingFiles":["docs/api.md"]}\n```',
+      },
+    });
+    await flushMicrotasks();
+
+    // 1 diagnose dispatch + 1 merge-assist dispatch
+    expect(skillCaptured.length).toBe(2);
+    const mergeAssist = skillCaptured[1]!.payload as {
+      skill: string;
+      content: string;
+      meta: { agentId: string };
+    };
+    expect(mergeAssist.skill).toBe("bug_triage");
+    expect(mergeAssist.meta.agentId).toBe("protomaker");
+    expect(mergeAssist.content).toContain("rebasable");
+    expect(mergeAssist.content).toContain("#77");
+    expect(mergeAssist.content).toContain("three-way merge");
+
+    plugin.uninstall();
+  });
+
+  test("unknown/malformed response defaults to genuine verdict (HITL escalation)", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [makePr({ number: 63, mergeable: "dirty", readyToMerge: false })]);
+
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+
+    const pr = makePr({ number: 63, mergeable: "dirty", readyToMerge: false });
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: { text: "I could not determine the verdict for this PR." },
+    });
+    await flushMicrotasks();
+
+    // Malformed response falls back to genuine → HITL
+    expect(hitlCaptured.length).toBeGreaterThan(0);
+
+    plugin.uninstall();
   });
 });

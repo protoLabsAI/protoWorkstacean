@@ -21,7 +21,7 @@ WorldStateEngine polls domains
   → GoalEvaluatorPlugin checks goals against current state
     → Emits world.goal.violated when a goal is breached
       → PlannerPluginL0 maps violations to actions via goalId
-        → ActionDispatcherPlugin fires the action (publishes to action.meta.topic)
+        → ActionDispatcherPlugin fires the action (publishes to agent.skill.request)
 ```
 
 Goals express **what should be true**. Actions express **what to do when it is not**.
@@ -104,7 +104,6 @@ actions:
         value: 0.05
     effects: []
     meta:
-      topic: "message.outbound.discord.push.1234567890"
       fireAndForget: true
 ```
 
@@ -116,7 +115,7 @@ Action fields:
 | `tier` | `tier_0` = deterministic/cheap, `tier_1` = A* planned, `tier_2` = LLM |
 | `preconditions` | Guard — world state conditions that must be true before dispatching |
 | `effects` | State mutations the action applies after execution (can be empty for alerts) |
-| `meta.topic` | Bus topic ActionDispatcherPlugin publishes to when the action fires |
+| `meta.skillHint` | Skill name to invoke (defaults to the action `id`) |
 | `meta.fireAndForget` | Do not wait for a response |
 
 `preconditions` use the same dot-path selectors as goals. Supported operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `exists`, `not_exists`.
@@ -135,7 +134,7 @@ Wait up to `tickMs` (30 seconds) for the next poll. In the server logs you shoul
 [world-state] domain error_rate updated
 [goal-evaluator] VIOLATION services.error_rate_healthy — rate=0.15 > max=0.05
 [planner-l0] plan: [alert.error_rate_high]
-[action-dispatcher] firing action alert.error_rate_high → message.outbound.discord.push.1234567890
+[action-dispatcher] firing action alert.error_rate_high → agent.skill.request
 ```
 
 If DiscordPlugin is running, the alert appears in your configured channel. Otherwise, the outbound message is logged to the event log.

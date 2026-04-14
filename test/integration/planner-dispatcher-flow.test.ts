@@ -141,13 +141,15 @@ describe("Planner → Dispatcher integration flow", () => {
     const smallOrchestrator = new PlanningOrchestrator({ dispatcher: { wipLimit: 1 } });
     smallOrchestrator.install(bus);
 
-    // Register 3 actions that will all match but dispatch to a topic (in-flight)
+    // tier_1 actions dispatch to agent.skill.request and stay in-flight until
+    // a response arrives — which here never does, so they accumulate against WIP.
     for (let i = 0; i < 3; i++) {
       smallOrchestrator.getRegistry().register(
         makeAction({
           id: `action-${i}`,
           goalId: `goal-${i}`,
-          meta: { topic: `agent.task.${i}`, timeout: 30_000 },
+          tier: "tier_1",
+          meta: { timeout: 30_000 },
         })
       );
     }
