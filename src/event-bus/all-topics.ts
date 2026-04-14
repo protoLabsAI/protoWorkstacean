@@ -50,9 +50,6 @@ export const WORLD_TOPICS = {
   /** Published by ActionDispatcherPlugin when an action is dispatched. */
   WORLD_ACTION_DISPATCH: "world.action.dispatch",
 
-  /** Published by ActionDispatcherPlugin when an action outcome is recorded. */
-  WORLD_ACTION_OUTCOME: "world.action.outcome",
-
   /** Published by LoopDetector when oscillation threshold is breached. */
   WORLD_ACTION_OSCILLATION: "world.action.oscillation",
 
