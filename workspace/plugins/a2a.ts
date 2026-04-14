@@ -17,7 +17,6 @@ import { readFileSync, watchFile, unwatchFile } from "node:fs";
 import { createSign } from "node:crypto";
 import { parse } from "yaml";
 import { ClientFactory, JsonRpcTransportFactory } from "@a2a-js/sdk/client";
-import { FIRE_AND_FORGET_SKILLS } from "../../src/router/faf-skills.ts";
 
 // ── GitHub App auth ───────────────────────────────────────────────────────────
 // Ava posts chain responses as ava[bot] using her own App identity.
@@ -231,23 +230,6 @@ function routeToAgent(skill: string | null, agents: AgentDef[]): AgentDef | null
 
 // ── A2A protocol ────────────────────────────────────────────────────────────
 
-// FIRE_AND_FORGET_SKILLS is imported from src/router/faf-skills.ts so the
-// allowlist is owned in exactly one place — the router now filters the same
-// set (fix/router-skip-faf-skills) and both sides read from the shared module.
-// If you need to add a skill, do it there.
-
-// In-flight guard: tracks currently-running fire-and-forget operations.
-// Key: `{agentName}:{skill}:{contentHash}` — prevents duplicate concurrent runs
-// when the same trigger fires multiple times (Discord retries, slash command re-click).
-// TTL of 10 min covers the longest expected operation.
-const inFlightFAF = new Map<string, number>();
-const FAF_TTL_MS = 10 * 60 * 1000;
-
-function fafKey(agentName: string, skill: string, content: string): string {
-  // Simple hash: agent + skill + first 120 chars of content (enough to distinguish)
-  return `${agentName}:${skill}:${content.slice(0, 120)}`;
-}
-
 async function callA2A(
   agent: AgentDef,
   content: string,
@@ -365,19 +347,12 @@ const MEMORY_SKILLS = new Set(["memory_recall", "memory_store"]);
 
 // ── Locally-owned skill surface ──────────────────────────────────────────────
 //
-// Single source of truth for which skills this plugin dispatches from the
-// `message.inbound.#` subscriber. The inbound handler's guard and the
-// downstream branches both read from this set, so there's no way for the
-// allowlist to drift from the actual handler logic. Any skill NOT in this
-// set falls through to the router + skill-dispatcher canonical path.
-//
-// When adding a skill to this plugin, add it to one of the source sets
-// (MEMORY_SKILLS or FIRE_AND_FORGET_SKILLS) — never hard-code a new string
-// here. onboard_project is already covered because it lives in
-// FIRE_AND_FORGET_SKILLS.
+// This plugin only handles memory skills locally. All other skills —
+// including plan, onboard_project, and deep_research — flow through the
+// router + skill-dispatcher canonical path, where TaskTracker handles
+// long-running Tasks and HITL escalation natively.
 const LOCALLY_OWNED_SKILLS = new Set<string>([
   ...MEMORY_SKILLS,
-  ...FIRE_AND_FORGET_SKILLS,
 ]);
 
 async function handleMemorySkill(
@@ -484,10 +459,6 @@ async function runChain(
   }
 }
 
-// ── Skills handled locally (never forwarded to an external agent) ────────────
-
-const LOCAL_SKILLS = new Set(["memory_recall", "memory_store", "onboard_project"]);
-
 // ── Plugin ──────────────────────────────────────────────────────────────────
 
 export default {
@@ -546,18 +517,11 @@ export default {
         ?? `message.outbound.${msg.topic.split(".").slice(1).join(".")}`;
 
       // ── Local ownership guard ──────────────────────────────────────────────
-      // This plugin only handles skills in LOCALLY_OWNED_SKILLS (memory ops +
-      // fire-and-forget orchestration, incl. onboard_project). Everything else
-      // — including skillHint-tagged webhooks like pr_review from github.ts —
-      // is the router + skill-dispatcher pipeline's responsibility. Without
-      // this guard the same inbound event triggers *both* plugins and the
-      // agent runs twice (observed on protoWorkstacean#104 as paired
-      // @protoquinn[bot] review comments).
-      //
-      // The symmetric half of this guard lives in src/router/router-plugin.ts
-      // where FIRE_AND_FORGET_SKILLS (from src/router/faf-skills.ts) is also
-      // filtered out — together they guarantee FAF dispatch is handled exactly
-      // once regardless of which subscriber fires first.
+      // This plugin only handles memory skills (memory_recall, memory_store).
+      // All other skills — including plan, onboard_project, and deep_research —
+      // flow through the router + skill-dispatcher pipeline. Without this guard
+      // the same inbound event triggers both plugins and the agent runs twice
+      // (observed on protoWorkstacean#104 as paired @protoquinn[bot] review comments).
       if (!skill || !LOCALLY_OWNED_SKILLS.has(skill)) return;
 
       const agent = routeToAgent(skill, agents);
@@ -574,56 +538,6 @@ export default {
       if (skill && MEMORY_SKILLS.has(skill)) {
         console.log(`[a2a] "${content.slice(0, 60)}" → memory (local, skill: ${skill})`);
         await handleMemorySkill(bus, skill, content, msg, outboundTopic, p);
-        return;
-      }
-
-      // onboard_project: route to OnboardingPlugin via message.inbound.onboard.
-      // The Discord payload has { content, channel, sender } but OnboardingPlugin
-      // expects { slug, title, github }.  Normalise here by parsing the content
-      // string for an "owner/repo" token, then building the structured payload.
-      // If the format is unrecognisable, reply with a usage error instead of
-      // silently dropping — a no-op is worse than a visible failure.
-      if (skill === "onboard_project") {
-        console.log(`[a2a] "${content.slice(0, 60)}" → onboarding (local, skill: onboard_project)`);
-
-        // Extract the first "owner/repo" token from the raw content string.
-        const githubMatch = content.match(/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/);
-        if (!githubMatch) {
-          console.warn(`[a2a] onboard_project: no owner/repo found in "${content.slice(0, 80)}"`);
-          publishResponse(
-            bus,
-            outboundTopic,
-            msg.correlationId,
-            "Usage: `/onboard <owner>/<repo> [slug] [title]`\nExample: `/onboard protolabsai/my-project`",
-            p.channel,
-            "a2a",
-          );
-          return;
-        }
-
-        const github = githubMatch[1];
-        // Derive slug from owner/repo: replace "/" and non-alphanumeric chars with "-"
-        const derivedSlug = github.replace(/\//g, "-").replace(/[^A-Za-z0-9-]/g, "-").toLowerCase();
-        // Optional explicit slug/title tokens after the repo: "owner/repo my-slug My Title"
-        const rest = content.slice(content.indexOf(github) + github.length).trim();
-        const restTokens = rest.split(/\s+/).filter(Boolean);
-        const slug = restTokens[0] && !restTokens[0].includes("/") ? restTokens[0] : derivedSlug;
-        const title = restTokens.length > 1
-          ? restTokens.slice(restTokens[0] === slug ? 1 : 0).join(" ")
-          : github.split("/")[1].replace(/[-_]/g, " ");
-
-        const onboardTopic = "message.inbound.onboard";
-        bus.publish(onboardTopic, {
-          ...msg,
-          id: crypto.randomUUID(),
-          topic: onboardTopic,
-          payload: {
-            ...p,
-            slug,
-            title,
-            github,
-          },
-        });
         return;
       }
 
@@ -645,41 +559,6 @@ export default {
       if (typeof p.projectSlug === "string") planeExtra.projectSlug = p.projectSlug;
       if (typeof p.projectRepo === "string") planeExtra.projectRepo = p.projectRepo;
       if (typeof p.prNumber === "number") planeExtra.prNumber = p.prNumber;
-
-      // Fire-and-forget for long-running skills: ack immediately, agent posts
-      // back to the reply topic when done. No workstacean-side timeout.
-      if (skill && FIRE_AND_FORGET_SKILLS.has(skill)) {
-        const key = fafKey(agent.name, skill, content);
-        const startedAt = inFlightFAF.get(key);
-        const isInFlight = startedAt && (Date.now() - startedAt < FAF_TTL_MS);
-
-        if (isInFlight) {
-          console.log(`[a2a] "${skill}" already in-flight — skipping duplicate`);
-          publishResponse(bus, outboundTopic, msg.correlationId,
-            `⏳ Already working on that — I'll post back when done.`, p.channel);
-          return;
-        }
-
-        console.log(`[a2a] "${skill}" is fire-and-forget — acking immediately`);
-        inFlightFAF.set(key, Date.now());
-        publishResponse(bus, outboundTopic, msg.correlationId,
-          `⏳ On it — this may take a few minutes. I'll post back when done.`, p.channel);
-        callA2A(agent, content, contextId, skill, msg.source, outboundTopic, planeExtra, undefined)
-          .then(response => {
-            inFlightFAF.delete(key);
-            publishResponse(bus, outboundTopic, msg.correlationId, response, p.channel);
-            if (agent.chain?.[skill]) {
-              runChain(bus, agents, agent, skill, content, response, outboundTopic, p.channel, p.github as GitHubContext | undefined).catch(console.error);
-            }
-          })
-          .catch(err => {
-            inFlightFAF.delete(key);
-            console.error(`[a2a] ${agent.name} async error:`, err);
-            publishResponse(bus, outboundTopic, msg.correlationId,
-              `⚠️ ${agent.name} hit an error: ${err instanceof Error ? err.message : String(err)}`, p.channel);
-          });
-        return;
-      }
 
       try {
         const response = await callA2A(agent, content, contextId, skill ?? undefined, msg.source, outboundTopic, planeExtra);
