@@ -1,8 +1,8 @@
 ---
-title: "Extension: x-protolabsconfidence-v1"
+title: "Extension: x-protolabs/confidence-v1"
 ---
 
-`x-protolabsconfidence-v1` is an A2A agent card extension that lets an agent attach a self-reported confidence score to its terminal message. OutcomeAnalysis uses these scores to weight failure signals — a high-confidence bad outcome is a stronger quality signal than a low-confidence one where the agent itself was uncertain.
+`x-protolabs/confidence-v1` is an A2A agent card extension that lets an agent attach a self-reported confidence score to its terminal message. OutcomeAnalysisPlugin uses these scores to weight failure signals — a high-confidence bad outcome is a stronger quality signal than a low-confidence one where the agent itself was uncertain.
 
 **Extension URI**: `https://protolabs.ai/a2a/ext/confidence-v1`
 
@@ -23,7 +23,7 @@ When an agent attaches a confidence score to its terminal message, OutcomeAnalys
 
 ## Schema
 
-The agent includes a `x-confidence` block in the `data` field of its terminal A2A task artifact:
+The agent includes an `x-confidence` block in the `data` field of its terminal A2A task artifact:
 
 ```json
 {
@@ -48,10 +48,10 @@ The agent includes a `x-confidence` block in the `data` field of its terminal A2
 When an agent card declares the `confidence-v1` extension, the A2A executor applies the registered interceptor after each skill execution:
 
 1. **`after` hook** — reads `result.data["x-confidence"]` from the terminal artifact
-2. Publishes `autonomous.confidence.reported` to the bus with `{ correlationId, agentName, skill, confidence, explanation }`
-3. **OutcomeAnalysis** subscribes to `autonomous.confidence.reported`, caches confidence by `correlationId`
-4. When `world.action.outcome` arrives for the same correlationId, the plugin weights the failure score: `weightedFailures += confidence`
-5. Alert threshold checks `weightedFailures / total` alongside raw success rate — a few high-confidence failures can trigger the alert even when raw counts look borderline
+2. Publishes `world.action.confidence` to the bus with `{ correlationId, agentName, skill, confidence, explanation }`
+3. **OutcomeAnalysisPlugin** subscribes to `world.action.confidence`, caches confidence by `correlationId`
+4. When `world.action.outcome` arrives for the same correlationId, the plugin weights the failure score: `weightedFailure += confidence`
+5. Alert threshold checks `success / (success + weightedFailure + timeout)` — a few high-confidence failures can trigger the alert even when raw counts look borderline
 
 Agents that do not declare this extension continue to work normally; missing confidence defaults to `1.0` (full weight) so existing failure tracking is unchanged.
 
@@ -104,13 +104,27 @@ Scenario: `pr_review` action runs 10 times. Six succeed. Four fail — but all f
 | total | 10 |
 | success | 6 |
 | failure | 4 |
-| weightedFailures | 3.6 (4 × 0.9) |
+| weightedFailure | 3.6 (4 × 0.9) |
 | successRate | 0.60 (60%) |
-| weightedFailureRate | 0.36 (36%) |
+| weightedSuccessRate | 6 / (6 + 3.6) ≈ 0.625 |
 
-The weighted failure rate (0.36) exceeds the `POOR_SUCCESS_THRESHOLD` (0.5)? No — but the raw success rate (0.60) is above 0.5 too, so no alert fires in this case. However, if those same four failures had `confidence: 1.0` (fully certain bad outcomes), `weightedFailureRate` = 0.40, still below threshold. The weighting primarily acts when combined with borderline raw success rates — e.g. five successes, five high-confidence failures gives `weightedFailureRate` = 0.50 exactly at threshold.
+The weighted success rate (0.625) is above the `POOR_SUCCESS_THRESHOLD` (0.5), so no alert fires. However, if the same four failures had `confidence: 1.0`, `weightedSuccessRate` = 6 / (6 + 4) = 0.60 — still above threshold. The key effect: **low-confidence failures are discounted**, reducing false alerts for inherently uncertain skills while preserving sensitivity for confident ones.
 
-The key effect: **low-confidence failures are discounted**, reducing false alerts for inherently uncertain skills while preserving sensitivity for confident ones.
+---
+
+## Bus events
+
+### `world.action.confidence` (published by extension)
+
+```typescript
+interface ActionConfidencePayload {
+  correlationId: string;  // Links to the corresponding world.action.outcome
+  agentName: string;      // Agent that reported this confidence
+  skill: string;          // Skill that was executed
+  confidence: number;     // [0.0, 1.0]
+  explanation?: string;   // Optional rationale
+}
+```
 
 ---
 
