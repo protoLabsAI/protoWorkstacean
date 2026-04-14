@@ -2,6 +2,7 @@
 import DashboardLayout from "../layouts/DashboardLayout.astro";
 import GoalStatus from "../components/GoalStatus.tsx";
 import OutcomesTable from "../components/OutcomesTable.tsx";
+import OutcomeAnalysis from "../components/OutcomeAnalysis.tsx";
 ---
 
 <DashboardLayout title="Goals" activePage="goals">
@@ -14,6 +15,12 @@ import OutcomesTable from "../components/OutcomesTable.tsx";
 
     <section class="outcomes-section">
       <OutcomesTable client:load />
+    </section>
+
+    <div class="divider" />
+
+    <section class="outcomes-section">
+      <OutcomeAnalysis client:load />
     </section>
   </div>
 </DashboardLayout>

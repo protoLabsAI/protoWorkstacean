@@ -97,6 +97,9 @@ export const getFlowMetrics = (force = false) =>
 export const getOutcomes = (force = false) =>
   apiFetch<OutcomesResponse>("/api/outcomes", { ttl: 15_000, force });
 
+export const getOutcomesAnalysis = (force = false) =>
+  apiFetch<OutcomesAnalysisResponse>("/api/outcomes/analysis", { ttl: 30_000, force });
+
 export const getCiHealth = (force = false) =>
   apiFetch<CiHealthResponse>("/api/ci-health", { ttl: 300_000, force });
 
@@ -179,6 +182,31 @@ export interface OutcomesResponse {
     completedAt: number;
     durationMs: number;
   }>;
+}
+
+export interface OutcomesAnalysisResponse {
+  success: boolean;
+  data: {
+    actions: Array<{
+      actionId: string;
+      total: number;
+      success: number;
+      failure: number;
+      timeout: number;
+      successRate: number;
+      lastEvaluatedAt: number;
+      alertedAt?: number;
+    }>;
+    hitl: Array<{
+      kind: string;
+      target: string;
+      count: number;
+      firstSeenAt: number;
+      lastSeenAt: number;
+      alertedAt?: number;
+    }>;
+  };
+  collectedAt: number;
 }
 
 export interface CiHealthResponse {
