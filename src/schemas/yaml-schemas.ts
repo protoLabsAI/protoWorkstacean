@@ -136,7 +136,6 @@ export const EffectSchema = z.object({
 });
 
 export const ActionMetaSchema = z.object({
-  topic: z.string().optional(),
   agentId: z.string().optional(),
   timeout: z.number().optional(),
   context: z.record(z.unknown()).optional(),

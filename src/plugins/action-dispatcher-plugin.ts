@@ -8,10 +8,9 @@
  * On receiving a dispatch event:
  *   1. Checks WIP limit; if at capacity, queues action and publishes queue_full
  *   2. Applies optimistic state effects via StateUpdater
- *   3. If action has meta.topic, publishes to agent.skill.request with source.interface='cron',
+ *   3. Publishes to agent.skill.request with source.interface='cron',
  *      payload.meta.systemActor='goap', and reply.topic=`agent.skill.response.${correlationId}`
- *   4. For free/internal (tier_0, no meta.topic) actions: resolves immediately as success
- *   5. Publishes world.action.outcome with result
+ *   4. Publishes world.action.outcome with result
  *   6. On failure: triggers rollback via StateRollbackRegistry
  */
 
@@ -163,12 +162,6 @@ export class ActionDispatcherPlugin implements Plugin {
     }
 
     try {
-      // For tier_0 / no-topic actions: resolve immediately as success
-      if (!action.meta.topic) {
-        await this.completeAction(action, correlationId, parentCorrelationId, startedAt, true);
-        return;
-      }
-
       // For fire-and-forget actions: publish to agent.skill.request then immediately succeed.
       // Use meta.fireAndForget for alerts, ceremony triggers, and other side-effect-only dispatches.
       if (action.meta.fireAndForget) {
