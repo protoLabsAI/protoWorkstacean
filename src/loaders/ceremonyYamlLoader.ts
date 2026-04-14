@@ -150,6 +150,7 @@ export class CeremonyYamlLoader {
       targets: c.targets as string[],
       notifyChannel: typeof c.notifyChannel === "string" ? c.notifyChannel : undefined,
       enabled: c.enabled !== false,
+      timeoutMs: typeof c.timeoutMs === "number" && c.timeoutMs > 0 ? c.timeoutMs : undefined,
     };
   }
 }
