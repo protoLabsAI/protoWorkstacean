@@ -35,6 +35,18 @@ export interface HITLRequest {
   ttlMs?: number;
   /** Policy to execute when the TTL expires without a human decision. */
   onTimeout?: "approve" | "reject" | "escalate";
+  /**
+   * Compound-gate metadata (Arc 7.3). When a single A2A task emits multiple
+   * input-required states across its lifecycle (e.g. draft → review → publish),
+   * each prompt sets `checkpoint` so renderers can show "Checkpoint 2 of 3"
+   * instead of a bare "input-required".
+   */
+  checkpoint?: {
+    /** 1-based index of this prompt within the task's compound sequence. */
+    index: number;
+    /** Optional agent-declared total; may be unknown at the first prompt. */
+    total?: number;
+  };
   replyTopic: string;     // where to publish HITLResponse
   sourceMeta?: BusMessage["source"]; // carry source through so HITL plugin knows how to render
   // ── Cost escalation fields (populated by BudgetPlugin L3 requests) ────────

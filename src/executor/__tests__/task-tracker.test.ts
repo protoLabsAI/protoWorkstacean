@@ -177,4 +177,86 @@ describe("TaskTracker", () => {
     expect(received).toHaveLength(0);
     expect(tracker.size).toBe(1);
   });
+
+  // ── Arc 7.3: compound gated task checkpointing ────────────────────────────
+  describe("compound gated checkpointing (Arc 7.3)", () => {
+    test("increments checkpoint counter on each input-required cycle", async () => {
+      // Fake executor — resumeTask resolves, pollTask alternates input-required
+      // and working so the tracker can cycle through checkpoints.
+      let pollCalls = 0;
+      const fake = {
+        type: "a2a" as const,
+        execute: async () => ({ text: "", isError: false, correlationId: "" }),
+        pollTask: async (): Promise<SkillResult> => {
+          pollCalls += 1;
+          return pollCalls === 1
+            ? { text: "draft needs review", isError: false, correlationId: "c1", data: { taskState: "input-required", taskId: "t1", contextId: "ctx1" } }
+            : { text: "final approval?", isError: false, correlationId: "c1", data: { taskState: "input-required", taskId: "t1", contextId: "ctx1" } };
+        },
+        cancelTask: async () => ({ text: "canceled", isError: false, correlationId: "c1" }),
+        resubscribeTask: async () => { throw new Error("not used"); },
+        resumeTask: async () => {},
+      };
+      const executor = fake as unknown as A2AExecutor;
+
+      const requests: unknown[] = [];
+      bus.subscribe("hitl.request.#", "test", (msg) => { requests.push(msg.payload); });
+
+      tracker = new TaskTracker({ bus, sweepIntervalMs: 20, defaultPollIntervalMs: 10 });
+      tracker.track({
+        correlationId: "c1", taskId: "t1", agentName: "ava",
+        replyTopic: "agent.skill.response.c1", executor,
+        sourceInterface: "discord", sourceChannelId: "chan", sourceUserId: "user",
+      });
+
+      // Wait for first input-required → HITL raised
+      await new Promise(r => setTimeout(r, 50));
+      expect(requests.length).toBe(1);
+      expect((requests[0] as { checkpoint?: { index: number } }).checkpoint?.index).toBe(1);
+      expect((requests[0] as { title: string }).title).not.toContain("checkpoint");
+
+      // Simulate human decision → triggers resume; tracker clears awaitingHuman
+      bus.publish("hitl.response.c1", {
+        id: "r1", correlationId: "c1", topic: "hitl.response.c1", timestamp: Date.now(),
+        payload: { type: "hitl_response", correlationId: "c1", decision: "approve", decidedBy: "human" },
+      });
+
+      // Wait for next sweep cycle → second input-required → second HITL raise
+      await new Promise(r => setTimeout(r, 80));
+      expect(requests.length).toBe(2);
+      expect((requests[1] as { checkpoint?: { index: number } }).checkpoint?.index).toBe(2);
+      expect((requests[1] as { title: string }).title).toContain("checkpoint 2");
+    });
+
+    test("first checkpoint does not include counter in title", async () => {
+      const fake = {
+        type: "a2a" as const,
+        execute: async () => ({ text: "", isError: false, correlationId: "" }),
+        pollTask: async (): Promise<SkillResult> => ({
+          text: "please confirm", isError: false, correlationId: "c1",
+          data: { taskState: "input-required", taskId: "t1", contextId: "ctx1" },
+        }),
+        cancelTask: async () => ({ text: "", isError: false, correlationId: "c1" }),
+        resubscribeTask: async () => { throw new Error("not used"); },
+        resumeTask: async () => {},
+      };
+      const executor = fake as unknown as A2AExecutor;
+
+      const requests: unknown[] = [];
+      bus.subscribe("hitl.request.#", "test", (msg) => { requests.push(msg.payload); });
+
+      tracker = new TaskTracker({ bus, sweepIntervalMs: 20, defaultPollIntervalMs: 10 });
+      tracker.track({
+        correlationId: "c1", taskId: "t1", agentName: "ava",
+        replyTopic: "agent.skill.response.c1", executor,
+      });
+
+      await new Promise(r => setTimeout(r, 40));
+      expect(requests.length).toBe(1);
+      const first = requests[0] as { title: string; checkpoint?: { index: number } };
+      expect(first.checkpoint?.index).toBe(1);
+      expect(first.title).toBe("Input needed from ava");
+      expect(first.title).not.toContain("checkpoint");
+    });
+  });
 });
