@@ -139,6 +139,23 @@ export class SkillBrokerPlugin implements Plugin {
       const card = await this._fetchCard(url);
       if (!card) return;
 
+      // Refresh transport capability flags from the card — authoritative source
+      // for streaming + push-notifications. Without this, executors keep using
+      // the yaml bootstrap value even when the agent has changed its
+      // advertisement. Cost: one setter call per agent per refresh cycle.
+      const caps = card.capabilities ?? {};
+      const priorStreaming = executor.streaming;
+      const priorPush = executor.pushNotifications;
+      executor.setCapabilities({
+        streaming: caps.streaming === true,
+        pushNotifications: caps.pushNotifications === true,
+      });
+      if (priorStreaming !== executor.streaming || priorPush !== executor.pushNotifications) {
+        console.log(
+          `[skill-broker] ${agent.name}: capabilities updated — streaming=${executor.streaming} pushNotifications=${executor.pushNotifications}`,
+        );
+      }
+
       const registered = this.registeredSkills.get(agent.name) ?? new Set();
       let added = 0;
 

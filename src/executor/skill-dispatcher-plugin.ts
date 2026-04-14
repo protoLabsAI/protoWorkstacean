@@ -343,16 +343,23 @@ export class SkillDispatcherPlugin implements Plugin {
           },
         });
 
-        // Try to register a push-notification webhook so the agent can POST
-        // completion back instead of us polling. Falls back to polling silently.
+        // Register a push-notification webhook only when the agent advertises
+        // capabilities.pushNotifications in its card. Without the gate we
+        // burn a round-trip on every long-running task against every agent,
+        // most of which reject. SkillBrokerPlugin refreshes the flag every
+        // 10 min so capability changes land automatically.
         const callbackBaseUrl = process.env.WORKSTACEAN_BASE_URL;
-        if (callbackBaseUrl) {
+        if (callbackBaseUrl && a2aExecutor.pushNotifications) {
           const callbackUrl = `${callbackBaseUrl.replace(/\/$/, "")}/api/a2a/callback/${encodeURIComponent(taskId)}`;
           void a2aExecutor.registerPushNotification(taskId, callbackUrl, callbackToken, correlationId, parentId)
             .then(ok => {
               if (ok) console.log(`[skill-dispatcher] Push-notification registered for ${taskId.slice(0, 8)}…`);
             })
             .catch(err => console.debug("[skill-dispatcher] push-notification register failed:", err));
+        } else if (callbackBaseUrl) {
+          console.log(
+            `[skill-dispatcher] ${a2aExecutor.name}: card.capabilities.pushNotifications=false — using polling for ${taskId.slice(0, 8)}…`,
+          );
         }
 
         this._publishFlowEvent("flow.item.updated", {
