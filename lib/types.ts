@@ -31,6 +31,10 @@ export interface HITLRequest {
   jonVerdict?: { score: number; concerns: string[]; verdict: string };
   options: string[];      // ["approve", "reject", "modify"]
   expiresAt: string;      // ISO timestamp
+  /** Optional TTL override in milliseconds. Callers may compute expiresAt from this. */
+  ttlMs?: number;
+  /** Policy to execute when the TTL expires without a human decision. */
+  onTimeout?: "approve" | "reject" | "escalate";
   replyTopic: string;     // where to publish HITLResponse
   sourceMeta?: BusMessage["source"]; // carry source through so HITL plugin knows how to render
   // ── Cost escalation fields (populated by BudgetPlugin L3 requests) ────────

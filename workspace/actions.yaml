@@ -215,6 +215,9 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      hitlPolicy:
+        ttlMs: 1800000   # 30 minutes — auto-approve if no human responds
+        onTimeout: approve
 
   - id: action.pr_fix_ci
     goalId: pr.no_failing_checks
@@ -507,3 +510,6 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      hitlPolicy:
+        ttlMs: 3600000  # 1 hour — escalate (no auto-action) so humans must intervene
+        onTimeout: escalate
