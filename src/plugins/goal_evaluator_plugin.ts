@@ -13,6 +13,7 @@ import { DiscordLogger } from "../integrations/discord_logger.ts";
 import type { GoalViolatedEventPayload } from "../types/events.ts";
 import type { TelemetryService } from "../telemetry/telemetry-service.ts";
 import { GOAL_EVENTS } from "../telemetry/telemetry-service.ts";
+import { TOPICS } from "../event-bus/topics.ts";
 
 /**
  * GoalEvaluatorPlugin — observe-only goal registry + evaluator.
@@ -67,12 +68,26 @@ export class GoalEvaluatorPlugin implements Plugin, IGoalEvaluatorPlugin {
     });
     this.subscriptionIds.push(subId);
 
-    // Hot-reload: re-read goals.yaml when GoalHotReloadPlugin approves a proposal
-    const reloadSubId = bus.subscribe("goals.reload", this.name, () => {
+    // Hot-reload triggers — two flavors live side by side:
+    //   goals.reload   — narrow signal from GoalHotReloadPlugin (Arc 9.2)
+    //                    after a HITL-approved goal proposal is written to
+    //                    goals.yaml. Single-file, single-purpose.
+    //   config.reload  — broad signal from the workspace config gate (Arc 9.4)
+    //                    after a ConfigChangeHITL approval lands. Covers
+    //                    goals.yaml + actions.yaml + agent cards.
+    // Both just re-read goals from disk; subscribing to both keeps each
+    // writer's contract intact without requiring them to coordinate.
+    const goalsReloadId = bus.subscribe("goals.reload", this.name, () => {
       console.log("[goal-evaluator] goals.reload received — reloading goals from disk");
       this.reloadGoals();
     });
-    this.subscriptionIds.push(reloadSubId);
+    this.subscriptionIds.push(goalsReloadId);
+
+    const configReloadId = bus.subscribe(TOPICS.CONFIG_RELOAD, this.name, () => {
+      console.info("[goal-evaluator] config.reload received — reloading goals from disk");
+      this.reloadGoals();
+    });
+    this.subscriptionIds.push(configReloadId);
 
     // Flush any buffered violations now that bus is available
     if (this.violationBuffer.length > 0) {

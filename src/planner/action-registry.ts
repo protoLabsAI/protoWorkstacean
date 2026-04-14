@@ -61,6 +61,11 @@ export class ActionRegistry {
     this.actions.delete(id);
   }
 
+  /** Remove all registered actions. Used for atomic hot-reload. */
+  clear(): void {
+    this.actions.clear();
+  }
+
   /** Number of registered actions. */
   get size(): number {
     return this.actions.size;

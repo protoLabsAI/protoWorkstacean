@@ -67,4 +67,11 @@ export const WORLD_TOPICS = {
    * Full topic is `autonomous.outcome.{systemActor}.{skill}`.
    */
   AUTONOMOUS_OUTCOME_PREFIX: "autonomous.outcome",
+
+  /**
+   * Published to trigger a hot reload of goals.yaml and actions.yaml from disk.
+   * Subscribers (actions loader in src/index.ts, GoalEvaluatorPlugin) re-read,
+   * re-validate, and atomically swap their loaded config. Arc 9.4.
+   */
+  CONFIG_RELOAD: "config.reload",
 } as const;
