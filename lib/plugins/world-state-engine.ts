@@ -36,6 +36,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import type { WorldState, WorldStateDomain, WorldStateSnapshot } from "../types/world-state.ts";
+import type { WorldStateDeltaPayload, EffectDomainDelta } from "../../src/executor/extensions/effect-domain.ts";
 import { HttpClient } from "../../src/services/http-client.ts";
 
 // ── Domain registration ───────────────────────────────────────────────────────
@@ -187,6 +188,27 @@ export class WorldStateEngine implements Plugin {
       await this._handleGetWorldState(msg);
     });
     this.subscriptionIds.push(mcpSubId);
+
+    // Subscribe to agent-produced world-state deltas — applies immediately
+    // and re-fires world.state.updated so GOAP re-evaluates goals without
+    // waiting for the next full domain poll.
+    const deltaSubId = bus.subscribe("world.state.delta", this.name, (msg: BusMessage) => {
+      const payload = msg.payload as WorldStateDeltaPayload | undefined;
+      if (!payload?.delta?.length) return;
+      this._applyDeltas(payload.delta);
+      this.worldState.timestamp = Date.now();
+      this.bus?.publish("world.state.updated", {
+        id: crypto.randomUUID(),
+        correlationId: msg.correlationId,
+        topic: "world.state.updated",
+        timestamp: Date.now(),
+        payload: this.worldState,
+      });
+      console.log(
+        `[world-state-engine] Applied ${payload.delta.length} delta(s) from ${payload.source}/${payload.skill} — re-firing world.state.updated`,
+      );
+    });
+    this.subscriptionIds.push(deltaSubId);
 
     // Start tickers for any domains registered before install()
     for (const reg of this.domains.values()) {
@@ -557,6 +579,53 @@ export class WorldStateEngine implements Plugin {
         ? { success: true, data: result }
         : { success: false, error: domain ? `No data for domain "${domain}"` : "World state not yet collected" },
     });
+  }
+
+  // ── Delta application ──────────────────────────────────────────────────────
+
+  /**
+   * Apply a batch of numeric deltas to the in-memory world state.
+   *
+   * Each delta names a domain and a dot-separated path into the domain object
+   * (e.g. "data.blockedPRs"). Only numeric leaf values are mutated; non-numeric
+   * paths and missing domains are logged and skipped.
+   */
+  private _applyDeltas(deltas: EffectDomainDelta[]): void {
+    for (const entry of deltas) {
+      const domainData = this.worldState.domains[entry.domain];
+      if (!domainData) {
+        console.warn(`[world-state-engine] Delta for unknown domain "${entry.domain}" — skipped`);
+        continue;
+      }
+
+      const parts = entry.path.split(".");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let obj: any = domainData;
+      for (let i = 0; i < parts.length - 1; i++) {
+        obj = obj?.[parts[i]];
+        if (obj === null || typeof obj !== "object") {
+          obj = null;
+          break;
+        }
+      }
+
+      if (obj === null || obj === undefined) {
+        console.warn(
+          `[world-state-engine] Delta path "${entry.path}" not found in domain "${entry.domain}" — skipped`,
+        );
+        continue;
+      }
+
+      const leaf = parts[parts.length - 1];
+      const current = obj[leaf];
+      if (typeof current === "number") {
+        obj[leaf] = current + entry.delta;
+      } else {
+        console.warn(
+          `[world-state-engine] Delta path "${entry.path}" in domain "${entry.domain}" is not a number (${typeof current}) — skipped`,
+        );
+      }
+    }
   }
 
   private _persistSnapshot(): void {
