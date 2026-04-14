@@ -221,7 +221,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { PlannerPluginL0 } = await import("./plugins/planner-plugin-l0.js");
-      return new PlannerPluginL0(actionRegistry);
+      return new PlannerPluginL0(actionRegistry, { executorRegistry });
     },
   },
   {
