@@ -313,6 +313,19 @@ export class ActionDispatcherPlugin implements Plugin {
       payload: outcomePayload,
     });
 
+    // Close the outcome → state feedback loop: re-publish world.state so goals
+    // re-evaluate immediately instead of waiting for the next domain poll (60s).
+    // Prevents duplicate dispatches for the same violation that was just remediated.
+    if (success && action.effects && action.effects.length > 0) {
+      this.bus.publish("world.state.updated", {
+        id: crypto.randomUUID(),
+        correlationId: parentCorrelationId,
+        topic: "world.state.updated",
+        timestamp: completedAt,
+        payload: this.worldState,
+      });
+    }
+
     // Complete in WIP queue and dispatch next if available
     const next = this.queue.complete(correlationId);
     if (next) {

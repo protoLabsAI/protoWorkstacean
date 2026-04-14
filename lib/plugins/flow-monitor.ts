@@ -201,18 +201,25 @@ export class FlowMonitorPlugin implements Plugin {
     const id = typeof p.id === "string" ? p.id : crypto.randomUUID();
     const type = this._parseItemType(p.type);
     const stage = typeof p.stage === "string" ? p.stage : "backlog";
+    const status = typeof p.status === "string" ? this._parseItemStatus(p.status) : "queued";
+    const createdAt = typeof p.createdAt === "number" ? p.createdAt : Date.now();
 
     const item: FlowItem = {
       id,
       type,
-      status: "queued",
+      status,
       stage,
-      createdAt: typeof p.createdAt === "number" ? p.createdAt : Date.now(),
+      createdAt,
+      // If item is created in "active" state, startedAt marks when the work began.
+      // Without this, efficiency computes 0 because activeMs = 0.
+      ...(status === "active" && {
+        startedAt: typeof p.startedAt === "number" ? p.startedAt : createdAt,
+      }),
       meta: typeof p.meta === "object" && p.meta !== null ? (p.meta as Record<string, unknown>) : undefined,
     };
 
     this.items.set(id, item);
-    console.log(`[flow-monitor] Item created: ${id} (${type}, stage: ${stage})`);
+    console.log(`[flow-monitor] Item created: ${id} (${type}, stage: ${stage}, status: ${status})`);
     this._tickMetrics();
   }
 

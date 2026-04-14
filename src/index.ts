@@ -303,6 +303,14 @@ const pluginRegistry: PluginRegistryEntry[] = [
       return new FlowMonitorPlugin();
     },
   },
+  {
+    name: "outcome-analysis",
+    condition: () => true,
+    factory: async () => {
+      const { OutcomeAnalysisPlugin } = await import("./plugins/outcome-analysis-plugin.js");
+      return new OutcomeAnalysisPlugin();
+    },
+  },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
   {
     name: "echo",
@@ -445,6 +453,32 @@ bus.subscribe("world.action.queue_full", "alert-bridge", (msg) => {
     topic: "message.outbound.discord.alert",
     timestamp: Date.now(),
     payload: { text, level: "warn", source: "action-dispatcher" },
+  });
+});
+
+// Outcome analysis alerts — chronic failures and repeated HITL escalations
+bus.subscribe("ops.alert.action_quality", "alert-bridge", (msg) => {
+  const p = (msg.payload ?? {}) as Record<string, unknown>;
+  const rate = typeof p.successRate === "number" ? (p.successRate * 100).toFixed(0) : "?";
+  const text = `🔻 Action quality alert — \`${p.actionId}\` success rate ${rate}% (${p.success}/${p.total}). ${p.recommendation ?? ""}`;
+  bus.publish("message.outbound.discord.alert", {
+    id: crypto.randomUUID(),
+    correlationId: msg.correlationId,
+    topic: "message.outbound.discord.alert",
+    timestamp: Date.now(),
+    payload: { text, level: "warn", source: "outcome-analysis" },
+  });
+});
+
+bus.subscribe("ops.alert.hitl_escalation", "alert-bridge", (msg) => {
+  const p = (msg.payload ?? {}) as Record<string, unknown>;
+  const text = `🔧 Feature-request signal — \`${p.kind}\` escalated to HITL ${p.count}× for \`${p.target}\`. ${p.recommendation ?? ""}`;
+  bus.publish("message.outbound.discord.alert", {
+    id: crypto.randomUUID(),
+    correlationId: msg.correlationId,
+    topic: "message.outbound.discord.alert",
+    timestamp: Date.now(),
+    payload: { text, level: "warn", source: "outcome-analysis" },
   });
 });
 
