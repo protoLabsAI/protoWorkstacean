@@ -15,6 +15,7 @@ import {
 } from "discord.js";
 import type { EventBus } from "../../types.ts";
 import type { HITLPlugin } from "../hitl.ts";
+import type { ConfigChangeHITLPlugin } from "../config-change-hitl.ts";
 import type { ChannelRegistry } from "../../channels/channel-registry.ts";
 import { ConversationManager } from "../../conversation/conversation-manager.ts";
 import { ConversationTracer, type TurnData } from "../../conversation/conversation-tracer.ts";
@@ -108,9 +109,11 @@ export interface DiscordContext {
   pendingAgents: Map<string, string>;
   channelRegistry?: ChannelRegistry;
   hitlPlugin?: HITLPlugin;
+  configChangePlugin?: ConfigChangeHITLPlugin;
   mailbox?: ContextMailbox;
   isExecutionActive?: (correlationId: string) => boolean;
   pendingHITLMessages: Map<string, { message: Message; replyTopic: string }>;
+  pendingConfigChangeMessages: Map<string, { message: Message; replyTopic: string }>;
   conversationManager: ConversationManager;
   conversationTracer: ConversationTracer;
   graphiti: GraphitiClient;
@@ -162,6 +165,7 @@ export function buildContext(opts: {
   client: Client;
   channelRegistry?: ChannelRegistry;
   hitlPlugin?: HITLPlugin;
+  configChangePlugin?: ConfigChangeHITLPlugin;
   mailbox?: ContextMailbox;
   isExecutionActive?: (correlationId: string) => boolean;
   identityRegistry: IdentityRegistry | null;
@@ -177,9 +181,11 @@ export function buildContext(opts: {
     pendingAgents: new Map(),
     channelRegistry: opts.channelRegistry,
     hitlPlugin: opts.hitlPlugin,
+    configChangePlugin: opts.configChangePlugin,
     mailbox: opts.mailbox,
     isExecutionActive: opts.isExecutionActive,
     pendingHITLMessages: new Map(),
+    pendingConfigChangeMessages: new Map(),
     conversationManager: opts.conversationManager,
     conversationTracer: opts.conversationTracer,
     graphiti: new GraphitiClient(),

@@ -9,6 +9,7 @@ import { Events, type TextChannel } from "discord.js";
 import type { EventBus, Plugin } from "../types.ts";
 import type { ChannelRegistry } from "../channels/channel-registry.ts";
 import type { HITLPlugin } from "./hitl.ts";
+import type { ConfigChangeHITLPlugin } from "./config-change-hitl.ts";
 import type { ContextMailbox } from "../dm/context-mailbox.ts";
 import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer } from "../conversation/conversation-tracer.ts";
@@ -32,6 +33,7 @@ export interface DiscordPluginOptions {
   dataDir?: string;
   channelRegistry?: ChannelRegistry;
   hitlPlugin?: HITLPlugin;
+  configChangePlugin?: ConfigChangeHITLPlugin;
   mailbox?: ContextMailbox;
   /** Check if an agent execution is in-flight for a given correlationId. */
   isExecutionActive?: (correlationId: string) => boolean;
@@ -51,6 +53,7 @@ export class DiscordPlugin implements Plugin {
   private dataDir: string | null;
   private channelRegistry?: ChannelRegistry;
   private hitlPlugin?: HITLPlugin;
+  private configChangePlugin?: ConfigChangeHITLPlugin;
   private mailbox?: ContextMailbox;
   private isExecutionActive?: (correlationId: string) => boolean;
 
@@ -63,6 +66,7 @@ export class DiscordPlugin implements Plugin {
     this.dataDir = opts.dataDir ? resolve(opts.dataDir) : null;
     this.channelRegistry = opts.channelRegistry;
     this.hitlPlugin = opts.hitlPlugin;
+    this.configChangePlugin = opts.configChangePlugin;
     this.mailbox = opts.mailbox;
     this.isExecutionActive = opts.isExecutionActive;
 
@@ -91,6 +95,7 @@ export class DiscordPlugin implements Plugin {
       client: this.client,
       channelRegistry: this.channelRegistry,
       hitlPlugin: this.hitlPlugin,
+      configChangePlugin: this.configChangePlugin,
       mailbox: this.mailbox,
       isExecutionActive: this.isExecutionActive,
       identityRegistry: new IdentityRegistry(this.workspaceDir),
@@ -174,6 +179,7 @@ export class DiscordPlugin implements Plugin {
       ctx.dmAccumulator?.destroy();
       ctx.pendingTurns.clear();
       ctx.pendingHITLMessages.clear();
+      ctx.pendingConfigChangeMessages.clear();
 
       for (const [name, client] of ctx.agentClients) {
         client.destroy();

@@ -13,7 +13,7 @@ import {
   type ChatInputCommandInteraction,
   type TextChannel,
 } from "discord.js";
-import type { BusMessage, HITLRequest } from "../../types.ts";
+import type { BusMessage, HITLRequest, ConfigChangeRequest } from "../../types.ts";
 import type { DiscordContext } from "./core.ts";
 
 // ── Pending reply handles ─────────────────────────────────────────────────────
@@ -82,6 +82,82 @@ export function buildHITLButtons(request: HITLRequest): ActionRowBuilder<ButtonB
     row.addComponents(
       new ButtonBuilder()
         .setCustomId(`hitl:${option}:${request.correlationId}`)
+        .setLabel(option.charAt(0).toUpperCase() + option.slice(1))
+        .setStyle(style),
+    );
+  }
+  return row;
+}
+
+// ── Config-change embed/button builders (Arc 9.3) ─────────────────────────────
+// Purple colour signals "the rules of the system are changing" vs the amber
+// "one-shot operational approval" colour used for regular HITL. Renders up to
+// three embeds: main info, YAML diff, GOAP/coverage impact analysis.
+
+export function buildConfigChangeEmbeds(request: ConfigChangeRequest): EmbedBuilder[] {
+  const embeds: EmbedBuilder[] = [];
+  const COLOR = 0x8b5cf6; // purple
+
+  const main = new EmbedBuilder()
+    .setTitle(`⚙️ Config Change — ${request.configFile}`)
+    .setDescription(`**${request.title}**\n\n${request.summary.slice(0, 3800)}`)
+    .setColor(COLOR)
+    .setFooter({
+      text: `config.change gate  •  Expires ${new Date(request.expiresAt).toLocaleString()}`,
+    });
+  embeds.push(main);
+
+  if (request.yamlDiff) {
+    // Discord code-block limit is 2000 chars per field; truncate gracefully.
+    const diff = request.yamlDiff.slice(0, 1900);
+    embeds.push(
+      new EmbedBuilder()
+        .setTitle("Proposed diff")
+        .setDescription(`\`\`\`diff\n${diff}\n\`\`\``)
+        .setColor(COLOR),
+    );
+  }
+
+  const impactLines: string[] = [];
+  if (request.goapImpact) {
+    impactLines.push(`**GOAP dry-run:** ${request.goapImpact.summary}`);
+    const imp = request.goapImpact;
+    if (imp.addedGoals?.length)     impactLines.push(`+ Goals added: ${imp.addedGoals.join(", ")}`);
+    if (imp.removedGoals?.length)   impactLines.push(`- Goals removed: ${imp.removedGoals.join(", ")}`);
+    if (imp.modifiedGoals?.length)  impactLines.push(`~ Goals modified: ${imp.modifiedGoals.join(", ")}`);
+    if (imp.addedActions?.length)   impactLines.push(`+ Actions added: ${imp.addedActions.join(", ")}`);
+    if (imp.removedActions?.length) impactLines.push(`- Actions removed: ${imp.removedActions.join(", ")}`);
+    if (imp.modifiedActions?.length)impactLines.push(`~ Actions modified: ${imp.modifiedActions.join(", ")}`);
+  }
+  if (request.coverageImpact) {
+    impactLines.push(`**Coverage:** ${request.coverageImpact.summary}`);
+    if (request.coverageImpact.affectedTestFiles.length) {
+      impactLines.push(`Affected test files: ${request.coverageImpact.affectedTestFiles.join(", ")}`);
+    }
+  }
+  if (impactLines.length) {
+    embeds.push(
+      new EmbedBuilder()
+        .setTitle("Impact analysis")
+        .setDescription(impactLines.join("\n").slice(0, 4096))
+        .setColor(COLOR),
+    );
+  }
+
+  return embeds;
+}
+
+export function buildConfigChangeButtons(request: ConfigChangeRequest): ActionRowBuilder<ButtonBuilder> {
+  const row = new ActionRowBuilder<ButtonBuilder>();
+  const STYLE_BY_OPTION: Record<string, ButtonStyle> = {
+    approve: ButtonStyle.Success,
+    reject: ButtonStyle.Danger,
+  };
+  for (const option of request.options) {
+    const style = STYLE_BY_OPTION[option] ?? ButtonStyle.Secondary;
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`config_change:${option}:${request.correlationId}`)
         .setLabel(option.charAt(0).toUpperCase() + option.slice(1))
         .setStyle(style),
     );
@@ -207,6 +283,43 @@ export function registerOutboundHandlers(ctx: DiscordContext): void {
           .setColor(0x6b7280);
         await entry.message.edit({ embeds: [expiredEmbed], components: [] }).catch(console.error);
         console.log(`[discord] HITL ${request.correlationId} marked expired`);
+      },
+    });
+  }
+
+  // ── Config-change renderer registration (Arc 9.3) ────────────────────────
+  if (ctx.configChangePlugin) {
+    ctx.configChangePlugin.registerRenderer("discord", {
+      render: async (request, _busRef) => {
+        const channelId = request.sourceMeta?.channelId;
+        if (!channelId) {
+          console.warn(`[discord] config_change ${request.correlationId} missing channelId — cannot render`);
+          return;
+        }
+        const ch = ctx.client.channels.cache.get(channelId) as TextChannel | undefined;
+        if (!ch) {
+          console.warn(`[discord] config_change channel ${channelId} not in cache — cannot render`);
+          return;
+        }
+        const embeds = buildConfigChangeEmbeds(request);
+        const row = buildConfigChangeButtons(request);
+        const msg = await ch.send({ embeds, components: [row] });
+        ctx.pendingConfigChangeMessages.set(request.correlationId, {
+          message: msg,
+          replyTopic: request.replyTopic,
+        });
+        console.log(`[discord] config_change ${request.correlationId} rendered in channel ${channelId}`);
+      },
+      onExpired: async (request, _busRef) => {
+        const entry = ctx.pendingConfigChangeMessages.get(request.correlationId);
+        if (!entry) return;
+        ctx.pendingConfigChangeMessages.delete(request.correlationId);
+        const expiredEmbed = new EmbedBuilder()
+          .setTitle(request.title)
+          .setDescription("**Config change approval expired** — re-trigger if still needed.")
+          .setColor(0x6b7280);
+        await entry.message.edit({ embeds: [expiredEmbed], components: [] }).catch(console.error);
+        console.log(`[discord] config_change ${request.correlationId} marked expired`);
       },
     });
   }
