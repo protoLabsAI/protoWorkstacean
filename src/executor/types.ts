@@ -55,6 +55,13 @@ export interface SkillResult {
     contextId?: string;
     /** A2A task lifecycle state: working, input-required, completed, failed, etc. */
     taskState?: string;
+    /**
+     * World-state deltas extracted from the agent's response. Populated by
+     * ProtoSdkExecutor when the agent emits a <worldstate-delta> block.
+     * Read by SkillDispatcherPlugin to publish world.state.delta events.
+     */
+    "x-effect-domain"?: { delta: Array<{ domain: string; path: string; delta: number; confidence: number }> };
+    [key: string]: unknown;
   };
 }
 

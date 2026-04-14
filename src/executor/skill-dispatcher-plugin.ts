@@ -23,6 +23,7 @@ import type { LoggerPlugin, ConversationTurn } from "../../lib/plugins/logger.ts
 import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "./task-tracker.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
+import type { WorldStateDeltaPayload } from "./extensions/effect-domain.ts";
 
 const WORKING_STATES = new Set(["submitted", "working"]);
 
@@ -378,6 +379,11 @@ export class SkillDispatcherPlugin implements Plugin {
           durationMs: Date.now() - dispatchedAt,
         });
       } else {
+        // Publish world-state deltas if the executor extracted any from the response.
+        // Closes the reflex loop: goal re-evaluates immediately rather than waiting
+        // for the next world-state poll cycle.
+        this._publishWorldStateDelta(result, skill, targets[0] ?? "unknown", correlationId);
+
         // Log a preview of the response so we can see what the executor actually
         // returned — critical for debugging A2A/agent behaviour when the skill
         // completes but produces no board side-effects.
@@ -518,6 +524,41 @@ export class SkillDispatcherPlugin implements Plugin {
       source,
       reply: { topic: replyTopic },
     });
+  }
+
+  /**
+   * Publish a world.state.delta event when the executor returned effect-domain
+   * data (i.e. the agent emitted a <worldstate-delta> block in its response).
+   * No-ops if the result carries no deltas.
+   */
+  private _publishWorldStateDelta(
+    result: { data?: Record<string, unknown> },
+    skill: string,
+    source: string,
+    correlationId: string,
+  ): void {
+    if (!this.bus) return;
+    const effectData = result.data?.["x-effect-domain"] as
+      | { delta?: Array<{ domain: string; path: string; delta: number; confidence: number }> }
+      | undefined;
+    if (!effectData?.delta?.length) return;
+
+    const topic = "world.state.delta";
+    const payload: WorldStateDeltaPayload = {
+      source,
+      skill,
+      delta: effectData.delta,
+    };
+    this.bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic,
+      timestamp: Date.now(),
+      payload,
+    });
+    console.log(
+      `[skill-dispatcher] Published world.state.delta for "${skill}" via ${source} — ${effectData.delta.length} delta(s)`,
+    );
   }
 
   private _publishAutonomousOutcome(opts: {

@@ -25,6 +25,32 @@ systemPrompt: |
   When reporting bugs or creating board issues, use the publish_event and report_incident tools
   with the projectSlug from the originating request.
 
+  ## World-state delta emission
+
+  After completing work that changes system state, emit a <worldstate-delta> block
+  so the GOAP planner can update its world-state snapshot immediately without waiting
+  for the next poll cycle:
+
+  ```
+  <worldstate-delta>
+  [{"domain":"ci","path":"data.blockedPRs","delta":-1,"confidence":0.8}]
+  </worldstate-delta>
+  ```
+
+  When to emit and what to include:
+  - After submitting a PR review that unblocks a PR (APPROVE or REQUEST_CHANGES):
+    domain=ci, path=data.blockedPRs, delta=-1, confidence=0.8
+  - After triaging a bug and creating a Plane issue:
+    domain=plane, path=data.untriaged, delta=-1, confidence=0.9
+    domain=plane, path=data.inProgress, delta=1, confidence=0.9
+  - After triaging a security incident:
+    domain=plane, path=data.untriaged, delta=-1, confidence=0.85
+    domain=plane, path=data.inProgress, delta=1, confidence=0.85
+  - Do NOT emit for read-only operations (get_world_state, get_ci_health, get_incidents).
+
+  Only emit when you have actually completed work that changes state. Use confidence < 1.0
+  since effects are probabilistic (e.g. an APPROVE may or may not unblock the PR).
+
 tools:
   - publish_event
   - get_world_state
@@ -44,9 +70,32 @@ skills:
   - name: bug_triage
     description: Triage a bug report — severity, reproduction, root cause, Plane issue
     keywords: [bug, issue, broken, crash, error, fail, exception, triage, TypeError, ReferenceError, not working, regression]
+    effects:
+      - domain: plane
+        path: data.untriaged
+        delta: -1
+        confidence: 0.9
+      - domain: plane
+        path: data.inProgress
+        delta: 1
+        confidence: 0.9
   - name: pr_review
     description: Review a pull request diff for correctness and regressions
     keywords: [pr, pull request, review, merge, /review, code review, lgtm, looks good]
+    effects:
+      - domain: ci
+        path: data.blockedPRs
+        delta: -1
+        confidence: 0.8
   - name: security_triage
     description: Triage a security incident — assess severity, draft remediation plan
     keywords: [security, vulnerability, breach, leak, exposed, cve, exploit]
+    effects:
+      - domain: plane
+        path: data.untriaged
+        delta: -1
+        confidence: 0.85
+      - domain: plane
+        path: data.inProgress
+        delta: 1
+        confidence: 0.85

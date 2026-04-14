@@ -32,16 +32,66 @@ export class ProtoSdkExecutor implements IExecutor {
       correlationId: req.correlationId,
     });
 
+    const { cleanText, deltas } = this._extractWorldstateDeltas(result.text);
+
     return {
-      text: result.text,
+      text: cleanText,
       isError: result.isError,
       correlationId: req.correlationId,
       data: {
         usage: result.usage,
         numTurns: result.numTurns,
         stopReason: result.stopReason,
+        ...(deltas.length > 0 ? { "x-effect-domain": { delta: deltas } } : {}),
       },
     };
+  }
+
+  /**
+   * Extract <worldstate-delta> JSON blocks from agent text.
+   *
+   * Agents emit these blocks when they know they've changed system state:
+   *   <worldstate-delta>
+   *   [{"domain":"ci","path":"data.blockedPRs","delta":-1,"confidence":0.8}]
+   *   </worldstate-delta>
+   *
+   * Returns the cleaned text (blocks stripped) and the parsed delta array.
+   * Malformed JSON blocks are silently ignored.
+   */
+  private _extractWorldstateDeltas(text: string): {
+    cleanText: string;
+    deltas: Array<{ domain: string; path: string; delta: number; confidence: number }>;
+  } {
+    const pattern = /<worldstate-delta>([\s\S]*?)<\/worldstate-delta>/gi;
+    const matches = [...text.matchAll(pattern)];
+    if (matches.length === 0) return { cleanText: text, deltas: [] };
+
+    const deltas: Array<{ domain: string; path: string; delta: number; confidence: number }> = [];
+    let cleanText = text;
+
+    for (const match of matches) {
+      try {
+        const parsed: unknown = JSON.parse(match[1].trim());
+        const entries = Array.isArray(parsed) ? parsed : [parsed];
+        for (const entry of entries) {
+          if (
+            entry !== null &&
+            typeof entry === "object" &&
+            typeof (entry as Record<string, unknown>).domain === "string" &&
+            typeof (entry as Record<string, unknown>).path === "string" &&
+            typeof (entry as Record<string, unknown>).delta === "number" &&
+            typeof (entry as Record<string, unknown>).confidence === "number"
+          ) {
+            deltas.push(entry as { domain: string; path: string; delta: number; confidence: number });
+          }
+        }
+      } catch {
+        // Malformed JSON — skip silently
+      }
+      cleanText = cleanText.replace(match[0], "").trim();
+    }
+
+    return { cleanText, deltas };
   }
 
   private _buildPrompt(req: SkillRequest): string {
