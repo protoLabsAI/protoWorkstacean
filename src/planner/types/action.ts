@@ -40,8 +40,6 @@ export interface Effect {
 
 /** Routing and execution metadata for an action. */
 export interface ActionMeta {
-  /** EventBus topic to publish when dispatching (omit for internal/free actions). */
-  topic?: string;
   /** Agent ID to route the action to. */
   agentId?: string;
   /** Dispatch timeout in milliseconds. */

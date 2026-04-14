@@ -20,7 +20,6 @@ actions:
         value: 0.35
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   # alert.distribution_drift — REMOVED alongside flow.distribution_balanced goal
@@ -40,7 +39,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: ceremony.security_triage
@@ -58,7 +56,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "ceremony.security-triage.execute"
       fireAndForget: true
 
   - id: alert.discord_disconnected
@@ -79,7 +76,6 @@ actions:
         value: true
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: alert.no_agents
@@ -97,7 +93,6 @@ actions:
         value: 1
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   # ── Service + Agent Ceremonies ─────────────────────────────────────
@@ -120,7 +115,6 @@ actions:
         value: false
     effects: []
     meta:
-      topic: "ceremony.service-health.execute"
       fireAndForget: true
 
   # ── CI + PR Pipeline ─────────────────────────────────────────────
@@ -140,7 +134,24 @@ actions:
         value: 0.70
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
+      fireAndForget: true
+
+  - id: ci.debug_failures
+    goalId: ci.success_rate_healthy
+    tier: tier_0
+    priority: 20
+    cost: 1
+    name: "Dispatch agent to investigate CI failures across projects"
+    preconditions:
+      - path: "extensions.ci_available"
+        operator: eq
+        value: true
+      - path: "domains.ci.data.successRate"
+        operator: lt
+        value: 0.70
+    effects: []
+    meta:
+      skillHint: debug_ci_failures
       fireAndForget: true
 
   # alert.pr_conflicts was retired in favour of action.pr_update_branch below.
@@ -167,7 +178,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "pr.remediate.update_branch"
       fireAndForget: true
 
   - id: alert.pr_stale
@@ -185,7 +195,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   # ── PR Remediation — closes the loop via PrRemediatorPlugin ───────────────
@@ -205,7 +214,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "pr.remediate.merge_ready"
       fireAndForget: true
 
   - id: action.pr_fix_ci
@@ -223,7 +231,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "pr.remediate.fix_ci"
       fireAndForget: true
 
   - id: action.pr_address_feedback
@@ -241,7 +248,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "pr.remediate.address_feedback"
       fireAndForget: true
 
   - id: alert.branch_drift
@@ -259,7 +265,6 @@ actions:
         value: 30
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   # ── protoMaker team (multi-agent board runtime) ──────────────────
@@ -279,7 +284,6 @@ actions:
         value: 3
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: action.protomaker_triage_blocked
@@ -297,7 +301,6 @@ actions:
         value: 3
     effects: []
     meta:
-      topic: "agent.skill.request"
       skillHint: board_health
       agentId: protomaker
       fireAndForget: true
@@ -317,7 +320,6 @@ actions:
         value: 10
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: action.protomaker_start_auto_mode
@@ -341,7 +343,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "agent.skill.request"
       skillHint: auto_mode
       agentId: protomaker
       fireAndForget: true
@@ -360,7 +361,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: alert.branch_unprotected
@@ -375,7 +375,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: alert.ci_main_red
@@ -390,7 +389,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   # ── Branch drift remediation ──────────────────────────────────────
@@ -413,7 +411,6 @@ actions:
         value: 30
     effects: []
     meta:
-      topic: "pr.backmerge.dispatch"
       fireAndForget: true
 
   # ── Plane board health ────────────────────────────────────────────
@@ -430,7 +427,6 @@ actions:
         value: 5
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: alert.plane_stale_backlog
@@ -445,7 +441,6 @@ actions:
         value: 10
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: alert.plane_unassigned_piling
@@ -460,7 +455,6 @@ actions:
         value: 20
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   # ── Memory / Graphiti health ──────────────────────────────────────
@@ -477,7 +471,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   - id: alert.memory_search_broken
@@ -492,7 +485,6 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true
 
   # ── HITL routing health ───────────────────────────────────────────
@@ -514,5 +506,4 @@ actions:
         value: 0
     effects: []
     meta:
-      topic: "message.outbound.discord.alert"
       fireAndForget: true

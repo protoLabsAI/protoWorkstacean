@@ -127,7 +127,6 @@ Append to `workspace/actions.yaml`. Every action must guard on domain availabili
         value: "ok"
     effects: []
     meta:
-      topic: "agent.skill.request"
       skillHint: diagnose
       agentId: myapp
       fireAndForget: true
@@ -135,7 +134,6 @@ Append to `workspace/actions.yaml`. Every action must guard on domain availabili
 
 Key fields:
 - `preconditions[0]` — **always guard on availability** to avoid firing on stale data
-- `meta.topic: "agent.skill.request"` — routes through SkillDispatcher to the A2A executor
 - `meta.skillHint` — which skill to invoke on the external agent
 - `meta.agentId` — which agent to route to (matches `name` in agents.yaml)
 - `meta.fireAndForget: true` — complete immediately (use `false` to wait for outcome)
@@ -217,7 +215,7 @@ GoalEvaluator detects violation
     ↓
 L0 Planner matches action preconditions against world state
     ↓
-ActionDispatcher publishes to meta.topic (agent.skill.request)
+ActionDispatcher publishes to agent.skill.request
     ↓
 SkillDispatcher extracts skillHint + agentId
     ↓

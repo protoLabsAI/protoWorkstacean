@@ -19,7 +19,10 @@ const makeAction = (overrides: Partial<Action> = {}): Action => ({
   name: "Test Action",
   description: "Test",
   goalId: "test-goal",
-  tier: "tier_0",
+  // tier_1 by default — exercises the skill-dispatch path. Tier_0 actions
+  // are declarative world-state-only and short-circuit to success; tests that
+  // need that path override explicitly.
+  tier: "tier_1",
   preconditions: [],
   effects: [],
   cost: 0,
@@ -60,7 +63,7 @@ describe("ActionDispatcherPlugin", () => {
       outcomes.push(msg.payload as ActionOutcomePayload);
     });
 
-    const action = makeAction({ tier: "tier_0" });
+    const action = makeAction({ tier: "tier_0", meta: { fireAndForget: true } });
     bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action));
 
     // Allow microtasks to process
@@ -77,6 +80,7 @@ describe("ActionDispatcherPlugin", () => {
 
     const action = makeAction({
       effects: [{ path: "planner.auto_mode_running", operation: "set", value: true }],
+      meta: { fireAndForget: true },
     });
 
     bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action));
@@ -96,11 +100,11 @@ describe("ActionDispatcherPlugin", () => {
       queueFullEvents.push(msg.payload as ActionQueueFullPayload);
     });
 
-    // Dispatch 3 actions with a topic (so they stay in-flight)
+    // Dispatch 3 actions without fireAndForget (so they stay in-flight waiting for agent.skill.response.*)
     for (let i = 0; i < 3; i++) {
       const action = makeAction({
         id: `action-${i}`,
-        meta: { topic: "agent.execute", timeout: 30_000 },
+        meta: { timeout: 30_000 },
       });
       bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, `corr-${i}`));
     }
@@ -112,13 +116,83 @@ describe("ActionDispatcherPlugin", () => {
   });
 
   test("records outcome in tracker", async () => {
-    const action = makeAction();
+    const action = makeAction({ meta: { fireAndForget: true } });
     bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action));
     await new Promise((r) => setTimeout(r, 10));
 
     const summary = dispatcher.getOutcomes().summary();
     expect(summary.total).toBe(1);
     expect(summary.success).toBe(1);
+  });
+
+  test("publishes to agent.skill.request with cron source and goap systemActor", async () => {
+    const skillRequests: BusMessage[] = [];
+    bus.subscribe("agent.skill.request", "test", (msg) => {
+      skillRequests.push(msg);
+    });
+
+    const action = makeAction({
+      id: "skill-action",
+      meta: { skillHint: "my_skill", timeout: 30_000 },
+    });
+    bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "corr-skill"));
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(skillRequests).toHaveLength(1);
+    const req = skillRequests[0];
+    expect(req.source).toEqual({ interface: "cron" });
+    expect(req.reply?.topic).toBe("agent.skill.response.corr-skill");
+    const payload = req.payload as Record<string, unknown>;
+    expect(payload.skill).toBe("my_skill");
+    expect((payload.meta as Record<string, unknown>).systemActor).toBe("goap");
+  });
+
+  test("uses action.id as skill when skillHint is absent", async () => {
+    const skillRequests: BusMessage[] = [];
+    bus.subscribe("agent.skill.request", "test", (msg) => {
+      skillRequests.push(msg);
+    });
+
+    const action = makeAction({
+      id: "fallback-action",
+      meta: { timeout: 30_000 },
+    });
+    bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "corr-fallback"));
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(skillRequests).toHaveLength(1);
+    const payload = skillRequests[0].payload as Record<string, unknown>;
+    expect(payload.skill).toBe("fallback-action");
+  });
+
+  test("completes action when agent.skill.response.* is received", async () => {
+    const outcomes: import("../event-bus/action-events.ts").ActionOutcomePayload[] = [];
+    bus.subscribe(TOPICS.WORLD_ACTION_OUTCOME, "test", (msg) => {
+      outcomes.push(msg.payload as import("../event-bus/action-events.ts").ActionOutcomePayload);
+    });
+
+    const action = makeAction({
+      id: "response-action",
+      meta: { skillHint: "my_skill", timeout: 5_000 },
+    });
+    bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "corr-resp"));
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Simulate skill response
+    bus.publish("agent.skill.response.corr-resp", {
+      id: crypto.randomUUID(),
+      correlationId: "corr-resp",
+      topic: "agent.skill.response.corr-resp",
+      timestamp: Date.now(),
+      payload: { correlationId: "corr-resp", content: "done" },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].success).toBe(true);
+    expect(outcomes[0].actionId).toBe("response-action");
   });
 
   test("updates world state on world.state.updated", () => {

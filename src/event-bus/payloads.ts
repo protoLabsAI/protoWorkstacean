@@ -180,6 +180,77 @@ export interface CeremonyExecutePayload {
   ceremonyId?: string;
 }
 
+// ── worktree.recovered ───────────────────────────────────────────────────────
+
+/** Classification of a dirty-worktree recovery attempt on automaker restart. */
+export type WorktreeRecoveryOutcome = 'auto_recovered' | 'unrecoverable';
+
+/**
+ * Payload for `worktree.recovered` — published by the automaker server when it
+ * encounters a dirty worktree on restart and attempts self-healing.
+ *
+ * `outcome: 'auto_recovered'` → WIP was committed to a recovery/ branch; the
+ *   feature will be resumed automatically.
+ * `outcome: 'unrecoverable'` → merge conflicts or no branch; HITL intervention
+ *   is required.
+ */
+export interface WorktreeRecoveredPayload {
+  /** Feature ID that owned the dirty worktree. */
+  featureId: string;
+  /** Absolute path to the project root. */
+  projectPath: string;
+  /** Absolute path to the affected worktree (if known). */
+  worktreePath?: string;
+  /** Recovery outcome classification. */
+  outcome: WorktreeRecoveryOutcome;
+  /** Human-readable description of what happened. */
+  reason: string;
+  /** The `recovery/<id>-<ts>` branch where WIP was committed (auto_recovered only). */
+  recoveryBranch?: string;
+  /** ISO 8601 timestamp when the recovery event occurred. */
+  recoveredAt: string;
+}
+
+// ── autonomous.outcome.* ─────────────────────────────────────────────────────
+
+/**
+ * Payload for `autonomous.outcome.{systemActor}.{skill}` — published by
+ * SkillDispatcherPlugin after every task reaches terminal state, whether via
+ * direct executor return or TaskTracker polling.
+ *
+ * Replaces the split between `world.action.outcome` and per-reply-topic
+ * responses so OutcomeAnalysis sees a single unified stream.
+ *
+ * effectDelta is reserved for Arc 4/5 — leave undefined for now.
+ */
+export interface AutonomousOutcomePayload {
+  /** Trace ID propagated from the originating bus message. */
+  correlationId: string;
+  /** Parent span ID — the bus message ID that triggered the skill request. */
+  parentId?: string;
+  /** Autonomous subsystem actor (e.g. "pr-remediator", "sweep") or "user". */
+  systemActor: string;
+  /** Skill name that was executed. */
+  skill: string;
+  /** True if the task completed without error. */
+  success: boolean;
+  /** Final A2A task lifecycle state (completed, failed, canceled, etc.). */
+  taskState?: string;
+  /** First 500 chars of the result text — for quick inspection. */
+  textPreview?: string;
+  /** Token usage reported by the executor. */
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+  /** Wall-clock time from dispatch to terminal state (ms). */
+  durationMs: number;
+  /** World-state delta produced by this task — populated in Arc 4/5. */
+  effectDelta?: Record<string, unknown>;
+}
+
 // ── world.goal.violated ──────────────────────────────────────────────────────
 // Defined in src/types/events.ts — re-exported here for convenience.
 export type { GoalViolatedEventPayload } from "../types/events.ts";

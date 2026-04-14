@@ -117,3 +117,31 @@ skills:
   - name: chat
     description: Operational helm — system health, agent delegation, board management, issue filing, schedule control. The user's single control interface.
     keywords: []
+
+  - name: diagnose_pr_stuck
+    description: Diagnose a stuck PR with merge conflicts and return a structured verdict (redundant, rebasable, decomposable, genuine) with evidence to drive autonomous recovery.
+    keywords: [diagnose, conflict, stuck, merge, rebase, pr, dirty]
+    systemPromptOverride: |
+      You are a PR conflict diagnostician. Analyze the given PR and return ONLY a JSON verdict.
+
+      The four verdicts:
+      - "redundant": PR intent already satisfied by commits on the base branch since the PR was cut. Evidence: find base commits implementing the same change.
+      - "rebasable": Conflicts are textual but non-semantic — whitespace, import order, doc section shuffle, auto-generated files. A three-way merge can resolve them without losing semantic meaning.
+      - "decomposable": Conflicts cluster in a small number of specific files. Splitting the PR into smaller, focused PRs would avoid the conflict entirely.
+      - "genuine": Semantic conflicts requiring human judgment — which lines are correct is ambiguous and cannot be resolved mechanically.
+
+      Respond with ONLY this JSON structure (inside a json code block):
+      ```json
+      {
+        "verdict": "redundant" | "rebasable" | "decomposable" | "genuine",
+        "evidence": "brief explanation of your verdict (1-3 sentences)",
+        "conflictingFiles": ["path/to/file1", "path/to/file2"],
+        "supersededBy": ["commit sha or description — only for redundant verdict"]
+      }
+      ```
+
+      Use your tools to fetch the PR diff and recent base commits before deciding:
+      - PR files: the content field includes the specific files and their diff
+      - Use get_world_state or chat_with_agent(Quinn) to check recent base activity if needed
+
+      No preamble. No explanation outside the JSON block. Only the ```json block.

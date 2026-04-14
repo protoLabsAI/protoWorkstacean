@@ -1,23 +1,11 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { WebSocketManager } from "../lib/websocket";
 import type { WsMessage } from "../lib/websocket";
+import { topicMatchesFilter } from "../lib/topic-filter";
 import { EventRow } from "./EventRow";
 import { LogRow } from "./LogRow";
 
 type WsStatus = "connecting" | "connected" | "disconnected";
-
-// Wildcard topic filter — supports * (single segment) and # (any suffix)
-function topicMatchesFilter(topic: string, filter: string): boolean {
-  if (!filter) return true;
-  const parts = filter.split(".");
-  const topicParts = (topic || "").split(".");
-  for (let i = 0; i < parts.length; i++) {
-    if (parts[i] === "#") return true;
-    if (parts[i] === "*") continue;
-    if (parts[i] !== topicParts[i]) return false;
-  }
-  return parts.length === topicParts.length;
-}
 
 function isDebug(msg: WsMessage): boolean {
   return typeof msg.topic === "string" && msg.topic.startsWith("debug.");
