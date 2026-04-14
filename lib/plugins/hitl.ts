@@ -90,20 +90,40 @@ export class HITLPlugin implements Plugin {
         if (new Date(req.expiresAt).getTime() <= now) {
           pendingRequests.delete(correlationId);
           unrenderedCorrelationIds.delete(correlationId);
-          console.log(`[hitl] Expired HITLRequest (${correlationId})`);
-          bus.publish(`hitl.expired.${correlationId}`, {
-            id: crypto.randomUUID(),
-            correlationId,
-            topic: `hitl.expired.${correlationId}`,
-            timestamp: Date.now(),
-            payload: { type: "hitl_expired", correlationId, originalRequest: req },
-          });
-          const iface = req.sourceMeta?.interface ?? "unknown";
-          const renderer = renderers.get(iface);
-          if (renderer?.onExpired) {
-            renderer.onExpired(req, bus).catch(err =>
-              console.error(`[hitl] renderer.onExpired failed for ${correlationId}:`, err),
-            );
+
+          if (req.onTimeout === "approve" || req.onTimeout === "reject") {
+            // Auto-respond according to the TTL policy
+            console.log(`[hitl] TTL expired → auto-${req.onTimeout} (${correlationId})`);
+            const autoResp: HITLResponse = {
+              type: "hitl_response",
+              correlationId,
+              decision: req.onTimeout,
+              decidedBy: `auto-${req.onTimeout}`,
+            };
+            bus.publish(`hitl.response.${correlationId}`, {
+              id: crypto.randomUUID(),
+              correlationId,
+              topic: `hitl.response.${correlationId}`,
+              timestamp: Date.now(),
+              payload: autoResp,
+            });
+          } else {
+            // onTimeout === "escalate" or not set — emit expired event for escalation handlers
+            console.log(`[hitl] Expired HITLRequest (${correlationId})`);
+            bus.publish(`hitl.expired.${correlationId}`, {
+              id: crypto.randomUUID(),
+              correlationId,
+              topic: `hitl.expired.${correlationId}`,
+              timestamp: Date.now(),
+              payload: { type: "hitl_expired", correlationId, originalRequest: req },
+            });
+            const iface = req.sourceMeta?.interface ?? "unknown";
+            const renderer = renderers.get(iface);
+            if (renderer?.onExpired) {
+              renderer.onExpired(req, bus).catch(err =>
+                console.error(`[hitl] renderer.onExpired failed for ${correlationId}:`, err),
+              );
+            }
           }
         }
       }
