@@ -19,6 +19,10 @@ import type {
   TaskStatusUpdateEvent,
 } from "@a2a-js/sdk";
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
+import {
+  WORLDSTATE_DELTA_MIME_TYPE,
+  type WorldStateDeltaArtifactData,
+} from "../../../lib/types/worldstate-delta.ts";
 
 /**
  * Auth scheme the executor applies on outbound requests.
@@ -316,6 +320,8 @@ export class A2AExecutor implements IExecutor {
     const text = artifactText || statusText || `Skill "${req.skill}" accepted by ${this.config.name}`;
     const taskState = task.status.state;
 
+    const worldStateDelta = this._extractWorldStateDelta(task);
+
     return {
       text,
       isError: taskState === "failed" || taskState === "rejected",
@@ -324,6 +330,7 @@ export class A2AExecutor implements IExecutor {
         taskId: task.id,
         contextId: task.contextId,
         taskState,
+        ...(worldStateDelta ? { [WORLDSTATE_DELTA_MIME_TYPE]: worldStateDelta } : {}),
       },
     };
   }
@@ -347,6 +354,8 @@ export class A2AExecutor implements IExecutor {
     // - append: true → concatenate incoming parts to existing buffer
     // - lastChunk: true → signal artifact is complete (we emit artifact_complete)
     const artifactBuffers = new Map<string, Array<{ kind: string; text?: string }>>();
+    // Collect worldstate-delta DataParts seen during streaming.
+    const streamDeltaData: Record<string, unknown> = {};
 
     for await (const event of client.sendMessageStream(params)) {
       if (event.kind === "message") {
@@ -362,6 +371,9 @@ export class A2AExecutor implements IExecutor {
         // Seed artifact buffers from task snapshot if present
         for (const artifact of event.artifacts ?? []) {
           artifactBuffers.set(artifact.artifactId, [...artifact.parts]);
+          // Extract worldstate-delta parts from seeded task snapshot
+          const delta = this._worldStateDeltaFromParts(artifact.parts);
+          if (delta) streamDeltaData[WORLDSTATE_DELTA_MIME_TYPE] = delta;
         }
         continue;
       }
@@ -391,6 +403,10 @@ export class A2AExecutor implements IExecutor {
           artifactBuffers.set(aid, [...incomingParts]);
         }
 
+        // Extract worldstate-delta DataParts as they arrive
+        const delta = this._worldStateDeltaFromParts(incomingParts);
+        if (delta) streamDeltaData[WORLDSTATE_DELTA_MIME_TYPE] = delta;
+
         // Emit chunk event — consumers see progressive updates in real time
         if (incomingText) {
           this.config.onStreamUpdate?.({
@@ -419,7 +435,7 @@ export class A2AExecutor implements IExecutor {
       text: resultText || `Skill "${req.skill}" completed by ${this.config.name}`,
       isError: taskState === "failed" || taskState === "rejected",
       correlationId: req.correlationId,
-      data: { taskId, contextId, taskState },
+      data: { taskId, contextId, taskState, ...streamDeltaData },
     };
   }
 
@@ -428,6 +444,37 @@ export class A2AExecutor implements IExecutor {
       .filter((p): p is { kind: "text"; text: string } => p.kind === "text" && typeof p.text === "string")
       .map(p => p.text)
       .join("");
+  }
+
+  /**
+   * Scan a Task's artifact parts for a worldstate-delta DataPart.
+   * Returns the first match's payload, or undefined if none found.
+   */
+  private _extractWorldStateDelta(task: Task): WorldStateDeltaArtifactData | undefined {
+    for (const artifact of task.artifacts ?? []) {
+      const result = this._worldStateDeltaFromParts(artifact.parts);
+      if (result) return result;
+    }
+    return undefined;
+  }
+
+  /**
+   * Scan a parts array for a worldstate-delta DataPart (kind: "data",
+   * metadata.mimeType === WORLDSTATE_DELTA_MIME_TYPE). Returns the first match.
+   */
+  private _worldStateDeltaFromParts(
+    parts: Array<{ kind: string; data?: Record<string, unknown>; metadata?: Record<string, unknown> }>,
+  ): WorldStateDeltaArtifactData | undefined {
+    for (const part of parts) {
+      if (
+        part.kind === "data" &&
+        part.metadata?.["mimeType"] === WORLDSTATE_DELTA_MIME_TYPE &&
+        part.data
+      ) {
+        return part.data as unknown as WorldStateDeltaArtifactData;
+      }
+    }
+    return undefined;
   }
 
   /**
