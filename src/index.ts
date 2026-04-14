@@ -434,53 +434,53 @@ const allPlugins = [...corePlugins, ...registeredPlugins, ...workspacePlugins];
 // ops.alert.budget and world.action.queue_full are published but had no consumers.
 // Forward both to message.outbound.discord.alert so they surface to operators.
 
-bus.subscribe("ops.alert.budget", "alert-bridge", (msg) => {
+bus.subscribe(TOPICS.FLOW_ALERT_BUDGET, "alert-bridge", (msg) => {
   const p = (msg.payload ?? {}) as Record<string, unknown>;
   const text = p.type === "cost_discrepancy"
     ? `Budget alert — cost discrepancy on request \`${p.requestId}\``
     : `Budget alert — ${String(p.type ?? "unknown")}: ${String(p.report ?? "")}`;
-  bus.publish("message.outbound.discord.alert", {
+  bus.publish(TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT, {
     id: crypto.randomUUID(),
     correlationId: msg.correlationId,
-    topic: "message.outbound.discord.alert",
+    topic: TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT,
     timestamp: Date.now(),
     payload: { text, level: "warn", source: "budget" },
   });
 });
 
-bus.subscribe("world.action.queue_full", "alert-bridge", (msg) => {
+bus.subscribe(TOPICS.WORLD_ACTION_QUEUE_FULL, "alert-bridge", (msg) => {
   const p = (msg.payload ?? {}) as Record<string, unknown>;
   const text = `Action queue full — WIP ${p.wipCount}/${p.wipLimit}, pending: \`${p.pendingActionId}\``;
-  bus.publish("message.outbound.discord.alert", {
+  bus.publish(TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT, {
     id: crypto.randomUUID(),
     correlationId: msg.correlationId,
-    topic: "message.outbound.discord.alert",
+    topic: TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT,
     timestamp: Date.now(),
     payload: { text, level: "warn", source: "action-dispatcher" },
   });
 });
 
 // Outcome analysis alerts — chronic failures and repeated HITL escalations
-bus.subscribe("ops.alert.action_quality", "alert-bridge", (msg) => {
+bus.subscribe(TOPICS.FLOW_ALERT_ACTION_QUALITY, "alert-bridge", (msg) => {
   const p = (msg.payload ?? {}) as Record<string, unknown>;
   const rate = typeof p.successRate === "number" ? (p.successRate * 100).toFixed(0) : "?";
   const text = `🔻 Action quality alert — \`${p.actionId}\` success rate ${rate}% (${p.success}/${p.total}). ${p.recommendation ?? ""}`;
-  bus.publish("message.outbound.discord.alert", {
+  bus.publish(TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT, {
     id: crypto.randomUUID(),
     correlationId: msg.correlationId,
-    topic: "message.outbound.discord.alert",
+    topic: TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT,
     timestamp: Date.now(),
     payload: { text, level: "warn", source: "outcome-analysis" },
   });
 });
 
-bus.subscribe("ops.alert.hitl_escalation", "alert-bridge", (msg) => {
+bus.subscribe(TOPICS.FLOW_ALERT_HITL_ESCALATION, "alert-bridge", (msg) => {
   const p = (msg.payload ?? {}) as Record<string, unknown>;
   const text = `🔧 Feature-request signal — \`${p.kind}\` escalated to HITL ${p.count}× for \`${p.target}\`. ${p.recommendation ?? ""}`;
-  bus.publish("message.outbound.discord.alert", {
+  bus.publish(TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT, {
     id: crypto.randomUUID(),
     correlationId: msg.correlationId,
-    topic: "message.outbound.discord.alert",
+    topic: TOPICS.MESSAGE_OUTBOUND_DISCORD_ALERT,
     timestamp: Date.now(),
     payload: { text, level: "warn", source: "outcome-analysis" },
   });
@@ -503,6 +503,7 @@ const API_KEY = process.env.WORKSTACEAN_API_KEY;
 // ── API routes (modular) ──────────────────────────────────────────────────────
 import { createAllRoutes, matchPath } from "./api/index.ts";
 import type { ApiContext } from "./api/index.ts";
+import { TOPICS } from "./event-bus/topics.ts";
 
 const apiContext: ApiContext = {
   workspaceDir,
