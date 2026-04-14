@@ -35,6 +35,10 @@ const contextMailbox = new ContextMailbox();
 import { TaskTracker } from "./executor/task-tracker.ts";
 const taskTracker = new TaskTracker({ bus });
 
+// --- Extensions — register interceptors with the global ExtensionRegistry ---
+import { registerCostV1Extension } from "./executor/extensions/cost-v1.ts";
+registerCostV1Extension(bus);
+
 // --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
 import { ChannelRegistry } from "../lib/channels/channel-registry.js";
 const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));
