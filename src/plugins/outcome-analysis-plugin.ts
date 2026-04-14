@@ -1,10 +1,11 @@
 /**
  * OutcomeAnalysisPlugin — closes the learning loop.
  *
- * Subscribes to world.action.outcome events, tracks per-action success rates
- * and HITL escalation frequency, and emits signals on chronic issues:
+ * Subscribes to autonomous.outcome.# events (unified outcome stream emitted by
+ * SkillDispatcherPlugin), tracks per-skill success rates and HITL escalation
+ * frequency, and emits signals on chronic issues:
  *
- *   - Actions with <50% success rate over 10+ attempts → publishes
+ *   - Skills with <50% success rate over 10+ attempts → publishes
  *     ops.alert.action_quality so the fleet knows to investigate/replace it.
  *   - Actions with repeated HITL escalations → treated as feature-request
  *     signals ("what would have unblocked this automatically?") and logged
@@ -14,15 +15,17 @@
  * own failures become inputs to its own improvement backlog.
  *
  * Inbound:
- *   world.action.outcome  — every action completion
+ *   autonomous.outcome.#  — every terminal skill dispatch (Arc 2.1+)
  *   hitl.escalation       — every HITL timeout/exhaustion (per pr-remediator)
  *
  * Outbound:
- *   ops.alert.action_quality   — action with poor success rate
+ *   ops.alert.action_quality   — skill with poor success rate
  *   ops.alert.hitl_escalation  — repeated human-needed action
  */
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
+import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
+import { TOPICS } from "../event-bus/topics.ts";
 
 interface ActionStats {
   actionId: string;
@@ -64,7 +67,7 @@ export class OutcomeAnalysisPlugin implements Plugin {
     this.bus = bus;
 
     this.subscriptionIds.push(
-      bus.subscribe("world.action.outcome", this.name, (msg) => this._onOutcome(msg)),
+      bus.subscribe(`${TOPICS.AUTONOMOUS_OUTCOME_PREFIX}.#`, this.name, (msg) => this._onOutcome(msg)),
     );
     this.subscriptionIds.push(
       bus.subscribe("hitl.escalation", this.name, (msg) => this._onHitlEscalation(msg)),
@@ -73,7 +76,7 @@ export class OutcomeAnalysisPlugin implements Plugin {
     this.analysisTimer = setInterval(() => this._runAnalysis(), ANALYSIS_INTERVAL_MS);
     // Don't keep the process alive just for this timer (important for tests).
     this.analysisTimer.unref?.();
-    console.log("[outcome-analysis] Installed — analyzing every 5 min");
+    console.log("[outcome-analysis] Installed — subscribed to autonomous.outcome.# — analyzing every 5 min");
   }
 
   uninstall(): void {
@@ -86,13 +89,12 @@ export class OutcomeAnalysisPlugin implements Plugin {
   }
 
   private _onOutcome(msg: BusMessage): void {
-    const p = msg.payload as Record<string, unknown> | undefined;
-    const actionId = typeof p?.actionId === "string" ? p.actionId : undefined;
-    if (!actionId) return;
+    const p = msg.payload as AutonomousOutcomePayload | undefined;
+    if (!p?.systemActor || !p?.skill) return;
 
-    const success = p?.success === true;
-    const error = typeof p?.error === "string" ? p.error : undefined;
-    const isTimeout = error?.toLowerCase().includes("timeout") ?? false;
+    const actionId = `${p.systemActor}.${p.skill}`;
+    const success = p.success === true;
+    const isTimeout = p.taskState === "canceled";
 
     const stats = this.actionStats.get(actionId) ?? {
       actionId,
