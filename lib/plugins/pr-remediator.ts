@@ -166,8 +166,13 @@ const ATTEMPT_COOLDOWN_MS = 5 * 60 * 1000;
 // escalates to HITL once. Further triggers are silently ignored until a
 // human clears the entry (by the PR leaving pr_pipeline, e.g. merged/closed).
 const MAX_ATTEMPTS_PER_PR = 3;
+// After this many update_branch 422 failures, run diagnose_pr_stuck before
+// attempting another retry. The diagnose skill classifies the conflict so the
+// loop picks the right recovery path instead of banging on the same wall.
+const DIAGNOSE_AFTER_ATTEMPTS = 2;
 
 type RemediationKind = "fix_ci" | "address_feedback" | "merge_ready" | "update_branch";
+type DiagnosisVerdict = "redundant" | "rebasable" | "decomposable" | "genuine";
 
 interface InFlightEntry {
   kind: RemediationKind;
@@ -414,6 +419,72 @@ async function ghDispatchBackmerge(
   }
 }
 
+/**
+ * Close a PR on GitHub. Used by diagnose_pr_stuck verdicts (redundant,
+ * decomposable) to automatically close PRs that won't benefit from further
+ * retry attempts.
+ */
+async function ghClosePr(
+  repo: string,
+  num: number,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(`https://api.github.com/repos/${repo}/pulls/${num}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ state: "closed" }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (resp.ok) return { ok: true, status: resp.status };
+    const body = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: body.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
+/**
+ * Post a comment on a PR/issue. Used by diagnose_pr_stuck to explain the
+ * auto-close decision before closing (redundant, decomposable verdicts).
+ */
+async function ghComment(
+  repo: string,
+  num: number,
+  body: string,
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials" };
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return { ok: false, status: 0, error: `malformed repo slug "${repo}"` };
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(`https://api.github.com/repos/${repo}/issues/${num}/comments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ body }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (resp.ok) return { ok: true, status: resp.status };
+    const errBody = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: errBody.slice(0, 200) };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
 type BranchDriftData = {
@@ -446,6 +517,12 @@ export class PrRemediatorPlugin implements Plugin {
   private readonly autoModeKickAlertsAt = new Map<string, number>();
   /** `repo#number` → timestamp of last auto-approve attempt (avoid re-submitting on every tick while GitHub catches up). */
   private readonly autoApprovedAt = new Map<string, number>();
+  /**
+   * `repo#number` → correlationId of the in-flight diagnose_pr_stuck skill
+   * request. Prevents further update_branch retries while diagnosis is running
+   * and routes the skill response to _handleDiagnoseResponse.
+   */
+  private readonly diagnosisInFlight = new Map<string, string>();
 
   install(bus: EventBus): void {
     this.bus = bus;
@@ -525,6 +602,7 @@ export class PrRemediatorPlugin implements Plugin {
     this.latestPrData = null;
     this.pendingApprovals.clear();
     this.inFlight.clear();
+    this.diagnosisInFlight.clear();
   }
 
   // ── Loop protection helpers ────────────────────────────────────────────────
@@ -550,6 +628,15 @@ export class PrRemediatorPlugin implements Plugin {
     number: number,
     kind: RemediationKind,
   ): { ok: true } | { ok: false; reason: string } {
+    // Block update_branch retries while diagnose_pr_stuck is classifying the conflict.
+    if (kind === "update_branch") {
+      const prKey = `${repo}#${number}`;
+      const diagCid = this.diagnosisInFlight.get(prKey);
+      if (diagCid !== undefined) {
+        return { ok: false, reason: `diagnose_pr_stuck in-flight (correlationId: ${diagCid})` };
+      }
+    }
+
     const key = this._inFlightKey(repo, number, kind);
     const entry = this.inFlight.get(key);
     if (!entry) return { ok: true };
@@ -610,6 +697,7 @@ export class PrRemediatorPlugin implements Plugin {
     number: number,
     kind: RemediationKind,
     entry: InFlightEntry,
+    conflictDetails?: string,
   ): void {
     if (!this.bus) return;
 
@@ -649,6 +737,7 @@ export class PrRemediatorPlugin implements Plugin {
         `**Last correlationId**: \`${entry.correlationId}\``,
         ``,
         `The auto-remediation loop has dispatched ${kind} to Ava ${entry.attempts} times and the PR is still stuck. This is a bottleneck — either a new agent capability is needed, the root cause is outside Ava's reach, or a human merge / manual fix will break the cycle.`,
+        conflictDetails ? `\n**Conflict diagnosis (genuine)**:\n${conflictDetails}` : "",
         ``,
         `**Treat every stuck PR as a feature request**: what would have unblocked this automatically? That's the next thing to build on the board.`,
         ``,
@@ -866,11 +955,22 @@ export class PrRemediatorPlugin implements Plugin {
         // address_feedback paths take over.
       } else if (result.status === 422) {
         // The merge itself has conflicts — GitHub can't auto-resolve.
-        // Mark this dispatch as completed so cooldown kicks in, but don't
-        // escalate yet: _shouldDispatch will exhaust the attempt budget
-        // eventually and emit the stuck-HITL on its own. Real conflicts
-        // need human intervention.
         console.warn(`[pr-remediator] update_branch rejected ${pr.repo}#${pr.number}: ${result.error}`);
+        // After DIAGNOSE_AFTER_ATTEMPTS consecutive 422 failures, run
+        // diagnose_pr_stuck to classify the conflict before retrying. The
+        // diagnose skill returns a verdict (redundant/rebasable/decomposable/
+        // genuine) that drives the appropriate recovery action, instead of
+        // blindly retrying the same failing operation.
+        const ubKey = this._inFlightKey(pr.repo, pr.number, "update_branch");
+        const ubEntry = this.inFlight.get(ubKey);
+        const prKey = `${pr.repo}#${pr.number}`;
+        if (
+          ubEntry &&
+          ubEntry.attempts >= DIAGNOSE_AFTER_ATTEMPTS &&
+          !this.diagnosisInFlight.has(prKey)
+        ) {
+          void this._dispatchDiagnose(pr, msg.correlationId);
+        }
       } else if (result.status === 403) {
         // App lacks write permission on this repo. Silent skip, log once —
         // the goal will keep firing but the dedup gate will cool it down.
@@ -1184,6 +1284,251 @@ Critical rules:
       console.log(`[pr-remediator] HITL-approved merge succeeded ${pending.repo}#${pending.number}`);
     } else {
       console.warn(`[pr-remediator] HITL-approved merge FAILED ${pending.repo}#${pending.number}: ${result.error}`);
+    }
+  }
+
+  // ── diagnose_pr_stuck ──────────────────────────────────────────────────────
+  //
+  // Called after DIAGNOSE_AFTER_ATTEMPTS consecutive 422 failures from
+  // ghUpdateBranch. Dispatches the diagnose_pr_stuck skill to Ava which
+  // fetches the PR diff and recent base commits, then returns one of four
+  // verdicts: redundant, rebasable, decomposable, or genuine.
+  //
+  // The verdict is handled by _handleDiagnoseResponse:
+  //   redundant    → comment + close PR (intent already satisfied)
+  //   rebasable    → dispatch Ava merge-assist (textual conflicts only)
+  //   decomposable → comment proposing splits + close PR
+  //   genuine      → escalate HITL with conflict details (semantic conflict)
+
+  private _dispatchDiagnose(pr: PrDomainEntry, parentCorrelationId: string): void {
+    if (!this.bus) return;
+    const prKey = `${pr.repo}#${pr.number}`;
+    const correlationId = crypto.randomUUID();
+
+    // Mark as in-flight before publishing so concurrent world-state ticks
+    // can't race a second diagnose dispatch while we're publishing.
+    this.diagnosisInFlight.set(prKey, correlationId);
+    console.log(
+      `[pr-remediator] dispatching diagnose_pr_stuck for ${prKey} after ${DIAGNOSE_AFTER_ATTEMPTS} update_branch 422 failures`,
+    );
+
+    // Subscribe to the specific response topic before publishing so we
+    // never miss the reply even if the executor completes synchronously.
+    let subId: string;
+    subId = this.bus.subscribe(
+      `agent.skill.response.${correlationId}`,
+      this.name,
+      (msg) => {
+        this.bus?.unsubscribe(subId);
+        this.diagnosisInFlight.delete(prKey);
+        const responsePayload = msg.payload as { text?: string; result?: string; content?: string };
+        const responseText = responsePayload.text ?? responsePayload.result ?? responsePayload.content ?? "";
+        void this._handleDiagnoseResponse(pr, responseText, parentCorrelationId).catch((err) =>
+          console.error(`[pr-remediator] diagnose response handler error for ${prKey}:`, err),
+        );
+      },
+    );
+    this.subscriptionIds.push(subId);
+
+    this.bus.publish("agent.skill.request", {
+      id: crypto.randomUUID(),
+      correlationId,
+      parentId: parentCorrelationId,
+      topic: "agent.skill.request",
+      timestamp: Date.now(),
+      payload: {
+        skill: "diagnose_pr_stuck",
+        content: `Diagnose this stuck PR and return a JSON verdict.
+
+PR: ${pr.repo}#${pr.number} — ${pr.title}
+Author: ${pr.author}
+Base branch: ${pr.baseRef}
+Head SHA: ${pr.headSha}
+Mergeable: ${pr.mergeable}
+CI Status: ${pr.ciStatus}
+Review State: ${pr.reviewState}
+Labels: ${pr.labels.join(", ") || "none"}
+
+This PR has failed GitHub's update-branch API (merge base into head) ${DIAGNOSE_AFTER_ATTEMPTS} times with HTTP 422 (merge conflict).
+
+Analyze the PR and return a JSON object with this exact shape:
+\`\`\`json
+{
+  "verdict": "redundant" | "rebasable" | "decomposable" | "genuine",
+  "evidence": "explanation of your verdict",
+  "conflictingFiles": ["path/to/file1"],
+  "supersededBy": ["commit sha or description, only for redundant verdict"]
+}
+\`\`\`
+
+Verdict definitions:
+- "redundant": The PR's intent is already satisfied by commits on \`${pr.baseRef}\` since the PR was cut.
+- "rebasable": Conflicts are textual but non-semantic (whitespace, import order, doc section shuffle, auto-generated files). A three-way merge can resolve them without losing meaning.
+- "decomposable": Conflicts cluster in a small number of specific files. Splitting into smaller PRs would avoid the conflict.
+- "genuine": Semantic conflicts requiring human judgment — which lines mean what is ambiguous.
+
+Use your GitHub API tools to fetch:
+1. PR files diff: GET /repos/${pr.repo}/pulls/${pr.number}/files
+2. Recent base commits: GET /repos/${pr.repo}/commits?sha=${pr.baseRef}&per_page=20
+
+Return ONLY the JSON block. No other text.`,
+        meta: { agentId: "ava", skillHint: "diagnose_pr_stuck", systemActor: "pr-remediator" },
+        prRepo: pr.repo,
+        prNumber: pr.number,
+      },
+    });
+  }
+
+  private async _handleDiagnoseResponse(
+    pr: PrDomainEntry,
+    responseText: string,
+    parentCorrelationId: string,
+  ): Promise<void> {
+    const prKey = `${pr.repo}#${pr.number}`;
+
+    type DiagnosisResult = {
+      verdict: DiagnosisVerdict;
+      evidence: string;
+      conflictingFiles?: string[];
+      supersededBy?: string[];
+    };
+
+    let diagnosis: DiagnosisResult | null = null;
+
+    // Try to parse JSON from code block first, then bare object
+    const jsonBlockMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonBlockMatch?.[1]) {
+      try {
+        diagnosis = JSON.parse(jsonBlockMatch[1]) as DiagnosisResult;
+      } catch { /* fall through */ }
+    }
+    if (!diagnosis) {
+      const bareMatch = responseText.match(/\{[\s\S]*?"verdict"[\s\S]*?\}/);
+      if (bareMatch) {
+        try {
+          diagnosis = JSON.parse(bareMatch[0]) as DiagnosisResult;
+        } catch { /* fall through */ }
+      }
+    }
+    // Fallback: scan text for verdict keyword
+    if (!diagnosis) {
+      const kw = responseText.match(/\b(redundant|rebasable|decomposable|genuine)\b/i);
+      diagnosis = {
+        verdict: (kw?.[1]?.toLowerCase() ?? "genuine") as DiagnosisVerdict,
+        evidence: responseText.slice(0, 500),
+      };
+    }
+
+    console.log(`[pr-remediator] diagnose verdict for ${prKey}: ${diagnosis.verdict}`);
+
+    switch (diagnosis.verdict) {
+      case "redundant": {
+        const comment = [
+          `**Auto-remediation verdict: redundant** — closing automatically.`,
+          ``,
+          `This PR's intent appears to already be satisfied by recent commits on \`${pr.baseRef}\`.`,
+          ``,
+          `**Evidence:** ${diagnosis.evidence}`,
+          diagnosis.supersededBy?.length
+            ? `**Superseded by:** ${diagnosis.supersededBy.join(", ")}`
+            : "",
+          ``,
+          `If this is incorrect, reopen with a note on what still needs to be done.`,
+          ``,
+          `*Automated verdict by pr-remediator diagnose_pr_stuck skill.*`,
+        ].filter(Boolean).join("\n");
+        const commentResult = await ghComment(pr.repo, pr.number, comment);
+        if (!commentResult.ok) {
+          console.warn(`[pr-remediator] failed to post redundant comment on ${prKey}: ${commentResult.error}`);
+        }
+        const closeResult = await ghClosePr(pr.repo, pr.number);
+        if (closeResult.ok) {
+          console.log(`[pr-remediator] closed ${prKey} as redundant`);
+        } else {
+          console.warn(`[pr-remediator] failed to close ${prKey} as redundant: ${closeResult.error}`);
+        }
+        break;
+      }
+
+      case "rebasable": {
+        const fileList = diagnosis.conflictingFiles?.map((f) => `\`${f}\``).join(", ") ?? "unknown";
+        const content = `PR ${pr.repo}#${pr.number} has a dirty branch. Conflict diagnosis: **rebasable** (textual conflicts only).
+
+Evidence: ${diagnosis.evidence}
+Conflicting files: ${fileList}
+
+You are operating in **fully autonomous mode**. Perform a three-way merge assistance:
+1. Fetch the PR diff: GET /repos/${pr.repo}/pulls/${pr.number}/files
+2. For each conflicting file, resolve conflicts that are textual (whitespace, import order, doc reshuffling, auto-generated content) — do NOT touch semantic code changes
+3. If you can resolve all conflicts cleanly, commit the resolution and push to the PR branch
+4. If any conflict requires semantic judgment, stop and report exactly which hunks need human review
+
+Do NOT ask for confirmation. Act.`;
+        const correlationId = this._dispatchToAva(content, "bug_triage", parentCorrelationId, {
+          prRepo: pr.repo,
+          prNumber: pr.number,
+          diagnosisVerdict: "rebasable",
+        });
+        if (correlationId) {
+          this._recordDispatch(pr.repo, pr.number, "update_branch", correlationId);
+          console.log(`[pr-remediator] dispatched rebase-assist for ${prKey} (correlationId: ${correlationId})`);
+        }
+        break;
+      }
+
+      case "decomposable": {
+        const fileList = diagnosis.conflictingFiles?.length
+          ? diagnosis.conflictingFiles.map((f) => `- \`${f}\``).join("\n")
+          : "See diagnosis evidence above.";
+        const comment = [
+          `**Auto-remediation verdict: decomposable** — closing and proposing a split.`,
+          ``,
+          `This PR has merge conflicts that cluster into distinct file groups. Rather than attempting a complex merge, the recommended path is to split this PR into smaller, focused PRs — one per file cluster.`,
+          ``,
+          `**Conflicting file clusters:**`,
+          fileList,
+          ``,
+          `**Evidence:** ${diagnosis.evidence}`,
+          ``,
+          `Please re-cut this as smaller, focused PRs targeting each cluster independently. This avoids the conflict and makes each change easier to review.`,
+          ``,
+          `*Automated verdict by pr-remediator diagnose_pr_stuck skill.*`,
+        ].join("\n");
+        const commentResult = await ghComment(pr.repo, pr.number, comment);
+        if (!commentResult.ok) {
+          console.warn(`[pr-remediator] failed to post decomposable comment on ${prKey}: ${commentResult.error}`);
+        }
+        const closeResult = await ghClosePr(pr.repo, pr.number);
+        if (closeResult.ok) {
+          console.log(`[pr-remediator] closed ${prKey} as decomposable, proposed split`);
+        } else {
+          console.warn(`[pr-remediator] failed to close ${prKey} as decomposable: ${closeResult.error}`);
+        }
+        break;
+      }
+
+      case "genuine":
+      default: {
+        // Genuine semantic conflict — escalate to HITL immediately with the
+        // specific conflict details from the diagnosis, instead of waiting for
+        // the attempt budget to exhaust naturally.
+        const ubKey = this._inFlightKey(pr.repo, pr.number, "update_branch");
+        const entry = this.inFlight.get(ubKey);
+        if (entry) {
+          entry.exhausted = true;
+          entry.escalated = true;
+        }
+        const effectiveEntry: InFlightEntry = entry ?? {
+          kind: "update_branch",
+          startedAt: Date.now() - DIAGNOSE_AFTER_ATTEMPTS * IN_FLIGHT_TTL_MS,
+          correlationId: parentCorrelationId,
+          attempts: DIAGNOSE_AFTER_ATTEMPTS,
+          exhausted: true,
+          escalated: true,
+        };
+        this._emitStuckHitlEscalation(pr.repo, pr.number, "update_branch", effectiveEntry, diagnosis.evidence);
+        break;
+      }
     }
   }
 
