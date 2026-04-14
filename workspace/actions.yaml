@@ -23,23 +23,7 @@ actions:
       topic: "message.outbound.discord.alert"
       fireAndForget: true
 
-  - id: alert.distribution_drift
-    goalId: flow.distribution_balanced
-    tier: tier_0
-    priority: 10
-    cost: 0
-    name: "Alert on work distribution drift"
-    preconditions:
-      - path: "extensions.flow_available"
-        operator: eq
-        value: true
-      - path: "domains.flow.data.distribution.ratios.feature"
-        operator: lt
-        value: 0.40
-    effects: []
-    meta:
-      topic: "message.outbound.discord.alert"
-      fireAndForget: true
+  # alert.distribution_drift — REMOVED alongside flow.distribution_balanced goal
 
   - id: alert.security_incident
     goalId: security.no_open_incidents

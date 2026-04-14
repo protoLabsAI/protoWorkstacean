@@ -34,10 +34,18 @@ export interface PlannerPluginL0Config {
   };
   /** Cooldown applied after oscillation is detected (ms). Default: 10min. */
   oscillationCooldownMs?: number;
+  /**
+   * Cooldown applied after a successful action with effects (ms). Default: 90s.
+   * Gives the next real domain poll time to catch up so goals aren't
+   * re-evaluated against optimistic effects only. Closes the outcome→state
+   * feedback loop without infinite re-dispatch.
+   */
+  successCooldownMs?: number;
 }
 
 const DEFAULT_LOOP_CONFIG = { maxAttempts: 3, windowMinutes: 5 };
 const DEFAULT_OSCILLATION_COOLDOWN_MS = 10 * 60 * 1000; // 10 min
+const DEFAULT_SUCCESS_COOLDOWN_MS = 90 * 1000; // 90s — longer than 60s domain poll
 
 export class PlannerPluginL0 implements Plugin {
   readonly name = "planner-l0";
@@ -87,6 +95,20 @@ export class PlannerPluginL0 implements Plugin {
         const outcome = msg.payload as ActionOutcomePayload;
         this.loopDetector.record(outcome.goalId, outcome.actionId, outcome.success);
         this.inFlightGoals.delete(outcome.goalId);
+
+        // Post-success cooldown — prevents re-dispatching the same action
+        // against a goal that's still violated because the real domain
+        // hasn't polled yet. Without this, the outcome→state feedback loop
+        // would fire the same remediation every tick until the real state
+        // catches up.
+        if (outcome.success) {
+          const action = this.registry.get(outcome.actionId);
+          if (action && action.effects && action.effects.length > 0) {
+            const cooldownMs =
+              this.pluginConfig.successCooldownMs ?? DEFAULT_SUCCESS_COOLDOWN_MS;
+            this.cooldownManager.setCooldown(outcome.goalId, outcome.actionId, cooldownMs);
+          }
+        }
       }
     );
     this.subscriptionIds.push(outcomeId);
