@@ -307,6 +307,23 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
       async () => JSON.stringify(await http.get("/api/discord/members")),
       { name: "discord_list_members", description: "List Discord server members with roles.", schema: z.object({}) },
     ),
+    discord_list_webhooks: tool(
+      async () => JSON.stringify(await http.get("/api/discord/webhooks")),
+      { name: "discord_list_webhooks", description: "List all Discord webhooks across guild channels.", schema: z.object({}) },
+    ),
+    discord_create_webhook: tool(
+      async (input) => JSON.stringify(await http.post("/api/discord/webhooks/create", input)),
+      {
+        name: "discord_create_webhook",
+        description: "Create a Discord webhook on a channel for external integrations (GitHub, CI, etc.).",
+        schema: z.object({
+          name: z.string().describe("Webhook display name"),
+          channelId: z.string().optional().describe("Target channel ID"),
+          channelName: z.string().optional().describe("Target channel name (alternative to ID)"),
+          reason: z.string().optional().describe("Audit log reason"),
+        }),
+      },
+    ),
     // ── Conversation feedback tools (require correlationId) ──────────────────
     react: tool(
       async (input) => {

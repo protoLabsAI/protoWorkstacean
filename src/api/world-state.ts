@@ -151,6 +151,18 @@ export function createRoutes(ctx: ApiContext): Route[] {
       }
     }
 
+    // Deep-agents run in-process — if they're in the ExecutorRegistry,
+    // the runtime loaded them and they're reachable by definition. Stamp
+    // a synthetic probe so the UI doesn't render them as "Not probed".
+    const now = Date.now();
+    for (const view of Object.values(agents)) {
+      if (view.executorType === "deep-agent" && view.reachable === undefined) {
+        view.reachable = true;
+        view.latencyMs = 0;
+        view.lastProbedAt = now;
+      }
+    }
+
     const reachableCount = Object.values(agents).filter(a => a.reachable === true).length;
 
     return Response.json({
