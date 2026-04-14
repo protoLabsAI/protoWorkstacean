@@ -313,6 +313,14 @@ export class ActionDispatcherPlugin implements Plugin {
       payload: outcomePayload,
     });
 
+    // NOTE: Previously re-published world.state.updated here to close the
+    // outcome → state feedback loop. Removed — caused infinite loops in tests
+    // because re-publish triggered re-evaluation of a still-violated goal
+    // (effects are optimistic, real domain hasn't caught up), which dispatched
+    // the same action again. The correct fix lives in the planner: stronger
+    // in-flight tracking that waits for domain confirmation, not optimistic
+    // effects. Filed as a follow-up.
+
     // Complete in WIP queue and dispatch next if available
     const next = this.queue.complete(correlationId);
     if (next) {
