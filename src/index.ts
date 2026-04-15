@@ -50,9 +50,13 @@ const agentKeys = new AgentKeyRegistry(workspaceDir, process.env.WORKSTACEAN_API
 import { registerCostExtension } from "./executor/extensions/cost.ts";
 import { registerConfidenceExtension } from "./executor/extensions/confidence.ts";
 import { registerEffectDomainExtension } from "./executor/extensions/effect-domain.ts";
+import { registerBlastExtension } from "./executor/extensions/blast.ts";
+import { registerHitlModeExtension } from "./executor/extensions/hitl-mode.ts";
 registerCostExtension(bus);
 registerConfidenceExtension(bus);
 registerEffectDomainExtension(bus);
+registerBlastExtension();
+registerHitlModeExtension();
 
 // --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
 import { ChannelRegistry } from "../lib/channels/channel-registry.js";
