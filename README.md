@@ -48,7 +48,10 @@ bun run src/index.ts
 | `WORKSTACEAN_HTTP_PORT` | No | HTTP API port (default: `3000`) |
 | `WORKSTACEAN_API_KEY` | No | API key for `/publish` endpoint |
 | `WORKSTACEAN_BASE_URL` | For A2A push notifications | Externally-reachable URL of the workstacean API (e.g. `http://ava:8081`). Stamped into push-notification callback URLs registered with remote A2A agents that advertise `capabilities.pushNotifications: true`. Unset → silently falls back to task polling. |
-| `GRAPHITI_URL` | For memory enrichment | Base URL of the Graphiti knowledge-graph service (default: `http://graphiti:8000`). Skill dispatcher pulls `<recalled_memory>` context before every user-originated skill call and writes episodic memory on success. |
+| `GRAPHITI_URL` | For memory enrichment | Base URL of the Graphiti knowledge-graph service (default: `http://graphiti:8000`). Skill dispatcher pulls `<recalled_memory>` context before every user-originated skill call and writes episodic memory on success. Memory enrichment applies to all channels (Discord, GitHub, Plane, Slack, Signal) — not just Discord. |
+| `ROUTER_DM_DEFAULT_AGENT` | For DM conversations | Agent to route Discord DMs to when no keyword matches (e.g. `quinn`). Required to enable natural DM conversations. |
+| `ROUTER_DM_DEFAULT_SKILL` | For DM conversations | Skill used for DMs routed by `ROUTER_DM_DEFAULT_AGENT` (default: `chat`). |
+| `DM_CONVERSATION_TIMEOUT_MS` | For DM conversations | Idle timeout (ms) before a DM conversation session expires (default: `900000` = 15 min). |
 | `ANTHROPIC_API_KEY` | For in-process agents | Claude API key |
 
 Full list: see `.env.dist`.
@@ -79,7 +82,7 @@ Plugins are loaded in `src/index.ts`. Each implements `install(bus) / uninstall(
 | `ActionDispatcherPlugin` | always | Executes planned actions with WIP limit |
 | `AgentFleetHealthPlugin` | always | Aggregates `autonomous.outcome.#` over a rolling 24h window; exposes `agent_fleet_health` world-state domain for fleet goals |
 | `CeremonyPlugin` | always | Scheduled fleet rituals from `workspace/ceremonies/*.yaml` |
-| `DiscordPlugin` | `DISCORD_BOT_TOKEN` | Discord gateway |
+| `DiscordPlugin` | `DISCORD_BOT_TOKEN` | Discord gateway; multi-bot pool from `channels.yaml`; `ConversationManager` tracks per-user conversation sessions for multi-turn DMs and opted-in guild channels |
 | `GitHubPlugin` | `GITHUB_TOKEN` or `GITHUB_APP_ID` | GitHub webhooks |
 | `PlanePlugin` | always | Plane webhook adapter |
 | `EchoPlugin` | `ENABLED_PLUGINS=echo` | Test echo |

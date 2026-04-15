@@ -68,7 +68,7 @@ All bus topics published and subscribed across all plugins and subsystems. Topic
 
 | Topic | Direction | Publisher | Subscriber | Description |
 |-------|-----------|-----------|------------|-------------|
-| `message.inbound.discord.<channelId>` | Inbound | DiscordPlugin | RouterPlugin | @mention or DM received |
+| `message.inbound.discord.<channelId>` | Inbound | DiscordPlugin | RouterPlugin | @mention, guild channel message, or DM received |
 | `message.inbound.discord.slash.<interactionId>` | Inbound | DiscordPlugin | RouterPlugin | Slash command invoked |
 | `message.outbound.discord.<channelId>` | Outbound | Agents | DiscordPlugin | Reply to a specific channel |
 | `message.outbound.discord.push.<channelId>` | Outbound | CeremonyPlugin, ActionDispatcherPlugin | DiscordPlugin | Unprompted push (cron result, alert) |
@@ -76,15 +76,19 @@ All bus topics published and subscribed across all plugins and subsystems. Topic
 **Inbound payload**:
 ```typescript
 {
-  sender: string;       // Discord user ID
-  channel: string;      // Discord channel ID
-  content: string;      // Cleaned message (mentions stripped)
-  skillHint?: string;   // Set by slash commands and reaction handlers
+  sender: string;         // Discord user ID
+  channel: string;        // Discord channel ID
+  content: string;        // Cleaned message (mentions stripped)
+  skillHint?: string;     // Set by slash commands and reaction handlers
   isReaction?: boolean;
   isThread?: boolean;
   guildId?: string;
+  correlationId: string;  // Stable conversationId for multi-turn sessions — reused
+                          // across turns by ConversationManager, becomes the A2A contextId
 }
 ```
+
+**Multi-turn conversations**: when `conversation.enabled: true` is set for a channel in `workspace/channels.yaml`, `ConversationManager` assigns a stable `conversationId` to each `(channelId, userId)` pair. This ID flows as `correlationId` on every turn, becoming the A2A `contextId` so agents have full conversation memory. DMs are always conversation-enabled (no YAML needed). RouterPlugin applies DM conversation stickiness — once a skill/agent is matched, subsequent DM turns reuse the same target without re-running keyword matching.
 
 ---
 
