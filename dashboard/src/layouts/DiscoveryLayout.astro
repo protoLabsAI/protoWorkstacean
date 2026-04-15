@@ -1,0 +1,17 @@
+---
+// DiscoveryLayout — wraps the standard dashboard shell for discovery-driven plugin pages.
+// Used by [dynamic].astro to render widgets fetched from /api/widgets.
+import DashboardLayout from "./DashboardLayout.astro";
+
+export interface Props {
+  title: string;
+  /** Sidebar nav item to highlight. Defaults to "discovery". */
+  activePage?: string;
+}
+
+const { title, activePage = "discovery" } = Astro.props;
+---
+
+<DashboardLayout title={title} activePage={activePage}>
+  <slot />
+</DashboardLayout>

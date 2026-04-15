@@ -13,67 +13,19 @@
  * Outbound: {replyTopic}  (from msg.reply.topic or agent.skill.response.{correlationId})
  */
 
-import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
+import type { Plugin, EventBus, BusMessage, ConversationTurn, LoggerTurnQueryRequest, LoggerTurnQueryResponse } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "./executor-registry.ts";
 import type { SkillRequest } from "./types.ts";
 import type { AgentSkillRequestPayload, AutonomousOutcomePayload, FlowItemPayload } from "../event-bus/payloads.ts";
 import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
-import type { LoggerPlugin, ConversationTurn } from "../../lib/plugins/logger.ts";
+import { assembleContext } from "../../lib/conversation/context-assembler.ts";
 import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "./task-tracker.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
 import { SessionStore } from "../agent-runtime/session-context.ts";
 
 const WORKING_STATES = new Set(["submitted", "working"]);
-
-/**
- * Assemble a structured context envelope for the agent prompt.
- *
- * Pure function — no side effects, suitable for unit testing.
- *
- * Sections emitted (in order, only when non-empty):
- *   <recalled_memory>  — Graphiti facts retrieved for this user
- *   <recent_conversation> — last N turns from LoggerPlugin
- *   <current_message>  — the user's actual input (always emitted)
- *
- * When there is no history (no memory, no turns), only <current_message>
- * is emitted — no empty XML tags.
- */
-export function assembleContext(
-  recalledMemory: string | undefined,
-  recentTurns: ConversationTurn[],
-  currentMessage: string,
-): string {
-  const parts: string[] = [];
-
-  if (recalledMemory) {
-    parts.push(
-      `<recalled_memory>\n` +
-      `The following facts were retrieved from your memory about this user. ` +
-      `Use them as background context if relevant — do NOT repeat them back ` +
-      `to the user or reference them unless the user's message specifically ` +
-      `asks about something they relate to. Focus your response on what the ` +
-      `user is actually saying below.\n\n` +
-      `${recalledMemory}\n` +
-      `</recalled_memory>`,
-    );
-  }
-
-  if (recentTurns.length > 0) {
-    const turnLines = recentTurns.map(turn => {
-      const ts = new Date(turn.createdAt).toISOString();
-      const channelSuffix = turn.channel ? ` [${turn.channel}]` : "";
-      const label = turn.role === "user" ? "User" : "Assistant";
-      return `[${ts}${channelSuffix}] ${label}: ${turn.content}`;
-    });
-    parts.push(`<recent_conversation>\n${turnLines.join("\n")}\n</recent_conversation>`);
-  }
-
-  parts.push(`<current_message>\n${currentMessage}\n</current_message>`);
-
-  return parts.join("\n\n");
-}
 
 /**
  * Classify a skill name into a flow item type for distribution tracking.
@@ -98,7 +50,6 @@ export class SkillDispatcherPlugin implements Plugin {
   private readonly subscriptionIds: string[] = [];
   private readonly graphiti: GraphitiClient;
   private readonly identityRegistry: IdentityRegistry;
-  private readonly loggerPlugin: LoggerPlugin | undefined;
   private readonly mailbox: ContextMailbox | undefined;
   private readonly taskTracker: TaskTracker | undefined;
   private readonly sessionStore: SessionStore;
@@ -116,8 +67,6 @@ export class SkillDispatcherPlugin implements Plugin {
     workspaceDir: string,
     /** Injectable for testing — defaults to a real GraphitiClient. */
     graphiti?: GraphitiClient,
-    /** Injectable for testing — provides recent conversation turns. */
-    loggerPlugin?: LoggerPlugin,
     /** Optional mailbox for mid-execution DM queuing. */
     mailbox?: ContextMailbox,
     /** Optional tracker for long-running A2A tasks. */
@@ -127,7 +76,6 @@ export class SkillDispatcherPlugin implements Plugin {
   ) {
     this.graphiti = graphiti ?? new GraphitiClient();
     this.identityRegistry = new IdentityRegistry(workspaceDir);
-    this.loggerPlugin = loggerPlugin;
     this.mailbox = mailbox;
     this.taskTracker = taskTracker;
     this.sessionStore = sessionStore ?? new SessionStore();
@@ -136,6 +84,51 @@ export class SkillDispatcherPlugin implements Plugin {
   /** Check if an execution is currently active for a given correlationId. */
   isActive(correlationId: string): boolean {
     return this.activeExecutions.has(correlationId);
+  }
+
+  /**
+   * Query LoggerPlugin for recent conversation turns via the bus.
+   * Resolves with [] if LoggerPlugin is not installed (timeout) or on any error.
+   */
+  private _queryRecentTurns(userId: string, agentName: string): Promise<ConversationTurn[]> {
+    if (!this.bus) return Promise.resolve([]);
+
+    return new Promise<ConversationTurn[]>((resolve) => {
+      const replyTopic = `logger.turn.query.response.${crypto.randomUUID()}`;
+      let settled = false;
+
+      const subId = this.bus!.subscribe(replyTopic, this.name, (msg: BusMessage) => {
+        if (settled) return;
+        settled = true;
+        this.bus!.unsubscribe(subId);
+        resolve((msg.payload as LoggerTurnQueryResponse).turns);
+      });
+
+      this.bus!.publish("logger.turn.query", {
+        id: crypto.randomUUID(),
+        correlationId: crypto.randomUUID(),
+        topic: "logger.turn.query",
+        timestamp: Date.now(),
+        payload: {
+          type: "logger.turn.query",
+          userId,
+          agentName,
+          limit: 8,
+          maxAgeMs: 24 * 60 * 60 * 1000,
+          replyTopic,
+        } satisfies LoggerTurnQueryRequest,
+      });
+
+      // Fallback: LoggerPlugin responds synchronously, so if not installed
+      // the timeout fires at next tick and we continue without turns.
+      setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          this.bus?.unsubscribe(subId);
+          resolve([]);
+        }
+      }, 0);
+    });
   }
 
   install(bus: EventBus): void {
@@ -266,14 +259,9 @@ export class SkillDispatcherPlugin implements Plugin {
       ]);
       const combined = [sharedCtx, agentCtx].filter(Boolean).join("\n");
 
-      // Retrieve recent turns for human-originated messages only
-      const recentTurns: ConversationTurn[] = (this.loggerPlugin && sourceUserId)
-        ? this.loggerPlugin.getRecentTurnsForUser(
-            sourceUserId,
-            targets[0] ?? "",
-            8,
-            24 * 60 * 60 * 1000,
-          )
+      // Retrieve recent turns for human-originated messages only via bus query
+      const recentTurns: ConversationTurn[] = sourceUserId
+        ? await this._queryRecentTurns(sourceUserId, targets[0] ?? "")
         : [];
 
       rawContent = assembleContext(combined || undefined, recentTurns, rawContent);
@@ -477,6 +465,7 @@ export class SkillDispatcherPlugin implements Plugin {
           agentName: targets[0],
           channelId: sourceChannelId,
           platform: sourcePlatform ?? (systemActor ? "system" : undefined),
+          parentTurnId: correlationId,
         };
         this.graphiti.addEpisode({ groupId, ...episodeBase })
           .catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode (shared) error:", err));

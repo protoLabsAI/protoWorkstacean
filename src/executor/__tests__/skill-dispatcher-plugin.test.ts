@@ -1,5 +1,6 @@
 import { describe, it, expect, mock, spyOn, beforeEach, afterEach } from "bun:test";
-import { SkillDispatcherPlugin, assembleContext } from "../skill-dispatcher-plugin.ts";
+import { SkillDispatcherPlugin } from "../skill-dispatcher-plugin.ts";
+import { assembleContext } from "../../../lib/conversation/context-assembler.ts";
 import { ExecutorRegistry } from "../executor-registry.ts";
 import { FunctionExecutor } from "../executors/function-executor.ts";
 import { ProtoSdkExecutor } from "../executors/proto-sdk-executor.ts";
@@ -9,7 +10,7 @@ import type { BusMessage } from "../../../lib/types.ts";
 import type { SkillRequest, SkillResult } from "../types.ts";
 import type { AgentDefinition } from "../../agent-runtime/types.ts";
 import type { GraphitiClient } from "../../../lib/memory/graphiti-client.ts";
-import type { ConversationTurn } from "../../../lib/plugins/logger.ts";
+import type { ConversationTurn } from "../../../lib/types.ts";
 
 // Minimal in-memory event bus for tests
 function makeBus() {
@@ -352,10 +353,10 @@ describe("SkillDispatcherPlugin — memory enrichment", () => {
 function makeTurn(overrides: Partial<ConversationTurn> = {}): ConversationTurn {
   return {
     role: "user",
-    content: "Hello",
-    channel: "discord",
-    skill: "chat",
-    createdAt: new Date("2024-01-01T12:00:00.000Z").getTime(),
+    text: "Hello",
+    channelId: "discord",
+    agentName: "chat",
+    timestamp: new Date("2024-01-01T12:00:00.000Z").getTime(),
     ...overrides,
   };
 }
@@ -380,8 +381,8 @@ describe("assembleContext", () => {
 
   it("includes <recent_conversation> when turns are provided", () => {
     const turns = [
-      makeTurn({ role: "user", content: "What time is it?", channel: "discord" }),
-      makeTurn({ role: "assistant", content: "It is noon.", channel: "discord" }),
+      makeTurn({ role: "user", text: "What time is it?", channelId: "discord" }),
+      makeTurn({ role: "assistant", text: "It is noon.", channelId: "discord" }),
     ];
     const result = assembleContext(undefined, turns, "Thanks");
     expect(result).toContain("<recent_conversation>");
@@ -392,10 +393,10 @@ describe("assembleContext", () => {
     expect(result).toContain("<current_message>");
   });
 
-  it("labels turns with ISO timestamp, channel, and role", () => {
+  it("labels turns with ISO timestamp, channelId, and role", () => {
     const ts = new Date("2024-06-15T09:30:00.000Z").getTime();
     const turns = [
-      makeTurn({ role: "user", content: "Hi", channel: "slack", createdAt: ts }),
+      makeTurn({ role: "user", text: "Hi", channelId: "slack", timestamp: ts }),
     ];
     const result = assembleContext(undefined, turns, "Next");
     expect(result).toContain("2024-06-15T09:30:00.000Z");
@@ -403,21 +404,21 @@ describe("assembleContext", () => {
     expect(result).toContain("User:");
   });
 
-  it("omits channel suffix when channel is undefined", () => {
-    const turns = [makeTurn({ channel: undefined })];
+  it("omits channel suffix when channelId is empty", () => {
+    const turns = [makeTurn({ channelId: "" })];
     const result = assembleContext(undefined, turns, "Next");
-    expect(result).not.toMatch(/\[undefined\]/);
+    expect(result).not.toMatch(/\[\]/);
     expect(result).toContain("User:");
   });
 
   it("labels assistant turns correctly", () => {
-    const turns = [makeTurn({ role: "assistant", content: "Hello!" })];
+    const turns = [makeTurn({ role: "assistant", text: "Hello!" })];
     const result = assembleContext(undefined, turns, "Next");
     expect(result).toContain("Assistant:");
   });
 
   it("emits all three sections in correct order when all data present", () => {
-    const turns = [makeTurn({ content: "Previous question" })];
+    const turns = [makeTurn({ text: "Previous question" })];
     const result = assembleContext("Some facts", turns, "Current question");
 
     const rmPos = result.indexOf("<recalled_memory>");

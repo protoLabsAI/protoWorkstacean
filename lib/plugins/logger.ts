@@ -1,15 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { Plugin, EventBus, BusMessage } from "../types";
-
-export interface ConversationTurn {
-  role: "user" | "assistant";
-  content: string;
-  channel: string | undefined;
-  skill: string | undefined;
-  createdAt: number;
-}
+import type { Plugin, EventBus, BusMessage, LoggerTurnQueryRequest, LoggerTurnQueryResponse, ConversationTurn } from "../types";
 
 export class LoggerPlugin implements Plugin {
   name = "logger";
@@ -18,6 +10,8 @@ export class LoggerPlugin implements Plugin {
 
   private db: Database | null = null;
   private subscriptionId: string | null = null;
+  private querySubscriptionId: string | null = null;
+  private bus: EventBus | null = null;
   private dataDir: string;
 
   constructor(dataDir: string) {
@@ -51,9 +45,25 @@ export class LoggerPlugin implements Plugin {
       this.db.exec("ALTER TABLE events ADD COLUMN parent_id TEXT");
     }
 
+    this.bus = bus;
+
     this.subscriptionId = bus.subscribe("#", this.name, (msg: BusMessage) => {
       if (msg.topic.startsWith("debug.")) return;
       this.log(msg);
+    });
+
+    this.querySubscriptionId = bus.subscribe("logger.turn.query", this.name, (msg: BusMessage) => {
+      const req = msg.payload as LoggerTurnQueryRequest;
+      const turns = this.getRecentTurnsForUser(req.userId, req.agentName, req.limit, req.maxAgeMs);
+      const response: LoggerTurnQueryResponse = { type: "logger.turn.query.response", turns };
+      bus.publish(req.replyTopic, {
+        id: crypto.randomUUID(),
+        correlationId: msg.correlationId,
+        parentId: msg.id,
+        topic: req.replyTopic,
+        timestamp: Date.now(),
+        payload: response,
+      });
     });
   }
 
@@ -161,24 +171,25 @@ export class LoggerPlugin implements Plugin {
       if (!request) continue;
 
       const reqPayload = request.payload as { skill?: string; content?: string; targets?: string[] };
-      const channel = request.source?.interface;
+      const channelId = request.source?.channelId ?? "";
+      const agentName = reqPayload.targets?.[0] ?? "";
 
       turns.push({
         role: "user",
-        content: reqPayload.content ?? "",
-        channel,
-        skill: reqPayload.skill,
-        createdAt: request.timestamp,
+        text: reqPayload.content ?? "",
+        channelId,
+        agentName,
+        timestamp: request.timestamp,
       });
 
       if (response) {
         const resPayload = response.payload as { content?: string; error?: string };
         turns.push({
           role: "assistant",
-          content: resPayload.content ?? resPayload.error ?? "",
-          channel,
-          skill: reqPayload.skill,
-          createdAt: response.timestamp,
+          text: resPayload.content ?? resPayload.error ?? "",
+          channelId,
+          agentName,
+          timestamp: response.timestamp,
         });
       }
     }

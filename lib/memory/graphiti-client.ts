@@ -95,11 +95,17 @@ export class GraphitiClient {
     channelId?: string;
     platform?: string;
     timestamp?: Date;
+    /** Sequential turn number within the conversation — used to reconstruct threading. */
+    turnNumber?: number;
+    /** ID of the parent turn — used to reconstruct threading across correlated exchanges. */
+    parentTurnId?: string;
   }): Promise<void> {
     const ts = (params.timestamp ?? new Date()).toISOString();
-    const source = params.channelId && params.platform
+    let source = params.channelId && params.platform
       ? `${params.platform} channel ${params.channelId}`
       : (params.platform ?? "unknown");
+    if (params.turnNumber !== undefined) source += ` | turn:${params.turnNumber}`;
+    if (params.parentTurnId !== undefined) source += ` | parent:${params.parentTurnId}`;
 
     await this._post("/messages", {
       group_id: params.groupId,
