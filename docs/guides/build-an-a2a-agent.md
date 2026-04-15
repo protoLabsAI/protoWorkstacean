@@ -155,9 +155,60 @@ async def _push(record):
         task.add_done_callback(_pending_webhook_tasks.discard)
 ```
 
+### 6. Producer must be independent of the SSE connection
+
+If your agent implements `message/sendStream`, the HTTP SSE generator and the LangGraph (or similar) producer should not be the same task. When the SSE client disconnects mid-run, FastAPI cancels the generator — if the producer is inline, it dies with the connection and any `:subscribe` reconnect has no task to attach to.
+
+**Pattern:** always spawn the producer as a background task owned by the task record, regardless of which entry point created the task. The SSE generator becomes a pure consumer that reads from the store and awaits the rotating `_update_event`. Drop the SSE connection → producer keeps running → reconnect via `:subscribe` picks up cleanly.
+
+```python
+# Shared consumer used by both message/sendStream and :subscribe
+async def _watch_task(task_id, start_text_len=0):
+    record = await _store.get(task_id)
+    if record is None:
+        return
+    last_sent_len = start_text_len
+    yield ("status", record, None)
+    if record.accumulated_text and len(record.accumulated_text) > last_sent_len:
+        yield ("text_delta", record, record.accumulated_text[last_sent_len:])
+        last_sent_len = len(record.accumulated_text)
+    if record.state in _TERMINAL:
+        return
+    while True:
+        r = await _store.get(task_id)
+        if r is None:
+            return
+        try:
+            await asyncio.wait_for(r._update_event.wait(), timeout=25)
+        except asyncio.TimeoutError:
+            yield ("keepalive", None, None)
+            continue
+        r = await _store.get(task_id)
+        if r is None:
+            return
+        yield ("status", r, None)
+        if r.accumulated_text and len(r.accumulated_text) > last_sent_len:
+            yield ("text_delta", r, r.accumulated_text[last_sent_len:])
+            last_sent_len = len(r.accumulated_text)
+        if r.state in _TERMINAL:
+            return
+```
+
+Both SSE routes catch `asyncio.CancelledError` (FastAPI raises this on client disconnect), log the drop, and re-raise — the background task is never cancelled.
+
+### 7. Emit text deltas, not the full accumulated text
+
+On `:subscribe` reconnect, the initial snapshot can emit the full `accumulated_text` once as an `append: false` frame. Every subsequent update must emit **only the new suffix** as `append: true`. Clients that receive the full text on every update see duplicated content on the wire (the subscribe snapshot already gave them the pre-disconnect portion). Track `last_sent_len` in your consumer and emit `text[last_sent_len:]`.
+
+### 8. Persist tool-progress messages on the record
+
+If the producer emits in-process events like `tool_start` / `tool_end` that your SSE path currently surfaces as status messages, those are invisible to a `:subscribe` reconnect — the subscriber reads the store, not the producer's event queue. Store the most recent tool message on the task record (e.g. `record.last_status_message: str | None`) via your `update_state(status_message=...)` call. Surface it under `status.message` in status events. Clear on terminal transitions so subscribers on a completed task see the final state cleanly.
+
 ## Streaming (optional)
 
 See [A2A Streaming (SSE)](./a2a-streaming) for the full SSE event protocol. Short version: advertise `capabilities.streaming: true`, accept `method: "message/sendStream"` on `/a2a` and `POST /message:stream`, emit `text/event-stream` frames as work progresses. `A2AExecutor` on Workstacean's side switches transport automatically based on the card; your `message/send` consumers stay unchanged.
+
+Terminal frames (`COMPLETED`) should carry the authoritative full artifact — text + any [worldstate-delta](../extensions/worldstate-delta-v1) DataParts — as `append: false, last_chunk: true`. Mid-run stays incremental via `append: true` text deltas only.
 
 ## Push notifications
 
@@ -271,12 +322,47 @@ Example body for `create`:
 
 **On update — do not re-enable by default.** The tool must treat `enabled` as present-only on update requests (not pass it through unless the caller explicitly set it) — otherwise every update silently re-enables paused ceremonies. This bit us in Quinn PR #12; see the `enabled: bool | None = None` pattern in `tools/lg_tools.py::manage_cron` for the fix.
 
+## Gold-standard checklist
+
+A protoAgent that ticks all of these is a first-class fleet citizen — routing, streaming, scheduling, observability, and planner ranking all work without any Workstacean-side tailoring:
+
+### Transport & lifecycle
+- [ ] `GET /.well-known/agent-card.json` + `/.well-known/agent.json` both serve the card
+- [ ] `capabilities.streaming: true` matches a real `message/sendStream` implementation
+- [ ] `capabilities.pushNotifications: true` matches a real `POST /tasks/{id}/pushNotificationConfigs` implementation
+- [ ] `message/send` returns a `Task` with `state: submitted` in under 1s (never blocks on work)
+- [ ] `GET /tasks/{id}` reflects current state + artifact
+- [ ] `POST /tasks/{id}:cancel` is atomic and fires a push notification
+- [ ] `GET /tasks/{id}:subscribe` can reattach to an in-flight task after SSE disconnect
+
+### Task store hygiene
+- [ ] Terminal tasks evict on a TTL (default 1h)
+- [ ] Webhook delivery tasks have strong references (Python 3.11 GC trap)
+- [ ] Cancel is an atomic `check-and-write` under the lock
+- [ ] Webhook URLs pass SSRF validation (loopback / RFC1918 / link-local rejected)
+- [ ] Push config read from the live record on every delivery, not closed over
+- [ ] Background producer runs independently of any SSE connection
+
+### SSE semantics
+- [ ] Text deltas only on `append: true` — never the full `accumulated_text`
+- [ ] Terminal frame is the authoritative full artifact, `append: false, last_chunk: true`
+- [ ] Tool status messages persist on the record for `:subscribe` to surface
+- [ ] Consumer disconnect does not cancel the producer
+
+### Extensions (cards + runtime)
+- [ ] [`effect-domain-v1`](../extensions/effect-domain-v1) declared on the card for every state-mutating skill (enables L1 planner ranking)
+- [ ] [`worldstate-delta-v1`](../extensions/worldstate-delta-v1) DataPart emitted on the terminal task whenever a tool with known effects succeeds (declared effects must agree with observed deltas — a drift test is cheap)
+- [ ] [`cost-v1`](../extensions/cost-v1) `{usage, durationMs, costUsd}` populated on the terminal task
+- [ ] [`confidence-v1`](../extensions/confidence-v1) `{confidence, explanation}` populated when the agent can self-assess
+- [ ] Success contract: `state: completed` means the agent actually achieved the goal, not just that the skill returned without crashing
+
 ## Reference implementations
 
-- **[`protoPen/a2a_handler.py`](https://github.com/protoLabsAI/protoPen/blob/main/a2a_handler.py)** — original implementation. Complete A2A spec surface in a single 724-line file.
-- **[`Quinn/a2a_handler.py`](https://github.com/protoLabsAI/quinn/blob/main/a2a_handler.py)** — protoPen's handler ported with the hardening described above (TTL, task retention, live push config, atomic cancel, SSRF guard).
-- **[`Quinn/tools/manage_cron.py`](https://github.com/protoLabsAI/quinn/blob/main/tools/manage_cron.py)** — minimal LangGraph tool that CRUDs ceremonies via the per-agent key.
-- **[`Quinn/tests/test_a2a_handler.py`](https://github.com/protoLabsAI/quinn/blob/main/tests/test_a2a_handler.py)** — 38 tests covering task store, background runner, SSRF, cancel races, webhook retention. Clone this alongside the handler.
+- **[`Quinn/a2a_handler.py`](https://github.com/protoLabsAI/quinn/blob/main/a2a_handler.py)** — the most complete reference. All of the hardening above + decoupled SSE producer + delta-only text frames + tool-message persistence. Single 800-line file, no inheritance.
+- **[`Quinn/server.py`](https://github.com/protoLabsAI/quinn/blob/main/server.py)** — agent-side wiring. `_chat_langgraph_stream` maps LangGraph `astream_events(v2)` to the `(tool_start|tool_end|text|delta|done|error)` tuple contract the handler consumes. `_build_agent_card` shows `capabilities.extensions` with `effect-domain-v1`. `_worldstate_delta_for_tool` emits the runtime delta on `file_bug` success.
+- **[`Quinn/tools/manage_cron.py`](https://github.com/protoLabsAI/quinn/blob/main/tools/manage_cron.py)** — LangGraph tool that CRUDs ceremonies via the per-agent `X-API-Key`.
+- **[`Quinn/tests/test_a2a_handler.py`](https://github.com/protoLabsAI/quinn/blob/main/tests/test_a2a_handler.py)** — ~55 tests covering the store, background runner, SSRF, cancel races, webhook retention, subscribe reconnect, delta-only text, producer survives consumer cancellation. Clone this alongside the handler.
+- **[`protoPen/a2a_handler.py`](https://github.com/protoLabsAI/protoPen/blob/main/a2a_handler.py)** — original port target. Predates Quinn's hardening; lacks decoupled SSE producer, SSRF guard, webhook retention, atomic cancel. Kept as a reference for the minimum viable spec surface, but new agents should mirror Quinn's version.
 
 ## Related
 
@@ -284,3 +370,4 @@ Example body for `create`:
 - [A2A Streaming (SSE)](./a2a-streaming) — SSE event protocol in detail
 - [Create a Ceremony](./create-a-ceremony) — ceremony YAML schema
 - [Workspace files reference](../../reference/workspace-files)
+- [`effect-domain-v1`](../extensions/effect-domain-v1), [`worldstate-delta-v1`](../extensions/worldstate-delta-v1), [`cost-v1`](../extensions/cost-v1), [`confidence-v1`](../extensions/confidence-v1) — the four A2A extensions covered by the planner's ranking model
