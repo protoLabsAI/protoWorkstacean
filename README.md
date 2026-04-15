@@ -19,7 +19,7 @@ External surfaces (GitHub, Discord, Plane, HTTP)
 World engine loop (parallel):
   WorldStateEngine (domain pollers)
     → GoalEvaluatorPlugin → world.goal.violated
-      → PlannerPluginL0 → world.action.plan
+      → PlannerPluginL0 → world.action.dispatch
         → ActionDispatcherPlugin → agent.skill.request
 ```
 
@@ -77,6 +77,7 @@ Plugins are loaded in `src/index.ts`. Each implements `install(bus) / uninstall(
 | `GoalEvaluatorPlugin` | always | Evaluates `workspace/goals.yaml` against world state |
 | `PlannerPluginL0` | always | Maps violated goals → actions from `ActionRegistry` |
 | `ActionDispatcherPlugin` | always | Executes planned actions with WIP limit |
+| `AgentFleetHealthPlugin` | always | Aggregates `autonomous.outcome.#` over a rolling 24h window; exposes `agent_fleet_health` world-state domain for fleet goals |
 | `CeremonyPlugin` | always | Scheduled fleet rituals from `workspace/ceremonies/*.yaml` |
 | `DiscordPlugin` | `DISCORD_BOT_TOKEN` | Discord gateway |
 | `GitHubPlugin` | `GITHUB_TOKEN` or `GITHUB_APP_ID` | GitHub webhooks |
@@ -95,6 +96,9 @@ The executor layer is the unified dispatch path for all agent skill calls.
 ExecutorRegistry.resolve(skill, targets?)
   1. Named target match — any registration whose agentName is in targets[]
   2. Skill-specific match — sorted by priority desc
+     └─ If multiple agents qualify: health-weighted random selection (Arc 8.4)
+        weight = successRate × (1 / (1 + costPerSuccessfulOutcome))
+        New agents with no data get neutral weight 1.0
   3. Default executor
   4. null → SkillDispatcherPlugin logs and publishes error response
 ```
