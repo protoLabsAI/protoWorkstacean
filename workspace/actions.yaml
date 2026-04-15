@@ -507,3 +507,41 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+
+  # ── Agent fleet health (Arc 8) ────────────────────────────────────
+
+  - id: alert.fleet_skill_orphaned
+    goalId: fleet.no_skill_orphaned
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert on orphaned skills — active skills with no success in 24h window"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.orphanedSkillCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: action.fleet_investigate_orphaned_skills
+    goalId: fleet.no_skill_orphaned
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Dispatch Ava to investigate orphaned skills and diagnose capability regression"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.orphanedSkillCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      skillHint: investigate_orphaned_skills
+      agentId: ava
+      fireAndForget: true

@@ -63,6 +63,12 @@ export interface FleetHealthSnapshot {
   agents: AgentFleetMetrics[];
   /** Always 24 — documents the rolling window. */
   windowHours: 24;
+  /**
+   * Count of skills seen in any outcome in the 24h window that have had
+   * no successful execution during that window. > 0 signals capability
+   * regression — a skill is active but consistently failing.
+   */
+  orphanedSkillCount: number;
   collectedAt: number;
 }
 
@@ -108,12 +114,21 @@ export class AgentFleetHealthPlugin implements Plugin {
     const cutoff = now - WINDOW_MS;
     const agents: AgentFleetMetrics[] = [];
 
+    // Per-skill: track whether any success exists in the window.
+    const skillSeenInWindow = new Set<string>();
+    const skillHasSuccessInWindow = new Set<string>();
+
     for (const [agentName, records] of this.agentWindows) {
       // Prune stale records
       const fresh = records.filter(r => r.timestamp >= cutoff);
       this.agentWindows.set(agentName, fresh);
 
       if (fresh.length === 0) continue;
+
+      for (const r of fresh) {
+        skillSeenInWindow.add(r.skill);
+        if (r.success) skillHasSuccessInWindow.add(r.skill);
+      }
 
       const successes = fresh.filter(r => r.success);
       const failures = fresh.filter(r => !r.success);
@@ -148,7 +163,12 @@ export class AgentFleetHealthPlugin implements Plugin {
       });
     }
 
-    return { agents, windowHours: 24, collectedAt: now };
+    let orphanedSkillCount = 0;
+    for (const skill of skillSeenInWindow) {
+      if (!skillHasSuccessInWindow.has(skill)) orphanedSkillCount++;
+    }
+
+    return { agents, windowHours: 24, orphanedSkillCount, collectedAt: now };
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────

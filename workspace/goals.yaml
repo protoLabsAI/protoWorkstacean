@@ -199,3 +199,11 @@ goals:
     selector: "domains.hitl_queue.data.pendingCount"
     max: 10
     description: "HITL pending queue should not exceed 10 — escalations are piling up faster than humans can clear them"
+
+  # ── Agent fleet health (Arc 8) ───────────────────────────────────
+  - id: fleet.no_skill_orphaned
+    type: Threshold
+    severity: high
+    selector: "domains.agent_fleet_health.data.orphanedSkillCount"
+    max: 0
+    description: "Every skill seen in the 24h window must have at least one successful execution — orphaned skills (active but never succeeding) signal capability regression"

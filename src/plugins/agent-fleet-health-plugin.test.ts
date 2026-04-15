@@ -197,6 +197,43 @@ describe("AgentFleetHealthPlugin", () => {
     }
   });
 
+  test("orphanedSkillCount is 0 when all skills have at least one success", async () => {
+    bus.publish("autonomous.outcome.completed", makeOutcomeMsg({ systemActor: "ava", skill: "plan", success: true, durationMs: 100 }));
+    bus.publish("autonomous.outcome.failed", makeOutcomeMsg({ systemActor: "ava", skill: "plan", success: false, durationMs: 100 }));
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const snapshot = plugin.getFleetHealth();
+    expect(snapshot.orphanedSkillCount).toBe(0);
+  });
+
+  test("orphanedSkillCount counts skills with no success in window", async () => {
+    bus.publish("autonomous.outcome.failed", makeOutcomeMsg({ systemActor: "ava", skill: "sweep", success: false, durationMs: 100 }));
+    bus.publish("autonomous.outcome.failed", makeOutcomeMsg({ systemActor: "quinn", skill: "review", success: false, durationMs: 200 }));
+    bus.publish("autonomous.outcome.completed", makeOutcomeMsg({ systemActor: "ava", skill: "plan", success: true, durationMs: 100 }));
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const snapshot = plugin.getFleetHealth();
+    // "sweep" and "review" have only failures; "plan" has a success
+    expect(snapshot.orphanedSkillCount).toBe(2);
+  });
+
+  test("orphanedSkillCount is 0 when no outcomes recorded", () => {
+    const snapshot = plugin.getFleetHealth();
+    expect(snapshot.orphanedSkillCount).toBe(0);
+  });
+
+  test("same skill across agents — counts as not orphaned if any agent succeeded", async () => {
+    bus.publish("autonomous.outcome.failed", makeOutcomeMsg({ systemActor: "ava", skill: "plan", success: false, durationMs: 100 }));
+    bus.publish("autonomous.outcome.completed", makeOutcomeMsg({ systemActor: "quinn", skill: "plan", success: true, durationMs: 100 }));
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const snapshot = plugin.getFleetHealth();
+    expect(snapshot.orphanedSkillCount).toBe(0);
+  });
+
   test("uninstall cleans up subscription", () => {
     plugin.uninstall();
     // After uninstall, publishing should not throw or add records
