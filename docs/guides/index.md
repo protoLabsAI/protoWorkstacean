@@ -21,7 +21,8 @@ Task-oriented guides for common operations in protoWorkstacean.
 If you have just completed the [Getting Started tutorial](../../tutorials/getting-started), the natural next guides are:
 
 1. **[Add an agent](./add-an-agent)** — bring your own agent into the fleet
-2. **[Add goals and actions](./add-goals-and-actions)** — let the world engine react autonomously to state changes
-3. **[Create a ceremony](./create-a-ceremony)** — schedule recurring work
+2. **[Build an A2A agent](./build-an-a2a-agent)** — opinionated recipe for writing the agent itself (endpoint, task lifecycle, hardening, automatic health)
+3. **[Add goals and actions](./add-goals-and-actions)** — let the world engine react autonomously to state changes
+4. **[Create a ceremony](./create-a-ceremony)** — schedule recurring work
 
 For background on why things work the way they do, see the [Explanation](../../explanation/index) section.
