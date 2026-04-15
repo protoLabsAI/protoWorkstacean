@@ -29,12 +29,25 @@ interface AgentHealthMetrics {
 
 type HealthGetter = () => AgentHealthMetrics[];
 
+/**
+ * Optional hook called after standard resolution.
+ * Receives (skill, targets, resolved) where resolved is the standard result.
+ * Return a different executor to override, or resolved to keep the default.
+ * Used by SkillAbTestPlugin to intercept specific skills under A/B test.
+ */
+export type ResolveHook = (
+  skill: string,
+  targets: string[],
+  resolved: IExecutor | null,
+) => IExecutor | null;
+
 export class ExecutorRegistry {
   private readonly _registrations: ExecutorRegistration[] = [];
   private _default: IExecutor | null = null;
   /** Secondary index: `${domain}::${path}` → EffectRegistration[] */
   private readonly _effectIndex = new Map<string, EffectRegistration[]>();
   private _healthGetter: HealthGetter | null = null;
+  private _resolveHook: ResolveHook | null = null;
 
   /**
    * Inject a live fleet-health snapshot provider (Arc 8.4).
@@ -84,12 +97,27 @@ export class ExecutorRegistry {
       }
     }
 
-    // 2. Skill-specific match with optional health-weighted selection
+    // 2. Skill-specific match — health-weighted ordering when a health
+    //    getter is registered (Arc 8.4), priority sort otherwise.
     const bySkill = this._registrations.filter(r => r.skill === skill);
-    if (bySkill.length > 0) return this._resolveByHealth(bySkill);
+    const resolved = bySkill.length > 0
+      ? this._resolveByHealth(bySkill)
+      : this._default;
 
-    // 3. Default
-    return this._default;
+    // 3. Optional hook — allows SkillAbTestPlugin to intercept (Arc 9.5)
+    if (this._resolveHook) return this._resolveHook(skill, targets, resolved);
+
+    return resolved;
+  }
+
+  /**
+   * Set (or clear) a resolve hook.
+   * The hook runs after standard resolution and may return a different executor.
+   * Pass null to remove the hook.
+   * Used by SkillAbTestPlugin to intercept skills under A/B test.
+   */
+  setResolveHook(hook: ResolveHook | null): void {
+    this._resolveHook = hook;
   }
 
   /**
