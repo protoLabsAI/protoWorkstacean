@@ -149,12 +149,23 @@ export interface ConfigChangeRenderer {
   onExpired?(request: ConfigChangeRequest, bus: EventBus): Promise<void>;
 }
 
+export type WidgetType = 'chart' | 'table' | 'status-card' | 'log-stream' | 'metric';
+
+export interface WidgetDescriptor {
+  id: string;
+  type: WidgetType;
+  title: string;
+  query?: string;
+  props?: Record<string, unknown>;
+}
+
 export interface Plugin {
   name: string;
   description: string;
   capabilities: string[];
   install(bus: EventBus): void;
   uninstall(): void;
+  getWidgets?(): WidgetDescriptor[];
 }
 
 export interface TopicInfo {
