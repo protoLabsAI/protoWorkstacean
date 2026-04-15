@@ -23,12 +23,14 @@ Each ceremony is defined in its own `.yaml` file inside `workspace/ceremonies/`.
 ```yaml
 id: board.pr-audit          # required — unique ceremony identifier
 name: PR Audit              # required — human-readable name
+description: "…"            # optional — free-form human-readable purpose
 schedule: "0 9 * * 1-5"    # required — cron expression (UTC)
 skill: audit-prs            # required — agent skill to invoke
-targets:                    # required — project paths or ['all']
-  - projects/my-project
-notifyChannel: eng-standup  # optional — Discord channel slug for notifications
+targets:                    # required — agent names or ['all']
+  - quinn
+notifyChannel: "1469195…"   # optional — Discord channel ID for outcome notifications
 enabled: true               # optional — defaults to true; set false to pause
+createdBy: quinn            # optional — owning agent for multi-tenant HTTP API gating
 ```
 
 ### Field Reference
@@ -37,11 +39,13 @@ enabled: true               # optional — defaults to true; set false to pause
 |-------|------|----------|-------------|
 | `id` | string | yes | Unique identifier, e.g. `board.pr-audit`. Used in bus topics. |
 | `name` | string | yes | Human-readable name shown in logs and notifications. |
+| `description` | string | no | Free-form purpose string, surfaced in the API listing. |
 | `schedule` | string | yes | Standard 5-field cron expression (UTC). |
 | `skill` | string | yes | Agent skill invoked when the ceremony fires. |
-| `targets` | string[] | yes | Non-empty list of project paths, or `['all']` to target all projects. |
-| `notifyChannel` | string | no | Discord channel slug for outcome notifications. |
+| `targets` | string[] | yes | Non-empty list of agent names (e.g. `['quinn']`) or `['all']` for fleet broadcast. Passed as `projectPaths` in the `ceremony.{id}.execute` context for backwards-compatible consumer shape. |
+| `notifyChannel` | string | no | Discord channel ID for outcome notifications. |
 | `enabled` | boolean | no | Whether this ceremony is active. Defaults to `true`. |
+| `createdBy` | string | no | Owning agent name. Stamped server-side when created through the HTTP API with a per-agent key; gates update/delete to the owner (admins bypass). See [HTTP API → per-agent keys](./http-api#per-agent-api-keys-multi-tenant-model). |
 
 ### Cron Expression Examples
 
