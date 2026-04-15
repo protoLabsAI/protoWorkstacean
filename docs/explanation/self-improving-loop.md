@@ -137,14 +137,33 @@ An earlier attempt to close `outcome → state` by republishing `world.state.upd
 
 ## Fleet-level rollups — `agent_fleet_health`
 
-`AgentFleetHealthPlugin` (Arc 8.1) subscribes to `autonomous.outcome.#` and keeps a rolling 24-hour window of every autonomous dispatch. For each agent it exposes:
+`AgentFleetHealthPlugin` (Arc 8.1) subscribes to `autonomous.outcome.#` and keeps a rolling 24-hour window of every autonomous dispatch. For each agent (`AgentFleetMetrics`) it exposes:
 
 - `successRate` — fraction of the window's outcomes that succeeded
 - `p50LatencyMs` / `p95LatencyMs` — wall-clock distribution
-- `costPerSuccessfulOutcome` — USD / success (from `cost-v1` usage samples when available, falling back to `MODEL_RATES["default"]` token pricing)
-- `recentFailures` — last 10 failure correlation IDs for drill-down
+- `costPerSuccessfulOutcome` — total window cost ÷ success count (from `cost-v1` usage samples when available, falling back to `MODEL_RATES["default"]` token pricing); 0 when no successes
+- `totalCostUsd` — raw LLM spend for all outcomes in the window
+- `failureRate1h` — failure fraction over the last 1h (a sub-window of the 24h window)
+- `recentFailures` — last 10 failure correlation IDs + reasons for drill-down
+- `totalOutcomes` — total outcome events in the window
 
-Exposed as the `agent_fleet_health` world-state domain via a 60-second collector. Goals can target `domains.agent_fleet_health.data.<agent>.successRate < 0.5` to fire when a specific agent degrades, or `costPerSuccessfulOutcome > X` to catch runaway spend.
+The `FleetHealthSnapshot` also exposes fleet-level aggregates:
+
+- `maxFailureRate1h` — max `failureRate1h` across all agents; used by `fleet.no_agent_stuck` (Arc 8.2) to fire when any agent's 1h failure rate exceeds 50%
+- `totalCostUsd1d` — sum of all agent costs in the window; used by `fleet.cost_under_budget` (Arc 8.3) to fire when fleet LLM spend exceeds $50/day
+- `orphanedSkillCount` — skills seen in any outcome in the 24h window that have had zero successful executions; > 0 signals capability regression; used by `fleet.no_skill_orphaned` (Arc 8.5)
+
+Exposed as the `agent_fleet_health` world-state domain via a 60-second collector. Goals target `domains.agent_fleet_health.data.*` selectors — no custom domain code required.
+
+### Health-weighted executor selection (Arc 8.4)
+
+When multiple agents can serve the same skill, `ExecutorRegistry` uses fleet health data to pick probabilistically rather than greedily:
+
+```
+weight = successRate × (1 / (1 + costPerSuccessfulOutcome))
+```
+
+Agents with no data (`totalOutcomes === 0`) get weight 1.0 so new agents still receive traffic. `AgentFleetHealthPlugin.getFleetHealth()` is the data source; `ExecutorRegistry.setHealthGetter()` wires it at startup.
 
 ---
 

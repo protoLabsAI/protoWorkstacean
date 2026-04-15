@@ -242,7 +242,7 @@ message.outbound.<dest>.<...context>    — messages to deliver to external inte
 agent.skill.request / response.<id>     — skill dispatch pipeline
 world.state.updated                     — domain poll results
 world.goal.violated                     — GOAP goal breach
-world.action.plan                       — GOAP action plan
+world.action.dispatch                   — GOAP action ready to execute
 ceremony.<id>.execute                   — ceremony trigger
 cron.<id>                               — scheduled event
 security.incident.reported              — incident lifecycle
