@@ -21,24 +21,55 @@ If you implement the A2A spec properly and serve an agent card with the right ca
 
 Your agent never writes a health probe, a retry loop, or a cron scheduler. Workstacean does those for every agent that joins the fleet.
 
-## The minimum endpoint
+## The endpoint surface
 
-At a minimum, expose four routes. The first three are the A2A spec; the fourth is how Workstacean discovers you.
+**The `@a2a-js/sdk` Client uses JSON-RPC on `/a2a` for every operation it calls** — including task management and push notification CRUD. REST paths like `GET /tasks/{id}` are **convenience aliases only**; the SDK never hits them. Omitting any JSON-RPC method means the matching SDK call silently returns `-32601 Method not found` and the SDK wraps that as a misleading "Invalid response Content-Type" error. See Quinn PR #25.
+
+### JSON-RPC methods (required — all of them)
+
+| Method | Purpose |
+|---|---|
+| `message/send` | Async submit; returns a Task with `state: submitted` |
+| `message/stream` | Send + SSE stream (spec-canonical name) |
+| `message/sendStream` | Legacy alias — accept alongside `message/stream` for backwards compat with older protoPen-era clients |
+| `tasks/get` | Fetch current Task state + artifact |
+| `tasks/cancel` | Cooperative cancel |
+| `tasks/resubscribe` | SSE reconnect to an in-flight task |
+| `tasks/pushNotificationConfig/set` | Register a webhook |
+| `tasks/pushNotificationConfig/get` | Read the current webhook |
+| `tasks/pushNotificationConfig/list` | List configs |
+| `tasks/pushNotificationConfig/delete` | Clear the webhook |
+
+If you skip the last four, every SDK call from `client.setTaskPushNotificationConfig` through `client.deleteTaskPushNotificationConfig` returns `-32601`. Your webhooks can still work via the REST alias below — but only if the caller knows to use it, which the SDK does not.
+
+### REST aliases (optional; no SDK client hits these)
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/a2a` | JSON-RPC 2.0 — `message/send` + optionally `message/sendStream` |
-| `GET` | `/tasks/{id}` | Poll the current task state |
-| `POST` | `/tasks/{id}:cancel` | Cancel an in-flight task |
-| `GET` | `/.well-known/agent-card.json` | Agent card (legacy clients hit `agent.json`; serve both) |
+| `POST` | `/message:send` | same as `message/send` (HTTP 202) |
+| `POST` | `/message:stream` | same as `message/stream` (SSE) |
+| `GET` | `/tasks/{id}` | same as `tasks/get` |
+| `GET` | `/tasks/{id}:subscribe` | same as `tasks/resubscribe` (plain SSE, no JSON-RPC envelope) |
+| `POST` | `/tasks/{id}:cancel` | same as `tasks/cancel` |
+| `POST` | `/tasks/{id}/pushNotificationConfigs` | same as `tasks/pushNotificationConfig/set` |
 
-Three more are required if you advertise push notifications:
+Serve them if you want manual `curl` smoke tests to be simpler. They are not required for SDK interoperability.
+
+### Agent card
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/tasks/{id}/pushNotificationConfigs` | Register a webhook for a task |
-| `POST` | `/message:send` | REST alias for `message/send` (HTTP 202) |
-| `POST` | `/message:stream` | REST alias for `message/sendStream` (SSE) |
+| `GET` | `/.well-known/agent-card.json` | Agent card (spec-canonical) |
+| `GET` | `/.well-known/agent.json` | Legacy path older clients still probe — serve both |
+
+### Error code conventions
+
+| Code | Meaning |
+|---|---|
+| `-32601` | Method not found |
+| `-32602` | Invalid params (missing field, bad type, SSRF rejection) |
+| `-32001` | Task not found |
+| `-32002` | Task already terminal (cancel-after-complete) |
 
 ### Task lifecycle
 
@@ -79,7 +110,7 @@ AGENT_CARD = {
     "version": "1.0.0",
     "provider": {"organization": "protoLabsAI"},
     "capabilities": {
-        "streaming": True,                  # enables message/sendStream + :subscribe
+        "streaming": True,                  # enables message/stream + :subscribe
         "pushNotifications": True,          # enables /tasks/{id}/pushNotificationConfigs
         "stateTransitionHistory": False,    # tracking every transition in the response
     },
@@ -157,12 +188,12 @@ async def _push(record):
 
 ### 6. Producer must be independent of the SSE connection
 
-If your agent implements `message/sendStream`, the HTTP SSE generator and the LangGraph (or similar) producer should not be the same task. When the SSE client disconnects mid-run, FastAPI cancels the generator — if the producer is inline, it dies with the connection and any `:subscribe` reconnect has no task to attach to.
+If your agent implements `message/stream`, the HTTP SSE generator and the LangGraph (or similar) producer should not be the same task. When the SSE client disconnects mid-run, FastAPI cancels the generator — if the producer is inline, it dies with the connection and any `:subscribe` reconnect has no task to attach to.
 
 **Pattern:** always spawn the producer as a background task owned by the task record, regardless of which entry point created the task. The SSE generator becomes a pure consumer that reads from the store and awaits the rotating `_update_event`. Drop the SSE connection → producer keeps running → reconnect via `:subscribe` picks up cleanly.
 
 ```python
-# Shared consumer used by both message/sendStream and :subscribe
+# Shared consumer used by both message/stream and :subscribe
 async def _watch_task(task_id, start_text_len=0):
     record = await _store.get(task_id)
     if record is None:
@@ -206,7 +237,7 @@ If the producer emits in-process events like `tool_start` / `tool_end` that your
 
 ## Streaming (optional)
 
-See [A2A Streaming (SSE)](./a2a-streaming) for the full SSE event protocol. Short version: advertise `capabilities.streaming: true`, accept `method: "message/sendStream"` on `/a2a` and `POST /message:stream`, emit `text/event-stream` frames as work progresses. `A2AExecutor` on Workstacean's side switches transport automatically based on the card; your `message/send` consumers stay unchanged.
+See [A2A Streaming (SSE)](./a2a-streaming) for the full SSE event protocol. Short version: advertise `capabilities.streaming: true`, accept `method: "message/stream"` on `/a2a` and `POST /message:stream`, emit `text/event-stream` frames as work progresses. `A2AExecutor` on Workstacean's side switches transport automatically based on the card; your `message/send` consumers stay unchanged.
 
 Terminal frames (`COMPLETED`) should carry the authoritative full artifact — text + any [worldstate-delta](../extensions/worldstate-delta-v1) DataParts — as `append: false, last_chunk: true`. Mid-run stays incremental via `append: true` text deltas only.
 
@@ -328,7 +359,7 @@ A protoAgent that ticks all of these is a first-class fleet citizen — routing,
 
 ### Transport & lifecycle
 - [ ] `GET /.well-known/agent-card.json` + `/.well-known/agent.json` both serve the card
-- [ ] `capabilities.streaming: true` matches a real `message/sendStream` implementation
+- [ ] `capabilities.streaming: true` matches a real `message/stream` implementation
 - [ ] `capabilities.pushNotifications: true` matches a real `POST /tasks/{id}/pushNotificationConfigs` implementation
 - [ ] `message/send` returns a `Task` with `state: submitted` in under 1s (never blocks on work)
 - [ ] `GET /tasks/{id}` reflects current state + artifact
