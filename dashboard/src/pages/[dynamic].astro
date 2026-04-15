@@ -1,0 +1,55 @@
+---
+// [dynamic].astro — discovery-driven catch-all router.
+//
+// At build time, attempts to fetch /api/widgets to enumerate registered plugins
+// and pre-render one page per plugin. Falls back to a single "widgets" path
+// if the API is unavailable (server not running at build time).
+//
+// At runtime the DiscoveryView component re-fetches /api/widgets every 30s so
+// new plugin registrations surface without a rebuild (Astro ISR-compatible pattern).
+
+import DiscoveryLayout from "../layouts/DiscoveryLayout.astro";
+import DiscoveryView from "../components/DiscoveryView.tsx";
+
+export async function getStaticPaths() {
+  try {
+    const apiBase = import.meta.env.API_BASE_URL ?? "http://localhost:3000";
+    const res = await fetch(`${apiBase}/api/widgets`, {
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const raw = await res.json();
+    const list: Array<{ pluginName: string }> = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.data)
+        ? raw.data
+        : [];
+
+    const plugins = [...new Set(list.map((w) => w.pluginName))];
+    if (plugins.length === 0) {
+      return [{ params: { dynamic: "widgets" }, props: { pluginName: null } }];
+    }
+    return plugins.map((pluginName) => ({
+      params: {
+        dynamic: pluginName.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      },
+      props: { pluginName },
+    }));
+  } catch {
+    // Server not running at build time — fall back to generic "widgets" path.
+    return [{ params: { dynamic: "widgets" }, props: { pluginName: null } }];
+  }
+}
+
+interface Props {
+  pluginName: string | null;
+}
+
+const { pluginName } = Astro.props;
+const pageTitle = pluginName ? pluginName : "Plugins";
+---
+
+<DiscoveryLayout title={pageTitle}>
+  <DiscoveryView client:load pluginFilter={pluginName} />
+</DiscoveryLayout>

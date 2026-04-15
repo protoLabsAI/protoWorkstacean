@@ -130,6 +130,9 @@ export const getCeremonies = () =>
 export const getHitlPending = () =>
   apiFetch<{ data: unknown[] }>("/api/hitl/pending", { ttl: 30_000 });
 
+export const getWidgets = (force = false) =>
+  apiFetch<unknown[]>("/api/widgets", { ttl: 30_000, force });
+
 // ── Response types (match actual API shapes after envelope unwrap) ─
 export interface WorldStateResponse {
   timestamp: number;
