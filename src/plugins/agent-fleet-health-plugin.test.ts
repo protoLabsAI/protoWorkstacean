@@ -203,7 +203,6 @@ describe("AgentFleetHealthPlugin", () => {
   });
 
   test("failureRate1h reflects only outcomes within the last 1h", async () => {
-    // All failures — failureRate1h should be 1
     bus.publish("autonomous.outcome.failed", makeOutcomeMsg({
       systemActor: "ava",
       skill: "plan",
@@ -236,15 +235,50 @@ describe("AgentFleetHealthPlugin", () => {
   });
 
   test("maxFailureRate1h is the max failureRate1h across all agents", async () => {
-    // ava: 1 success, 0 failures → failureRate1h = 0
     bus.publish("autonomous.outcome.completed", makeOutcomeMsg({ systemActor: "ava", skill: "plan", success: true, durationMs: 100 }));
-    // quinn: 0 successes, 1 failure → failureRate1h = 1
     bus.publish("autonomous.outcome.failed", makeOutcomeMsg({ systemActor: "quinn", skill: "sweep", success: false, durationMs: 100 }));
 
     await new Promise(r => setTimeout(r, 10));
 
     const snapshot = plugin.getFleetHealth();
     expect(snapshot.maxFailureRate1h).toBe(1);
+  });
+
+  // ── Arc 8.5: orphanedSkillCount ───────────────────────────────────────────
+  test("orphanedSkillCount is 0 when all skills have at least one success", async () => {
+    bus.publish("autonomous.outcome.completed", makeOutcomeMsg({ systemActor: "ava", skill: "plan", success: true, durationMs: 100 }));
+    bus.publish("autonomous.outcome.failed", makeOutcomeMsg({ systemActor: "ava", skill: "plan", success: false, durationMs: 100 }));
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const snapshot = plugin.getFleetHealth();
+    expect(snapshot.orphanedSkillCount).toBe(0);
+  });
+
+  test("orphanedSkillCount counts skills with no success in window", async () => {
+    bus.publish("autonomous.outcome.failed", makeOutcomeMsg({ systemActor: "ava", skill: "sweep", success: false, durationMs: 100 }));
+    bus.publish("autonomous.outcome.failed", makeOutcomeMsg({ systemActor: "quinn", skill: "review", success: false, durationMs: 200 }));
+    bus.publish("autonomous.outcome.completed", makeOutcomeMsg({ systemActor: "ava", skill: "plan", success: true, durationMs: 100 }));
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const snapshot = plugin.getFleetHealth();
+    expect(snapshot.orphanedSkillCount).toBe(2);
+  });
+
+  test("orphanedSkillCount is 0 when no outcomes recorded", () => {
+    const snapshot = plugin.getFleetHealth();
+    expect(snapshot.orphanedSkillCount).toBe(0);
+  });
+
+  test("same skill across agents — counts as not orphaned if any agent succeeded", async () => {
+    bus.publish("autonomous.outcome.failed", makeOutcomeMsg({ systemActor: "ava", skill: "plan", success: false, durationMs: 100 }));
+    bus.publish("autonomous.outcome.completed", makeOutcomeMsg({ systemActor: "quinn", skill: "plan", success: true, durationMs: 100 }));
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const snapshot = plugin.getFleetHealth();
+    expect(snapshot.orphanedSkillCount).toBe(0);
   });
 
   test("uninstall cleans up subscription", () => {
