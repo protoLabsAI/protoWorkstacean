@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import type { ServerWebSocket } from "bun";
-import type { Plugin, EventBus, BusMessage } from "../types";
+import type { Plugin, EventBus, BusMessage, WidgetDescriptor } from "../types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -68,6 +68,19 @@ export class EventViewerPlugin implements Plugin {
     });
 
     console.log(`Event viewer available at http://localhost:${this.port}`);
+  }
+
+  getWidgets(): WidgetDescriptor[] {
+    return [
+      {
+        pluginName: this.name,
+        id: "event-stream",
+        type: "log-stream",
+        title: "Event Stream",
+        query: "/api/events",
+        props: { wsPath: "/ws", limit: 500 },
+      },
+    ];
   }
 
   uninstall(): void {
