@@ -48,6 +48,8 @@ export interface AgentFleetMetrics {
    * no usage data is available.
    */
   costPerSuccessfulOutcome: number;
+  /** Total raw LLM cost in USD for all outcomes in the 24h window. */
+  totalCostUsd: number;
   /** Most recent failures (up to 10), most-recent-first. */
   recentFailures: Array<{
     timestamp: number;
@@ -63,6 +65,8 @@ export interface FleetHealthSnapshot {
   agents: AgentFleetMetrics[];
   /** Always 24 — documents the rolling window. */
   windowHours: 24;
+  /** Sum of all LLM costs across all agents over the 24h window (USD). */
+  totalCostUsd1d: number;
   collectedAt: number;
 }
 
@@ -123,9 +127,9 @@ export class AgentFleetHealthPlugin implements Plugin {
       const p50LatencyMs = _percentile(durations, 0.5);
       const p95LatencyMs = _percentile(durations, 0.95);
 
-      const totalCost = fresh.reduce((sum, r) => sum + r.costUsd, 0);
+      const totalCostUsd = fresh.reduce((sum, r) => sum + r.costUsd, 0);
       const costPerSuccessfulOutcome =
-        successes.length > 0 ? totalCost / successes.length : 0;
+        successes.length > 0 ? totalCostUsd / successes.length : 0;
 
       const recentFailures = failures
         .sort((a, b) => b.timestamp - a.timestamp)
@@ -143,12 +147,15 @@ export class AgentFleetHealthPlugin implements Plugin {
         p50LatencyMs,
         p95LatencyMs,
         costPerSuccessfulOutcome,
+        totalCostUsd,
         recentFailures,
         totalOutcomes: fresh.length,
       });
     }
 
-    return { agents, windowHours: 24, collectedAt: now };
+    const totalCostUsd1d = agents.reduce((sum, a) => sum + a.totalCostUsd, 0);
+
+    return { agents, windowHours: 24, totalCostUsd1d, collectedAt: now };
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────

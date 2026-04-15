@@ -507,3 +507,40 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+
+  # ── Fleet cost homeostasis ────────────────────────────────────────
+
+  - id: alert.fleet_cost_over_budget
+    goalId: fleet.cost_under_budget
+    tier: tier_0
+    priority: 20
+    cost: 0
+    name: "Alert operator when fleet LLM spend exceeds daily budget"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.totalCostUsd1d"
+        operator: gt
+        value: 50
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: action.fleet_downshift_models
+    goalId: fleet.cost_under_budget
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Downshift to cheaper models on low-blast skills when fleet spend exceeds budget"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.totalCostUsd1d"
+        operator: gt
+        value: 50
+    effects: []
+    meta:
+      skillHint: downshift_models
+      fireAndForget: true
