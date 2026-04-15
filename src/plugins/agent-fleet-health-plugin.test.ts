@@ -197,6 +197,56 @@ describe("AgentFleetHealthPlugin", () => {
     }
   });
 
+  test("failureRate1h is 0 for agent with no 1h outcomes", () => {
+    const snapshot = plugin.getFleetHealth();
+    expect(snapshot.maxFailureRate1h).toBe(0);
+  });
+
+  test("failureRate1h reflects only outcomes within the last 1h", async () => {
+    // All failures — failureRate1h should be 1
+    bus.publish("autonomous.outcome.failed", makeOutcomeMsg({
+      systemActor: "ava",
+      skill: "plan",
+      success: false,
+      durationMs: 100,
+    }));
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const snapshot = plugin.getFleetHealth();
+    const agent = snapshot.agents.find(a => a.agentName === "ava")!;
+    expect(agent.failureRate1h).toBe(1);
+    expect(snapshot.maxFailureRate1h).toBe(1);
+  });
+
+  test("maxFailureRate1h is 0 when all recent outcomes succeed", async () => {
+    bus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+      systemActor: "ava",
+      skill: "plan",
+      success: true,
+      durationMs: 100,
+    }));
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const snapshot = plugin.getFleetHealth();
+    const agent = snapshot.agents.find(a => a.agentName === "ava")!;
+    expect(agent.failureRate1h).toBe(0);
+    expect(snapshot.maxFailureRate1h).toBe(0);
+  });
+
+  test("maxFailureRate1h is the max failureRate1h across all agents", async () => {
+    // ava: 1 success, 0 failures → failureRate1h = 0
+    bus.publish("autonomous.outcome.completed", makeOutcomeMsg({ systemActor: "ava", skill: "plan", success: true, durationMs: 100 }));
+    // quinn: 0 successes, 1 failure → failureRate1h = 1
+    bus.publish("autonomous.outcome.failed", makeOutcomeMsg({ systemActor: "quinn", skill: "sweep", success: false, durationMs: 100 }));
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const snapshot = plugin.getFleetHealth();
+    expect(snapshot.maxFailureRate1h).toBe(1);
+  });
+
   test("uninstall cleans up subscription", () => {
     plugin.uninstall();
     // After uninstall, publishing should not throw or add records

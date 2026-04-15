@@ -487,6 +487,49 @@ actions:
     meta:
       fireAndForget: true
 
+  # ── Agent fleet health ────────────────────────────────────────────
+  #
+  # Fires when any agent's 1h failure rate exceeds 50%.
+  # alert action surfaces the violation to Discord immediately.
+  # fleet_incident_response action dispatches Ava to open an
+  # incident, page on-call, and pause auto-routing to the stuck
+  # agent until its failure rate falls below 50%.
+
+  - id: alert.fleet_agent_stuck
+    goalId: fleet.no_agent_stuck
+    tier: tier_0
+    priority: 20
+    cost: 0
+    name: "Alert when an agent's 1h failure rate exceeds 50%"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.maxFailureRate1h"
+        operator: gt
+        value: 0.5
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: action.fleet_incident_response
+    goalId: fleet.no_agent_stuck
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Dispatch Ava to open incident, page on-call, and pause routing for stuck agent"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.maxFailureRate1h"
+        operator: gt
+        value: 0.5
+    effects: []
+    meta:
+      skillHint: fleet_incident_response
+      fireAndForget: true
+
   # ── HITL routing health ───────────────────────────────────────────
   #
   # This alert bypasses the HITL plugin entirely — if the HITL routing
