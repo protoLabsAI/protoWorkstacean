@@ -1,4 +1,4 @@
-import type { ConversationTurn } from "../plugins/logger.ts";
+import type { ConversationTurn } from "../types.ts";
 
 /**
  * Assemble a structured context envelope for the agent prompt.
@@ -35,10 +35,10 @@ export function assembleContext(
 
   if (recentTurns.length > 0) {
     const turnLines = recentTurns.map(turn => {
-      const ts = new Date(turn.createdAt).toISOString();
-      const channelSuffix = turn.channel ? ` [${turn.channel}]` : "";
+      const ts = new Date(turn.timestamp).toISOString();
+      const channelSuffix = turn.channelId ? ` [${turn.channelId}]` : "";
       const label = turn.role === "user" ? "User" : "Assistant";
-      return `[${ts}${channelSuffix}] ${label}: ${turn.content}`;
+      return `[${ts}${channelSuffix}] ${label}: ${turn.text}`;
     });
     parts.push(`<recent_conversation>\n${turnLines.join("\n")}\n</recent_conversation>`);
   }
