@@ -17,6 +17,7 @@ import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 import { MODEL_RATES } from "../../lib/types/budget.ts";
 
 const WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 hours
+const WINDOW_1H_MS = 60 * 60 * 1_000; // 1 hour
 const MAX_RECENT_FAILURES = 10;
 const DEFAULT_RATES = MODEL_RATES["default"];
 
@@ -48,6 +49,8 @@ export interface AgentFleetMetrics {
    * no usage data is available.
    */
   costPerSuccessfulOutcome: number;
+  /** Total raw LLM cost in USD for all outcomes in the 24h window. */
+  totalCostUsd: number;
   /** Most recent failures (up to 10), most-recent-first. */
   recentFailures: Array<{
     timestamp: number;
@@ -57,12 +60,24 @@ export interface AgentFleetMetrics {
   }>;
   /** Total outcome events counted in the 24h window. */
   totalOutcomes: number;
+  /**
+   * Fraction of outcomes that failed over the last 1h window (0–1).
+   * 0 when no outcomes in the 1h window.
+   */
+  failureRate1h: number;
 }
 
 export interface FleetHealthSnapshot {
   agents: AgentFleetMetrics[];
   /** Always 24 — documents the rolling window. */
   windowHours: 24;
+  /**
+   * Max failureRate1h across all agents. 0 when no agents have 1h outcomes.
+   * Used as the GOAP goal selector for fleet.no_agent_stuck (Arc 8.2).
+   */
+  maxFailureRate1h: number;
+  /** Sum of all LLM costs across all agents over the 24h window (USD). Used by fleet.cost_under_budget (Arc 8.3). */
+  totalCostUsd1d: number;
   collectedAt: number;
 }
 
@@ -106,6 +121,7 @@ export class AgentFleetHealthPlugin implements Plugin {
   getFleetHealth(): FleetHealthSnapshot {
     const now = Date.now();
     const cutoff = now - WINDOW_MS;
+    const cutoff1h = now - WINDOW_1H_MS;
     const agents: AgentFleetMetrics[] = [];
 
     for (const [agentName, records] of this.agentWindows) {
@@ -123,9 +139,9 @@ export class AgentFleetHealthPlugin implements Plugin {
       const p50LatencyMs = _percentile(durations, 0.5);
       const p95LatencyMs = _percentile(durations, 0.95);
 
-      const totalCost = fresh.reduce((sum, r) => sum + r.costUsd, 0);
+      const totalCostUsd = fresh.reduce((sum, r) => sum + r.costUsd, 0);
       const costPerSuccessfulOutcome =
-        successes.length > 0 ? totalCost / successes.length : 0;
+        successes.length > 0 ? totalCostUsd / successes.length : 0;
 
       const recentFailures = failures
         .sort((a, b) => b.timestamp - a.timestamp)
@@ -137,18 +153,29 @@ export class AgentFleetHealthPlugin implements Plugin {
           failureReason: r.failureReason,
         }));
 
+      const fresh1h = fresh.filter(r => r.timestamp >= cutoff1h);
+      const failures1h = fresh1h.filter(r => !r.success);
+      const failureRate1h = fresh1h.length > 0 ? failures1h.length / fresh1h.length : 0;
+
       agents.push({
         agentName,
         successRate,
         p50LatencyMs,
         p95LatencyMs,
         costPerSuccessfulOutcome,
+        totalCostUsd,
         recentFailures,
         totalOutcomes: fresh.length,
+        failureRate1h,
       });
     }
 
-    return { agents, windowHours: 24, collectedAt: now };
+    const maxFailureRate1h = agents.length > 0
+      ? Math.max(...agents.map(a => a.failureRate1h))
+      : 0;
+    const totalCostUsd1d = agents.reduce((sum, a) => sum + a.totalCostUsd, 0);
+
+    return { agents, windowHours: 24, maxFailureRate1h, totalCostUsd1d, collectedAt: now };
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────

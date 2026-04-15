@@ -185,6 +185,19 @@ goals:
     min: 1
     description: "Graphiti /search must succeed — deeper wiring check (Neo4j vector fns + embedder)"
 
+  # ── Agent fleet health ──────────────────────────────────────────
+  #
+  # Fires when any agent exceeds 50% failure rate in the last hour.
+  # Triggers: open incident, page on-call, pause auto-routing to
+  # the stuck agent until health recovers.
+
+  - id: fleet.no_agent_stuck
+    type: Threshold
+    severity: high
+    selector: "domains.agent_fleet_health.data.maxFailureRate1h"
+    max: 0.5
+    description: "No agent should have >50% failure rate in the last hour — max(agents[*].failureRate1h) < 0.5"
+
   # ── HITL routing health ─────────────────────────────────────────
   - id: hitl.no_unrendered_requests
     type: Threshold
@@ -199,3 +212,16 @@ goals:
     selector: "domains.hitl_queue.data.pendingCount"
     max: 10
     description: "HITL pending queue should not exceed 10 — escalations are piling up faster than humans can clear them"
+
+  # ── Fleet cost homeostasis ───────────────────────────────────────
+  #
+  # Fires when the sum of all agent LLM costs over the rolling 24h window
+  # exceeds the daily fleet budget ($50). Triggers model downshifting on
+  # low-blast skills and alerts the operator.
+
+  - id: fleet.cost_under_budget
+    type: Threshold
+    severity: high
+    selector: "domains.agent_fleet_health.data.totalCostUsd1d"
+    max: 50
+    description: "Total fleet LLM spend over the rolling 24h window must not exceed $50"
