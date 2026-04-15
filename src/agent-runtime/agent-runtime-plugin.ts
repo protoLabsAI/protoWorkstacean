@@ -34,13 +34,15 @@ export class AgentRuntimePlugin implements Plugin {
 
   private readonly config: AgentRuntimeConfig;
   private readonly executorRegistry: ExecutorRegistry;
+  private bus?: EventBus;
 
   constructor(config: AgentRuntimeConfig, executorRegistry: ExecutorRegistry) {
     this.config = config;
     this.executorRegistry = executorRegistry;
   }
 
-  install(_bus: EventBus): void {
+  install(bus: EventBus): void {
+    this.bus = bus;
     const definitions = loadAgentDefinitions(this.config.workspaceDir);
     const knownTools = new Set(BUS_TOOL_NAMES as readonly string[]);
 

@@ -61,6 +61,9 @@ function loadActionsYaml(): void {
   try {
     const raw = parseYaml(readFileSync(actionsPath, "utf8")) as { actions?: Record<string, unknown>[] };
     const actionsData = raw?.actions ?? [];
+
+    // Parse and validate all actions before mutating the registry (fail-fast)
+    const parsed: Action[] = [];
     for (const a of actionsData) {
       try {
         const action: Action = {
@@ -87,10 +90,16 @@ function loadActionsYaml(): void {
             : [],
           meta: typeof a.meta === "object" && a.meta !== null ? (a.meta as Action["meta"]) : {},
         };
-        actionRegistry.upsert(action);
+        parsed.push(action);
       } catch (err) {
         console.warn(`[actions-loader] Skipping invalid action '${a.id}':`, err);
       }
+    }
+
+    // Atomic swap: clear existing registry then upsert all validated actions
+    actionRegistry.clear();
+    for (const action of parsed) {
+      actionRegistry.upsert(action);
     }
     console.info(`[actions-loader] Loaded ${actionRegistry.size} action(s) from workspace/actions.yaml`);
   } catch (err) {
@@ -172,6 +181,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
         dataDir,
         channelRegistry,
         hitlPlugin,
+        configChangePlugin,
         mailbox: contextMailbox,
         isExecutionActive: (correlationId: string) => {
           const dispatcher = registeredPlugins.find(p => p.name === "skill-dispatcher");
@@ -262,6 +272,17 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Intercepts ExecutorRegistry.resolve() to A/B test competing skill variants.
+    // Must be installed AFTER registrars (agent-runtime, skill-broker) and
+    // BEFORE skill-dispatcher so the hook is active when dispatches begin.
+    name: "skill-ab-test",
+    condition: () => true,
+    factory: async () => {
+      const { SkillAbTestPlugin } = await import("./executor/skill-ab-test-plugin.js");
+      return new SkillAbTestPlugin(executorRegistry);
+    },
+  },
+  {
     // Sole subscriber to agent.skill.request — dispatches via ExecutorRegistry.
     // Must be installed AFTER agent-runtime and skill-broker (registrars).
     name: "skill-dispatcher",
@@ -327,6 +348,26 @@ const pluginRegistry: PluginRegistryEntry[] = [
       return new OutcomeAnalysisPlugin();
     },
   },
+  {
+    // Captures goal_proposal results from Ava, gates on HITL approval, then
+    // appends the approved entry to workspace/goals.yaml and triggers reload.
+    name: "goal-hot-reload",
+    condition: () => true,
+    factory: async () => {
+      const { GoalHotReloadPlugin } = await import("./plugins/goal-hot-reload-plugin.js");
+      return new GoalHotReloadPlugin(workspaceDir);
+    },
+  },
+  {
+    // Arc 8.1 — aggregates autonomous.outcome.# into per-agent 24h
+    // success/latency/cost rollups; exposed as agent_fleet_health domain.
+    name: "agent-fleet-health",
+    condition: () => true,
+    factory: async () => {
+      const { AgentFleetHealthPlugin } = await import("./plugins/agent-fleet-health-plugin.js");
+      return new AgentFleetHealthPlugin();
+    },
+  },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
   {
     name: "echo",
@@ -345,6 +386,13 @@ const { HITLPlugin } = await import("../lib/plugins/hitl.js");
 const hitlPlugin = new HITLPlugin(workspaceDir);
 hitlPlugin.install(bus);
 registeredPlugins.push(hitlPlugin);
+
+// ── ConfigChangeHITLPlugin — pre-installed so DiscordPlugin can register its renderer ──
+// Separate gate from operational HITL: "rules are changing" vs "one-shot approval".
+const { ConfigChangeHITLPlugin } = await import("../lib/plugins/config-change-hitl.js");
+const configChangePlugin = new ConfigChangeHITLPlugin();
+configChangePlugin.install(bus);
+registeredPlugins.push(configChangePlugin);
 
 for (const entry of pluginRegistry) {
   if (entry.condition()) {
@@ -517,6 +565,19 @@ import { createAllRoutes, matchPath } from "./api/index.ts";
 import type { ApiContext } from "./api/index.ts";
 import { TOPICS } from "./event-bus/topics.ts";
 
+// ── config.reload — hot-reload goals.yaml + actions.yaml without restart ──────
+// Subscribers:
+//   - this handler re-reads actions.yaml and refreshes telemetry rows
+//   - GoalEvaluatorPlugin (in plugin registry) re-reads goals.yaml
+bus.subscribe(TOPICS.CONFIG_RELOAD, "config-reloader", () => {
+  console.info("[config-reload] Reloading actions from disk...");
+  loadActionsYaml();
+  for (const action of actionRegistry.getAll()) {
+    telemetry.registerKnown("action", action.id, ACTION_EVENTS);
+  }
+  console.info(`[config-reload] Actions reloaded: ${actionRegistry.size} active. Goals reload handled by goal-evaluator plugin.`);
+});
+
 const apiContext: ApiContext = {
   workspaceDir,
   bus,
@@ -566,7 +627,21 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     engine.registerDomain("plane", createHttpCollector(`${base}/api/plane-board`), 120_000); // 2min — Plane REST list across projects
     engine.registerDomain("memory", createHttpCollector(`${base}/api/memory-health`), 60_000); // 1min — Graphiti health + search probe
 
-    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue, plane, memory");
+    // agent_fleet_health — bus-aggregated, no HTTP polling needed
+    const fleetHealth = registeredPlugins.find(p => p.name === "agent-fleet-health");
+    if (fleetHealth) {
+      type AgentFleetHealthPlugin = import("./plugins/agent-fleet-health-plugin.js").AgentFleetHealthPlugin;
+      const fleetPlugin = fleetHealth as unknown as AgentFleetHealthPlugin;
+      engine.registerDomain(
+        "agent_fleet_health",
+        () => Promise.resolve(fleetPlugin.getFleetHealth()),
+        60_000,
+      );
+      // Arc 8: wire live fleet health into ExecutorRegistry for weighted selection.
+      executorRegistry.setHealthGetter(() => fleetPlugin.getFleetHealth().agents);
+    }
+
+    console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue, plane, memory, agent_fleet_health");
 
     // All local + workspace/domains.yaml + per-project domains are now
     // registered. Defer prune briefly so any async per-project domain

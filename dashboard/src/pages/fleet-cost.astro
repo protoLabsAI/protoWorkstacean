@@ -1,0 +1,8 @@
+---
+import DashboardLayout from "../layouts/DashboardLayout.astro";
+import FleetCostView from "../components/FleetCostView.tsx";
+---
+
+<DashboardLayout title="Fleet Cost" activePage="fleet-cost">
+  <FleetCostView client:load />
+</DashboardLayout>

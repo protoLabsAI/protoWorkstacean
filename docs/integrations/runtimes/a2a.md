@@ -4,6 +4,8 @@ title: A2A Runtime
 
 `A2AExecutor` dispatches skills to external agents over HTTP using the [A2A protocol](https://a2a-protocol.org/latest/specification/) (JSON-RPC 2.0). Supports multi-turn conversations via `contextId` + `taskId`, task lifecycle states, SSE streaming for long-running skills, and API key authentication.
 
+All inbound skill requests — including long-running orchestration skills like `plan`, `onboard_project`, and `deep_research` — flow through this single path. There is no separate fire-and-forget bypass.
+
 **Type string**: `a2a`
 **Registered by**: `SkillBrokerPlugin` — one executor per agent in `workspace/agents.yaml`.
 

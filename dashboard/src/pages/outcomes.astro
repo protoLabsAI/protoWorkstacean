@@ -1,0 +1,8 @@
+---
+import DashboardLayout from "../layouts/DashboardLayout.astro";
+import UnifiedOutcomesView from "../components/UnifiedOutcomesView.tsx";
+---
+
+<DashboardLayout title="Outcomes" activePage="outcomes">
+  <UnifiedOutcomesView client:load />
+</DashboardLayout>

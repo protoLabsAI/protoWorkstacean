@@ -490,6 +490,49 @@ actions:
     meta:
       fireAndForget: true
 
+  # ── Agent fleet health ────────────────────────────────────────────
+  #
+  # Fires when any agent's 1h failure rate exceeds 50%.
+  # alert action surfaces the violation to Discord immediately.
+  # fleet_incident_response action dispatches Ava to open an
+  # incident, page on-call, and pause auto-routing to the stuck
+  # agent until its failure rate falls below 50%.
+
+  - id: alert.fleet_agent_stuck
+    goalId: fleet.no_agent_stuck
+    tier: tier_0
+    priority: 20
+    cost: 0
+    name: "Alert when an agent's 1h failure rate exceeds 50%"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.maxFailureRate1h"
+        operator: gt
+        value: 0.5
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: action.fleet_incident_response
+    goalId: fleet.no_agent_stuck
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Dispatch Ava to open incident, page on-call, and pause routing for stuck agent"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.maxFailureRate1h"
+        operator: gt
+        value: 0.5
+    effects: []
+    meta:
+      skillHint: fleet_incident_response
+      fireAndForget: true
+
   # ── HITL routing health ───────────────────────────────────────────
   #
   # This alert bypasses the HITL plugin entirely — if the HITL routing
@@ -513,3 +556,78 @@ actions:
       hitlPolicy:
         ttlMs: 3600000  # 1 hour — escalate (no auto-action) so humans must intervene
         onTimeout: escalate
+
+  # ── Fleet cost homeostasis (Arc 8.3) ──────────────────────────────
+
+  - id: alert.fleet_cost_over_budget
+    goalId: fleet.cost_under_budget
+    tier: tier_0
+    priority: 20
+    cost: 0
+    name: "Alert operator when fleet LLM spend exceeds daily budget"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.totalCostUsd1d"
+        operator: gt
+        value: 50
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: action.fleet_downshift_models
+    goalId: fleet.cost_under_budget
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Downshift to cheaper models on low-blast skills when fleet spend exceeds budget"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.totalCostUsd1d"
+        operator: gt
+        value: 50
+    effects: []
+    meta:
+      skillHint: downshift_models
+      fireAndForget: true
+
+  # ── Skill orphan detection (Arc 8.5) ──────────────────────────────
+
+  - id: alert.fleet_skill_orphaned
+    goalId: fleet.no_skill_orphaned
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert on orphaned skills — active skills with no success in 24h window"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.orphanedSkillCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: action.fleet_investigate_orphaned_skills
+    goalId: fleet.no_skill_orphaned
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Dispatch Ava to investigate orphaned skills and diagnose capability regression"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.orphanedSkillCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      skillHint: investigate_orphaned_skills
+      agentId: ava
+      fireAndForget: true

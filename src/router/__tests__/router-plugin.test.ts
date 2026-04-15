@@ -321,8 +321,8 @@ describe("RouterPlugin", () => {
     });
   });
 
-  describe("fire-and-forget skip", () => {
-    const onboardingAgent = {
+  describe("formerly-FAF skills now dispatch via skill-dispatcher", () => {
+    const avaAgent2 = {
       name: "ava",
       role: "orchestrator",
       model: "claude-opus-4-6",
@@ -332,17 +332,18 @@ describe("RouterPlugin", () => {
         { name: "onboard_project", keywords: ["onboard"] },
         { name: "plan",            keywords: ["plan"] },
         { name: "deep_research",   keywords: ["research"] },
+        { name: "sitrep",          keywords: ["status", "sitrep"] },
       ],
     };
 
-    test("skips onboard_project so workspace/a2a owns the dispatch", async () => {
-      const { workspaceDir, cleanup } = makeWorkspace({ agents: { "ava.yaml": onboardingAgent } });
+    test("onboard_project is dispatched via skill-dispatcher", async () => {
+      const { workspaceDir, cleanup } = makeWorkspace({ agents: { "ava.yaml": avaAgent2 } });
       try {
         const bus = new InMemoryEventBus();
         const plugin = new RouterPlugin({ workspaceDir });
         plugin.install(bus);
 
-        const req = waitForSkillRequest(bus, 100);
+        const req = waitForSkillRequest(bus);
         bus.publish(
           "message.inbound.discord.onboard-1",
           makeInbound("message.inbound.discord.onboard-1", {
@@ -350,21 +351,23 @@ describe("RouterPlugin", () => {
             skillHint: "onboard_project",
           }),
         );
-        expect(await req).toBeNull();
+        const result = await req;
+        expect(result).not.toBeNull();
+        expect((result!.payload as Record<string, unknown>).skill).toBe("onboard_project");
 
         plugin.uninstall();
       } finally { cleanup(); }
     });
 
-    test("skips plan, deep_research", async () => {
-      const { workspaceDir, cleanup } = makeWorkspace({ agents: { "ava.yaml": onboardingAgent } });
+    test("plan and deep_research are dispatched via skill-dispatcher", async () => {
+      const { workspaceDir, cleanup } = makeWorkspace({ agents: { "ava.yaml": avaAgent2 } });
       try {
         const bus = new InMemoryEventBus();
         const plugin = new RouterPlugin({ workspaceDir });
         plugin.install(bus);
 
         for (const skill of ["plan", "deep_research"]) {
-          const req = waitForSkillRequest(bus, 80);
+          const req = waitForSkillRequest(bus);
           bus.publish(
             "message.inbound.discord.faf",
             makeInbound("message.inbound.discord.faf", {
@@ -372,22 +375,17 @@ describe("RouterPlugin", () => {
               skillHint: skill,
             }),
           );
-          expect(await req).toBeNull();
+          const result = await req;
+          expect(result).not.toBeNull();
+          expect((result!.payload as Record<string, unknown>).skill).toBe(skill);
         }
 
         plugin.uninstall();
       } finally { cleanup(); }
     });
 
-    test("non-FAF skill with same agent still dispatches normally", async () => {
-      const avaWithMixed = {
-        ...onboardingAgent,
-        skills: [
-          ...onboardingAgent.skills,
-          { name: "sitrep", keywords: ["status", "sitrep"] },
-        ],
-      };
-      const { workspaceDir, cleanup } = makeWorkspace({ agents: { "ava.yaml": avaWithMixed } });
+    test("sitrep and other skills still dispatch normally", async () => {
+      const { workspaceDir, cleanup } = makeWorkspace({ agents: { "ava.yaml": avaAgent2 } });
       try {
         const bus = new InMemoryEventBus();
         const plugin = new RouterPlugin({ workspaceDir });

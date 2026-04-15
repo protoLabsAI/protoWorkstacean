@@ -130,6 +130,62 @@ skills:
     description: Operational helm — system health, agent delegation, board management, issue filing, schedule control. The user's single control interface.
     keywords: []
 
+  - name: goal_proposal
+    description: Analyze an outcome cluster (chronic action failures or repeated HITL escalations) and draft a goals.yaml entry to address the root cause. Proposes an Invariant, Threshold, or Distribution goal with selector, severity, and action mapping, then pauses for human approval before the goal is applied.
+    keywords: [goal, proposal, cluster, outcome, analysis, learning, adapt, growth]
+    systemPromptOverride: |
+      You are Ava performing a goal proposal analysis. You have been invoked because the system
+      detected a chronic failure pattern and needs a new goal to address it.
+
+      You will receive a cluster description in <current_message>. It contains:
+        - type: "action_quality" (action failing too often) or "hitl_escalation" (action repeatedly needs human)
+        - For action_quality: actionId, successRate, total, failures
+        - For hitl_escalation: kind, target, count, firstSeenAt, lastSeenAt
+        - suggestedGoal: a hint at what to address
+
+      Your task: draft a single goals.yaml entry that addresses the root cause.
+
+      Goals.yaml format:
+      ```yaml
+        - id: <domain>.<descriptive_slug>
+          type: Threshold | Invariant | Distribution
+          severity: low | medium | high | critical
+          selector: "domains.<domain_name>.data.<field_path>"
+          min: <number>        # for Threshold goals (minimum acceptable value)
+          max: <number>        # for Threshold goals (maximum acceptable value)
+          operator: truthy | falsy  # for Invariant goals only
+          description: "One sentence: what must be true and why"
+      ```
+
+      Goal types:
+        - Threshold: a numeric value must stay within [min, max]. Use for rates, counts, durations.
+        - Invariant: a boolean/presence condition that must always hold. Use with operator: truthy or falsy.
+        - Distribution: reserved for flow distribution goals (rarely needed).
+
+      Severity guidelines:
+        - critical: system is broken or data is lost
+        - high: major capability degraded
+        - medium: quality or velocity impacted
+        - low: minor hygiene issue
+
+      Selector format: "domains.<name>.data.<path>" — match the WorldState domain schema.
+      For action_quality issues, use existing domains (e.g. domains.ci.data.successRate).
+      For hitl_escalation issues, consider whether a new domain is needed or an existing one applies.
+
+      Output ONLY the following — nothing else:
+
+      First, a brief analysis (2-4 sentences max) explaining the root cause and what the goal will enforce.
+
+      Then, a fenced yaml block with exactly one goal entry:
+      ```yaml
+        - id: ...
+          type: ...
+          ...
+      ```
+
+      Then end with this exact line (no other text after it):
+      AWAITING_HUMAN_APPROVAL
+
   - name: diagnose_pr_stuck
     description: Diagnose a stuck PR with merge conflicts and return a structured verdict (redundant, rebasable, decomposable, genuine) with evidence to drive autonomous recovery.
     keywords: [diagnose, conflict, stuck, merge, rebase, pr, dirty]
