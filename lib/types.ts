@@ -180,6 +180,16 @@ export interface LoggerTurnQueryResponse {
   }>;
 }
 
+// ── ConversationTurn ──────────────────────────────────────────────────────────
+
+export interface ConversationTurn {
+  timestamp: number;
+  role: "user" | "assistant";
+  text: string;
+  agentName: string;
+  channelId: string;
+}
+
 export type WidgetType = 'chart' | 'table' | 'status-card' | 'log-stream' | 'metric';
 
 export interface WidgetDescriptor {
