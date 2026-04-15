@@ -152,6 +152,8 @@ export interface ConfigChangeRenderer {
 export type WidgetType = 'chart' | 'table' | 'status-card' | 'log-stream' | 'metric';
 
 export interface WidgetDescriptor {
+  /** Plugin that contributed this widget — stamped by /api/widgets discovery from plugin.name. */
+  pluginName: string;
   id: string;
   type: WidgetType;
   title: string;
