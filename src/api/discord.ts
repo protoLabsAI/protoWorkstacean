@@ -9,6 +9,7 @@
  *   GET  /api/discord/server-stats      — member count, channel count, boost level
  *   GET  /api/discord/channels          — list all channels with type and category
  *   POST /api/discord/channels/create   — create a channel (text/voice/category)
+ *   POST /api/discord/channels/delete   — delete a channel (recursive for categories)
  *   POST /api/discord/send              — send a message to a channel
  *   GET  /api/discord/members           — list members (paginated)
  *   GET  /api/discord/webhooks          — list webhooks across guild channels
@@ -109,6 +110,57 @@ export function createRoutes(ctx: ApiContext): Route[] {
           return Response.json({
             success: true,
             data: { id: created.id, name: created.name, type: created.type },
+          });
+        } catch (e) {
+          return Response.json({ success: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+        }
+      },
+    },
+    {
+      method: "POST",
+      path: "/api/discord/channels/delete",
+      handler: async (req) => {
+        const client = getDiscordClient(ctx);
+        if (!client) return Response.json({ success: false, error: "Discord not connected" }, { status: 503 });
+
+        const guild = client.guilds.cache.get(getGuildId());
+        if (!guild) return Response.json({ success: false, error: "Guild not found" }, { status: 404 });
+
+        let body: { channelId?: string; channelName?: string; recursive?: boolean; reason?: string };
+        try { body = await req.json() as typeof body; }
+        catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
+
+        let target: any = null;
+        if (body.channelId) {
+          target = guild.channels.cache.get(body.channelId);
+        } else if (body.channelName) {
+          target = guild.channels.cache.find((ch: any) => ch.name === body.channelName);
+        }
+        if (!target) {
+          return Response.json({ success: false, error: "Channel not found (pass channelId or channelName)" }, { status: 404 });
+        }
+
+        try {
+          // Recursive delete for categories — Discord won't auto-delete children;
+          // we collect them first so the response can report what was removed.
+          const deletedChildren: Array<{ id: string; name: string }> = [];
+          const isCategory = target.type === 4;
+          if (isCategory && body.recursive !== false) {
+            const children = guild.channels.cache.filter((ch: any) => ch.parentId === target.id);
+            for (const child of children.values()) {
+              await child.delete(body.reason ?? "deleted via /api/discord/channels/delete");
+              deletedChildren.push({ id: child.id, name: child.name });
+            }
+          }
+          await target.delete(body.reason ?? "deleted via /api/discord/channels/delete");
+          return Response.json({
+            success: true,
+            data: {
+              id: target.id,
+              name: target.name,
+              type: target.type,
+              deletedChildren,
+            },
           });
         } catch (e) {
           return Response.json({ success: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });

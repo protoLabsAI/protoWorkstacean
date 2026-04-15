@@ -82,6 +82,7 @@ tools:
   - discord_server_stats
   - discord_list_channels
   - discord_create_channel
+  - discord_delete_channel
   - discord_list_webhooks
   - discord_create_webhook
   - discord_send
