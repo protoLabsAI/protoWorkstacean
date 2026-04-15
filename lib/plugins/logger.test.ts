@@ -80,15 +80,13 @@ describe("LoggerPlugin.getRecentTurnsForUser", () => {
 
     expect(turns.length).toBe(2);
     expect(turns[0].role).toBe("user");
-    expect(turns[0].content).toBe("Hello agent");
-    expect(turns[0].skill).toBe("chat");
-    expect(turns[0].channel).toBe("discord");
-    expect(turns[0].createdAt).toBe(req.timestamp);
+    expect(turns[0].text).toBe("Hello agent");
+    expect(turns[0].channelId).toBe("ch-1");
+    expect(turns[0].timestamp).toBe(req.timestamp);
 
     expect(turns[1].role).toBe("assistant");
-    expect(turns[1].content).toBe("Hi there!");
-    expect(turns[1].skill).toBe("chat");
-    expect(turns[1].channel).toBe("discord");
+    expect(turns[1].text).toBe("Hi there!");
+    expect(turns[1].channelId).toBe("ch-1");
   });
 
   test("returns only user turn when no response exists", () => {
@@ -134,7 +132,7 @@ describe("LoggerPlugin.getRecentTurnsForUser", () => {
     const turns = plugin.getRecentTurnsForUser("user-abc", "protomaker", 10, 60_000);
 
     expect(turns.length).toBe(1);
-    expect(turns[0].content).toBe("Hello protomaker");
+    expect(turns[0].text).toBe("Hello protomaker");
   });
 
   test("includes events with empty targets when agentName filter is set", () => {
@@ -212,9 +210,9 @@ describe("LoggerPlugin bus-based logger.turn.query capability", () => {
     expect(received!.type).toBe("logger.turn.query.response");
     expect(received!.turns.length).toBe(2);
     expect(received!.turns[0].role).toBe("user");
-    expect(received!.turns[0].content).toBe("Hello agent");
+    expect(received!.turns[0].text).toBe("Hello agent");
     expect(received!.turns[1].role).toBe("assistant");
-    expect(received!.turns[1].content).toBe("Hi there!");
+    expect(received!.turns[1].text).toBe("Hi there!");
   });
 
   test("responds with empty turns when no matching events", () => {
