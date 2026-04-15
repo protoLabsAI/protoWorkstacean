@@ -272,6 +272,17 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Intercepts ExecutorRegistry.resolve() to A/B test competing skill variants.
+    // Must be installed AFTER registrars (agent-runtime, skill-broker) and
+    // BEFORE skill-dispatcher so the hook is active when dispatches begin.
+    name: "skill-ab-test",
+    condition: () => true,
+    factory: async () => {
+      const { SkillAbTestPlugin } = await import("./executor/skill-ab-test-plugin.js");
+      return new SkillAbTestPlugin(executorRegistry);
+    },
+  },
+  {
     // Sole subscriber to agent.skill.request — dispatches via ExecutorRegistry.
     // Must be installed AFTER agent-runtime and skill-broker (registrars).
     name: "skill-dispatcher",
