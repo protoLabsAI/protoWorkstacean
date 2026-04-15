@@ -17,6 +17,7 @@ import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 import { MODEL_RATES } from "../../lib/types/budget.ts";
 
 const WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 hours
+const WINDOW_1H_MS = 60 * 60 * 1_000; // 1 hour
 const MAX_RECENT_FAILURES = 10;
 const DEFAULT_RATES = MODEL_RATES["default"];
 
@@ -57,12 +58,22 @@ export interface AgentFleetMetrics {
   }>;
   /** Total outcome events counted in the 24h window. */
   totalOutcomes: number;
+  /**
+   * Fraction of outcomes that failed over the last 1h window (0–1).
+   * 0 when no outcomes in the 1h window.
+   */
+  failureRate1h: number;
 }
 
 export interface FleetHealthSnapshot {
   agents: AgentFleetMetrics[];
   /** Always 24 — documents the rolling window. */
   windowHours: 24;
+  /**
+   * Max failureRate1h across all agents. 0 when no agents have 1h outcomes.
+   * Used as the GOAP goal selector for fleet.no_agent_stuck.
+   */
+  maxFailureRate1h: number;
   collectedAt: number;
 }
 
@@ -106,6 +117,7 @@ export class AgentFleetHealthPlugin implements Plugin {
   getFleetHealth(): FleetHealthSnapshot {
     const now = Date.now();
     const cutoff = now - WINDOW_MS;
+    const cutoff1h = now - WINDOW_1H_MS;
     const agents: AgentFleetMetrics[] = [];
 
     for (const [agentName, records] of this.agentWindows) {
@@ -137,6 +149,10 @@ export class AgentFleetHealthPlugin implements Plugin {
           failureReason: r.failureReason,
         }));
 
+      const fresh1h = fresh.filter(r => r.timestamp >= cutoff1h);
+      const failures1h = fresh1h.filter(r => !r.success);
+      const failureRate1h = fresh1h.length > 0 ? failures1h.length / fresh1h.length : 0;
+
       agents.push({
         agentName,
         successRate,
@@ -145,10 +161,15 @@ export class AgentFleetHealthPlugin implements Plugin {
         costPerSuccessfulOutcome,
         recentFailures,
         totalOutcomes: fresh.length,
+        failureRate1h,
       });
     }
 
-    return { agents, windowHours: 24, collectedAt: now };
+    const maxFailureRate1h = agents.length > 0
+      ? Math.max(...agents.map(a => a.failureRate1h))
+      : 0;
+
+    return { agents, windowHours: 24, maxFailureRate1h, collectedAt: now };
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
