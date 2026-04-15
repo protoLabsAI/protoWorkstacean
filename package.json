@@ -1,6 +1,6 @@
 {
   "name": "workstacean",
-  "version": "0.7.10",
+  "version": "0.7.11",
   "type": "module",
   "scripts": {
     "start": "bun run src/index.ts",
