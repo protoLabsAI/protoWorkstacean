@@ -149,6 +149,37 @@ export interface ConfigChangeRenderer {
   onExpired?(request: ConfigChangeRequest, bus: EventBus): Promise<void>;
 }
 
+// ── Logger turn-query capability ──────────────────────────────────────────────
+// Topic: logger.turn.query
+// Any plugin may publish a LoggerTurnQueryRequest. LoggerPlugin subscribes to
+// "logger.turn.query", resolves the turns, and publishes a
+// LoggerTurnQueryResponse to the replyTopic.
+
+export interface LoggerTurnQueryRequest {
+  type: "logger.turn.query";
+  /** Canonical user ID (matches BusMessage.source.userId). */
+  userId: string;
+  /** Agent name to scope turns to. Pass empty string for any agent. */
+  agentName: string;
+  /** Maximum number of conversation turns (not pairs) to return. */
+  limit: number;
+  /** Only include turns within this many ms of now. */
+  maxAgeMs: number;
+  /** Topic where LoggerPlugin publishes the LoggerTurnQueryResponse. */
+  replyTopic: string;
+}
+
+export interface LoggerTurnQueryResponse {
+  type: "logger.turn.query.response";
+  turns: Array<{
+    role: "user" | "assistant";
+    content: string;
+    channel: string | undefined;
+    skill: string | undefined;
+    createdAt: number;
+  }>;
+}
+
 export type WidgetType = 'chart' | 'table' | 'status-card' | 'log-stream' | 'metric';
 
 export interface WidgetDescriptor {

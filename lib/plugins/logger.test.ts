@@ -1,20 +1,24 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { rmSync } from "node:fs";
 import { LoggerPlugin } from "./logger";
-import type { BusMessage } from "../types";
+import type { BusMessage, LoggerTurnQueryRequest, LoggerTurnQueryResponse } from "../types";
 
 const TEST_DATA_DIR = "/tmp/logger-test-" + process.pid;
 
 function makeBus() {
-  const subs: Array<(msg: BusMessage) => void> = [];
+  const subs: Array<{ pattern: string; handler: (msg: BusMessage) => void }> = [];
   return {
-    subscribe(_pattern: string, _name: string, handler: (msg: BusMessage) => void) {
-      subs.push(handler);
+    subscribe(pattern: string, _name: string, handler: (msg: BusMessage) => void) {
+      subs.push({ pattern, handler });
       return "sub-id";
     },
     unsubscribe() {},
-    publish(_topic: string, msg: BusMessage) {
-      for (const h of subs) h(msg);
+    publish(topic: string, msg: BusMessage) {
+      for (const sub of subs) {
+        if (sub.pattern === "#" || sub.pattern === topic) {
+          sub.handler(msg);
+        }
+      }
     },
     topics() { return []; },
     consumers() { return []; },
@@ -158,5 +162,85 @@ describe("LoggerPlugin.getRecentTurnsForUser", () => {
     const turns = plugin.getRecentTurnsForUser("user-abc", "", 2, 60_000);
     // 2 correlationIds * 1 user turn each = 2 turns
     expect(turns.length).toBe(2);
+  });
+});
+
+describe("LoggerPlugin bus-based logger.turn.query capability", () => {
+  let plugin: LoggerPlugin;
+  let bus: ReturnType<typeof makeBus>;
+
+  beforeEach(() => {
+    plugin = new LoggerPlugin(TEST_DATA_DIR);
+    bus = makeBus();
+    plugin.install(bus as never);
+  });
+
+  afterEach(() => {
+    plugin.uninstall();
+    try { rmSync(TEST_DATA_DIR, { recursive: true }); } catch {}
+  });
+
+  test("responds to logger.turn.query with turns published to replyTopic", () => {
+    const req = makeRequest();
+    const res = makeResponse();
+    bus.publish(req.topic, req);
+    bus.publish(res.topic, res);
+
+    let received: LoggerTurnQueryResponse | null = null;
+    bus.subscribe("logger.turn.query.response.test", "test", (msg: BusMessage) => {
+      received = msg.payload as LoggerTurnQueryResponse;
+    });
+
+    const queryRequest: LoggerTurnQueryRequest = {
+      type: "logger.turn.query",
+      userId: "user-abc",
+      agentName: "",
+      limit: 10,
+      maxAgeMs: 60_000,
+      replyTopic: "logger.turn.query.response.test",
+    };
+
+    bus.publish("logger.turn.query", {
+      id: "q-1",
+      correlationId: "corr-q-1",
+      topic: "logger.turn.query",
+      timestamp: Date.now(),
+      payload: queryRequest,
+    });
+
+    expect(received).not.toBeNull();
+    expect(received!.type).toBe("logger.turn.query.response");
+    expect(received!.turns.length).toBe(2);
+    expect(received!.turns[0].role).toBe("user");
+    expect(received!.turns[0].content).toBe("Hello agent");
+    expect(received!.turns[1].role).toBe("assistant");
+    expect(received!.turns[1].content).toBe("Hi there!");
+  });
+
+  test("responds with empty turns when no matching events", () => {
+    let received: LoggerTurnQueryResponse | null = null;
+    bus.subscribe("logger.turn.query.response.empty", "test", (msg: BusMessage) => {
+      received = msg.payload as LoggerTurnQueryResponse;
+    });
+
+    const queryRequest: LoggerTurnQueryRequest = {
+      type: "logger.turn.query",
+      userId: "nobody",
+      agentName: "",
+      limit: 10,
+      maxAgeMs: 60_000,
+      replyTopic: "logger.turn.query.response.empty",
+    };
+
+    bus.publish("logger.turn.query", {
+      id: "q-2",
+      correlationId: "corr-q-2",
+      topic: "logger.turn.query",
+      timestamp: Date.now(),
+      payload: queryRequest,
+    });
+
+    expect(received).not.toBeNull();
+    expect(received!.turns).toEqual([]);
   });
 });

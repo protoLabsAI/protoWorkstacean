@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { Plugin, EventBus, BusMessage } from "../types";
+import type { Plugin, EventBus, BusMessage, LoggerTurnQueryRequest, LoggerTurnQueryResponse } from "../types";
 
 export interface ConversationTurn {
   role: "user" | "assistant";
@@ -18,6 +18,8 @@ export class LoggerPlugin implements Plugin {
 
   private db: Database | null = null;
   private subscriptionId: string | null = null;
+  private querySubscriptionId: string | null = null;
+  private bus: EventBus | null = null;
   private dataDir: string;
 
   constructor(dataDir: string) {
@@ -51,9 +53,25 @@ export class LoggerPlugin implements Plugin {
       this.db.exec("ALTER TABLE events ADD COLUMN parent_id TEXT");
     }
 
+    this.bus = bus;
+
     this.subscriptionId = bus.subscribe("#", this.name, (msg: BusMessage) => {
       if (msg.topic.startsWith("debug.")) return;
       this.log(msg);
+    });
+
+    this.querySubscriptionId = bus.subscribe("logger.turn.query", this.name, (msg: BusMessage) => {
+      const req = msg.payload as LoggerTurnQueryRequest;
+      const turns = this.getRecentTurnsForUser(req.userId, req.agentName, req.limit, req.maxAgeMs);
+      const response: LoggerTurnQueryResponse = { type: "logger.turn.query.response", turns };
+      bus.publish(req.replyTopic, {
+        id: crypto.randomUUID(),
+        correlationId: msg.correlationId,
+        parentId: msg.id,
+        topic: req.replyTopic,
+        timestamp: Date.now(),
+        payload: response,
+      });
     });
   }
 
