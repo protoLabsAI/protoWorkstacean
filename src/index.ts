@@ -35,6 +35,13 @@ const contextMailbox = new ContextMailbox();
 import { TaskTracker } from "./executor/task-tracker.ts";
 const taskTracker = new TaskTracker({ bus });
 
+// --- Agent key registry — resolves per-agent X-API-Key headers to identities
+//     so ceremony / cron endpoints (and any future per-agent permission gates)
+//     can enforce ownership. Falls back to admin-only mode when
+//     workspace/agent-keys.yaml is absent.
+import { AgentKeyRegistry } from "../lib/auth/agent-keys.ts";
+const agentKeys = new AgentKeyRegistry(workspaceDir, process.env.WORKSTACEAN_API_KEY);
+
 // --- A2A extensions — register observability interceptors (cost, confidence,
 //     effect-domain, blast, hitl-mode, worldstate-delta). A2AExecutor.execute()
 //     runs the before/after hooks on every skill call; the extensions
@@ -585,6 +592,7 @@ const apiContext: ApiContext = {
   executorRegistry,
   telemetry,
   apiKey: API_KEY,
+  agentKeys,
   mailbox: contextMailbox,
   taskTracker,
 };

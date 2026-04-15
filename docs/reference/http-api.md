@@ -26,6 +26,23 @@ A few endpoints return raw objects without the envelope (`/api/services`, `/api/
 
 Read endpoints are unauthenticated. Mutating endpoints (`/publish`, `/api/onboard`, `/api/ceremonies/:id/run`, `/api/incidents`, `/api/incidents/:id/resolve`) require `X-API-Key: $WORKSTACEAN_API_KEY`. If `WORKSTACEAN_API_KEY` is unset, authentication is skipped entirely.
 
+### Per-agent API keys (multi-tenant model)
+
+The ceremony endpoints (`GET /api/ceremonies`, `POST /api/ceremonies/create`, `POST /api/ceremonies/:id/update`, `POST /api/ceremonies/:id/delete`) additionally support per-agent identity resolution.
+
+- The legacy `WORKSTACEAN_API_KEY` is the **admin key** — sees all ceremonies, can create/update/delete any of them, can override `createdBy` on create.
+- Per-agent keys are declared in `workspace/agent-keys.yaml`:
+  ```yaml
+  keys:
+    quinn:
+      envKey: WORKSTACEAN_API_KEY_QUINN
+    jon:
+      envKey: WORKSTACEAN_API_KEY_JON
+  ```
+  Set the env var (via Infisical), the registry hot-reloads. When an agent calls with its own key, every ceremony it creates is stamped `createdBy: <agentName>` automatically. Update / delete are gated by `caller.agentName === ceremony.createdBy`. List filters to caller's own ceremonies (`?all=true` for admin-only fleet view).
+- Agents cannot override `createdBy` on create or transfer ownership on update — those are admin-only.
+- Backward-compatible: workspaces without `agent-keys.yaml` keep single-key admin behavior. Agents using the admin key bypass ownership checks.
+
 ---
 
 ## GET /health
@@ -184,9 +201,12 @@ For live goal evaluation, the dashboard's Goals page runs `src/lib/goal-evaluato
 
 ## GET /api/ceremonies
 
-List all ceremony definitions parsed from `workspace/ceremonies/*.yaml`.
+List ceremony definitions parsed from `workspace/ceremonies/*.yaml`.
 
-**Auth**: None
+**Auth**: API key. Agent-scoped callers see only their own ceremonies (`createdBy === caller.agentName`). Admin sees all.
+
+**Query params**:
+- `?all=true` — admin-only override: return every ceremony regardless of owner.
 
 **Response** (`200`):
 ```json
@@ -841,7 +861,7 @@ Returns `403` if the repo is not in `projects.yaml`.
 
 Create a new scheduled ceremony. Writes YAML to `workspace/ceremonies/` and registers with the hot-reload watcher.
 
-**Auth**: API key
+**Auth**: API key (admin or per-agent — see [Per-agent API keys](#per-agent-api-keys-multi-tenant-model))
 
 **Request body**:
 ```typescript
@@ -853,12 +873,17 @@ Create a new scheduled ceremony. Writes YAML to `workspace/ceremonies/` and regi
   targets?: string[];    // Agent targets (default: ["all"])
   enabled?: boolean;     // Default: true
   notifyChannel?: string; // Discord channel ID for notifications
+  createdBy?: string;    // Admin-only override (ignored from agent-scoped callers)
 }
 ```
 
+`createdBy` is **stamped server-side** from the caller's identity:
+- Agent-scoped key → `createdBy = <agentName>`, `createdBy` body field is ignored
+- Admin key → `createdBy` defaults to `"system"`; admins may set the body field to attribute the ceremony to a specific agent
+
 **Response** (`200`):
 ```json
-{ "success": true, "data": { "id": "my.ceremony", "name": "...", "schedule": "...", "..." } }
+{ "success": true, "data": { "id": "...", "createdBy": "quinn", "..." } }
 ```
 
 ---
@@ -867,11 +892,15 @@ Create a new scheduled ceremony. Writes YAML to `workspace/ceremonies/` and regi
 
 Update an existing ceremony. Merges fields into the existing YAML.
 
-**Auth**: API key
+**Auth**: API key. Agent-scoped callers may only update ceremonies where `createdBy === caller.agentName`. Admin can update any.
 
 **Path params**: `id` — ceremony ID
 
-**Request body**: Same fields as create (all optional except `id`).
+**Request body**: Same fields as create (all optional except `id`). `createdBy` is **stripped from the body** — ownership transfers are not supported via update.
+
+**Errors**:
+- `404` — ceremony not found
+- `403` — agent-scoped caller is not the owner
 
 ---
 
@@ -879,9 +908,12 @@ Update an existing ceremony. Merges fields into the existing YAML.
 
 Delete a ceremony. Removes the YAML file and unregisters from the scheduler.
 
-**Auth**: API key
+**Auth**: API key. Agent-scoped callers may only delete their own ceremonies. Admin can delete any.
 
 **Path params**: `id` — ceremony ID
+
+**Errors**:
+- `403` — agent-scoped caller is not the owner
 
 ---
 
