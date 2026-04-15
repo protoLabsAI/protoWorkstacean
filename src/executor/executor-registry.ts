@@ -10,9 +10,22 @@
 
 import type { IExecutor, ExecutorRegistration } from "./types.ts";
 
+/**
+ * Optional hook called after standard resolution.
+ * Receives (skill, targets, resolved) where resolved is the standard result.
+ * Return a different executor to override, or resolved to keep the default.
+ * Used by SkillAbTestPlugin to intercept specific skills under A/B test.
+ */
+export type ResolveHook = (
+  skill: string,
+  targets: string[],
+  resolved: IExecutor | null,
+) => IExecutor | null;
+
 export class ExecutorRegistry {
   private readonly _registrations: ExecutorRegistration[] = [];
   private _default: IExecutor | null = null;
+  private _resolveHook: ResolveHook | null = null;
 
   /**
    * Register an executor for a specific skill.
@@ -57,10 +70,22 @@ export class ExecutorRegistry {
     const bySkill = this._registrations
       .filter(r => r.skill === skill)
       .sort((a, b) => b.priority - a.priority);
-    if (bySkill.length > 0) return bySkill[0].executor;
+    const resolved = bySkill.length > 0 ? bySkill[0].executor : this._default;
 
-    // 3. Default
-    return this._default;
+    // 3. Optional hook — allows SkillAbTestPlugin to intercept
+    if (this._resolveHook) return this._resolveHook(skill, targets, resolved);
+
+    return resolved;
+  }
+
+  /**
+   * Set (or clear) a resolve hook.
+   * The hook runs after standard resolution and may return a different executor.
+   * Pass null to remove the hook.
+   * Used by SkillAbTestPlugin to intercept skills under A/B test.
+   */
+  setResolveHook(hook: ResolveHook | null): void {
+    this._resolveHook = hook;
   }
 
   /** All current registrations — useful for diagnostics and health checks. */
