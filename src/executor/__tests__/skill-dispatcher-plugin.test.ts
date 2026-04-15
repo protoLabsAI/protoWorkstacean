@@ -1,5 +1,6 @@
 import { describe, it, expect, mock, spyOn, beforeEach, afterEach } from "bun:test";
-import { SkillDispatcherPlugin, assembleContext } from "../skill-dispatcher-plugin.ts";
+import { SkillDispatcherPlugin } from "../skill-dispatcher-plugin.ts";
+import { assembleContext } from "../../../lib/conversation/context-assembler.ts";
 import { ExecutorRegistry } from "../executor-registry.ts";
 import { FunctionExecutor } from "../executors/function-executor.ts";
 import { ProtoSdkExecutor } from "../executors/proto-sdk-executor.ts";
