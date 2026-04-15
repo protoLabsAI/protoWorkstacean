@@ -13,6 +13,7 @@ import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { TelemetryService } from "../telemetry/telemetry-service.ts";
 import type { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "../executor/task-tracker.ts";
+import type { AgentKeyRegistry } from "../../lib/auth/agent-keys.ts";
 
 export type Params = Record<string, string>;
 export type RouteHandler = (req: Request, params: Params) => Response | Promise<Response>;
@@ -34,6 +35,12 @@ export interface ApiContext {
   executorRegistry: ExecutorRegistry;
   telemetry?: TelemetryService;
   apiKey?: string;
+  /**
+   * Per-agent API key registry — resolves request `X-API-Key` headers to a
+   * CallerIdentity. When unset, endpoints fall back to the legacy single-key
+   * model (admin-only via ctx.apiKey).
+   */
+  agentKeys?: AgentKeyRegistry;
   mailbox?: ContextMailbox;
   taskTracker?: TaskTracker;
 }

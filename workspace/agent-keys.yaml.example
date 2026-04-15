@@ -1,0 +1,36 @@
+# Per-agent API key registry — backs the multi-tenant ceremony / cron model.
+#
+# Each entry binds an agent name to an environment variable holding that
+# agent's secret. Workstacean reads X-API-Key headers on /api/ceremonies/*
+# (and any future per-agent-permissioned endpoint), looks up the key value
+# here, and stamps the resolved agentName on every ceremony that agent
+# creates. Update / delete / list filtering enforce caller === createdBy.
+#
+# The legacy WORKSTACEAN_API_KEY remains the admin / operator key with
+# full read/write across all ceremonies. Listing it here is unnecessary.
+#
+# Rollout:
+#   1. Copy this file to workspace/agent-keys.yaml
+#   2. For each agent, generate a long random secret and set the env var
+#      via Infisical (or your container's environment).
+#   3. Restart workstacean — keys hot-reload from the yaml every 5s, but
+#      env vars are read once at process start.
+#   4. In each agent's container, set WORKSTACEAN_API_KEY to the
+#      agent-scoped secret instead of the admin key.
+#
+# Hot-reload: the file is watched at 5s interval. Adding / removing
+# agents takes effect without a restart; rotating an env var requires
+# a workstacean restart.
+
+keys:
+  quinn:
+    envKey: WORKSTACEAN_API_KEY_QUINN
+  jon:
+    envKey: WORKSTACEAN_API_KEY_JON
+  researcher:
+    envKey: WORKSTACEAN_API_KEY_RESEARCHER
+  protopen:
+    envKey: WORKSTACEAN_API_KEY_PROTOPEN
+  # ava and protobot run in-process and use the admin key directly,
+  # so they don't appear here. Add them only if you want to subject
+  # them to the per-agent ownership model too.

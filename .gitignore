@@ -11,6 +11,7 @@ workspace/projects.yaml
 workspace/discord.yaml
 workspace/github.yaml
 workspace/google.yaml
+workspace/agent-keys.yaml
 .automaker-lock
 .automaker/
 .worktrees/
