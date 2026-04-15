@@ -49,6 +49,8 @@ export interface AgentFleetMetrics {
    * no usage data is available.
    */
   costPerSuccessfulOutcome: number;
+  /** Total raw LLM cost in USD for all outcomes in the 24h window. */
+  totalCostUsd: number;
   /** Most recent failures (up to 10), most-recent-first. */
   recentFailures: Array<{
     timestamp: number;
@@ -71,9 +73,11 @@ export interface FleetHealthSnapshot {
   windowHours: 24;
   /**
    * Max failureRate1h across all agents. 0 when no agents have 1h outcomes.
-   * Used as the GOAP goal selector for fleet.no_agent_stuck.
+   * Used as the GOAP goal selector for fleet.no_agent_stuck (Arc 8.2).
    */
   maxFailureRate1h: number;
+  /** Sum of all LLM costs across all agents over the 24h window (USD). Used by fleet.cost_under_budget (Arc 8.3). */
+  totalCostUsd1d: number;
   collectedAt: number;
 }
 
@@ -135,9 +139,9 @@ export class AgentFleetHealthPlugin implements Plugin {
       const p50LatencyMs = _percentile(durations, 0.5);
       const p95LatencyMs = _percentile(durations, 0.95);
 
-      const totalCost = fresh.reduce((sum, r) => sum + r.costUsd, 0);
+      const totalCostUsd = fresh.reduce((sum, r) => sum + r.costUsd, 0);
       const costPerSuccessfulOutcome =
-        successes.length > 0 ? totalCost / successes.length : 0;
+        successes.length > 0 ? totalCostUsd / successes.length : 0;
 
       const recentFailures = failures
         .sort((a, b) => b.timestamp - a.timestamp)
@@ -159,6 +163,7 @@ export class AgentFleetHealthPlugin implements Plugin {
         p50LatencyMs,
         p95LatencyMs,
         costPerSuccessfulOutcome,
+        totalCostUsd,
         recentFailures,
         totalOutcomes: fresh.length,
         failureRate1h,
@@ -168,8 +173,9 @@ export class AgentFleetHealthPlugin implements Plugin {
     const maxFailureRate1h = agents.length > 0
       ? Math.max(...agents.map(a => a.failureRate1h))
       : 0;
+    const totalCostUsd1d = agents.reduce((sum, a) => sum + a.totalCostUsd, 0);
 
-    return { agents, windowHours: 24, maxFailureRate1h, collectedAt: now };
+    return { agents, windowHours: 24, maxFailureRate1h, totalCostUsd1d, collectedAt: now };
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
