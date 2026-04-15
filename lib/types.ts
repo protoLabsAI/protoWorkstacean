@@ -149,12 +149,21 @@ export interface ConfigChangeRenderer {
   onExpired?(request: ConfigChangeRequest, bus: EventBus): Promise<void>;
 }
 
+export interface WidgetDescriptor {
+  pluginName: string;
+  widgetId: string;
+  type: string;
+  title: string;
+  props: Record<string, unknown>;
+}
+
 export interface Plugin {
   name: string;
   description: string;
   capabilities: string[];
   install(bus: EventBus): void;
   uninstall(): void;
+  getWidgets?(): WidgetDescriptor[];
 }
 
 export interface TopicInfo {
