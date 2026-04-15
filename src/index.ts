@@ -565,11 +565,14 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     const fleetHealth = registeredPlugins.find(p => p.name === "agent-fleet-health");
     if (fleetHealth) {
       type AgentFleetHealthPlugin = import("./plugins/agent-fleet-health-plugin.js").AgentFleetHealthPlugin;
+      const fleetPlugin = fleetHealth as unknown as AgentFleetHealthPlugin;
       engine.registerDomain(
         "agent_fleet_health",
-        () => Promise.resolve((fleetHealth as unknown as AgentFleetHealthPlugin).getFleetHealth()),
+        () => Promise.resolve(fleetPlugin.getFleetHealth()),
         60_000,
       );
+      // Arc 8: wire live fleet health into ExecutorRegistry for weighted selection.
+      executorRegistry.setHealthGetter(() => fleetPlugin.getFleetHealth().agents);
     }
 
     console.log("[domain-discovery] Registered local domains: flow, services, agent_health, security, ci, pr_pipeline, branch_drift, branch_protection, hitl_queue, plane, memory, agent_fleet_health");

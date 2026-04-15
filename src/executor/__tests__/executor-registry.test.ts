@@ -52,7 +52,7 @@ describe("ExecutorRegistry", () => {
   });
 
   describe("priority", () => {
-    it("higher priority wins for same skill", () => {
+    it("higher priority wins for same skill (no health getter)", () => {
       const registry = new ExecutorRegistry();
       const low = makeExecutor("low");
       const high = makeExecutor("high");
@@ -116,6 +116,115 @@ describe("ExecutorRegistry", () => {
       const list = registry.list();
       list.pop();
       expect(registry.size).toBe(1);
+    });
+  });
+
+  describe("health-weighted selection (Arc 8)", () => {
+    it("uses priority when health getter is not set", () => {
+      const registry = new ExecutorRegistry();
+      const ava = makeExecutor("ava");
+      const quinn = makeExecutor("quinn");
+      registry.register("skill", ava, { agentName: "ava", priority: 5 });
+      registry.register("skill", quinn, { agentName: "quinn", priority: 10 });
+      // Without health getter, highest priority wins deterministically
+      expect(registry.resolve("skill")).toBe(quinn);
+    });
+
+    it("never selects an agent with weight 0 (successRate=0)", () => {
+      const registry = new ExecutorRegistry();
+      const healthy = makeExecutor("healthy");
+      const broken = makeExecutor("broken");
+      registry.register("skill", healthy, { agentName: "healthy-agent" });
+      registry.register("skill", broken, { agentName: "broken-agent" });
+
+      registry.setHealthGetter(() => [
+        { agentName: "healthy-agent", successRate: 1.0, costPerSuccessfulOutcome: 0, totalOutcomes: 10 },
+        { agentName: "broken-agent", successRate: 0.0, costPerSuccessfulOutcome: 0, totalOutcomes: 5 },
+      ]);
+
+      // Run many times — broken-agent should never win
+      for (let i = 0; i < 50; i++) {
+        expect(registry.resolve("skill")).toBe(healthy);
+      }
+    });
+
+    it("gives neutral weight to agents with no health data", () => {
+      const registry = new ExecutorRegistry();
+      const known = makeExecutor("known");
+      const unknown = makeExecutor("unknown");
+      registry.register("skill", known, { agentName: "known-agent" });
+      registry.register("skill", unknown, { agentName: "unknown-agent" });
+
+      registry.setHealthGetter(() => [
+        { agentName: "known-agent", successRate: 1.0, costPerSuccessfulOutcome: 0, totalOutcomes: 10 },
+        // unknown-agent has no entry → neutral weight 1.0
+      ]);
+
+      // Both should be selectable — verify unknown-agent is returned at least once in 200 attempts
+      const results = new Set<string>();
+      for (let i = 0; i < 200; i++) {
+        const resolved = registry.resolve("skill");
+        if (resolved) results.add(resolved.type);
+      }
+      expect(results.has("known")).toBe(true);
+      expect(results.has("unknown")).toBe(true);
+    });
+
+    it("gives neutral weight to agents with totalOutcomes=0", () => {
+      const registry = new ExecutorRegistry();
+      const ava = makeExecutor("ava");
+      const quinn = makeExecutor("quinn");
+      registry.register("skill", ava, { agentName: "ava" });
+      registry.register("skill", quinn, { agentName: "quinn" });
+
+      registry.setHealthGetter(() => [
+        { agentName: "ava", successRate: 0, costPerSuccessfulOutcome: 0, totalOutcomes: 0 },
+        { agentName: "quinn", successRate: 0, costPerSuccessfulOutcome: 0, totalOutcomes: 0 },
+      ]);
+
+      // Both have totalOutcomes=0 → both weight 1.0 → both selectable
+      const results = new Set<string>();
+      for (let i = 0; i < 200; i++) {
+        const resolved = registry.resolve("skill");
+        if (resolved) results.add(resolved.type);
+      }
+      expect(results.has("ava")).toBe(true);
+      expect(results.has("quinn")).toBe(true);
+    });
+
+    it("weight formula: successRate × (1 / (1 + cost)) — lower cost agent wins more often", () => {
+      const registry = new ExecutorRegistry();
+      const cheap = makeExecutor("cheap");
+      const expensive = makeExecutor("expensive");
+      registry.register("skill", cheap, { agentName: "cheap-agent" });
+      registry.register("skill", expensive, { agentName: "expensive-agent" });
+
+      // cheap: weight = 1.0 × 1/(1+0) = 1.0
+      // expensive: weight = 1.0 × 1/(1+99) = 0.01
+      registry.setHealthGetter(() => [
+        { agentName: "cheap-agent", successRate: 1.0, costPerSuccessfulOutcome: 0, totalOutcomes: 10 },
+        { agentName: "expensive-agent", successRate: 1.0, costPerSuccessfulOutcome: 99, totalOutcomes: 10 },
+      ]);
+
+      let cheapCount = 0;
+      const TRIALS = 200;
+      for (let i = 0; i < TRIALS; i++) {
+        if (registry.resolve("skill") === cheap) cheapCount++;
+      }
+      // cheap has ~100× more weight — should win the vast majority (>90%) of the time
+      expect(cheapCount).toBeGreaterThan(TRIALS * 0.85);
+    });
+
+    it("single candidate always wins regardless of health getter", () => {
+      const registry = new ExecutorRegistry();
+      const solo = makeExecutor("solo");
+      registry.register("skill", solo, { agentName: "solo-agent" });
+
+      registry.setHealthGetter(() => [
+        { agentName: "solo-agent", successRate: 0.0, costPerSuccessfulOutcome: 999, totalOutcomes: 5 },
+      ]);
+
+      expect(registry.resolve("skill")).toBe(solo);
     });
   });
 });
