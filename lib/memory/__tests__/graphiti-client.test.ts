@@ -171,6 +171,52 @@ describe("GraphitiClient.addEpisode", () => {
       client.addEpisode({ groupId: "user_josh", userMessage: "x", agentMessage: "y" })
     ).rejects.toThrow("400");
   });
+
+  it("encodes turnNumber in source_description when provided", async () => {
+    spyFetch(null, 202);
+    const client = new GraphitiClient();
+    await client.addEpisode({
+      groupId: "user_josh",
+      userMessage: "hi",
+      agentMessage: "hello",
+      platform: "discord",
+      channelId: "99",
+      turnNumber: 3,
+    });
+    const body = lastFetchBody as { messages: Array<{ source_description: string }> };
+    expect(body.messages[0]!.source_description).toContain("| turn:3");
+    expect(body.messages[1]!.source_description).toContain("| turn:3");
+  });
+
+  it("encodes parentTurnId in source_description when provided", async () => {
+    spyFetch(null, 202);
+    const client = new GraphitiClient();
+    await client.addEpisode({
+      groupId: "user_josh",
+      userMessage: "hi",
+      agentMessage: "hello",
+      parentTurnId: "corr-abc-123",
+    });
+    const body = lastFetchBody as { messages: Array<{ source_description: string }> };
+    expect(body.messages[0]!.source_description).toContain("| parent:corr-abc-123");
+    expect(body.messages[1]!.source_description).toContain("| parent:corr-abc-123");
+  });
+
+  it("encodes both turnNumber and parentTurnId in source_description", async () => {
+    spyFetch(null, 202);
+    const client = new GraphitiClient();
+    await client.addEpisode({
+      groupId: "user_josh",
+      userMessage: "hi",
+      agentMessage: "hello",
+      platform: "slack",
+      channelId: "C01",
+      turnNumber: 7,
+      parentTurnId: "parent-xyz",
+    });
+    const body = lastFetchBody as { messages: Array<{ source_description: string }> };
+    expect(body.messages[0]!.source_description).toBe("slack channel C01 | turn:7 | parent:parent-xyz");
+  });
 });
 
 describe("GraphitiClient.search", () => {

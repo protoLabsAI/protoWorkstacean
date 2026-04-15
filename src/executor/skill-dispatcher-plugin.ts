@@ -512,6 +512,7 @@ export class SkillDispatcherPlugin implements Plugin {
           agentName: targets[0],
           channelId: sourceChannelId,
           platform: sourcePlatform ?? (systemActor ? "system" : undefined),
+          parentTurnId: correlationId,
         };
         this.graphiti.addEpisode({ groupId, ...episodeBase })
           .catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode (shared) error:", err));
