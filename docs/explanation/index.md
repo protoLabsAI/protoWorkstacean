@@ -13,6 +13,7 @@ These docs explain the *why* behind protoWorkstacean's architecture. Read them w
 | [Self-improving loop](./self-improving-loop) | How A2A extensions feed observations into `PlannerPluginL0`'s candidate ranking, how episodic memory writes to Graphiti, and why the convergence loops don't diverge |
 | [Distributed tracing](./distributed-tracing) | How `correlationId` (trace-id) and `parentId` (span-id) flow from the bus through RouterPlugin, A2AExecutor, external agents (protoMaker team, Quinn), and back |
 | [Plugin system](./plugin-system) | The plugin lifecycle, core vs integration vs workspace plugins, ordering guarantees |
+| [Cross-channel conversations](../integrations/channels) | How `ChannelRegistry` maps channels → agents, how `ConversationManager` maintains stable `conversationId` across DM and guild turns, and how memory enrichment now applies to all channels |
 
 ## Design philosophy
 
