@@ -34,7 +34,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import type { Plugin, EventBus, BusMessage } from "../types.ts";
+import type { Plugin, EventBus, BusMessage, WidgetDescriptor } from "../types.ts";
 import type { WorldState, WorldStateDomain, WorldStateSnapshot } from "../types/world-state.ts";
 import { HttpClient } from "../../src/services/http-client.ts";
 
@@ -245,6 +245,27 @@ export class WorldStateEngine implements Plugin {
         `[world-state-engine] Pruned ${orphans.length} orphan domain(s) from restored snapshot: ${orphans.join(", ")}`,
       );
     }
+  }
+
+  getWidgets(): WidgetDescriptor[] {
+    return [
+      {
+        pluginName: this.name,
+        id: "world-state-domain-grid",
+        type: "table",
+        title: "Domain Grid",
+        query: "/api/world-state",
+        props: { layout: "grid" },
+      },
+      {
+        pluginName: this.name,
+        id: "world-state-domain-card",
+        type: "status-card",
+        title: "Domain Card",
+        query: "/api/world-state",
+        props: { layout: "card" },
+      },
+    ];
   }
 
   uninstall(): void {
