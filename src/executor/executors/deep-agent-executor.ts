@@ -189,13 +189,17 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
         if (input.action === "list") return JSON.stringify(await http.get("/api/ceremonies"));
         if (input.action === "create") return JSON.stringify(await http.post("/api/ceremonies/create", input));
         if (input.action === "update") return JSON.stringify(await http.post(`/api/ceremonies/${input.id}/update`, input));
+        if (input.action === "run") return JSON.stringify(await http.post(`/api/ceremonies/${input.id}/run`, {}));
         return JSON.stringify(await http.post(`/api/ceremonies/${input.id}/delete`, {}));
       },
       {
         name: "manage_cron",
-        description: "CRUD scheduled ceremonies.",
+        description:
+          "CRUD scheduled ceremonies (cron jobs). Actions: list, create, update, delete, run (manual fire — ignores schedule). " +
+          "Naming convention: prefix ids with the agent's name (e.g. ava.weekly-rollup) so the dashboard groups by owner. " +
+          "Per-agent ownership is enforced server-side via X-API-Key — agent-scoped keys can only update/delete their own ceremonies; admin keys see all.",
         schema: z.object({
-          action: z.enum(["create", "update", "delete", "list"]),
+          action: z.enum(["create", "update", "delete", "list", "run"]),
           id: z.string().optional(),
           name: z.string().optional(),
           schedule: z.string().optional(),

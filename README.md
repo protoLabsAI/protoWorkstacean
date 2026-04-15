@@ -200,11 +200,13 @@ protoWorkstacean is a first-class [A2A](https://a2a-protocol.org) client **and**
   - [`cost-v1`](docs/extensions/cost-v1.md) — records per-(agent, skill) token + wall-time actuals, publishes `autonomous.cost.*`
   - [`confidence-v1`](docs/extensions/confidence-v1.md) — captures agent-reported confidence (0.0–1.0), flags high-confidence failures
   - [`effect-domain-v1`](docs/extensions/effect-domain-v1.md) — parses worldstate-delta artifacts, publishes `world.state.delta`
+  - [`blast-v1`](docs/extensions/blast-v1.md) — per-skill scope-of-effect declaration (self/project/repo/fleet/public); planner + HITL policy read from it
+  - [`hitl-mode-v1`](docs/extensions/hitl-mode-v1.md) — per-skill approval policy (autonomous / notification / veto / gated / compound); sub-agent `input-required` routes back to the dispatching agent by default, human operator as final fallback
   - [`worldstate-delta-v1`](docs/extensions/worldstate-delta-v1.md) — DataPart content type for observed domain mutations
 
   Observations from cost-v1 + confidence-v1 feed `PlannerPluginL0`'s candidate ranking ([Arc 6.4](docs/explanation/self-improving-loop.md)): once a candidate has ≥5 samples the planner ranks by observed success rate × confidence × wall-time penalty; cold candidates fall back to the card's self-declared confidence.
 
-See [`docs/guides/add-an-agent.md`](docs/guides/add-an-agent.md) for the full agent-onboarding flow.
+Agent authors: see [Build an A2A agent](docs/guides/build-an-a2a-agent.md) for the spec-side recipe and [Extend an A2A agent](docs/guides/extend-an-a2a-agent.md) for the x-protolabs extension pack (all 5 above, complete example agent card, response-field conventions).
 
 ---
 

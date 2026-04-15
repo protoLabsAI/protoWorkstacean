@@ -1,9 +1,23 @@
 name: Release Notes
 
+# Fires on tag push to post Discord release notes via the
+# DISCORD_WEBHOOK_PROTOWORKSTACEAN_RELEASE webhook.
+#
+# Known gap: tags pushed by auto-release.yml using GITHUB_TOKEN do NOT
+# trigger this workflow (GitHub's recursion-prevention policy on
+# bot-pushed tags). Until repo GH_PAT is configured (filed: #262),
+# use workflow_dispatch to manually post for missed releases.
+
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to post notes for (e.g. v0.7.10). Defaults to latest tag on the workflow's checked-out commit."
+        type: string
+        required: false
 
 jobs:
   post-release-notes:
@@ -12,6 +26,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # full history for git log
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: oven-sh/setup-bun@v2
 

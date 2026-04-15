@@ -35,6 +35,13 @@ const contextMailbox = new ContextMailbox();
 import { TaskTracker } from "./executor/task-tracker.ts";
 const taskTracker = new TaskTracker({ bus });
 
+// --- Agent key registry — resolves per-agent X-API-Key headers to identities
+//     so ceremony / cron endpoints (and any future per-agent permission gates)
+//     can enforce ownership. Falls back to admin-only mode when
+//     workspace/agent-keys.yaml is absent.
+import { AgentKeyRegistry } from "../lib/auth/agent-keys.ts";
+const agentKeys = new AgentKeyRegistry(workspaceDir, process.env.WORKSTACEAN_API_KEY);
+
 // --- A2A extensions — register observability interceptors (cost, confidence,
 //     effect-domain, blast, hitl-mode, worldstate-delta). A2AExecutor.execute()
 //     runs the before/after hooks on every skill call; the extensions
@@ -43,9 +50,13 @@ const taskTracker = new TaskTracker({ bus });
 import { registerCostExtension } from "./executor/extensions/cost.ts";
 import { registerConfidenceExtension } from "./executor/extensions/confidence.ts";
 import { registerEffectDomainExtension } from "./executor/extensions/effect-domain.ts";
+import { registerBlastExtension } from "./executor/extensions/blast.ts";
+import { registerHitlModeExtension } from "./executor/extensions/hitl-mode.ts";
 registerCostExtension(bus);
 registerConfidenceExtension(bus);
 registerEffectDomainExtension(bus);
+registerBlastExtension();
+registerHitlModeExtension();
 
 // --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
 import { ChannelRegistry } from "../lib/channels/channel-registry.js";
@@ -585,6 +596,7 @@ const apiContext: ApiContext = {
   executorRegistry,
   telemetry,
   apiKey: API_KEY,
+  agentKeys,
   mailbox: contextMailbox,
   taskTracker,
 };
