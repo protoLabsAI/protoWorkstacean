@@ -291,6 +291,20 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
         }),
       },
     ),
+    discord_delete_channel: tool(
+      async (input) => JSON.stringify(await http.post("/api/discord/channels/delete", input)),
+      {
+        name: "discord_delete_channel",
+        description:
+          "Delete a Discord channel by ID or name. For categories, by default all child channels are deleted too (set recursive=false to leave them as orphans). Destructive — confirm with the user before invoking unless the user explicitly named the channel/category to delete.",
+        schema: z.object({
+          channelId: z.string().optional().describe("Channel ID (exact)"),
+          channelName: z.string().optional().describe("Channel name (alternative to ID)"),
+          recursive: z.boolean().optional().describe("For categories: delete contained channels too (default: true)"),
+          reason: z.string().optional().describe("Audit log reason"),
+        }),
+      },
+    ),
     discord_send: tool(
       async (input) => JSON.stringify(await http.post("/api/discord/send", input)),
       {
