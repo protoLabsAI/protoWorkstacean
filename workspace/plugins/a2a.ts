@@ -16,6 +16,7 @@
 import { readFileSync, watchFile, unwatchFile } from "node:fs";
 import { createSign } from "node:crypto";
 import { parse } from "yaml";
+import { ClientFactory, JsonRpcTransportFactory } from "@a2a-js/sdk/client";
 import { FIRE_AND_FORGET_SKILLS } from "../../src/router/faf-skills.ts";
 
 // ── GitHub App auth ───────────────────────────────────────────────────────────
@@ -258,41 +259,63 @@ async function callA2A(
   timeoutMs: number | undefined = 120_000,
 ): Promise<string> {
   const apiKey = agent.apiKeyEnv ? (process.env[agent.apiKeyEnv] ?? "") : "";
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (apiKey) headers["X-API-Key"] = apiKey;
+
+  // Custom fetch wrapper: stamps X-API-Key auth and enforces the call timeout.
+  const customFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const hdrs = new Headers(init?.headers);
+    if (apiKey) hdrs.set("X-API-Key", apiKey);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs ?? 120_000);
+    try {
+      return await fetch(input, { ...init, headers: hdrs, signal: init?.signal ?? controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }) as typeof fetch;
+
+  const factory = new ClientFactory({
+    transports: [new JsonRpcTransportFactory({ fetchImpl: customFetch })],
+  });
+
+  // Strip /a2a suffix so ClientFactory discovers the agent card at /.well-known/agent-card.json.
+  const baseUrl = agent.url.replace(/\/a2a\/?$/, "");
+  let client;
+  try {
+    client = await factory.createFromUrl(baseUrl);
+  } catch {
+    // Some agents serve /.well-known/agent.json (legacy path).
+    client = await factory.createFromUrl(baseUrl, "/.well-known/agent.json");
+  }
 
   const metadata: Record<string, unknown> = { ...(extraMeta ?? {}) };
   if (skillHint) metadata.skillHint = skillHint;
   if (source) metadata.source = source;
   if (replyTopic) metadata.replyTopic = replyTopic;
 
-  const resp = await fetch(agent.url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: crypto.randomUUID(),
-      method: "message/send",
-      params: {
-        message: { role: "user", parts: [{ kind: "text", text: content }] },
-        contextId,
-        ...(Object.keys(metadata).length ? { metadata } : {}),
-      },
-    }),
-    ...(timeoutMs !== undefined ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+  const result = await client.sendMessage({
+    message: {
+      kind: "message" as const,
+      messageId: crypto.randomUUID(),
+      role: "user" as const,
+      parts: [{ kind: "text" as const, text: content }],
+      contextId,
+    },
+    ...(Object.keys(metadata).length ? { metadata } : {}),
   });
 
-  const data = (await resp.json()) as {
-    result?: { artifacts?: { parts?: { kind: string; text?: string }[] }[] };
-    error?: { message: string };
-  };
+  // Result is Message | Task — extract text from whichever the agent returned.
+  if (result.kind === "message") {
+    return result.parts
+      .filter((p): p is { kind: "text"; text: string } => p.kind === "text" && typeof p.text === "string")
+      .map(p => p.text)
+      .join("\n");
+  }
 
-  if (data.error) throw new Error(data.error.message);
-
-  return (data.result?.artifacts ?? [])
-    .flatMap(a => a.parts ?? [])
-    .filter(p => p.kind === "text")
-    .map(p => p.text ?? "")
+  // Task — extract from artifacts (mirrors A2AExecutor._executeBlocking).
+  return (result.artifacts ?? [])
+    .flatMap(a => a.parts)
+    .filter((p): p is { kind: "text"; text: string } => p.kind === "text" && typeof p.text === "string")
+    .map(p => p.text)
     .join("\n");
 }
 
