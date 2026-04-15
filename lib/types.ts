@@ -171,13 +171,7 @@ export interface LoggerTurnQueryRequest {
 
 export interface LoggerTurnQueryResponse {
   type: "logger.turn.query.response";
-  turns: Array<{
-    role: "user" | "assistant";
-    content: string;
-    channel: string | undefined;
-    skill: string | undefined;
-    createdAt: number;
-  }>;
+  turns: ConversationTurn[];
 }
 
 // ── ConversationTurn ──────────────────────────────────────────────────────────

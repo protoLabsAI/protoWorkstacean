@@ -1,15 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { Plugin, EventBus, BusMessage, LoggerTurnQueryRequest, LoggerTurnQueryResponse } from "../types";
-
-export interface ConversationTurn {
-  role: "user" | "assistant";
-  content: string;
-  channel: string | undefined;
-  skill: string | undefined;
-  createdAt: number;
-}
+import type { Plugin, EventBus, BusMessage, LoggerTurnQueryRequest, LoggerTurnQueryResponse, ConversationTurn } from "../types";
 
 export class LoggerPlugin implements Plugin {
   name = "logger";
@@ -179,24 +171,25 @@ export class LoggerPlugin implements Plugin {
       if (!request) continue;
 
       const reqPayload = request.payload as { skill?: string; content?: string; targets?: string[] };
-      const channel = request.source?.interface;
+      const channelId = request.source?.channelId ?? "";
+      const agentName = reqPayload.targets?.[0] ?? "";
 
       turns.push({
         role: "user",
-        content: reqPayload.content ?? "",
-        channel,
-        skill: reqPayload.skill,
-        createdAt: request.timestamp,
+        text: reqPayload.content ?? "",
+        channelId,
+        agentName,
+        timestamp: request.timestamp,
       });
 
       if (response) {
         const resPayload = response.payload as { content?: string; error?: string };
         turns.push({
           role: "assistant",
-          content: resPayload.content ?? resPayload.error ?? "",
-          channel,
-          skill: reqPayload.skill,
-          createdAt: response.timestamp,
+          text: resPayload.content ?? resPayload.error ?? "",
+          channelId,
+          agentName,
+          timestamp: response.timestamp,
         });
       }
     }
