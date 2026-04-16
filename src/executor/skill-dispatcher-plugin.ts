@@ -374,9 +374,10 @@ export class SkillDispatcherPlugin implements Plugin {
           const callbackUrl = `${callbackBaseUrl.replace(/\/$/, "")}/api/a2a/callback/${encodeURIComponent(taskId)}`;
           void a2aExecutor.registerPushNotification(taskId, callbackUrl, callbackToken, correlationId, parentId)
             .then(ok => {
-              if (ok) console.log(`[skill-dispatcher] Push-notification registered for ${taskId.slice(0, 8)}…`);
+              if (ok) console.log(`[skill-dispatcher] Push-notification registered for ${taskId.slice(0, 8)}… at ${callbackUrl}`);
+              // Failure path is logged by A2AExecutor.registerPushNotification with agent + reason.
             })
-            .catch(err => console.debug("[skill-dispatcher] push-notification register failed:", err));
+            .catch(err => console.log("[skill-dispatcher] push-notification register failed:", err));
         } else if (callbackBaseUrl) {
           console.log(
             `[skill-dispatcher] ${a2aExecutor.name}: card.capabilities.pushNotifications=false — using polling for ${taskId.slice(0, 8)}…`,
