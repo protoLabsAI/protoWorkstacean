@@ -99,11 +99,45 @@ export interface HITLRenderer {
 // Distinct from HITLRequest so operators see "this changes the rules of the
 // system" vs "this is a one-shot operational approval".
 
+/**
+ * Evidence block required for data-driven config change proposals
+ * (e.g. from the tuning agent). Forces proposers to carry their work —
+ * approvers see sample counts, baseline metrics, and which skills are
+ * affected, so they can reason about whether the change is statistically
+ * warranted vs. chasing noise.
+ */
+export interface ConfigChangeEvidence {
+  /** Number of samples backing the proposed change. Gated server-side at >= 50. */
+  sampleCount: number;
+  /** Current observed metric (e.g. "successRate=0.45, avgConfidence=0.72"). */
+  baselineMetric: string;
+  /** Expected delta (e.g. "target: successRate>=0.7 via explicit CI-status prompt"). */
+  proposedDelta: string;
+  /** Skill names whose behavior this change affects. */
+  affectedSkills: string[];
+  /** Free-text rationale. */
+  rationale?: string;
+}
+
+/**
+ * Change target for an agent-YAML proposal. Only in-process agent files
+ * can be targeted (goals/actions use their own configFile variants).
+ */
+export interface ConfigChangeAgentTarget {
+  type: "agent";
+  /** Name of the agent — resolves to `workspace/agents/<agentName>.yaml`. */
+  agentName: string;
+}
+
 export interface ConfigChangeRequest {
   type: "config_change_request";
   correlationId: string;
-  /** Which workspace config file is being changed. */
-  configFile: "goals.yaml" | "actions.yaml";
+  /**
+   * Which workspace config file is being changed. Goals + actions use string
+   * literals; agent-YAML changes use a structured target so the approver can
+   * see which agent is affected without parsing a path.
+   */
+  configFile: "goals.yaml" | "actions.yaml" | ConfigChangeAgentTarget;
   title: string;
   summary: string;
   /** Unified diff of the proposed change (before → after). */
@@ -124,6 +158,12 @@ export interface ConfigChangeRequest {
     affectedTestFiles: string[];
     summary: string;
   };
+  /**
+   * Evidence backing the proposal — required for data-driven proposals
+   * (tuning agent). Optional for operator-authored proposals where the
+   * operator's judgment is the evidence.
+   */
+  evidence?: ConfigChangeEvidence;
   options: string[];   // ["approve", "reject"]
   expiresAt: string;   // ISO timestamp
   replyTopic: string;  // where to publish ConfigChangeResponse

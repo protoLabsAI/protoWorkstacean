@@ -69,6 +69,16 @@ export interface SkillResult {
      * for the same correlationId+agentName can resume the session.
      */
     sessionId?: string;
+    /** Wall-clock duration, from a cost-v1 DataPart. */
+    durationMs?: number;
+    /** Dollar cost, from a cost-v1 DataPart. */
+    costUsd?: number;
+    /** Explicit success flag from cost-v1 / confidence-v1 DataParts. */
+    success?: boolean;
+    /** Self-reported confidence in [0, 1], from a confidence-v1 DataPart. */
+    confidence?: number;
+    /** Free-text confidence explanation, from a confidence-v1 DataPart. */
+    confidenceExplanation?: string;
   };
 }
 
