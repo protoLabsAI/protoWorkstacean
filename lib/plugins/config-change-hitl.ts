@@ -20,6 +20,8 @@
  * Payload shape for config.change.response.*: ConfigChangeResponse (lib/types.ts)
  */
 
+import { writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import type {
   EventBus,
   BusMessage,
@@ -35,6 +37,30 @@ const renderers = new Map<string, ConfigChangeRenderer>();
 // ── Pending request store ──────────────────────────────────────────────────
 const pendingRequests = new Map<string, ConfigChangeRequest>();
 
+/**
+ * Companion map keyed by correlationId → proposed new file content. Lets the
+ * applier write the full approved content on decision=approve. Populated via
+ * the propose endpoint (not via the bus topic, which carries only yamlDiff).
+ */
+const pendingContent = new Map<string, { targetPath: string; newContent: string }>();
+
+/** Resolve the workspace-relative path a ConfigChangeRequest writes to. */
+function resolveTargetPath(workspaceDir: string, req: ConfigChangeRequest): string | null {
+  if (req.configFile === "goals.yaml" || req.configFile === "actions.yaml") {
+    return join(workspaceDir, req.configFile);
+  }
+  if (typeof req.configFile === "object" && req.configFile.type === "agent") {
+    if (!/^[\w\-]+$/.test(req.configFile.agentName)) return null;
+    return join(workspaceDir, "agents", `${req.configFile.agentName}.yaml`);
+  }
+  return null;
+}
+
+/** Public helper so the propose HTTP endpoint can register the new content. */
+export function recordPendingContent(correlationId: string, targetPath: string, newContent: string): void {
+  pendingContent.set(correlationId, { targetPath, newContent });
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────
 
 export class ConfigChangeHITLPlugin implements Plugin {
@@ -44,6 +70,16 @@ export class ConfigChangeHITLPlugin implements Plugin {
   readonly capabilities = ["config-change-hitl-routing"];
 
   private expiryTimer: ReturnType<typeof setInterval> | null = null;
+  private workspaceDir: string | null = null;
+
+  /**
+   * Optional workspace directory. When set, approved config-change responses
+   * are applied automatically by writing the proposed newContent to the target
+   * file. Without it, approvals are logged but nothing is written.
+   */
+  setWorkspaceDir(dir: string): void {
+    this.workspaceDir = dir;
+  }
 
   /** All currently pending (unexpired, undecided) config-change requests. */
   getPendingRequests(): ConfigChangeRequest[] {
@@ -122,11 +158,57 @@ export class ConfigChangeHITLPlugin implements Plugin {
       );
     });
 
-    // ── Clean up pending map when a response arrives ──────────────────
+    // ── Apply approved changes + clean up pending map on response ─────
     bus.subscribe("config.change.response.#", this.name, (msg: BusMessage) => {
       const resp = msg.payload as ConfigChangeResponse;
       if (resp?.type !== "config_change_response") return;
+
+      const req = pendingRequests.get(resp.correlationId);
+      const content = pendingContent.get(resp.correlationId);
       pendingRequests.delete(resp.correlationId);
+      pendingContent.delete(resp.correlationId);
+
+      if (resp.decision !== "approve") {
+        console.log(
+          `[config-change-hitl] ${resp.correlationId} rejected by ${resp.decidedBy}${resp.feedback ? ` — ${resp.feedback}` : ""}`,
+        );
+        return;
+      }
+
+      if (!req || !content || !this.workspaceDir) {
+        console.warn(
+          `[config-change-hitl] ${resp.correlationId} approved but missing request/content/workspaceDir — cannot auto-apply`,
+        );
+        return;
+      }
+
+      const targetPath = resolveTargetPath(this.workspaceDir, req);
+      if (!targetPath || targetPath !== content.targetPath) {
+        console.warn(
+          `[config-change-hitl] ${resp.correlationId} approved but target path mismatch — refusing to apply`,
+        );
+        return;
+      }
+
+      try {
+        if (!existsSync(targetPath)) {
+          console.warn(`[config-change-hitl] target file ${targetPath} does not exist — refusing to create via approval`);
+          return;
+        }
+        writeFileSync(targetPath, content.newContent, "utf8");
+        console.log(
+          `[config-change-hitl] ${resp.correlationId} applied by ${resp.decidedBy} → ${targetPath}`,
+        );
+        bus.publish(`config.change.applied.${resp.correlationId}`, {
+          id: crypto.randomUUID(),
+          correlationId: resp.correlationId,
+          topic: `config.change.applied.${resp.correlationId}`,
+          timestamp: Date.now(),
+          payload: { type: "config_change_applied", correlationId: resp.correlationId, targetPath },
+        });
+      } catch (err) {
+        console.error(`[config-change-hitl] apply failed for ${resp.correlationId}:`, err);
+      }
     });
   }
 
