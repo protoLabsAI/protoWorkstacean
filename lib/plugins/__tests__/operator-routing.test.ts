@@ -2,22 +2,24 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { InMemoryEventBus } from "../../bus.ts";
 import { OperatorRoutingPlugin } from "../operator-routing.ts";
 import type { OperatorMessageRequest } from "../operator-routing.ts";
+import type { IdentityRegistry } from "../../identity/identity-registry.ts";
+
+function stubRegistry(adminDiscordId: string | null): IdentityRegistry {
+  return {
+    adminIds: (platform: string) => (platform === "discord" && adminDiscordId ? [adminDiscordId] : []),
+  } as unknown as IdentityRegistry;
+}
 
 describe("OperatorRoutingPlugin", () => {
   let bus: InMemoryEventBus;
   let plugin: OperatorRoutingPlugin;
-  const originalEnv = process.env.OPERATOR_DISCORD_USER_ID;
 
   beforeEach(() => {
     bus = new InMemoryEventBus();
-    plugin = new OperatorRoutingPlugin();
-    plugin.install(bus);
   });
 
   afterEach(() => {
-    plugin.uninstall();
-    if (originalEnv !== undefined) process.env.OPERATOR_DISCORD_USER_ID = originalEnv;
-    else delete process.env.OPERATOR_DISCORD_USER_ID;
+    plugin?.uninstall();
   });
 
   function publishReq(req: OperatorMessageRequest): void {
@@ -30,8 +32,9 @@ describe("OperatorRoutingPlugin", () => {
     });
   }
 
-  test("routes to Discord DM topic when OPERATOR_DISCORD_USER_ID is set", async () => {
-    process.env.OPERATOR_DISCORD_USER_ID = "123456789";
+  test("routes to Discord DM for the admin user's Discord ID from users.yaml", async () => {
+    plugin = new OperatorRoutingPlugin(stubRegistry("123456789"));
+    plugin.install(bus);
 
     const received: Array<{ topic: string; payload: unknown }> = [];
     bus.subscribe("message.outbound.discord.dm.user.#", "test", msg => {
@@ -57,7 +60,8 @@ describe("OperatorRoutingPlugin", () => {
   });
 
   test("prepends urgency badge on high + urgent", async () => {
-    process.env.OPERATOR_DISCORD_USER_ID = "123";
+    plugin = new OperatorRoutingPlugin(stubRegistry("123"));
+    plugin.install(bus);
 
     const received: Array<{ content: string }> = [];
     bus.subscribe("message.outbound.discord.dm.user.#", "test", msg => {
@@ -76,7 +80,8 @@ describe("OperatorRoutingPlugin", () => {
   });
 
   test("prepends [topic] when topic is set", async () => {
-    process.env.OPERATOR_DISCORD_USER_ID = "123";
+    plugin = new OperatorRoutingPlugin(stubRegistry("123"));
+    plugin.install(bus);
 
     const received: Array<{ content: string }> = [];
     bus.subscribe("message.outbound.discord.dm.user.#", "test", msg => {
@@ -97,12 +102,19 @@ describe("OperatorRoutingPlugin", () => {
     expect(received[0].content).toContain("delete the A records");
   });
 
-  test("drops with warning when no channels are configured", async () => {
-    delete process.env.OPERATOR_DISCORD_USER_ID;
+  test("fails loudly when no admin user has a Discord ID — publishes failure event, no silent drop", async () => {
+    plugin = new OperatorRoutingPlugin(stubRegistry(null));
+    plugin.install(bus);
 
-    const received: Array<{ topic: string }> = [];
-    bus.subscribe("message.outbound.#", "test", msg => {
-      received.push({ topic: msg.topic });
+    const deliveries: Array<{ topic: string }> = [];
+    bus.subscribe("message.outbound.#", "test-deliveries", msg => {
+      deliveries.push({ topic: msg.topic });
+    });
+
+    const failures: Array<{ correlationId: string; error: string }> = [];
+    bus.subscribe("operator.message.failed.#", "test-failures", msg => {
+      const p = msg.payload as { correlationId: string; error: string };
+      failures.push({ correlationId: p.correlationId, error: p.error });
     });
 
     publishReq({
@@ -113,7 +125,14 @@ describe("OperatorRoutingPlugin", () => {
       from: "ava",
     });
 
-    await new Promise(r => setTimeout(r, 10));
-    expect(received).toHaveLength(0);
+    await new Promise(r => setTimeout(r, 15));
+
+    // No message delivered on any outbound channel
+    expect(deliveries).toHaveLength(0);
+    // But a failure event IS published, loud and scoped to the correlation ID
+    expect(failures).toHaveLength(1);
+    expect(failures[0].correlationId).toBe("c1");
+    expect(failures[0].error).toContain("No operator channels available");
+    expect(failures[0].error).toContain("workspace/users.yaml");
   });
 });
