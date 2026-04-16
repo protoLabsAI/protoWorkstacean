@@ -1,0 +1,16 @@
+id: fleet-tuning-review
+name: Fleet Tuning Review
+description: |
+  Weekly self-improvement pass. The tuner agent reads per-(agent, skill)
+  cost, confidence, and outcome data for the past week, identifies
+  underperforming or miscalibrated skills, and proposes constraint changes
+  (prompt tweaks, hitl-mode bumps, tool whitelist additions) through
+  ConfigChangeHITL. A human approves each proposal on Discord before it
+  applies. Runs Monday at 08:00 UTC — aggregated samples from the prior
+  week drive the pass.
+schedule: "0 8 * * 1"
+skill: tuning_review
+targets:
+  - tuner
+notifyChannel: ""
+enabled: true
