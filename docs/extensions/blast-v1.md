@@ -4,7 +4,7 @@ title: "Extension: x-protolabs/blast-v1"
 
 `x-protolabs/blast-v1` lets agents declare the **scope of effect** for each skill so the planner, HITL policy, and dashboards can apply stricter gates to higher-impact work — independent of goal-level config.
 
-**Extension URI**: `https://protolabs.ai/a2a/ext/blast-v1`
+**Extension URI**: `https://proto-labs.ai/a2a/ext/blast-v1`
 
 ---
 
@@ -49,7 +49,7 @@ Add to your agent card's `capabilities.extensions` list:
   "capabilities": {
     "extensions": [
       {
-        "uri": "https://protolabs.ai/a2a/ext/blast-v1",
+        "uri": "https://proto-labs.ai/a2a/ext/blast-v1",
         "params": {
           "skills": {
             "sitrep":              { "radius": "self" },

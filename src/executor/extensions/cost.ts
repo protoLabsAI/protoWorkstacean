@@ -15,7 +15,7 @@
  *     both surface this) and appends a CostSample to the running stats store;
  *     publishes `autonomous.cost.{systemActor}.{skill}` for observability.
  *
- * Extension URI: https://protolabs.ai/a2a/ext/cost-v1
+ * Extension URI: https://proto-labs.ai/a2a/ext/cost-v1
  */
 
 import type { EventBus } from "../../../lib/types.ts";
@@ -25,7 +25,7 @@ import {
   type ExtensionContext,
 } from "../extension-registry.ts";
 
-export const COST_URI = "https://protolabs.ai/a2a/ext/cost-v1";
+export const COST_URI = "https://proto-labs.ai/a2a/ext/cost-v1";
 
 /**
  * Per-skill cost estimate as declared by the agent card.

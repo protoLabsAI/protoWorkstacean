@@ -4,7 +4,7 @@ title: "Extension: x-protolabs/confidence-v1"
 
 `x-protolabs/confidence-v1` captures the agent's self-reported confidence in its output so OutcomeAnalysis can weight failure signals by how sure the agent was, and the planner can prefer high-confidence candidates when ranking.
 
-**Extension URI**: `https://protolabs.ai/a2a/ext/confidence-v1`
+**Extension URI**: `https://proto-labs.ai/a2a/ext/confidence-v1`
 
 ---
 

@@ -23,7 +23,7 @@ const HITL_TTL_MS = 30 * 60_000; // 30 min default input-required window
 const DISPATCHER_REPLY_TIMEOUT_MS = 5 * 60_000; // 5 min
 
 /** Extension URI for worldstate-delta-v1 artifacts. */
-const WORLDSTATE_DELTA_URI = "https://protolabs.ai/a2a/ext/worldstate-delta-v1";
+const WORLDSTATE_DELTA_URI = "https://proto-labs.ai/a2a/ext/worldstate-delta-v1";
 
 export interface TrackedTask {
   correlationId: string;

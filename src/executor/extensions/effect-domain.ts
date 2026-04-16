@@ -13,7 +13,7 @@
  * Call `registerEffectDomainExtension(bus)` once at startup (e.g. in src/index.ts)
  * to wire this extension into the defaultExtensionRegistry.
  *
- * Extension URI: https://protolabs.ai/a2a/ext/effect-domain-v1
+ * Extension URI: https://proto-labs.ai/a2a/ext/effect-domain-v1
  */
 
 import type { EventBus } from "../../../lib/types.ts";
@@ -28,7 +28,7 @@ import {
   type WorldStateDeltaEntry,
 } from "../../../lib/types/worldstate-delta.ts";
 
-export const EFFECT_DOMAIN_URI = "https://protolabs.ai/a2a/ext/effect-domain-v1";
+export const EFFECT_DOMAIN_URI = "https://proto-labs.ai/a2a/ext/effect-domain-v1";
 
 /** A single world-state mutation declared for a skill in the agent card. */
 export interface EffectDomainDelta {
