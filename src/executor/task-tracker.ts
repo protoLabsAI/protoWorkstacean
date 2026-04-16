@@ -15,9 +15,12 @@
 import type { EventBus, BusMessage, HITLRequest, HITLResponse } from "../../lib/types.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
 import type { AgentSkillResponsePayload } from "../event-bus/payloads.ts";
+import { defaultHitlModeRegistry } from "./extensions/hitl-mode.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled", "rejected"]);
 const HITL_TTL_MS = 30 * 60_000; // 30 min default input-required window
+/** Per-prompt deadline for the dispatching-agent caller-first chain. On timeout, fall back to Discord. */
+const DISPATCHER_REPLY_TIMEOUT_MS = 5 * 60_000; // 5 min
 
 /** Extension URI for worldstate-delta-v1 artifacts. */
 const WORLDSTATE_DELTA_URI = "https://protolabs.ai/a2a/ext/worldstate-delta-v1";
@@ -26,6 +29,10 @@ export interface TrackedTask {
   correlationId: string;
   taskId: string;
   agentName: string;
+  /** Skill name the sub-agent is running — needed for hitl-mode registry lookup. */
+  skillName?: string;
+  /** Name of the agent that dispatched this task (if any). Enables caller-first HITL routing. */
+  dispatcherAgent?: string;
   replyTopic: string;
   executor: A2AExecutor;
   parentId?: string;
@@ -99,6 +106,10 @@ export class TaskTracker {
     correlationId: string;
     taskId: string;
     agentName: string;
+    /** Skill name — enables hitl-mode registry lookup for input-required routing. */
+    skillName?: string;
+    /** Dispatching agent — enables caller-first HITL chain (agent answers before human). */
+    dispatcherAgent?: string;
     replyTopic: string;
     executor: A2AExecutor;
     parentId?: string;
@@ -117,6 +128,8 @@ export class TaskTracker {
       correlationId: params.correlationId,
       taskId: params.taskId,
       agentName: params.agentName,
+      skillName: params.skillName,
+      dispatcherAgent: params.dispatcherAgent,
       replyTopic: params.replyTopic,
       executor: params.executor,
       parentId: params.parentId,
@@ -258,9 +271,16 @@ export class TaskTracker {
   }
 
   /**
-   * Emit a HITL request for a task that hit input-required. HITLPlugin will
-   * route to the registered renderer (Discord approval buttons, etc). The
-   * response flows back via hitl.response.# which we subscribe to.
+   * Decide who answers an `input-required` prompt and route accordingly.
+   *
+   * Caller-first chain (the default when a dispatching agent is known):
+   *   1. hitl-mode-v1 declaration says `reviewer: "operator"` → skip to step 3
+   *   2. dispatcherAgent present → publish a chat skill-request to the
+   *      dispatcher; on reply within the deadline, resume the sub-agent's
+   *      task with the dispatcher's answer. No Discord prompt is raised
+   *      unless this path fails.
+   *   3. Fallback: emit the traditional `hitl.request.*` event so the
+   *      registered renderer (Discord, Plane) asks a human.
    */
   private _raiseHitl(task: TrackedTask, question: string | undefined): void {
     if (task.awaitingHuman) return; // already raised, avoid duplicate
@@ -269,16 +289,130 @@ export class TaskTracker {
     // input-required) surface which prompt this is in the sequence. 1-based.
     task.checkpointCount = (task.checkpointCount ?? 0) + 1;
 
+    const decl = task.skillName
+      ? defaultHitlModeRegistry.get(task.agentName, task.skillName)
+      : undefined;
+    const forceOperator = decl?.reviewer === "operator";
+
+    if (task.dispatcherAgent && !forceOperator) {
+      this._askDispatcher(task, question);
+      return;
+    }
+
+    this._emitHitlRequest(task, question);
+  }
+
+  /**
+   * Ask the dispatching agent to answer an `input-required` prompt from one
+   * of its sub-agents. Publishes a `chat` skill-request to the dispatcher,
+   * waits up to DISPATCHER_REPLY_TIMEOUT_MS for a reply, and resumes the
+   * sub-agent's task with the answer. Falls back to the human renderer path
+   * on timeout, empty reply, or error.
+   */
+  private _askDispatcher(task: TrackedTask, question: string | undefined): void {
+    const dispatcher = task.dispatcherAgent!;
+    const promptCorrelationId = crypto.randomUUID();
+    const promptReplyTopic = `agent.skill.response.${promptCorrelationId}`;
+    const promptText = [
+      `${task.agentName} is asking for input on the "${task.skillName ?? "current"}" task:`,
+      "",
+      question || "(no question text provided)",
+      "",
+      "Reply with the decision or context needed for the task to continue. Keep it concise.",
+    ].join("\n");
+
+    let settled = false;
+    const subId = this.bus.subscribe(promptReplyTopic, "task-tracker-hitl-reply", (msg: BusMessage) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      this.bus.unsubscribe(subId);
+
+      const resp = msg.payload as AgentSkillResponsePayload | undefined;
+      const answer = typeof resp?.content === "string" ? resp.content.trim() : "";
+      if (resp?.error || !answer) {
+        console.log(
+          `[task-tracker] dispatcher ${dispatcher} returned empty/error reply — falling back to renderer chain`,
+        );
+        this._emitHitlRequest(task, question);
+        return;
+      }
+
+      void this._resumeFromDispatcher(task, answer, dispatcher);
+    });
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      this.bus.unsubscribe(subId);
+      console.log(
+        `[task-tracker] dispatcher ${dispatcher} did not reply within ${DISPATCHER_REPLY_TIMEOUT_MS}ms — falling back to renderer chain`,
+      );
+      this._emitHitlRequest(task, question);
+    }, DISPATCHER_REPLY_TIMEOUT_MS);
+    (timer as { unref?: () => void }).unref?.();
+
+    this.bus.publish("agent.skill.request", {
+      id: crypto.randomUUID(),
+      correlationId: promptCorrelationId,
+      topic: "agent.skill.request",
+      timestamp: Date.now(),
+      payload: {
+        skill: "chat",
+        content: promptText,
+        targets: [dispatcher],
+        replyTopic: promptReplyTopic,
+      },
+    });
+
+    console.log(
+      `[task-tracker] input-required from ${task.agentName} — routing to dispatcher ${dispatcher} (correlationId: ${task.correlationId.slice(0, 8)}…)`,
+    );
+  }
+
+  /**
+   * Resume the sub-agent's task after the dispatching agent has supplied an
+   * answer to an `input-required` prompt. Mirrors _resumeFromHitl but carries
+   * agent-sourced text instead of a structured human decision.
+   */
+  private async _resumeFromDispatcher(task: TrackedTask, answerText: string, dispatcher: string): Promise<void> {
+    try {
+      await task.executor.resumeTask(
+        task.taskId,
+        task.taskId,
+        `Dispatcher (${dispatcher}) response:\n${answerText}`,
+        task.correlationId,
+        task.parentId,
+      );
+      task.awaitingHuman = false;
+      task.lastPolledAt = Date.now();
+      console.log(
+        `[task-tracker] Resumed ${task.agentName} task ${task.taskId.slice(0, 8)}… with dispatcher answer`,
+      );
+    } catch (err) {
+      console.error(`[task-tracker] resumeTask after dispatcher reply failed:`, err);
+      // Fall back to human path so the task doesn't hang
+      this._emitHitlRequest(task, answerText);
+    }
+  }
+
+  /**
+   * Publish the traditional `hitl.request.{correlationId}` event for the
+   * HITL plugin to render (Discord button, Plane comment, etc.). Used both
+   * as the direct operator-only path and as a fallback from the dispatcher
+   * caller-first chain.
+   */
+  private _emitHitlRequest(task: TrackedTask, question: string | undefined): void {
     const req: HITLRequest = {
       type: "hitl_request",
       correlationId: task.correlationId,
-      title: task.checkpointCount > 1
+      title: (task.checkpointCount ?? 1) > 1
         ? `Input needed from ${task.agentName} (checkpoint ${task.checkpointCount})`
         : `Input needed from ${task.agentName}`,
       summary: question || "The agent is requesting input to continue.",
       options: ["approve", "reject"],
       expiresAt: new Date(Date.now() + HITL_TTL_MS).toISOString(),
-      checkpoint: { index: task.checkpointCount },
+      checkpoint: { index: task.checkpointCount ?? 1 },
       replyTopic: `hitl.response.${task.correlationId}`,
       sourceMeta: {
         interface: task.sourceInterface ?? "discord",

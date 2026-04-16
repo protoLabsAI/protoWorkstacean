@@ -50,6 +50,14 @@ export interface AgentSkillRequestPayload {
     skillHint?: string;
     topic?: string;
     context?: Record<string, unknown>;
+    /**
+     * Name of the agent that dispatched this skill request (if any). Set when
+     * an agent tool like `chat_with_agent` or `delegate_task` fires the
+     * request. Carries through the A2A lifecycle so `TaskTracker` can route
+     * `input-required` prompts back to the dispatcher instead of directly to
+     * the human renderer.
+     */
+    dispatcherAgent?: string;
     [key: string]: unknown;
   };
   /** Allow additional forwarded payload fields from the originating message. */

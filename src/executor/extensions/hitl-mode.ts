@@ -57,6 +57,15 @@ export interface HitlModeDeclaration {
   mode: HitlMode;
   /** Per-skill TTL for veto mode, in ms. Ignored for other modes. */
   vetoTtlMs?: number;
+  /**
+   * Who answers `input-required` prompts. `"operator"` forces the prompt
+   * straight to the human renderer chain (Discord, etc.), bypassing the
+   * dispatching-agent caller-first chain. Absent means caller-first (the
+   * default): the dispatching agent gets the first shot via a chat skill
+   * invocation, and only falls back to the human if the dispatcher can't
+   * answer or doesn't reply within a TTL.
+   */
+  reviewer?: "operator";
   /** Optional human-readable reason for the declared mode. */
   note?: string;
 }
@@ -100,6 +109,14 @@ export class HitlModeRegistry {
 
   clear(): void {
     this.byKey.clear();
+  }
+
+  /** Drop every declaration for a given agent. Used on card-refresh so deletions propagate. */
+  clearAgent(agentName: string): void {
+    const prefix = `${agentName}::`;
+    for (const key of this.byKey.keys()) {
+      if (key.startsWith(prefix)) this.byKey.delete(key);
+    }
   }
 
   get size(): number {
