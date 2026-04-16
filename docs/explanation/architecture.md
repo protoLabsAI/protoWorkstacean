@@ -33,13 +33,13 @@ flowchart TD
     end
 
     subgraph Registrars["Registrars (install-time only)"]
-        ART["AgentRuntimePlugin\nworkspace/agents/*.yaml\n→ ProtoSdkExecutor"]
+        ART["AgentRuntimePlugin\nworkspace/agents/*.yaml\n→ DeepAgentExecutor"]
         SKB["SkillBrokerPlugin\nworkspace/agents.yaml\n→ A2AExecutor"]
     end
 
     subgraph Executors["Executor implementations"]
-        PSE["ProtoSdkExecutor\n@protolabsai/sdk\nin-process"]
-        A2AE["A2AExecutor\nHTTP JSON-RPC 2.0\nX-Correlation-Id · X-Parent-Id"]
+        PSE["DeepAgentExecutor\nLangGraph createReactAgent\nin-process"]
+        A2AE["A2AExecutor\nHTTP JSON-RPC 2.0 + SSE\nX-Correlation-Id · X-Parent-Id"]
     end
 
     subgraph WorldEngine["World Engine"]
@@ -69,7 +69,7 @@ flowchart TD
     SDP --> REG
     REG --> PSE & A2AE
 
-    ART -- "register ProtoSdkExecutor" --> REG
+    ART -- "register DeepAgentExecutor" --> REG
     SKB -- "register A2AExecutor" --> REG
 
     A2AE --> PM_A2A

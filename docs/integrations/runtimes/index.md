@@ -8,9 +8,8 @@ Every agent in protoWorkstacean is wrapped in an `IExecutor` and registered in `
 
 | Runtime | Type string | Package | When to use |
 |---------|-------------|---------|-------------|
-| [ProtoSdk](proto-sdk) | `proto-sdk` | `@protolabsai/sdk` | Default for all new agents — in-process |
-| [A2A](a2a) | `a2a` | HTTP JSON-RPC 2.0 | Agent lives in a separate service |
-| [Pi SDK](pi-sdk) | `agent` | `@mariozechner/pi-coding-agent` | Legacy — existing agents only |
+| [DeepAgent](deep-agent) | `deep-agent` | `@langchain/langgraph` | **Default** for new in-process agents |
+| [A2A](a2a) | `a2a` | HTTP JSON-RPC 2.0 + SSE | Agent lives in a separate service |
 
 ## IExecutor interface
 

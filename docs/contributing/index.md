@@ -12,7 +12,7 @@ Contributions to protoWorkstacean are welcome. This section covers how to get st
 | `src/executor/` | Executor layer: `IExecutor`, `ExecutorRegistry`, `SkillDispatcherPlugin`, four executor implementations |
 | `src/plugins/` | All plugin implementations (GOAP, ceremonies, skill broker, agent runtime, etc.) |
 | `src/router/` | `RouterPlugin` + `SkillResolver` + `ProjectEnricher` |
-| `src/agent-runtime/` | `AgentRuntimePlugin`, `AgentDefinitionLoader`, `ProtoSdkExecutor` |
+| `src/agent-runtime/` | `AgentRuntimePlugin`, `AgentDefinitionLoader` (registers `DeepAgentExecutor` instances) |
 | `src/world/` | Domain discovery |
 | `src/engines/` | `WorldStateEngine` |
 | `src/lib/` | Shared types (`BusMessage`, `Plugin`, `EventBus`) and utilities |

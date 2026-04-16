@@ -153,7 +153,7 @@ List agents loaded from `workspace/agents.yaml`.
   "data": [
     {
       "name": "ava",
-      "executor": "proto-sdk",
+      "executor": "deep-agent",
       "skills": ["chat"]
     },
     {
@@ -389,7 +389,7 @@ Agent executor registry summary. **No envelope.**
 {
   "agentCount": 3,
   "agents": {
-    "ava":        { "skills": ["chat"],                               "executorType": "proto-sdk" },
+    "ava":        { "skills": ["chat"],                               "executorType": "deep-agent" },
     "protomaker": { "skills": ["sitrep", "plan", "manage_feature"],   "executorType": "a2a" },
     "quinn":      { "skills": ["pr_review", "bug_triage"],            "executorType": "a2a" }
   },

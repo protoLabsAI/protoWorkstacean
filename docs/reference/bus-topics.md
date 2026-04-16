@@ -12,7 +12,7 @@ All bus topics published and subscribed across all plugins and subsystems. Topic
 |-------|-----------|-----------|------------|-------------|
 | `agent.skill.request` | Internal | RouterPlugin, ActionDispatcherPlugin, CeremonyPlugin, OutcomeAnalysisPlugin | SkillDispatcherPlugin | Requests execution of a named skill. `plan` / `onboard_project` / `deep_research` all flow through here (no per-skill routing table) |
 | `agent.skill.response.<correlationId>` | Internal | SkillDispatcherPlugin | Caller (varies) | Result of a skill execution |
-| `skill.progress` | Internal | ProtoSdkExecutor (via AgentExecutor `onProgress`) | Optional subscribers (UI, logs) | Intermediate tool_use + assistant text blocks streamed during skill execution. Payload is a `SkillProgressEvent`; useful for dashboards that want to render live agent reasoning. Not guaranteed in-order, not for correctness. |
+| `skill.progress` | Internal | DeepAgentExecutor / A2AExecutor | Optional subscribers (UI, logs) | Intermediate tool-call + assistant-message events streamed during skill execution (LangGraph tool calls for in-process, A2A stream updates for external). Payload is a `SkillProgressEvent`; useful for dashboards that want to render live agent reasoning. Not guaranteed in-order, not for correctness. |
 
 **`agent.skill.request` payload** (`SkillRequest`):
 ```typescript

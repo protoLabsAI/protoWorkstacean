@@ -14,7 +14,7 @@ Complete technical reference for protoWorkstacean APIs, configuration schemas, a
 | [Bus topics](./bus-topics) | Every bus topic: direction, publisher, subscriber, payload shape |
 | [Workspace files](./workspace-files) | Schemas for all YAML configuration files: agents, goals, actions, ceremonies, domains |
 | [Agent skills](./agent-skills) | Agent YAML schema, skill definitions, and available tools |
-| [Runtimes](../integrations/runtimes/) | Executor types — ProtoSdk, A2A, Pi SDK, Function, Workflow |
+| [Runtimes](../integrations/runtimes/) | Executor types — DeepAgent (LangGraph), A2A, Function, Workflow |
 
 ## How to use this section
 

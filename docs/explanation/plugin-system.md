@@ -54,7 +54,7 @@ Loaded on every startup, but some are no-ops if their configuration is missing:
 | Plugin | Role |
 |--------|------|
 | `RouterPlugin` | Translates `message.inbound.#` and `cron.#` into `agent.skill.request` |
-| `AgentRuntimePlugin` | Registrar: reads `workspace/agents/*.yaml`, registers `ProtoSdkExecutor` instances |
+| `AgentRuntimePlugin` | Registrar: reads `workspace/agents/*.yaml`, registers `DeepAgentExecutor` (LangGraph) instances |
 | `SkillBrokerPlugin` | Registrar: reads `workspace/agents.yaml`, registers `A2AExecutor` instances |
 | `SkillDispatcherPlugin` | Sole `agent.skill.request` subscriber; dispatches via `ExecutorRegistry` |
 | `WorldStateEngine` | Generic domain poller; domains registered via `discoverAndRegister()` |
