@@ -24,6 +24,14 @@ import {
   type WorldStateDeltaArtifactData,
 } from "../../../lib/types/worldstate-delta.ts";
 import {
+  COST_V1_MIME_TYPE,
+  type CostArtifactData,
+} from "../../../lib/types/cost-v1.ts";
+import {
+  CONFIDENCE_V1_MIME_TYPE,
+  type ConfidenceArtifactData,
+} from "../../../lib/types/confidence-v1.ts";
+import {
   defaultExtensionRegistry,
   type ExtensionContext,
   type ExtensionInterceptor,
@@ -427,6 +435,9 @@ export class A2AExecutor implements IExecutor {
     const taskState = task.status.state;
 
     const worldStateDelta = this._extractWorldStateDelta(task);
+    const allParts = (task.artifacts ?? []).flatMap(a => a.parts);
+    const cost = this._costFromParts(allParts);
+    const confidence = this._confidenceFromParts(allParts);
 
     return {
       text,
@@ -437,6 +448,7 @@ export class A2AExecutor implements IExecutor {
         contextId: task.contextId,
         taskState,
         ...(worldStateDelta ? { [WORLDSTATE_DELTA_MIME_TYPE]: worldStateDelta } : {}),
+        ...this._flattenExtensionData(cost, confidence, taskState),
       },
     };
   }
@@ -547,11 +559,23 @@ export class A2AExecutor implements IExecutor {
       .join("\n");
     const resultText = terminalMessage || artifactText;
 
+    // Scan accumulated artifact parts for cost-v1 + confidence-v1 payloads
+    // and flatten them onto result.data the same way the blocking path does.
+    const allStreamParts = Array.from(artifactBuffers.values()).flat();
+    const cost = this._costFromParts(allStreamParts);
+    const confidence = this._confidenceFromParts(allStreamParts);
+
     return {
       text: resultText || `Skill "${req.skill}" completed by ${this.config.name}`,
       isError: taskState === "failed" || taskState === "rejected",
       correlationId: req.correlationId,
-      data: { taskId, contextId, taskState, ...streamDeltaData },
+      data: {
+        taskId,
+        contextId,
+        taskState,
+        ...streamDeltaData,
+        ...this._flattenExtensionData(cost, confidence, taskState),
+      },
     };
   }
 
@@ -591,6 +615,64 @@ export class A2AExecutor implements IExecutor {
       }
     }
     return undefined;
+  }
+
+  /** Scan artifact parts for a cost-v1 DataPart and return the first match. */
+  private _costFromParts(
+    parts: Array<{ kind: string; data?: Record<string, unknown>; metadata?: Record<string, unknown> }>,
+  ): CostArtifactData | undefined {
+    for (const part of parts) {
+      if (
+        part.kind === "data" &&
+        part.metadata?.["mimeType"] === COST_V1_MIME_TYPE &&
+        part.data
+      ) {
+        return part.data as unknown as CostArtifactData;
+      }
+    }
+    return undefined;
+  }
+
+  /** Scan artifact parts for a confidence-v1 DataPart and return the first match. */
+  private _confidenceFromParts(
+    parts: Array<{ kind: string; data?: Record<string, unknown>; metadata?: Record<string, unknown> }>,
+  ): ConfidenceArtifactData | undefined {
+    for (const part of parts) {
+      if (
+        part.kind === "data" &&
+        part.metadata?.["mimeType"] === CONFIDENCE_V1_MIME_TYPE &&
+        part.data
+      ) {
+        return part.data as unknown as ConfidenceArtifactData;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Flatten cost-v1 + confidence-v1 DataPart payloads onto the fields the
+   * extension interceptors already read off `result.data`. Call sites merge
+   * the returned object into their `data` spread.
+   */
+  private _flattenExtensionData(
+    cost: CostArtifactData | undefined,
+    confidence: ConfidenceArtifactData | undefined,
+    taskState: string,
+  ): Record<string, unknown> {
+    return {
+      ...(cost && {
+        usage: cost.usage,
+        ...(typeof cost.durationMs === "number" ? { durationMs: cost.durationMs } : {}),
+        ...(typeof cost.costUsd === "number" ? { costUsd: cost.costUsd } : {}),
+        success: cost.success ?? (taskState === "completed"),
+      }),
+      ...(confidence && {
+        confidence: confidence.confidence,
+        ...(typeof confidence.explanation === "string"
+          ? { confidenceExplanation: confidence.explanation }
+          : {}),
+      }),
+    };
   }
 
   /**
