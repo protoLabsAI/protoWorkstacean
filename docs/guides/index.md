@@ -8,7 +8,7 @@ Task-oriented guides for common operations in protoWorkstacean.
 
 | Guide | Description |
 |-------|-------------|
-| [Add an agent](./add-an-agent) | Register an in-process agent (YAML + ProtoSdkExecutor) or an external A2A agent |
+| [Add an agent](./add-an-agent) | Register an in-process agent (YAML + DeepAgentExecutor / LangGraph) or an external A2A agent |
 | [Build an A2A agent](./build-an-a2a-agent) | Agent-author recipe: the endpoint, task lifecycle, hardening, automatic health, and scheduled work |
 | [Extend an A2A agent](./extend-an-a2a-agent) | Opt in to the x-protolabs extensions pack (cost, confidence, effect-domain, blast, hitl-mode) — smarter planner + HITL with minimal card changes |
 | [Add a domain](./add-a-domain) | Poll a custom HTTP endpoint and expose it as a world-state domain |

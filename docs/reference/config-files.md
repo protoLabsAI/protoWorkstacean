@@ -188,7 +188,7 @@ agents:
 
 **`chain`** is optional. When `chain[skill]` is set, the named agent is called with the first agent's response as context. One level deep only.
 
-> **Note:** `workspace/agents/<name>.yaml` (in-process) and `workspace/agents.yaml` (external A2A) coexist. In-process agents like the `ava` chat agent run inside workstacean via `ProtoSdkExecutor`; external agents like the protoMaker team are called via `A2AExecutor`. Both register into the same `ExecutorRegistry`, so skill dispatch is identical from the bus's perspective.
+> **Note:** `workspace/agents/<name>.yaml` (in-process) and `workspace/agents.yaml` (external A2A) coexist. In-process agents like the `ava` chat agent run inside workstacean via `DeepAgentExecutor` (LangGraph); external agents like Quinn and Jon are called via `A2AExecutor`. Both register into the same `ExecutorRegistry`, so skill dispatch is identical from the bus's perspective.
 
 ---
 

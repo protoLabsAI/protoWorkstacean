@@ -40,9 +40,9 @@ See `lib/plugins/scheduler.test.ts` for a full working example.
 
 ## Legacy observational scripts
 
-`src/test-agent.ts` and `src/test-cron.ts` are **not tests of the current production runtime**. They were written to exercise the Pi SDK agent (`@mariozechner/pi-coding-agent`) and are observational — they make real LLM calls and log output to stdout for human inspection. No automated assertions.
+`src/test-agent.ts` and `src/test-cron.ts` are **not tests of the current production runtime**. They were written for an earlier in-process runtime and are observational — they make real LLM calls and log output to stdout for human inspection. No automated assertions.
 
-These scripts are kept for reference but do **not** represent the current testing approach. The production runtime is `ProtoSdkExecutor` (`@protolabsai/sdk`), which has no equivalent observational scripts yet.
+These scripts are kept for reference but do **not** represent the current testing approach. The production in-process runtime is `DeepAgentExecutor` (LangGraph), which has no equivalent observational scripts yet.
 
 If you want to run them anyway:
 

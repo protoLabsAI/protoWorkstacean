@@ -73,7 +73,7 @@ function makeExecutor(type: string): IExecutor {
 describe("ExecutorRegistry", () => {
   test("resolves registered skill", () => {
     const registry = new ExecutorRegistry();
-    const exec = makeExecutor("proto-sdk");
+    const exec = makeExecutor("deep-agent");
     registry.register("daily_standup", exec);
     expect(registry.resolve("daily_standup")).toBe(exec);
   });
@@ -193,8 +193,8 @@ src/
     skill-dispatcher-plugin.ts # Sole agent.skill.request subscriber
     executors/
       a2a-executor.ts
+      deep-agent-executor.ts     # LangGraph — default in-process runtime
       function-executor.ts
-      proto-sdk-executor.ts
       workflow-executor.ts
     __tests__/
   plugins/
