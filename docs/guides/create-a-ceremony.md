@@ -8,12 +8,12 @@ Ceremonies are distinct from GOAP actions. Actions react to world-state violatio
 
 ## How ceremonies work
 
-1. `SchedulerPlugin` fires a `cron.<id>` bus event at the scheduled time
-2. `RouterPlugin` receives it, identifies it as a ceremony, and publishes `ceremony.<id>.execute`
-3. `CeremonyPlugin` subscribes to `ceremony.#.execute`, loads the ceremony definition, and dispatches `agent.skill.request` with the configured skill and targets
-4. `SkillDispatcherPlugin` routes the request to the matching executor
+1. `CeremonyPlugin` owns an internal cron timer for each enabled ceremony and fires `ceremony.<id>.execute` at the scheduled time
+2. `CeremonyPlugin` publishes `agent.skill.request` with the configured skill and targets
+3. `SkillDispatcherPlugin` routes the request to the matching executor (in-process or A2A)
+4. On terminal response (or 120s timeout) `CeremonyPlugin` publishes `ceremony.<id>.completed` and persists the outcome to `knowledge.db`
 
-The ceremony YAML is the only configuration required.
+Ceremony YAML is hot-reloaded every 5 seconds — drop a file and it's live without a restart.
 
 ## Ceremony YAML schema
 
@@ -47,6 +47,11 @@ notifyChannel: "1469195643590541353"
 
 # Set to false to disable without deleting the file.
 enabled: true
+
+# Ownership marker — stamped automatically when created via API with a
+# per-agent key. Controls who can update/delete through the HTTP API.
+# Operator-authored ceremonies omit this (treated as "system"-owned).
+createdBy: quinn
 ```
 
 ## Field reference
@@ -58,9 +63,10 @@ enabled: true
 | `description` | No | Explains the purpose of the ceremony. |
 | `schedule` | Yes | 5-field cron expression (UTC). Examples below. |
 | `skill` | Yes | Skill name dispatched via `agent.skill.request`. |
-| `targets` | No | Agent names for explicit routing. Empty = default routing. |
+| `targets` | Yes | Non-empty array of agent names (e.g. `["quinn"]`), or `["all"]` for fleet broadcast. |
 | `notifyChannel` | No | Discord channel ID for delivery. Empty = no Discord post. |
 | `enabled` | No | `true` (default) or `false` to suspend without deleting. |
+| `createdBy` | No | Owning agent name. Stamped automatically when created via the HTTP API with a per-agent key; operator-written files typically omit it. Enforced by `/api/ceremonies/:id/update` and `/api/ceremonies/:id/delete`. |
 
 ## Cron expression examples
 
@@ -93,23 +99,48 @@ curl -X POST http://localhost:3000/publish \
 ## Listing ceremonies
 
 ```bash
-curl http://localhost:3000/api/ceremonies
+curl -H "X-API-Key: $WORKSTACEAN_API_KEY" http://localhost:3000/api/ceremonies
 ```
+
+Admin keys see every ceremony; per-agent keys (`WORKSTACEAN_API_KEY_<AGENT>`) return only ceremonies where `createdBy` matches the caller. Admins can pass `?all=true` to see everything regardless of owner.
 
 Response:
 
 ```json
-[
-  {
-    "id": "daily-standup",
-    "name": "Daily Fleet Standup",
-    "schedule": "0 9 * * 1-5",
-    "skill": "board_audit",
-    "enabled": true,
-    "nextRun": "2026-04-09T09:00:00.000Z"
-  }
-]
+{
+  "success": true,
+  "data": [
+    {
+      "id": "daily-standup",
+      "name": "Daily Fleet Standup",
+      "schedule": "0 9 * * 1-5",
+      "skill": "board_audit",
+      "targets": ["ava"],
+      "notifyChannel": "1469195643590541353",
+      "enabled": true
+    }
+  ]
+}
 ```
+
+## Creating ceremonies at runtime
+
+Drop a file into `workspace/ceremonies/` (hot-reloaded in ≤5s) *or* call the API:
+
+```bash
+curl -X POST http://localhost:3000/api/ceremonies/create \
+  -H "X-API-Key: $WORKSTACEAN_API_KEY_QUINN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "quinn.hourly-sweep",
+    "name": "Hourly Sweep",
+    "schedule": "0 * * * *",
+    "skill": "qa_report",
+    "targets": ["quinn"]
+  }'
+```
+
+When called with a per-agent key, `createdBy` is stamped server-side. Agents can then update or delete only ceremonies they own; admins can manage any. See [Build an A2A agent → Scheduled work](./build-an-a2a-agent#scheduled-work-ceremonies) for the agent-side `manage_cron` tool pattern.
 
 ## Example: security triage ceremony
 
@@ -147,10 +178,9 @@ The protoMaker team receives the `pattern_analysis` skill request every Monday a
 
 ## Adding a ceremony
 
-1. Create the file `workspace/ceremonies/<id>.yaml` with the schema above
-2. Restart the server (ceremonies are loaded at startup)
-3. Confirm it appears in `GET /api/ceremonies`
-4. Optionally trigger it manually to verify the skill routes correctly
+1. Create the file `workspace/ceremonies/<id>.yaml` with the schema above (or POST to `/api/ceremonies/create`)
+2. Wait ≤5s for the hot-reload watcher, or confirm immediately via `GET /api/ceremonies`
+3. Optionally trigger it manually with `/api/ceremonies/<id>/run` to verify the skill routes correctly
 
 ## Related
 
