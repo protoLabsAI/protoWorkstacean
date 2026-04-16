@@ -155,7 +155,7 @@ Trigger by @mention: `@protoquinn <description>` (admin users only).
 
 ## Related docs
 
-- [reference/plugins.md](../reference/plugins.md) — GitHubPlugin API contract
-- [reference/bus-topics.md](../reference/bus-topics.md) — GitHub bus topics
-- [reference/agent-skills.md](../reference/agent-skills.md) — `pr_review` and `bug_triage` skill specs
-- [explanation/architecture.md](../explanation/architecture.md) — Quinn's vector context pipeline in detail
+- [reference/plugins.md](../reference/plugins) — GitHubPlugin API contract
+- [reference/bus-topics.md](../reference/bus-topics) — GitHub bus topics
+- [reference/agent-skills.md](../reference/agent-skills) — `pr_review` and `bug_triage` skill specs
+- [explanation/architecture.md](../explanation/architecture) — Quinn's vector context pipeline in detail

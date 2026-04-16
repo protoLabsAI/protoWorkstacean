@@ -88,7 +88,7 @@ const summary = defaultCostStore.summary("quinn", "pr_review");
 - ≥ 5 samples → warm: sort by `2.0 * successRate + 0.5 * avgConfidenceOnSuccess − 0.3 * clamp(avgWallMs / 60_000, 0, 2)`
 - \< 5 samples → cold: fall back to card-declared confidence
 
-See [`self-improving-loop.md`](../explanation/self-improving-loop.md) for the full observation → ranking flow.
+See [`self-improving-loop.md`](../explanation/self-improving-loop) for the full observation → ranking flow.
 
 ---
 
@@ -119,6 +119,6 @@ Quinn currently emits `usage` + `durationMs` only — `costUsd` capture from the
 
 ## Related
 
-- [`confidence-v1`](confidence-v1.md) — companion extension for agent-reported confidence, read alongside cost in the same planner ranking
-- [`effect-domain-v1`](effect-domain-v1.md) — card-side effect declarations; Arc 6.4 ranking layers observed cost/confidence on top
-- [`worldstate-delta-v1`](worldstate-delta-v1.md) — artifact format for observed mutations
+- [`confidence-v1`](confidence-v1) — companion extension for agent-reported confidence, read alongside cost in the same planner ranking
+- [`effect-domain-v1`](effect-domain-v1) — card-side effect declarations; Arc 6.4 ranking layers observed cost/confidence on top
+- [`worldstate-delta-v1`](worldstate-delta-v1) — artifact format for observed mutations

@@ -180,7 +180,7 @@ The caller receives the same `SkillResult` it would have received from a blockin
 
 If a streaming agent returns `input-required`, the task does not complete. `TaskTracker` detects the state, raises an `HITLRequest` on the bus, and the HITL renderer surfaces the pause point to a human on the originating interface. When the human responds, `TaskTracker` resumes the task via `message/send` with the same `taskId`. The agent picks up where it left off.
 
-This is the same flow whether the request came from a human message or an autonomous GOAP action. See [HITL guide](./hitl.md) for the full flow.
+This is the same flow whether the request came from a human message or an autonomous GOAP action. See [HITL guide](./hitl) for the full flow.
 
 ## Fallback behavior
 

@@ -165,7 +165,7 @@ Emitted by extensions running inside `A2AExecutor` and by `ActionDispatcherPlugi
 }
 ```
 
-See [`self-improving-loop.md`](../explanation/self-improving-loop.md) for the end-to-end observation → planner-ranking path and [`cost-v1`](../extensions/cost-v1.md) / [`confidence-v1`](../extensions/confidence-v1.md) for the extension-specific payload shapes.
+See [`self-improving-loop.md`](../explanation/self-improving-loop) for the end-to-end observation → planner-ranking path and [`cost-v1`](../extensions/cost-v1) / [`confidence-v1`](../extensions/confidence-v1) for the extension-specific payload shapes.
 
 ---
 
