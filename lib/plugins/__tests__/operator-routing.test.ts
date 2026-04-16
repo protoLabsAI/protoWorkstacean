@@ -2,22 +2,24 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { InMemoryEventBus } from "../../bus.ts";
 import { OperatorRoutingPlugin } from "../operator-routing.ts";
 import type { OperatorMessageRequest } from "../operator-routing.ts";
+import type { IdentityRegistry } from "../../identity/identity-registry.ts";
+
+function stubRegistry(adminDiscordId: string | null): IdentityRegistry {
+  return {
+    adminIds: (platform: string) => (platform === "discord" && adminDiscordId ? [adminDiscordId] : []),
+  } as unknown as IdentityRegistry;
+}
 
 describe("OperatorRoutingPlugin", () => {
   let bus: InMemoryEventBus;
   let plugin: OperatorRoutingPlugin;
-  const originalEnv = process.env.OPERATOR_DISCORD_USER_ID;
 
   beforeEach(() => {
     bus = new InMemoryEventBus();
-    plugin = new OperatorRoutingPlugin();
-    plugin.install(bus);
   });
 
   afterEach(() => {
-    plugin.uninstall();
-    if (originalEnv !== undefined) process.env.OPERATOR_DISCORD_USER_ID = originalEnv;
-    else delete process.env.OPERATOR_DISCORD_USER_ID;
+    plugin?.uninstall();
   });
 
   function publishReq(req: OperatorMessageRequest): void {
@@ -30,8 +32,9 @@ describe("OperatorRoutingPlugin", () => {
     });
   }
 
-  test("routes to Discord DM topic when OPERATOR_DISCORD_USER_ID is set", async () => {
-    process.env.OPERATOR_DISCORD_USER_ID = "123456789";
+  test("routes to Discord DM for the admin user's Discord ID from users.yaml", async () => {
+    plugin = new OperatorRoutingPlugin(stubRegistry("123456789"));
+    plugin.install(bus);
 
     const received: Array<{ topic: string; payload: unknown }> = [];
     bus.subscribe("message.outbound.discord.dm.user.#", "test", msg => {
@@ -57,7 +60,8 @@ describe("OperatorRoutingPlugin", () => {
   });
 
   test("prepends urgency badge on high + urgent", async () => {
-    process.env.OPERATOR_DISCORD_USER_ID = "123";
+    plugin = new OperatorRoutingPlugin(stubRegistry("123"));
+    plugin.install(bus);
 
     const received: Array<{ content: string }> = [];
     bus.subscribe("message.outbound.discord.dm.user.#", "test", msg => {
@@ -76,7 +80,8 @@ describe("OperatorRoutingPlugin", () => {
   });
 
   test("prepends [topic] when topic is set", async () => {
-    process.env.OPERATOR_DISCORD_USER_ID = "123";
+    plugin = new OperatorRoutingPlugin(stubRegistry("123"));
+    plugin.install(bus);
 
     const received: Array<{ content: string }> = [];
     bus.subscribe("message.outbound.discord.dm.user.#", "test", msg => {
@@ -97,8 +102,9 @@ describe("OperatorRoutingPlugin", () => {
     expect(received[0].content).toContain("delete the A records");
   });
 
-  test("drops with warning when no channels are configured", async () => {
-    delete process.env.OPERATOR_DISCORD_USER_ID;
+  test("drops with warning when no admin user has a Discord ID mapped", async () => {
+    plugin = new OperatorRoutingPlugin(stubRegistry(null));
+    plugin.install(bus);
 
     const received: Array<{ topic: string }> = [];
     bus.subscribe("message.outbound.#", "test", msg => {

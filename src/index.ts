@@ -411,7 +411,9 @@ registeredPlugins.push(configChangePlugin);
 // (Discord DM today; SMS/Signal/push future) and dispatches. Pre-installed so
 // any other plugin that wants to reach the operator has a stable contract.
 const { OperatorRoutingPlugin } = await import("../lib/plugins/operator-routing.js");
-const operatorRoutingPlugin = new OperatorRoutingPlugin();
+const { IdentityRegistry } = await import("../lib/identity/identity-registry.js");
+const operatorIdentityRegistry = new IdentityRegistry(workspaceDir);
+const operatorRoutingPlugin = new OperatorRoutingPlugin(operatorIdentityRegistry);
 operatorRoutingPlugin.install(bus);
 registeredPlugins.push(operatorRoutingPlugin);
 

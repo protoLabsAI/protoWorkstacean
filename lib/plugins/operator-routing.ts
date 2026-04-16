@@ -3,9 +3,10 @@
  * (Discord, SMS, Signal, email, etc.) so any agent can call `msg_operator`
  * without knowing which channel the operator is currently reachable on.
  *
- * Today's routing: single channel (Discord DM) if OPERATOR_DISCORD_USER_ID is
- * set. If unset, logs the message and drops it (agents shouldn't silently
- * fail to reach a user — they should see the drop in logs).
+ * Today's routing: single channel (Discord DM) if the first admin user in
+ * workspace/users.yaml has a Discord ID mapped. If not, each request is
+ * dropped with a visible warning — agents shouldn't silently fail to reach
+ * the operator.
  *
  * Future routing: a `operator_presence` world-state domain will track live
  * signals (active-on-discord, on-phone, AFK, GPS pinned to home/office, etc).
@@ -26,6 +27,7 @@
  */
 
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
+import type { IdentityRegistry } from "../identity/identity-registry.ts";
 
 export interface OperatorMessageRequest {
   type: "operator_message_request";
@@ -49,6 +51,15 @@ export class OperatorRoutingPlugin implements Plugin {
     "Routes operator-bound messages across transports (Discord, SMS, etc.) based on presence + urgency";
   readonly capabilities = ["operator-routing"];
 
+  /**
+   * IdentityRegistry is the single source of truth for operator identity.
+   * The first admin user with a Discord identity in workspace/users.yaml is
+   * the DM recipient. No env var fallback — if no admin has a Discord ID
+   * mapped, operator messaging is disabled and each request is dropped with
+   * a visible warning.
+   */
+  constructor(private readonly identityRegistry: IdentityRegistry) {}
+
   install(bus: EventBus): void {
     bus.subscribe("operator.message.request", this.name, (msg: BusMessage) => {
       const req = msg.payload as OperatorMessageRequest;
@@ -65,7 +76,9 @@ export class OperatorRoutingPlugin implements Plugin {
    * here when the presence domain and channel config land.
    */
   private _route(bus: EventBus, req: OperatorMessageRequest): void {
-    const discordUserId = process.env.OPERATOR_DISCORD_USER_ID;
+    // Operator identity is sourced from workspace/users.yaml — the first
+    // admin user with a Discord ID mapped. If none, we drop the message.
+    const discordUserId = this.identityRegistry.adminIds("discord")[0];
     const delivered: string[] = [];
 
     if (discordUserId) {
