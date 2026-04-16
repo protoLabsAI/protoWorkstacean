@@ -13,7 +13,7 @@ Onboarding a project provisions it across every system protoLabs uses: GitHub (`
 
 ### Option A — Automatic (org webhook)
 
-If you have the GitHub org webhook registered (see [how-to/use-quinn-pr-review.md](use-quinn-pr-review.md) for webhook setup), any new repository created under the org automatically triggers onboarding. No manual action needed.
+If you have the GitHub org webhook registered (see [how-to/use-quinn-pr-review.md](use-quinn-pr-review) for webhook setup), any new repository created under the org automatically triggers onboarding. No manual action needed.
 
 ### Option B — Discord slash command
 
@@ -106,6 +106,6 @@ curl -s -X POST http://workstacean:3000/publish \
 
 ## Related docs
 
-- [reference/agent-skills.md](../reference/agent-skills.md) — full skill registry including `onboard_project` parameters
-- [reference/config-files.md](../reference/config-files.md) — `projects.yaml` schema
-- [explanation/agent-identity.md](../explanation/agent-identity.md) — why Quinn handles Discord provisioning (not Ava)
+- [reference/agent-skills.md](../reference/agent-skills) — full skill registry including `onboard_project` parameters
+- [reference/config-files.md](../reference/config-files) — `projects.yaml` schema
+- [explanation/agent-identity.md](../explanation/agent-identity) — why Quinn handles Discord provisioning (not Ava)

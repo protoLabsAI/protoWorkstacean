@@ -143,6 +143,6 @@ On startup, the plugin logs which services it activated:
 
 ## Related docs
 
-- [reference/bus-topics.md](../reference/bus-topics.md) — Google bus topics
-- [reference/config-files.md](../reference/config-files.md) — full `google.yaml` schema
-- [explanation/plugin-lifecycle.md](../explanation/plugin-lifecycle.md) — plugin install/uninstall lifecycle
+- [reference/bus-topics.md](../reference/bus-topics) — Google bus topics
+- [reference/config-files.md](../reference/config-files) — full `google.yaml` schema
+- [explanation/plugin-lifecycle.md](../explanation/plugin-lifecycle) — plugin install/uninstall lifecycle

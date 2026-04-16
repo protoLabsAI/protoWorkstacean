@@ -105,11 +105,11 @@ When two candidates score identically (common in the cold regime with matching c
 
 | Extension | Reads from | Writes to | Consumer |
 |---|---|---|---|
-| [`cost-v1`](../extensions/cost-v1.md) | `result.data.usage`, `durationMs`, `costUsd`, `success` | `defaultCostStore` + `autonomous.cost.*` topic | Planner ranking, dashboard, `OutcomeAnalysis` action-quality alerts |
-| [`confidence-v1`](../extensions/confidence-v1.md) | `result.data.confidence`, `confidenceExplanation`, `success` | `defaultConfidenceStore` + `autonomous.confidence.*` topic | Planner ranking, calibration dashboard |
-| [`effect-domain-v1`](../extensions/effect-domain-v1.md) | `worldstate-delta-v1` artifact DataPart | `world.state.delta` bus event | `WorldStateEngine` applies deltas, planner sees fresh state faster |
-| [`blast-v1`](../extensions/blast-v1.md) | `capabilities.extensions[].params.skills` on the agent card | `defaultBlastRegistry` + stamps `x-blast-radius` on outbound metadata | HITL policy + planner tiebreaker + dashboard severity coloring |
-| [`hitl-mode-v1`](../extensions/hitl-mode-v1.md) | `capabilities.extensions[].params.skills` on the agent card | `defaultHitlModeRegistry` + stamps `x-hitl-mode` on outbound metadata | `HITLPlugin` flow selection (autonomous / notification / veto / gated / compound); sub-agent `input-required` routes back to dispatching agent, human fallback |
+| [`cost-v1`](../extensions/cost-v1) | `result.data.usage`, `durationMs`, `costUsd`, `success` | `defaultCostStore` + `autonomous.cost.*` topic | Planner ranking, dashboard, `OutcomeAnalysis` action-quality alerts |
+| [`confidence-v1`](../extensions/confidence-v1) | `result.data.confidence`, `confidenceExplanation`, `success` | `defaultConfidenceStore` + `autonomous.confidence.*` topic | Planner ranking, calibration dashboard |
+| [`effect-domain-v1`](../extensions/effect-domain-v1) | `worldstate-delta-v1` artifact DataPart | `world.state.delta` bus event | `WorldStateEngine` applies deltas, planner sees fresh state faster |
+| [`blast-v1`](../extensions/blast-v1) | `capabilities.extensions[].params.skills` on the agent card | `defaultBlastRegistry` + stamps `x-blast-radius` on outbound metadata | HITL policy + planner tiebreaker + dashboard severity coloring |
+| [`hitl-mode-v1`](../extensions/hitl-mode-v1) | `capabilities.extensions[].params.skills` on the agent card | `defaultHitlModeRegistry` + stamps `x-hitl-mode` on outbound metadata | `HITLPlugin` flow selection (autonomous / notification / veto / gated / compound); sub-agent `input-required` routes back to dispatching agent, human fallback |
 
 All five interceptors are registered once at startup (`src/index.ts`) and fire on every A2A dispatch regardless of whether the agent's card opts in — they self-gate by checking for their expected response fields or card declarations. Agents that don't opt in produce no samples and no metadata stamps; agents that do get their samples counted. No config change needed on either side when a new agent joins the fleet.
 

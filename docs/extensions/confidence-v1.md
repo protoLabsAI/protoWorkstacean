@@ -104,7 +104,7 @@ score (warm) = 2.0 * cost.successRate
 
 `avgConfidenceOnSuccess` specifically (not overall average) is used — it answers "when this agent succeeds at this skill, how sure is it?" which is the right question for ranking future candidates.
 
-See [`self-improving-loop.md`](../explanation/self-improving-loop.md) for the full flow.
+See [`self-improving-loop.md`](../explanation/self-improving-loop) for the full flow.
 
 ---
 
@@ -120,5 +120,5 @@ Payload is the raw `ConfidenceSample`. Subscribers: dashboard calibration view, 
 
 ## Related
 
-- [`cost-v1`](cost-v1.md) — companion metric; planner reads both together
-- [`effect-domain-v1`](effect-domain-v1.md) — card-side declaration of effects; observed confidence overrides the declared prior once warm
+- [`cost-v1`](cost-v1) — companion metric; planner reads both together
+- [`effect-domain-v1`](effect-domain-v1) — card-side declaration of effects; observed confidence overrides the declared prior once warm
