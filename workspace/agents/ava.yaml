@@ -135,7 +135,7 @@ tools:
   - send_update
   - msg_operator
 
-maxTurns: 10
+maxTurns: 25
 
 discordBotTokenEnvKey: DISCORD_BOT_TOKEN_AVA
 
