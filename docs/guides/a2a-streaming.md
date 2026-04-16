@@ -68,19 +68,28 @@ async def a2a_handler(req: dict):
 
 Each SSE line must be `data: <json>\n\n`. Three event types:
 
+> **Critical — every event needs a `kind` discriminator.** `@a2a-js/sdk`'s `for await` loop routes by `kind`. Events without it are silently skipped and `A2AExecutor` sees the stream as empty. This is what Quinn #40 fixed. Wire fields are camelCase (`taskId`, `contextId`, `lastChunk`) — not snake_case.
+
+**Initial snapshot** — the first frame is a full `Task` object with `kind: "task"`:
+```json
+data: {"kind": "task", "id": "task-uuid", "contextId": "conv-uuid", "status": {"state": "submitted", "timestamp": "..."}}
+```
+
 **TaskStatusUpdateEvent** — progress indicator:
 ```json
-data: {"id": "task-uuid", "contextId": "conv-uuid", "status": {"state": "working", "message": {"parts": [{"text": "Scanning HuggingFace..."}]}}}
+data: {"kind": "status-update", "taskId": "task-uuid", "contextId": "conv-uuid", "status": {"state": "working", "message": {"role": "agent", "parts": [{"kind": "text", "text": "Scanning HuggingFace..."}]}}, "final": false}
 ```
 
 **TaskArtifactUpdateEvent** — partial result:
 ```json
-data: {"id": "task-uuid", "contextId": "conv-uuid", "artifact": {"parts": [{"kind": "text", "text": "Found 3 relevant papers..."}]}}
+data: {"kind": "artifact-update", "taskId": "task-uuid", "contextId": "conv-uuid", "artifact": {"artifactId": "task-uuid", "parts": [{"kind": "text", "text": "Found 3 relevant papers..."}]}, "append": true, "lastChunk": false}
 ```
 
-**Completion** — final result + done signal:
+**Completion** — emit TWO events: the final artifact-update, then a final status-update. `[DONE]` closes the stream:
 ```json
-data: {"id": "task-uuid", "contextId": "conv-uuid", "status": {"state": "completed"}, "artifact": {"parts": [{"kind": "text", "text": "Full research report..."}]}}
+data: {"kind": "artifact-update", "taskId": "task-uuid", "contextId": "conv-uuid", "artifact": {"artifactId": "task-uuid", "parts": [{"kind": "text", "text": "Full research report..."}]}, "append": false, "lastChunk": true}
+
+data: {"kind": "status-update", "taskId": "task-uuid", "contextId": "conv-uuid", "status": {"state": "completed", "timestamp": "..."}, "final": true}
 
 data: [DONE]
 ```
@@ -93,8 +102,8 @@ async def sse_generator(req):
     context_id = req["params"].get("contextId", task_id)
     text = extract_text(req)
 
-    # Emit "working" status
-    yield f"data: {json.dumps({'id': task_id, 'contextId': context_id, 'status': {'state': 'working', 'message': {'parts': [{'text': 'Starting...'}]}}})}\n\n"
+    # Frame 0: initial Task snapshot
+    yield f"data: {json.dumps({'kind': 'task', 'id': task_id, 'contextId': context_id, 'status': {'state': 'submitted', 'timestamp': iso_now()}})}\n\n"
 
     # Run work with progress callback
     progress_q = queue.Queue()
@@ -108,10 +117,13 @@ async def sse_generator(req):
         await asyncio.sleep(0.5)
         while not progress_q.empty():
             msg = progress_q.get_nowait()
-            yield f"data: {json.dumps({'id': task_id, 'contextId': context_id, 'status': {'state': 'working', 'message': {'parts': [{'text': msg}]}}})}\n\n"
+            yield f"data: {json.dumps({'kind': 'status-update', 'taskId': task_id, 'contextId': context_id, 'status': {'state': 'working', 'message': {'role': 'agent', 'parts': [{'kind': 'text', 'text': msg}]}}, 'final': False})}\n\n"
 
     result = task.result()
-    yield f"data: {json.dumps({'id': task_id, 'contextId': context_id, 'status': {'state': 'completed'}, 'artifact': {'parts': [{'kind': 'text', 'text': result}]}})}\n\n"
+    # Terminal: artifact-update FIRST (with the authoritative artifact),
+    # then status-update with final=True.
+    yield f"data: {json.dumps({'kind': 'artifact-update', 'taskId': task_id, 'contextId': context_id, 'artifact': {'artifactId': task_id, 'parts': [{'kind': 'text', 'text': result}]}, 'append': False, 'lastChunk': True})}\n\n"
+    yield f"data: {json.dumps({'kind': 'status-update', 'taskId': task_id, 'contextId': context_id, 'status': {'state': 'completed', 'timestamp': iso_now()}, 'final': True})}\n\n"
     yield "data: [DONE]\n\n"
 ```
 
@@ -143,10 +155,11 @@ Inbound message: "research full-duplex voice AI"
       → ExecutorRegistry → A2AExecutor (streaming: true)
         → POST /a2a  method: message/stream
           ← text/event-stream:
-              data: {"status":{"state":"working","message":"Scanning HuggingFace..."}}
-              data: {"status":{"state":"working","message":"Reading paper: PersonaPlex..."}}
-              data: {"status":{"state":"working","message":"Synthesizing findings..."}}
-              data: {"artifact":{"parts":[{"kind":"text","text":"Full report..."}]}}
+              data: {"kind":"task", "id":"...", "contextId":"...", "status":{"state":"submitted"}}
+              data: {"kind":"status-update", "taskId":"...", "status":{"state":"working","message":{...}}, "final":false}
+              data: {"kind":"status-update", "taskId":"...", "status":{"state":"working","message":{...}}, "final":false}
+              data: {"kind":"artifact-update", "taskId":"...", "artifact":{"artifactId":"...","parts":[...]}, "append":false, "lastChunk":true}
+              data: {"kind":"status-update", "taskId":"...", "status":{"state":"completed"}, "final":true}
               data: [DONE]
         Each "working" event → onStreamUpdate → Discord agent-ops channel
         Final artifact → published to replyTopic

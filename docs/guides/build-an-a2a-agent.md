@@ -239,23 +239,28 @@ If the producer emits in-process events like `tool_start` / `tool_end` that your
 
 See [A2A Streaming (SSE)](./a2a-streaming) for the full SSE event protocol. Short version: advertise `capabilities.streaming: true`, accept `method: "message/stream"` on `/a2a` and `POST /message:stream`, emit `text/event-stream` frames as work progresses. `A2AExecutor` on Workstacean's side switches transport automatically based on the card; your `message/send` consumers stay unchanged.
 
-Terminal frames (`COMPLETED`) should carry the authoritative full artifact — text + any [worldstate-delta](../extensions/worldstate-delta-v1) DataParts — as `append: false, last_chunk: true`. Mid-run stays incremental via `append: true` text deltas only.
+On `COMPLETED`, emit **two** events per the A2A spec: first a `kind: "artifact-update"` carrying the authoritative full artifact — text + any [worldstate-delta](../extensions/worldstate-delta-v1) DataParts — as `append: false, lastChunk: true`; then a `kind: "status-update"` with `final: true` to close the stream. Mid-run stays incremental via `kind: "artifact-update"` + `append: true` text deltas only.
+
+> **Critical — SSE events must carry a `kind` discriminator.** `@a2a-js/sdk`'s `for await (const event of client.sendMessageStream(...))` routes events by `kind`. Events missing it are silently dropped, which means Workstacean's TaskTracker never attaches, push notifications never register, and HITL chains silently fail. This was Quinn #40. Every frame — initial `task`, every `status-update`, every `artifact-update` — needs `kind`.
 
 ## Push notifications
 
 Workstacean registers webhooks of the form `${WORKSTACEAN_BASE_URL}/api/a2a/callback/{taskId}` with a per-task HMAC token. When you POST a task snapshot to the URL, Workstacean verifies the token and fires the same bus event a poll would have.
 
-The webhook payload should be a `TaskStatusUpdateEvent`:
+The webhook payload is a `TaskStatusUpdateEvent` — same shape as on the wire, including the `kind` discriminator:
 
 ```json
 {
-  "task_id": "3f8a1c2d-...",
-  "context_id": "engagement-001",
+  "kind": "status-update",
+  "taskId": "3f8a1c2d-...",
+  "contextId": "engagement-001",
   "status": {"state": "completed", "timestamp": "2026-04-15T20:00:00Z"},
+  "final": true,
   "artifact": {
+    "artifactId": "3f8a1c2d-...",
     "parts": [{"kind": "text", "text": "## Results\n..."}],
     "append": false,
-    "last_chunk": true
+    "lastChunk": true
   }
 }
 ```
@@ -375,22 +380,26 @@ A protoAgent that ticks all of these is a first-class fleet citizen — routing,
 - [ ] Background producer runs independently of any SSE connection
 
 ### SSE semantics
-- [ ] Text deltas only on `append: true` — never the full `accumulated_text`
-- [ ] Terminal frame is the authoritative full artifact, `append: false, last_chunk: true`
+- [ ] Every event carries a `kind` discriminator (`task` / `status-update` / `artifact-update` / `message`) — without it `@a2a-js/sdk` silently drops the event (Quinn #40)
+- [ ] Wire fields are camelCase: `taskId`, `contextId`, `lastChunk`, `artifactId` (not `task_id` / `context_id` / `last_chunk`) — Python variable names can stay snake_case, just not dict keys that cross the wire
+- [ ] Status updates carry a `final` boolean (true on terminal states)
+- [ ] Text deltas emit as `kind: "artifact-update"` + `append: true` — never the full `accumulated_text`
+- [ ] `COMPLETED` emits TWO events per spec: `artifact-update` (full artifact, `append: false`, `lastChunk: true`) then `status-update` (`final: true`)
+- [ ] Artifact objects carry an `artifactId` for cross-event correlation
 - [ ] Tool status messages persist on the record for `:subscribe` to surface
 - [ ] Consumer disconnect does not cancel the producer
 
 ### Extensions (cards + runtime)
 - [ ] [`effect-domain-v1`](../extensions/effect-domain-v1) declared on the card for every state-mutating skill (enables L1 planner ranking)
 - [ ] [`worldstate-delta-v1`](../extensions/worldstate-delta-v1) DataPart emitted on the terminal task whenever a tool with known effects succeeds (declared effects must agree with observed deltas — a drift test is cheap)
-- [ ] [`cost-v1`](../extensions/cost-v1) `{usage, durationMs, costUsd}` populated on the terminal task
+- [ ] [`cost-v1`](../extensions/cost-v1) `{usage, durationMs, costUsd?}` DataPart on every terminal task that ran an LLM. Capture token usage from your model events (LangChain: `on_chat_model_end` → `output.usage_metadata`); compute `durationMs` from `created_at`/`updated_at`; emit only when usage was actually tracked. `costUsd` is optional — derive from per-model rates or capture from the gateway response. Reference: Quinn `_terminal_artifact_parts` + `store.add_usage` (PR #56).
 - [ ] [`confidence-v1`](../extensions/confidence-v1) `{confidence, explanation}` populated when the agent can self-assess
 - [ ] Success contract: `state: completed` means the agent actually achieved the goal, not just that the skill returned without crashing
 
 ## Reference implementations
 
 - **[`Quinn/a2a_handler.py`](https://github.com/protoLabsAI/quinn/blob/main/a2a_handler.py)** — the most complete reference. All of the hardening above + decoupled SSE producer + delta-only text frames + tool-message persistence. Single 800-line file, no inheritance.
-- **[`Quinn/server.py`](https://github.com/protoLabsAI/quinn/blob/main/server.py)** — agent-side wiring. `_chat_langgraph_stream` maps LangGraph `astream_events(v2)` to the `(tool_start|tool_end|text|delta|done|error)` tuple contract the handler consumes. `_build_agent_card` shows `capabilities.extensions` with `effect-domain-v1`. `_worldstate_delta_for_tool` emits the runtime delta on `file_bug` success.
+- **[`Quinn/server.py`](https://github.com/protoLabsAI/quinn/blob/main/server.py)** — agent-side wiring. `_chat_langgraph_stream` maps LangGraph `astream_events(v2)` to the `(tool_start|tool_end|text|delta|usage|done|error)` tuple contract the handler consumes. `_build_agent_card` shows `capabilities.extensions` with `effect-domain-v1` and `cost-v1`. `_worldstate_delta_for_tool` emits the runtime delta on `file_bug` success. `on_chat_model_end` capture feeds the `usage` channel for cost-v1.
 - **[`Quinn/tools/manage_cron.py`](https://github.com/protoLabsAI/quinn/blob/main/tools/manage_cron.py)** — LangGraph tool that CRUDs ceremonies via the per-agent `X-API-Key`.
 - **[`Quinn/tests/test_a2a_handler.py`](https://github.com/protoLabsAI/quinn/blob/main/tests/test_a2a_handler.py)** — ~55 tests covering the store, background runner, SSRF, cancel races, webhook retention, subscribe reconnect, delta-only text, producer survives consumer cancellation. Clone this alongside the handler.
 - **[`protoPen/a2a_handler.py`](https://github.com/protoLabsAI/protoPen/blob/main/a2a_handler.py)** — original port target. Predates Quinn's hardening; lacks decoupled SSE producer, SSRF guard, webhook retention, atomic cancel. Kept as a reference for the minimum viable spec surface, but new agents should mirror Quinn's version.
