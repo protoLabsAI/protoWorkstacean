@@ -136,7 +136,7 @@ if (decl && HITL_MODE_ORDER[decl.mode] >= HITL_MODE_ORDER.gated) {
 
 - ✅ `before` hook ships on every A2A call; metadata stamping live
 - ✅ Registry populated by `SkillBrokerPlugin` card-refresh path
-- ⏳ **Caller-first reviewer resolution is pending implementation** — today `input-required` routes directly to Discord (human operator). The sub-agent → caller fallback chain is documented here as the target design; follow-up ticket tracks the `TaskTracker` change to inspect `source.agentId` and hand HITL requests back through the dispatch chain before defaulting to the human renderer.
+- ✅ Caller-first reviewer resolution live — `TaskTracker` routes `input-required` back to the dispatching agent (via `meta.dispatcherAgent` on the originating `agent.skill.request`) before falling back to the human renderer chain. `reviewer: "operator"` on the declaration forces direct-to-human.
 
 ---
 

@@ -231,6 +231,11 @@ export class SkillDispatcherPlugin implements Plugin {
     const goapGoalId: string | undefined =
       typeof payload.meta?.goalId === "string" ? payload.meta.goalId
       : (typeof payload.goalId === "string" ? payload.goalId : undefined);
+    // Name of the agent that issued this skill request (via chat_with_agent /
+    // delegate_task). Carried forward to TaskTracker so input-required prompts
+    // can route back to the dispatcher instead of straight to the operator.
+    const dispatcherAgent: string | undefined =
+      typeof payload.meta?.dispatcherAgent === "string" ? payload.meta.dispatcherAgent : undefined;
 
     let rawContent = typeof payload.content === "string" ? payload.content : undefined;
     const originalContent = rawContent; // preserved for episode storage — never includes context prefix
@@ -321,6 +326,7 @@ export class SkillDispatcherPlugin implements Plugin {
           correlationId,
           taskId,
           agentName: targets[0] ?? "unknown",
+          skillName: skill,
           replyTopic,
           executor: a2aExecutor,
           parentId,
@@ -328,6 +334,7 @@ export class SkillDispatcherPlugin implements Plugin {
           sourceInterface: sourcePlatform,
           sourceChannelId: sourceChannelId,
           sourceUserId: sourceUserId,
+          ...(dispatcherAgent ? { dispatcherAgent } : {}),
           onTerminal: (content, isError, taskState) => {
             this._publishAutonomousOutcome({
               correlationId,
