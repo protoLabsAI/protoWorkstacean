@@ -392,14 +392,14 @@ A protoAgent that ticks all of these is a first-class fleet citizen — routing,
 ### Extensions (cards + runtime)
 - [ ] [`effect-domain-v1`](../extensions/effect-domain-v1) declared on the card for every state-mutating skill (enables L1 planner ranking)
 - [ ] [`worldstate-delta-v1`](../extensions/worldstate-delta-v1) DataPart emitted on the terminal task whenever a tool with known effects succeeds (declared effects must agree with observed deltas — a drift test is cheap)
-- [ ] [`cost-v1`](../extensions/cost-v1) `{usage, durationMs, costUsd}` populated on the terminal task
+- [ ] [`cost-v1`](../extensions/cost-v1) `{usage, durationMs, costUsd?}` DataPart on every terminal task that ran an LLM. Capture token usage from your model events (LangChain: `on_chat_model_end` → `output.usage_metadata`); compute `durationMs` from `created_at`/`updated_at`; emit only when usage was actually tracked. `costUsd` is optional — derive from per-model rates or capture from the gateway response. Reference: Quinn `_terminal_artifact_parts` + `store.add_usage` (PR #56).
 - [ ] [`confidence-v1`](../extensions/confidence-v1) `{confidence, explanation}` populated when the agent can self-assess
 - [ ] Success contract: `state: completed` means the agent actually achieved the goal, not just that the skill returned without crashing
 
 ## Reference implementations
 
 - **[`Quinn/a2a_handler.py`](https://github.com/protoLabsAI/quinn/blob/main/a2a_handler.py)** — the most complete reference. All of the hardening above + decoupled SSE producer + delta-only text frames + tool-message persistence. Single 800-line file, no inheritance.
-- **[`Quinn/server.py`](https://github.com/protoLabsAI/quinn/blob/main/server.py)** — agent-side wiring. `_chat_langgraph_stream` maps LangGraph `astream_events(v2)` to the `(tool_start|tool_end|text|delta|done|error)` tuple contract the handler consumes. `_build_agent_card` shows `capabilities.extensions` with `effect-domain-v1`. `_worldstate_delta_for_tool` emits the runtime delta on `file_bug` success.
+- **[`Quinn/server.py`](https://github.com/protoLabsAI/quinn/blob/main/server.py)** — agent-side wiring. `_chat_langgraph_stream` maps LangGraph `astream_events(v2)` to the `(tool_start|tool_end|text|delta|usage|done|error)` tuple contract the handler consumes. `_build_agent_card` shows `capabilities.extensions` with `effect-domain-v1` and `cost-v1`. `_worldstate_delta_for_tool` emits the runtime delta on `file_bug` success. `on_chat_model_end` capture feeds the `usage` channel for cost-v1.
 - **[`Quinn/tools/manage_cron.py`](https://github.com/protoLabsAI/quinn/blob/main/tools/manage_cron.py)** — LangGraph tool that CRUDs ceremonies via the per-agent `X-API-Key`.
 - **[`Quinn/tests/test_a2a_handler.py`](https://github.com/protoLabsAI/quinn/blob/main/tests/test_a2a_handler.py)** — ~55 tests covering the store, background runner, SSRF, cancel races, webhook retention, subscribe reconnect, delta-only text, producer survives consumer cancellation. Clone this alongside the handler.
 - **[`protoPen/a2a_handler.py`](https://github.com/protoLabsAI/protoPen/blob/main/a2a_handler.py)** — original port target. Predates Quinn's hardening; lacks decoupled SSE producer, SSRF guard, webhook retention, atomic cancel. Kept as a reference for the minimum viable spec surface, but new agents should mirror Quinn's version.
