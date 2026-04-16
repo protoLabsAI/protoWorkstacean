@@ -16,7 +16,7 @@
  *     observation. A separate consumer can subscribe to `autonomous.outcome.#`
  *     and cross-reference the blast radius stored here.
  *
- * Extension URI: https://protolabs.ai/a2a/ext/blast-v1
+ * Extension URI: https://proto-labs.ai/a2a/ext/blast-v1
  */
 
 import {
@@ -25,7 +25,7 @@ import {
   type ExtensionContext,
 } from "../extension-registry.ts";
 
-export const BLAST_URI = "https://protolabs.ai/a2a/ext/blast-v1";
+export const BLAST_URI = "https://proto-labs.ai/a2a/ext/blast-v1";
 
 /**
  * Scope of effect for a skill. Ordered from narrowest to widest.

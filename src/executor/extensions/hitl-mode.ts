@@ -11,7 +11,7 @@
  * TaskTracker) can read it without a second lookup. No `after(ctx)` — mode
  * is policy, not observation.
  *
- * Extension URI: https://protolabs.ai/a2a/ext/hitl-mode-v1
+ * Extension URI: https://proto-labs.ai/a2a/ext/hitl-mode-v1
  */
 
 import {
@@ -20,7 +20,7 @@ import {
   type ExtensionContext,
 } from "../extension-registry.ts";
 
-export const HITL_MODE_URI = "https://protolabs.ai/a2a/ext/hitl-mode-v1";
+export const HITL_MODE_URI = "https://proto-labs.ai/a2a/ext/hitl-mode-v1";
 
 /**
  * Approval policy for a single skill. Ordered from least-gated to most-gated.
