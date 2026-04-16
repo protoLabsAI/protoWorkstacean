@@ -74,7 +74,7 @@ When `SkillBrokerPlugin` refreshes your card (every 10 min), declarations are pa
 
 Blast is useful whenever "this action is big" needs to affect routing or gating:
 
-- **HITL policy** — the [hitl-mode-v1](hitl-mode-v1.md) extension can say `mode: gated` only for skills with `radius >= repo`, leaving smaller-blast work fully autonomous. The two extensions compose.
+- **HITL policy** — the [hitl-mode-v1](hitl-mode-v1) extension can say `mode: gated` only for skills with `radius >= repo`, leaving smaller-blast work fully autonomous. The two extensions compose.
 - **Planner tiebreaker** — `PlannerL0` can prefer lower-blast options when two skills produce the same effect (Arc 6.4 ranking).
 - **Dashboard** — the fleet view colors skills by blast radius so operators see at a glance which work needs attention vs. which runs quietly.
 - **Ops alerts** — `ops.alert.action_quality` on a `public`-radius skill is a much bigger signal than one on a `self` skill. Alert severity can scale.
@@ -101,6 +101,6 @@ Registry is populated by `SkillBrokerPlugin` on every card refresh. Missing decl
 
 ## Related
 
-- [hitl-mode-v1](hitl-mode-v1.md) — per-skill approval policy; composes with blast to gate high-impact skills
-- [cost-v1](cost-v1.md) — per-skill cost observations; planner tiebreaker alongside blast
-- [Build an A2A Agent](../guides/build-an-a2a-agent.md) — agent-author recipe (task store, webhooks, health)
+- [hitl-mode-v1](hitl-mode-v1) — per-skill approval policy; composes with blast to gate high-impact skills
+- [cost-v1](cost-v1) — per-skill cost observations; planner tiebreaker alongside blast
+- [Build an A2A Agent](../guides/build-an-a2a-agent) — agent-author recipe (task store, webhooks, health)

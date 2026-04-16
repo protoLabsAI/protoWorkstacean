@@ -108,7 +108,7 @@ Keys:
 
 - **`HITLPlugin`** — reads `x-hitl-mode` from the metadata on `input-required` and selects the rendering path: Discord button, resume-prompt, or auto-approve-on-TTL. Without the extension, falls back to legacy HITL config.
 - **`TaskTracker`** — honors `vetoTtlMs` for veto-mode skills; auto-resumes the task on timeout if no cancel arrived.
-- **Planner** — can compose with [blast-v1](blast-v1.md) to require `gated` only for skills with `radius >= repo`.
+- **Planner** — can compose with [blast-v1](blast-v1) to require `gated` only for skills with `radius >= repo`.
 - **Dashboard** — fleet view shows which skills are gated vs. autonomous, how often each mode fires.
 
 ---
@@ -142,6 +142,6 @@ if (decl && HITL_MODE_ORDER[decl.mode] >= HITL_MODE_ORDER.gated) {
 
 ## Related
 
-- [blast-v1](blast-v1.md) — per-skill scope declaration; compose with hitl-mode to gate high-impact skills
-- [Build an A2A Agent](../guides/build-an-a2a-agent.md) — agent-author recipe for the A2A spec surface
-- [self-improving-loop](../explanation/self-improving-loop.md) — how observations feed back into planner + goal proposals
+- [blast-v1](blast-v1) — per-skill scope declaration; compose with hitl-mode to gate high-impact skills
+- [Build an A2A Agent](../guides/build-an-a2a-agent) — agent-author recipe for the A2A spec surface
+- [self-improving-loop](../explanation/self-improving-loop) — how observations feed back into planner + goal proposals

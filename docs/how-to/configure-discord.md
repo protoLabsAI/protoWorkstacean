@@ -171,6 +171,6 @@ Changes take effect within a few seconds in Discord (guild-scoped commands updat
 
 ## Related docs
 
-- [reference/bus-topics.md](../reference/bus-topics.md) — Discord bus topics
-- [reference/config-files.md](../reference/config-files.md) — full `discord.yaml` schema reference
-- [explanation/plugin-lifecycle.md](../explanation/plugin-lifecycle.md) — how the DiscordPlugin registers and subscribes
+- [reference/bus-topics.md](../reference/bus-topics) — Discord bus topics
+- [reference/config-files.md](../reference/config-files) — full `discord.yaml` schema reference
+- [explanation/plugin-lifecycle.md](../explanation/plugin-lifecycle) — how the DiscordPlugin registers and subscribes
