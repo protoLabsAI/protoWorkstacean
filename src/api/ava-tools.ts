@@ -138,6 +138,16 @@ export function createRoutes(ctx: ApiContext): Route[] {
       const remoteTaskId = result.data?.taskId;
       const remoteContextId = result.data?.contextId ?? conversationId;
       const taskState = result.data?.taskState ?? "completed";
+      // Surface observability fields (cost-v1, confidence-v1, duration) so the
+      // caller agent sees what its delegation cost and how confident the
+      // sub-agent was. Fields are only present when the sub-agent opted in to
+      // the respective extension and emitted the DataPart — undefined otherwise.
+      const usage = result.data?.usage;
+      const durationMs = typeof result.data?.durationMs === "number" ? result.data.durationMs : undefined;
+      const costUsd = typeof result.data?.costUsd === "number" ? result.data.costUsd : undefined;
+      const confidence = typeof result.data?.confidence === "number" ? result.data.confidence : undefined;
+      const confidenceExplanation = typeof result.data?.confidenceExplanation === "string"
+        ? result.data.confidenceExplanation : undefined;
 
       return Response.json({
         success: true,
@@ -151,6 +161,11 @@ export function createRoutes(ctx: ApiContext): Route[] {
           taskState,
           correlationId,
           agent,
+          ...(usage ? { usage } : {}),
+          ...(durationMs !== undefined ? { durationMs } : {}),
+          ...(costUsd !== undefined ? { costUsd } : {}),
+          ...(confidence !== undefined ? { confidence } : {}),
+          ...(confidenceExplanation ? { confidenceExplanation } : {}),
         },
       });
     } catch (e) {
