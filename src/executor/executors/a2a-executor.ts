@@ -310,8 +310,11 @@ export class A2AExecutor implements IExecutor {
         pushNotificationConfig: { url: callbackUrl, token },
       });
       return true;
-    } catch {
+    } catch (err) {
       // Agent doesn't support push notifications — tracker falls back to polling
+      console.log(
+        `[a2a-executor] ${this.config.name}: push-notification register failed for ${taskId.slice(0, 8)}… — ${err instanceof Error ? err.message : String(err)}`,
+      );
       return false;
     }
   }
