@@ -1,26 +1,26 @@
 # docker-compose.graphiti-standalone.yml
 #
-# Self-contained Graphiti + Neo4j stack for running workstacean WITHOUT
-# the rabbit-hole.io research stack.
+# Self-contained Graphiti + Neo4j stack for running workstacean locally
+# without the shared homelab-iac neo4j.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.graphiti-standalone.yml up
 #
 # This overlay:
-#   1. Starts a dedicated Neo4j instance for Graphiti (separate from rabbit-hole)
-#   2. Wires Graphiti to use it instead of rabbit-hole's research-neo4j
-#   3. Exposes Neo4j UI on port 7575 (avoids conflict if research-neo4j is running)
+#   1. Starts a dedicated Neo4j instance for Graphiti
+#   2. Wires Graphiti to use it instead of the shared homelab-iac neo4j
+#   3. Exposes Neo4j UI on port 7575 (avoids conflict with the shared 7474/7687)
 #
-# If you DO have rabbit-hole running, use docker-compose.yml alone and set:
-#   NEO4J_URI=bolt://research-neo4j:7687
-#   NEO4J_USER=neo4j
-#   NEO4J_PASSWORD=<your research-neo4j password>
-# in your .env — Graphiti and rabbit-hole use different node labels, no conflicts.
+# Graphiti and rabbit-hole use different node labels, so they can share a
+# single neo4j in production (homelab-iac/stacks/infra). This overlay is
+# only for offline/laptop work where reaching the shared instance isn't
+# practical.
 
 services:
   # ── Dedicated Neo4j for Graphiti ─────────────────────────────────────────────
   # Graphiti uses labels: EpisodicNode, EntityNode, Community, EpisodicEdge
-  # These don't conflict with rabbit-hole's Entity:* labels if sharing an instance.
+  # These don't conflict with rabbit-hole's Entity:* labels — production
+  # shares a single neo4j in homelab-iac/stacks/infra.
   graphiti-neo4j:
     image: neo4j:5.26.2
     restart: unless-stopped
@@ -32,7 +32,7 @@ services:
       start_period: 20s
     ports:
       - "7575:7474"   # Browser UI — http://localhost:7575
-      - "7688:7687"   # Bolt (avoids conflict with research-neo4j on 7687)
+      - "7688:7687"   # Bolt (avoids conflict with shared neo4j on 7687)
     volumes:
       - graphiti-neo4j-data:/data
     environment:

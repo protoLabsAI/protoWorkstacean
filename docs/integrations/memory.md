@@ -203,6 +203,6 @@ This is a hard delete from Neo4j — irreversible.
 See `homelab-iac/stacks/ai/docker-compose.yml` for the reference deployment. Key points:
 
 - Graphiti runs as a sidecar (`zepai/graphiti:latest`)
-- Shares the `research-neo4j` Neo4j instance with other tools
+- Connects to the shared `neo4j` instance in `homelab-iac/stacks/infra` over `infra_default`
 - `NEO4J_PASSWORD` and `LITELLM_MASTER_KEY` are injected via Infisical
 - workstacean's `GRAPHITI_URL` points at `http://graphiti:8000`

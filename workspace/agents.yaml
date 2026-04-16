@@ -44,9 +44,12 @@ agents:
       - message.inbound.discord.#
 
   # Researcher — rabbit-hole.io deep research agent.
-  # Same host→container port mapping as Quinn: internal listen is 7870.
+  # Container `researcher` lives in homelab-iac/stacks/rabbit-hole and
+  # attaches to ai_default so workstacean can reach it by hostname.
+  # Internal listen 7870 (matches Quinn's pattern); host 7874 exposed
+  # for Tailscale-internal clients like agent-rollcall.sh.
   - name: researcher
-    url: http://research-langgraph-agent:7870/a2a
+    url: http://researcher:7870/a2a
     auth:
       scheme: apiKey
       credentialsEnv: RESEARCHER_API_KEY

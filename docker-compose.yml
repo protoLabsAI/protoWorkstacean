@@ -23,8 +23,10 @@ services:
 
   # ── Graphiti — temporal user memory ──────────────────────────────────────────
   # Stores conversation episodes and extracts temporal facts per user.
-  # Points at research-neo4j (rabbit-hole.io stack) in production.
-  # For standalone dev (no rabbit-hole), see docker-compose.graphiti-standalone.yml.
+  # In production, graphiti runs from homelab-iac/stacks/ai against the
+  # shared neo4j in homelab-iac/stacks/infra. This compose entry is for
+  # local development; docker-compose.graphiti-standalone.yml provides a
+  # fully self-contained alternative (own neo4j) for laptops offline.
   graphiti:
     image: zepai/graphiti:latest
     restart: unless-stopped
@@ -34,7 +36,8 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - MODEL_NAME=${GRAPHITI_MODEL:-gpt-4o-mini}
       - EMBEDDING_MODEL_NAME=${GRAPHITI_EMBEDDING_MODEL:-text-embedding-3-small}
-      # Neo4j — rabbit-hole.io instance in production; override for standalone
+      # Neo4j — production uses the shared instance in homelab-iac/stacks/infra;
+      # override NEO4J_URI for local standalone dev (see graphiti-standalone.yml).
       - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
       - NEO4J_USER=${NEO4J_USER:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
