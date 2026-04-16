@@ -80,15 +80,6 @@ All LLM calls route through LiteLLM at `LLM_GATEWAY_URL` (or `OPENAI_BASE_URL`).
 
 `correlationId` from the bus message is propagated through the LangGraph invocation. When `LANGFUSE_*` env vars are set, the LangChain callback handler traces every LLM call and tool invocation to Langfuse.
 
-## Migration from ProtoSdkExecutor
-
-`DeepAgentExecutor` replaces the previous `ProtoSdkExecutor` which spawned `@protolabsai/sdk` CLI subprocesses. Key differences:
-
-- **No subprocess** — runs in-process via LangGraph, faster startup
-- **No verification prompts** — the SDK injected coding-agent verification steps inappropriate for conversational agents
-- **Standard LangChain tools** — zod schemas, same as the rest of the LangChain ecosystem
-- **ChatOpenAI** — native OpenAI-compatible client, works with any gateway
-
 ## When to use
 
 Use `DeepAgentExecutor` for any agent that should run inside the workstacean process with direct access to bus tools. This is the right choice for most agents.

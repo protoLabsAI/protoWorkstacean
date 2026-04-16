@@ -23,9 +23,9 @@ All environment variables recognised by protoWorkstacean, their defaults, and wh
 
 | Variable | Default | Plugin | Description |
 |----------|---------|--------|-------------|
-| `LLM_GATEWAY_URL` | `http://gateway:4000/v1` | AgentRuntimePlugin / ProtoSdkExecutor | Base URL for the LiteLLM proxy gateway. All LLM calls route through this. |
-| `OPENAI_API_KEY` | _(none)_ | ProtoSdkExecutor | API key sent as Bearer token to the LLM gateway. |
-| `OPENAI_BASE_URL` | _(none)_ | ProtoSdkExecutor | Alternative base URL override (takes precedence over `LLM_GATEWAY_URL` if set). |
+| `LLM_GATEWAY_URL` | `http://gateway:4000/v1` | AgentRuntimePlugin / DeepAgentExecutor | Base URL for the LiteLLM proxy gateway. All LLM calls route through this. |
+| `OPENAI_API_KEY` | _(none)_ | DeepAgentExecutor | API key sent as Bearer token to the LLM gateway. |
+| `OPENAI_BASE_URL` | _(none)_ | DeepAgentExecutor | Alternative base URL override (takes precedence over `LLM_GATEWAY_URL` if set). |
 | `ANTHROPIC_API_KEY` | _(none)_ | AgentRuntimePlugin | Direct Anthropic API key (used when running without a gateway). |
 | `ROUTER_DEFAULT_SKILL` | _(none)_ | RouterPlugin | Fallback skill when no keyword match or `skillHint` found. If unset, unmatched messages are dropped. |
 | `ROUTER_DM_DEFAULT_AGENT` | _(none)_ | RouterPlugin | Agent to route Discord DMs to when no keyword matches. E.g. `quinn`. Required to enable natural DM conversations. |
@@ -37,10 +37,10 @@ All environment variables recognised by protoWorkstacean, their defaults, and wh
 
 | Variable | Default | Plugin | Description |
 |----------|---------|--------|-------------|
-| `LANGFUSE_PUBLIC_KEY` | _(none)_ | ProtoSdkExecutor | LangFuse public key for tracing. If unset, tracing is disabled. |
-| `LANGFUSE_SECRET_KEY` | _(none)_ | ProtoSdkExecutor | LangFuse secret key. |
-| `LANGFUSE_BASE_URL` | _(none)_ | ProtoSdkExecutor | LangFuse base URL (e.g. `https://cloud.langfuse.com`). |
-| `LANGFUSE_HOST` | _(none)_ | ProtoSdkExecutor | Alternative LangFuse host (overrides `LANGFUSE_BASE_URL`). |
+| `LANGFUSE_PUBLIC_KEY` | _(none)_ | DeepAgentExecutor | LangFuse public key for tracing. If unset, tracing is disabled. |
+| `LANGFUSE_SECRET_KEY` | _(none)_ | DeepAgentExecutor | LangFuse secret key. |
+| `LANGFUSE_BASE_URL` | _(none)_ | DeepAgentExecutor | LangFuse base URL (e.g. `https://cloud.langfuse.com`). |
+| `LANGFUSE_HOST` | _(none)_ | DeepAgentExecutor | Alternative LangFuse host (overrides `LANGFUSE_BASE_URL`). |
 
 ## A2A / protoMaker team
 

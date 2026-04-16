@@ -28,8 +28,7 @@ protoWorkstacean connects to external services through **plugins** and runs agen
 
 | Runtime | What it does | When to use |
 |---------|-------------|-------------|
-| [ProtoSdk](runtimes/proto-sdk) | In-process `@protolabsai/sdk` agent | Default for all new agents |
-| [A2A](runtimes/a2a) | Dispatches to a remote agent over HTTP (JSON-RPC 2.0) | Agent lives in a separate service (ava, quinn) |
-| [Pi SDK](runtimes/pi-sdk) | In-process `@mariozechner/pi-coding-agent` agent | Legacy — existing agents only |
+| [DeepAgent](runtimes/deep-agent) | In-process LangGraph ReAct agent | **Default** for new in-process agents (Ava) |
+| [A2A](runtimes/a2a) | Dispatches to a remote agent over HTTP (JSON-RPC 2.0 + SSE) | Agent lives in a separate service (Quinn, Jon, Researcher, protoPen) |
 
 See [Runtimes overview](runtimes/) for how the executor layer works and how to register a new runtime.

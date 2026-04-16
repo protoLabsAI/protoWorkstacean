@@ -65,7 +65,7 @@ DM routing:
 2. Ava's pool client (logged in via `DISCORD_BOT_TOKEN_AVA`) receives `MessageCreate`
 3. `_handleDM(message, agentName="ava", bus)` publishes `message.inbound.discord.<channel>` with `meta.agentId=ava`
 4. Router forwards to skill-dispatcher with the explicit target
-5. Dispatcher resolves `ava` in the ExecutorRegistry → in-process `ProtoSdkExecutor`
+5. Dispatcher resolves `ava` in the ExecutorRegistry → in-process `DeepAgentExecutor` (LangGraph)
 6. Response flows back to `message.outbound.discord.<channel>` and the pool client posts as `@ava`
 
 If a message hits the shared protoBot client (guild @-mention, DM to protoBot directly), routing falls back to `ROUTER_DM_DEFAULT_AGENT` + `ROUTER_DM_DEFAULT_SKILL` env vars — currently `ava` + `chat`, so generic DMs still land on the conversational Ava agent.
@@ -141,6 +141,6 @@ No secrets are stored in this repository. `workspace/agents.yaml` uses `apiKeyEn
 1. Create `workspace/agents/{name}.yaml` with `name`, `role`, `model`, `systemPrompt`, `tools`, `skills`
 2. (Optional) Add `discordBotTokenEnvKey` for a dedicated Discord identity
 3. Restart workstacean — `[agent-runtime] Loaded agent "{name}"` in logs confirms the definition loaded
-4. `ExecutorRegistry.resolve(skill, [name])` will route work to the in-process `ProtoSdkExecutor` for that agent
+4. `ExecutorRegistry.resolve(skill, [name])` will route work to the in-process `DeepAgentExecutor` (LangGraph) for that agent
 
 Both paths coexist. The ExecutorRegistry resolves by explicit target first, then by skill — so in-process and A2A agents can share a skill space without collision as long as dispatches carry `meta.agentId`.

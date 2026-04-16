@@ -313,9 +313,9 @@ Workstacean reloads `workspace/ceremonies/*.yaml` every ~5s, so no restart is ne
 
 When the cron fires:
 
-1. `SchedulerPlugin` emits `cron.quinn.daily-digest`
-2. `RouterPlugin` maps it to `agent.skill.request` with the right `skillHint`
-3. `A2AExecutor` sends `message/send` to your `/a2a` with the skill content
+1. `CeremonyPlugin`'s internal timer emits `ceremony.quinn.daily-digest.execute`
+2. `CeremonyPlugin` publishes `agent.skill.request` with the ceremony's configured skill + targets
+3. `SkillDispatcherPlugin` resolves the executor; `A2AExecutor` sends `message/send` to your `/a2a` with the skill content
 4. Your agent runs the skill — the message text is whatever content the ceremony plugin built (usually a skill-specific prompt)
 
 From the agent's perspective, a cron-triggered `message/send` looks identical to a Discord DM or any other inbound call. The only hint is `params.metadata.skillHint` which you can use for deterministic tool selection.
