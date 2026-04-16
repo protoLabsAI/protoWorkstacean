@@ -80,5 +80,9 @@ agents:
       scheme: apiKey
       credentialsEnv: PROTOPEN_API_KEY
     streaming: true
+    # Runs off-docker on steamdeck via Tailscale — push-notification callback
+    # URLs must use WORKSTACEAN_BASE_URL (the operator-configured Tailscale
+    # hostname) rather than the docker-internal workstacean:3000.
+    external: true
     subscribesTo:
       - message.inbound.discord.#
