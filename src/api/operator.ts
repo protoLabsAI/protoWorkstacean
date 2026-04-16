@@ -50,6 +50,22 @@ export function createRoutes(ctx: ApiContext): Route[] {
       from,
     };
 
+    // Subscribe to the failure event BEFORE publishing — if routing throws
+    // (no channel available) we get a failed event and return 503 so the
+    // agent's tool call visibly fails, not silently succeeds. See
+    // feedback_fail_fast_and_loud memory.
+    const failedTopic = `operator.message.failed.${correlationId}`;
+    const failurePromise = new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 250);
+      (timer as { unref?: () => void }).unref?.();
+      const subId = ctx.bus.subscribe(failedTopic, "operator-api", (msg) => {
+        clearTimeout(timer);
+        ctx.bus.unsubscribe(subId);
+        const p = msg.payload as { error?: string };
+        resolve(p?.error ?? "unknown failure");
+      });
+    });
+
     ctx.bus.publish("operator.message.request", {
       id: crypto.randomUUID(),
       correlationId,
@@ -57,6 +73,14 @@ export function createRoutes(ctx: ApiContext): Route[] {
       timestamp: Date.now(),
       payload,
     });
+
+    const failure = await failurePromise;
+    if (failure) {
+      return Response.json(
+        { success: false, error: failure },
+        { status: 503 },
+      );
+    }
 
     return Response.json({ success: true, data: { correlationId } });
   }
