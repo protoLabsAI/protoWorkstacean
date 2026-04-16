@@ -239,23 +239,28 @@ If the producer emits in-process events like `tool_start` / `tool_end` that your
 
 See [A2A Streaming (SSE)](./a2a-streaming) for the full SSE event protocol. Short version: advertise `capabilities.streaming: true`, accept `method: "message/stream"` on `/a2a` and `POST /message:stream`, emit `text/event-stream` frames as work progresses. `A2AExecutor` on Workstacean's side switches transport automatically based on the card; your `message/send` consumers stay unchanged.
 
-Terminal frames (`COMPLETED`) should carry the authoritative full artifact — text + any [worldstate-delta](../extensions/worldstate-delta-v1) DataParts — as `append: false, last_chunk: true`. Mid-run stays incremental via `append: true` text deltas only.
+On `COMPLETED`, emit **two** events per the A2A spec: first a `kind: "artifact-update"` carrying the authoritative full artifact — text + any [worldstate-delta](../extensions/worldstate-delta-v1) DataParts — as `append: false, lastChunk: true`; then a `kind: "status-update"` with `final: true` to close the stream. Mid-run stays incremental via `kind: "artifact-update"` + `append: true` text deltas only.
+
+> **Critical — SSE events must carry a `kind` discriminator.** `@a2a-js/sdk`'s `for await (const event of client.sendMessageStream(...))` routes events by `kind`. Events missing it are silently dropped, which means Workstacean's TaskTracker never attaches, push notifications never register, and HITL chains silently fail. This was Quinn #40. Every frame — initial `task`, every `status-update`, every `artifact-update` — needs `kind`.
 
 ## Push notifications
 
 Workstacean registers webhooks of the form `${WORKSTACEAN_BASE_URL}/api/a2a/callback/{taskId}` with a per-task HMAC token. When you POST a task snapshot to the URL, Workstacean verifies the token and fires the same bus event a poll would have.
 
-The webhook payload should be a `TaskStatusUpdateEvent`:
+The webhook payload is a `TaskStatusUpdateEvent` — same shape as on the wire, including the `kind` discriminator:
 
 ```json
 {
-  "task_id": "3f8a1c2d-...",
-  "context_id": "engagement-001",
+  "kind": "status-update",
+  "taskId": "3f8a1c2d-...",
+  "contextId": "engagement-001",
   "status": {"state": "completed", "timestamp": "2026-04-15T20:00:00Z"},
+  "final": true,
   "artifact": {
+    "artifactId": "3f8a1c2d-...",
     "parts": [{"kind": "text", "text": "## Results\n..."}],
     "append": false,
-    "last_chunk": true
+    "lastChunk": true
   }
 }
 ```
@@ -375,8 +380,12 @@ A protoAgent that ticks all of these is a first-class fleet citizen — routing,
 - [ ] Background producer runs independently of any SSE connection
 
 ### SSE semantics
-- [ ] Text deltas only on `append: true` — never the full `accumulated_text`
-- [ ] Terminal frame is the authoritative full artifact, `append: false, last_chunk: true`
+- [ ] Every event carries a `kind` discriminator (`task` / `status-update` / `artifact-update` / `message`) — without it `@a2a-js/sdk` silently drops the event (Quinn #40)
+- [ ] Wire fields are camelCase: `taskId`, `contextId`, `lastChunk`, `artifactId` (not `task_id` / `context_id` / `last_chunk`) — Python variable names can stay snake_case, just not dict keys that cross the wire
+- [ ] Status updates carry a `final` boolean (true on terminal states)
+- [ ] Text deltas emit as `kind: "artifact-update"` + `append: true` — never the full `accumulated_text`
+- [ ] `COMPLETED` emits TWO events per spec: `artifact-update` (full artifact, `append: false`, `lastChunk: true`) then `status-update` (`final: true`)
+- [ ] Artifact objects carry an `artifactId` for cross-event correlation
 - [ ] Tool status messages persist on the record for `:subscribe` to surface
 - [ ] Consumer disconnect does not cancel the producer
 
