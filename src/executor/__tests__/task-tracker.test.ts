@@ -3,6 +3,7 @@ import { InMemoryEventBus } from "../../../lib/bus.ts";
 import { TaskTracker } from "../task-tracker.ts";
 import type { A2AExecutor } from "../executors/a2a-executor.ts";
 import type { SkillResult } from "../types.ts";
+import { defaultHitlModeRegistry } from "../extensions/hitl-mode.ts";
 
 /** Minimal fake executor that lets tests drive pollTask responses. */
 function makeFakeExecutor(responses: SkillResult[] | (() => SkillResult)): A2AExecutor {
@@ -257,6 +258,122 @@ describe("TaskTracker", () => {
       expect(first.checkpoint?.index).toBe(1);
       expect(first.title).toBe("Input needed from ava");
       expect(first.title).not.toContain("checkpoint");
+    });
+  });
+
+  // ── Dispatcher caller-first HITL chain ───────────────────────────────────
+  describe("dispatcher caller-first routing", () => {
+    afterEach(() => {
+      defaultHitlModeRegistry.clear();
+    });
+
+    function makeInputRequiredExecutor(): { executor: A2AExecutor; resumedWith: string[] } {
+      const resumedWith: string[] = [];
+      const fake = {
+        type: "a2a" as const,
+        execute: async () => ({ text: "", isError: false, correlationId: "" }),
+        pollTask: async (): Promise<SkillResult> => ({
+          text: "should I ship?", isError: false, correlationId: "c1",
+          data: { taskState: "input-required", taskId: "t1", contextId: "ctx1" },
+        }),
+        cancelTask: async () => ({ text: "", isError: false, correlationId: "c1" }),
+        resubscribeTask: async () => { throw new Error("not used"); },
+        resumeTask: async (_taskId: string, text: string) => { resumedWith.push(text); },
+      };
+      return { executor: fake as unknown as A2AExecutor, resumedWith };
+    }
+
+    test("routes input-required to dispatcher when dispatcherAgent set and no operator override", async () => {
+      const { executor, resumedWith } = makeInputRequiredExecutor();
+      const dispatcherRequests: Array<Record<string, unknown>> = [];
+      const hitlRequests: unknown[] = [];
+      bus.subscribe("agent.skill.request", "test-dispatcher", (msg) => {
+        dispatcherRequests.push(msg.payload as Record<string, unknown>);
+      });
+      bus.subscribe("hitl.request.#", "test-hitl", (msg) => { hitlRequests.push(msg.payload); });
+
+      tracker = new TaskTracker({ bus, sweepIntervalMs: 20, defaultPollIntervalMs: 10 });
+      tracker.track({
+        correlationId: "c1", taskId: "t1", agentName: "quinn", skillName: "pr_review",
+        dispatcherAgent: "ava",
+        replyTopic: "agent.skill.response.c1", executor,
+      });
+
+      await new Promise(r => setTimeout(r, 50));
+      expect(dispatcherRequests.length).toBe(1);
+      expect(dispatcherRequests[0].skill).toBe("chat");
+      expect(dispatcherRequests[0].targets).toEqual(["ava"]);
+      expect((dispatcherRequests[0].content as string)).toContain("should I ship?");
+      expect(hitlRequests).toHaveLength(0);
+
+      // Simulate Ava's chat reply
+      const replyTopic = dispatcherRequests[0].replyTopic as string;
+      bus.publish(replyTopic, {
+        id: "r1", correlationId: "x", topic: replyTopic, timestamp: Date.now(),
+        payload: { content: "yes, ship it", isError: false, correlationId: "x" },
+      });
+
+      await new Promise(r => setTimeout(r, 30));
+      expect(resumedWith).toHaveLength(1);
+      expect(resumedWith[0]).toContain("Dispatcher (ava)");
+      expect(resumedWith[0]).toContain("yes, ship it");
+      expect(hitlRequests).toHaveLength(0);
+    });
+
+    test("operator override forces hitl.request despite dispatcher being set", async () => {
+      defaultHitlModeRegistry.declare({
+        agentName: "quinn", skill: "security_triage",
+        mode: "gated", reviewer: "operator",
+      });
+
+      const { executor } = makeInputRequiredExecutor();
+      const dispatcherRequests: unknown[] = [];
+      const hitlRequests: unknown[] = [];
+      bus.subscribe("agent.skill.request", "test-dispatcher", (msg) => {
+        dispatcherRequests.push(msg.payload);
+      });
+      bus.subscribe("hitl.request.#", "test-hitl", (msg) => { hitlRequests.push(msg.payload); });
+
+      tracker = new TaskTracker({ bus, sweepIntervalMs: 20, defaultPollIntervalMs: 10 });
+      tracker.track({
+        correlationId: "c1", taskId: "t1", agentName: "quinn", skillName: "security_triage",
+        dispatcherAgent: "ava",
+        replyTopic: "agent.skill.response.c1", executor,
+      });
+
+      await new Promise(r => setTimeout(r, 50));
+      expect(dispatcherRequests).toHaveLength(0);
+      expect(hitlRequests).toHaveLength(1);
+    });
+
+    test("falls back to hitl.request when dispatcher reply is empty", async () => {
+      const { executor } = makeInputRequiredExecutor();
+      const dispatcherRequests: Array<Record<string, unknown>> = [];
+      const hitlRequests: unknown[] = [];
+      bus.subscribe("agent.skill.request", "test-dispatcher", (msg) => {
+        dispatcherRequests.push(msg.payload as Record<string, unknown>);
+      });
+      bus.subscribe("hitl.request.#", "test-hitl", (msg) => { hitlRequests.push(msg.payload); });
+
+      tracker = new TaskTracker({ bus, sweepIntervalMs: 20, defaultPollIntervalMs: 10 });
+      tracker.track({
+        correlationId: "c1", taskId: "t1", agentName: "quinn", skillName: "pr_review",
+        dispatcherAgent: "ava",
+        replyTopic: "agent.skill.response.c1", executor,
+      });
+
+      await new Promise(r => setTimeout(r, 40));
+      expect(dispatcherRequests).toHaveLength(1);
+
+      // Dispatcher replies with empty content — tracker should fall back
+      const replyTopic = dispatcherRequests[0].replyTopic as string;
+      bus.publish(replyTopic, {
+        id: "r1", correlationId: "x", topic: replyTopic, timestamp: Date.now(),
+        payload: { content: "", isError: false, correlationId: "x" },
+      });
+
+      await new Promise(r => setTimeout(r, 30));
+      expect(hitlRequests).toHaveLength(1);
     });
   });
 });

@@ -102,14 +102,15 @@ const _worldCaches = new Map<string, WorldStateCache>();
 // These are all StructuredToolInterface at runtime, but TS can't unify them into a single
 // Record type because tool()'s zod v3/v4 interop overloads produce SchemaOutputT params
 // that don't widen back to the base interface defaults. Record stays loose; return is typed.
-function createLangChainTools(toolNames: string[], http: HttpClient, correlationId?: string): StructuredToolInterface[] {
+function createLangChainTools(toolNames: string[], http: HttpClient, correlationId?: string, agentName?: string): StructuredToolInterface[] {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const all: Record<string, any> = {
     chat_with_agent: tool(
       async (input) => {
         console.log(`[deep-agent:tool] chat_with_agent called: agent=${input.agent}, skill=${input.skill ?? "auto"}, msg="${input.message.slice(0, 80)}"`);
         try {
-          const result = await http.post("/api/a2a/chat", input);
+          const body = agentName ? { ...input, dispatcherAgent: agentName } : input;
+          const result = await http.post("/api/a2a/chat", body);
           console.log(`[deep-agent:tool] chat_with_agent returned: ${JSON.stringify(result).slice(0, 200)}`);
           return JSON.stringify(result);
         } catch (e) {
@@ -134,7 +135,10 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
       },
     ),
     delegate_task: tool(
-      async (input) => JSON.stringify(await http.post("/api/a2a/delegate", input)),
+      async (input) => {
+        const body = agentName ? { ...input, dispatcherAgent: agentName } : input;
+        return JSON.stringify(await http.post("/api/a2a/delegate", body));
+      },
       {
         name: "delegate_task",
         description: "Fire-and-forget: dispatch work to an agent.",
@@ -417,7 +421,7 @@ export class DeepAgentExecutor implements IExecutor {
 
   async execute(req: SkillRequest): Promise<SkillResult> {
     const prompt = req.content ?? req.prompt ?? this._buildPrompt(req);
-    const tools = createLangChainTools(this.agentDef.tools, this.http, req.correlationId);
+    const tools = createLangChainTools(this.agentDef.tools, this.http, req.correlationId, this.agentDef.name);
 
     const callbacks = LANGFUSE_ENABLED
       ? [new LangfuseCallbackHandler({

@@ -26,6 +26,11 @@ import type { Plugin, EventBus } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import { A2AExecutor } from "../executor/executors/a2a-executor.ts";
 import { resolveEnvVars } from "../utils/env-interpolation.ts";
+import {
+  defaultHitlModeRegistry,
+  HITL_MODE_URI,
+  type HitlMode,
+} from "../executor/extensions/hitl-mode.ts";
 
 interface AgentSkill {
   name: string;
@@ -262,8 +267,48 @@ export class SkillBrokerPlugin implements Plugin {
       if (added > 0) {
         console.log(`[skill-broker] ${agent.name}: discovered ${added} new skill(s) from agent card (${Array.from(registered).join(", ")})`);
       }
+
+      this._loadHitlModeDeclarations(agent.name, card);
     } catch (err) {
       console.debug(`[skill-broker] ${agent.name}: card discovery skipped:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  /**
+   * Parse `capabilities.extensions[hitl-mode-v1].params.skills` and populate
+   * the shared HITL-mode registry. Clears the agent's prior entries first so
+   * deletions on the agent's card propagate through.
+   */
+  private _loadHitlModeDeclarations(agentName: string, card: AgentCard): void {
+    defaultHitlModeRegistry.clearAgent(agentName);
+
+    const ext = (card.capabilities?.extensions ?? []).find(e => e?.uri === HITL_MODE_URI);
+    if (!ext) return;
+
+    const params = (ext.params ?? {}) as { skills?: Record<string, unknown> };
+    const entries = params.skills && typeof params.skills === "object" ? params.skills : {};
+    let declared = 0;
+
+    for (const [skill, rawEntry] of Object.entries(entries)) {
+      const entry = rawEntry as { mode?: unknown; vetoTtlMs?: unknown; reviewer?: unknown; note?: unknown } | undefined;
+      if (!entry || typeof entry !== "object") continue;
+      const mode = entry.mode;
+      if (typeof mode !== "string") continue;
+      if (!["autonomous", "notification", "veto", "gated", "compound"].includes(mode)) continue;
+
+      defaultHitlModeRegistry.declare({
+        agentName,
+        skill,
+        mode: mode as HitlMode,
+        ...(typeof entry.vetoTtlMs === "number" ? { vetoTtlMs: entry.vetoTtlMs } : {}),
+        ...(entry.reviewer === "operator" ? { reviewer: "operator" as const } : {}),
+        ...(typeof entry.note === "string" ? { note: entry.note } : {}),
+      });
+      declared++;
+    }
+
+    if (declared > 0) {
+      console.log(`[skill-broker] ${agentName}: loaded ${declared} hitl-mode declaration(s)`);
     }
   }
 

@@ -37,6 +37,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
     const contextId = body.contextId as string | undefined;
     const skill = (body.skill as string) || "chat";
     const done = body.done === true;
+    const dispatcherAgent = typeof body.dispatcherAgent === "string" ? body.dispatcherAgent : undefined;
 
     if (!agent || !message) {
       return Response.json(
@@ -67,6 +68,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
         skill,
         content: message,
         targets: [agent],
+        ...(dispatcherAgent ? { meta: { dispatcherAgent } } : {}),
       },
     };
 
@@ -184,6 +186,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
     const skill = body.skill as string | undefined;
     const message = body.message as string | undefined;
     const projectSlug = body.projectSlug as string | undefined;
+    const dispatcherAgent = typeof body.dispatcherAgent === "string" ? body.dispatcherAgent : undefined;
 
     if (!agent || !skill || !message) {
       return Response.json(
@@ -205,6 +208,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
         content: message,
         targets: [agent],
         ...(projectSlug ? { projectSlug } : {}),
+        ...(dispatcherAgent ? { meta: { dispatcherAgent } } : {}),
       },
     });
 
