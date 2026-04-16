@@ -1,8 +1,9 @@
 /**
  * GraphitiClient — user memory via Graphiti (Zep OSS temporal knowledge graph).
  *
- * Graphiti runs as a sidecar container, stores data in the shared research-neo4j
- * instance. Each user gets a scoped group_id so facts never bleed across users.
+ * Graphiti runs as a sidecar container and stores data in the shared neo4j
+ * instance in homelab-iac/stacks/infra, alongside rabbit-hole.io's knowledge
+ * graph. Each user gets a scoped group_id so facts never bleed across users.
  *
  * Key operations:
  *   getContextBlock()  — retrieve relevant facts before routing a message
