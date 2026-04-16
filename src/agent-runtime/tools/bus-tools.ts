@@ -495,11 +495,38 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
+  const msgOperator = tool(
+    "msg_operator",
+    "Send a message to the human operator. The routing plugin picks the transport " +
+      "(Discord DM today; SMS/Signal/push in the future) based on operator presence + " +
+      "urgency. Use this when you need to reach the operator directly, not when posting " +
+      "to a shared channel. Include urgency to help routing pick the right surface; " +
+      "only escalate to 'urgent' when the system actually needs immediate human attention.",
+    {
+      message: z.string().describe("The message body to deliver"),
+      urgency: z.enum(["low", "normal", "high", "urgent"]).default("normal").describe(
+        "How urgently the operator should see this. 'low' = FYI, 'normal' = default, " +
+        "'high' = needs attention this session, 'urgent' = act now",
+      ),
+      topic: z.string().optional().describe(
+        "Short subject tag, e.g. 'todo', 'alert', 'hitl-prompt'. Shown as [topic] prefix.",
+      ),
+    },
+    async ({ message, urgency, topic }) => {
+      try {
+        const data = await http.post("/api/operator/message", { message, urgency, topic });
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
   return [
     publishEvent, getWorldState, getIncidents, reportIncident, getProjects,
     getCiHealth, getPrPipeline, getBranchDrift, getOutcomes, getCeremonies, runCeremony,
     chatWithAgent, delegateTask, manageBoard, createGitHubIssue, manageCron, webSearch,
-    getCostSummary, getConfidenceSummary, proposeConfigChange,
+    getCostSummary, getConfidenceSummary, proposeConfigChange, msgOperator,
   ];
 }
 
@@ -538,6 +565,8 @@ export const BUS_TOOL_NAMES = [
   "get_cost_summary",
   "get_confidence_summary",
   "propose_config_change",
+  // Operator comms (Ava helm, HITL)
+  "msg_operator",
 ] as const;
 
 export type BusToolName = (typeof BUS_TOOL_NAMES)[number];
