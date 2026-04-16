@@ -407,10 +407,99 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
+  // ── Tuning / observability tools ────────────────────────────────────────
+
+  const getCostSummary = tool(
+    "get_cost_summary",
+    "Read per-(agent, skill) cost samples (token usage, duration, dollar cost, success rate). " +
+      "Use to identify expensive or failing skills. Supports filtering by agent, skill, and minimum sample count " +
+      "(recommended: minSamples=50 to gate statistical noise, 100+ for tuning proposals).",
+    {
+      agent: z.string().optional().describe("Filter by agent name, e.g. 'quinn'"),
+      skill: z.string().optional().describe("Filter by skill name, e.g. 'pr_review'"),
+      minSamples: z.number().optional().describe("Minimum sample count (default: 0)"),
+    },
+    async ({ agent, skill, minSamples }) => {
+      try {
+        const params = new URLSearchParams();
+        if (agent) params.set("agent", agent);
+        if (skill) params.set("skill", skill);
+        if (minSamples !== undefined) params.set("minSamples", String(minSamples));
+        const qs = params.toString();
+        const data = await http.get(`/api/cost-summaries${qs ? "?" + qs : ""}`);
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  const getConfidenceSummary = tool(
+    "get_confidence_summary",
+    "Read per-(agent, skill) confidence calibration metrics (avgConfidence, " +
+      "avgConfidenceOnSuccess vs OnFailure, highConfFailures count — the key miscalibration signal). " +
+      "Use to spot skills where the agent is overconfident on failures.",
+    {
+      agent: z.string().optional().describe("Filter by agent name"),
+      skill: z.string().optional().describe("Filter by skill name"),
+    },
+    async ({ agent, skill }) => {
+      try {
+        const params = new URLSearchParams();
+        if (agent) params.set("agent", agent);
+        if (skill) params.set("skill", skill);
+        const qs = params.toString();
+        const data = await http.get(`/api/confidence-summaries${qs ? "?" + qs : ""}`);
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  const proposeConfigChange = tool(
+    "propose_config_change",
+    "Propose a change to workspace config (goals.yaml, actions.yaml, or an agent YAML) " +
+      "that a human must approve via Discord before it applies. " +
+      "Data-driven proposals must include `evidence` (sampleCount, baselineMetric, " +
+      "proposedDelta, affectedSkills) so the approver can judge whether the change " +
+      "is warranted. Proposals targeting agent YAML require sampleCount >= 50.",
+    {
+      target: z.union([
+        z.literal("goals.yaml"),
+        z.literal("actions.yaml"),
+        z.object({ type: z.literal("agent"), agentName: z.string() }),
+      ]).describe("Which config to change. Pass 'goals.yaml' / 'actions.yaml' for those files, " +
+        "or { type: 'agent', agentName: 'quinn' } for workspace/agents/quinn.yaml"),
+      title: z.string().describe("One-line summary of the proposed change"),
+      summary: z.string().describe("Multi-sentence explanation of what and why"),
+      yamlDiff: z.string().describe("Unified diff (before → after) for operator review"),
+      newContent: z.string().optional().describe("Full new file content — used by the applier when approved"),
+      evidence: z.object({
+        sampleCount: z.number(),
+        baselineMetric: z.string(),
+        proposedDelta: z.string(),
+        affectedSkills: z.array(z.string()),
+        rationale: z.string().optional(),
+      }).optional().describe("Data-driven evidence block. Required for tuning-agent proposals."),
+    },
+    async ({ target, title, summary, yamlDiff, newContent, evidence }) => {
+      try {
+        const data = await http.post("/api/config-change/propose", {
+          target, title, summary, yamlDiff, newContent, evidence,
+        });
+        return ok(data);
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
   return [
     publishEvent, getWorldState, getIncidents, reportIncident, getProjects,
     getCiHealth, getPrPipeline, getBranchDrift, getOutcomes, getCeremonies, runCeremony,
     chatWithAgent, delegateTask, manageBoard, createGitHubIssue, manageCron, webSearch,
+    getCostSummary, getConfidenceSummary, proposeConfigChange,
   ];
 }
 
@@ -445,6 +534,10 @@ export const BUS_TOOL_NAMES = [
   // Conversation feedback (any DeepAgent)
   "react",
   "send_update",
+  // Tuning / observability (tuner agent, Ava helm)
+  "get_cost_summary",
+  "get_confidence_summary",
+  "propose_config_change",
 ] as const;
 
 export type BusToolName = (typeof BUS_TOOL_NAMES)[number];

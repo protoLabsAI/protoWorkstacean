@@ -402,6 +402,7 @@ registeredPlugins.push(hitlPlugin);
 // Separate gate from operational HITL: "rules are changing" vs "one-shot approval".
 const { ConfigChangeHITLPlugin } = await import("../lib/plugins/config-change-hitl.js");
 const configChangePlugin = new ConfigChangeHITLPlugin();
+configChangePlugin.setWorkspaceDir(workspaceDir);
 configChangePlugin.install(bus);
 registeredPlugins.push(configChangePlugin);
 
