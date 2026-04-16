@@ -367,9 +367,13 @@ export class SkillDispatcherPlugin implements Plugin {
         //     WORKSTACEAN_INTERNAL_BASE_URL (default http://workstacean:3000)
         //     which resolves inside the shared docker network.
         //   - External agents reached over Tailscale / public networks
-        //     (hostname has a dot, e.g. `http://host.tailnet.ts.net:...`)
-        //     use WORKSTACEAN_BASE_URL — the operator-configured public URL.
-        const callbackBaseUrl = this._pickCallbackBaseUrl(a2aExecutor.url);
+        //     (explicitly flagged `external: true` in agents.yaml, or
+        //     hostname has a dot like `host.tailnet.ts.net:...`) use
+        //     WORKSTACEAN_BASE_URL — the operator-configured public URL.
+        //     The `external` flag is needed because some Tailscale hosts
+        //     (e.g. `steamdeck`) use single-label MagicDNS names that the
+        //     hostname-shape heuristic can't distinguish from docker services.
+        const callbackBaseUrl = this._pickCallbackBaseUrl(a2aExecutor.url, a2aExecutor.external);
         if (callbackBaseUrl && a2aExecutor.pushNotifications) {
           const callbackUrl = `${callbackBaseUrl.replace(/\/$/, "")}/api/a2a/callback/${encodeURIComponent(taskId)}`;
           void a2aExecutor.registerPushNotification(taskId, callbackUrl, callbackToken, correlationId, parentId)
@@ -618,11 +622,19 @@ export class SkillDispatcherPlugin implements Plugin {
    * Internal default: http://workstacean:3000 (resolves on shared docker net).
    * External default: process.env.WORKSTACEAN_BASE_URL.
    */
-  private _pickCallbackBaseUrl(agentUrl: string | undefined): string | undefined {
+  private _pickCallbackBaseUrl(agentUrl: string | undefined, external: boolean = false): string | undefined {
+    // Explicit opt-out: agent runs off-network (Tailscale / public), so the
+    // docker-internal callback won't reach it. Use the operator-configured
+    // external URL regardless of hostname shape.
+    if (external) return process.env.WORKSTACEAN_BASE_URL;
+
     if (!agentUrl) return process.env.WORKSTACEAN_BASE_URL;
     try {
       const { hostname } = new URL(agentUrl);
-      // Docker service names are single-label (no dot, not an IP).
+      // Docker service names are single-label (no dot, not an IP). This
+      // heuristic is correct for quinn / jon / researcher but incorrect for
+      // single-label Tailscale MagicDNS hostnames — those agents must set
+      // `external: true` in workspace/agents.yaml.
       const isDockerInternal = !hostname.includes(".") && !hostname.includes(":");
       if (isDockerInternal) {
         return process.env.WORKSTACEAN_INTERNAL_BASE_URL ?? "http://workstacean:3000";

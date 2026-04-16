@@ -81,6 +81,14 @@ export interface A2AAgentConfig {
    * source-of-truth story as streaming — card advertises, broker refreshes.
    */
   pushNotifications?: boolean;
+  /**
+   * Agent runs on an external network (Tailscale, public Internet) rather
+   * than the shared docker network. Consumed by SkillDispatcherPlugin to
+   * pick the correct push-notification callback base URL — internal agents
+   * get WORKSTACEAN_INTERNAL_BASE_URL (docker service name), externals get
+   * WORKSTACEAN_BASE_URL (Tailscale / public hostname).
+   */
+  external?: boolean;
   /** Callback for intermediate streaming updates (e.g. publish to bus). */
   onStreamUpdate?: (update: { type: string; text?: string; state?: string }) => void;
   /**
@@ -163,6 +171,11 @@ export class A2AExecutor implements IExecutor {
   /** Expose the configured agent URL so the dispatcher can pick an appropriate callback base URL. */
   get url(): string {
     return this.config.url;
+  }
+
+  /** True when the agent runs on an external network — dispatcher uses WORKSTACEAN_BASE_URL for callbacks. */
+  get external(): boolean {
+    return this.config.external === true;
   }
 
   /**
