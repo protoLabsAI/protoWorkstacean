@@ -106,6 +106,17 @@ Payload is the raw `CostSample` above. Used for:
 
 ---
 
+## Reference implementations
+
+| Side | Where | Notes |
+|---|---|---|
+| **Extraction** (consumer) | [`src/executor/executors/a2a-executor.ts`](https://github.com/protoLabsAI/protoWorkstacean/blob/main/src/executor/executors/a2a-executor.ts) — added in #372 | Scans terminal Task artifact parts for `application/vnd.protolabs.cost-v1+json`, flattens onto `result.data` so the cost interceptor records the sample |
+| **Emission** (producer) | [`Quinn/a2a_handler.py::_terminal_artifact_parts`](https://github.com/protoLabsAI/quinn/blob/main/a2a_handler.py) + [`Quinn/server.py::_chat_langgraph_stream`](https://github.com/protoLabsAI/quinn/blob/main/server.py) — added in Quinn #56 | Captures `on_chat_model_end` events from LangGraph for `usage_metadata`, accumulates onto `TaskRecord.usage`, emits the DataPart on COMPLETED |
+
+Quinn currently emits `usage` + `durationMs` only — `costUsd` capture from the LiteLLM gateway response is a follow-up. Consumers tolerate missing `costUsd` and can derive it from per-model rates if needed.
+
+---
+
 ## Related
 
 - [`confidence-v1`](confidence-v1.md) — companion extension for agent-reported confidence, read alongside cost in the same planner ranking
