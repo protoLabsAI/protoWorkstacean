@@ -248,6 +248,7 @@ export class GitHubPlugin implements Plugin {
   private server: ReturnType<typeof Bun.serve> | null = null;
   private workspaceDir: string;
   private config!: GitHubConfig;
+  private projectMeta = new Map<string, { slug: string; projectPath: string | undefined }>();
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
@@ -264,6 +265,7 @@ export class GitHubPlugin implements Plugin {
     console.log(`[github] Auth: ${usingApp ? "GitHub App (quinn[bot])" : "PAT (GITHUB_TOKEN)"}`);
 
     this.config = loadConfig(this.workspaceDir);
+    this.projectMeta = loadProjectMetaForSweep(this.workspaceDir);
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? "";
     const port = parseInt(process.env.GITHUB_WEBHOOK_PORT ?? "8082", 10);
 
@@ -276,6 +278,7 @@ export class GitHubPlugin implements Plugin {
       if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer);
       reloadDebounceTimer = setTimeout(() => {
         this.config = loadConfig(this.workspaceDir);
+        this.projectMeta = loadProjectMetaForSweep(this.workspaceDir);
         const repoCount = this.config.autoTriage?.monitoredRepos?.length ?? 0;
         console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
       }, 300);
@@ -606,6 +609,8 @@ export class GitHubPlugin implements Plugin {
 
         const topic = `message.inbound.github.${ctx.owner}.${ctx.repo}.${event}.${ctx.number}`;
         const replyTopic = `message.outbound.github.${ctx.owner}.${ctx.repo}.${ctx.number}`;
+        const repoSlug = `${ctx.owner}/${ctx.repo}`;
+        const meta = this.projectMeta.get(repoSlug);
 
         bus.publish(topic, {
           id: `${event}-${action}-${ctx.owner}-${ctx.repo}-${ctx.number}-${correlationId.slice(0, 8)}`,
@@ -619,6 +624,8 @@ export class GitHubPlugin implements Plugin {
             skillHint: autoTriage.skillHint,
             trustTier,
             quarantine,
+            ...(meta?.projectPath ? { projectPath: meta.projectPath } : {}),
+            ...(meta?.slug ? { projectSlug: meta.slug } : {}),
             github: {
               event,
               action,

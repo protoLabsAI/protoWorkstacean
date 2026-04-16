@@ -348,6 +348,11 @@ export class SkillDispatcherPlugin implements Plugin {
               text: content,
               durationMs: Date.now() - dispatchedAt,
             });
+
+            const gh = payload.github as { title?: string; owner?: string; repo?: string; number?: number; url?: string } | undefined;
+            if (skill === "bug_triage" && gh?.title && !isError && typeof payload.projectPath === "string") {
+              void this._fileTriageOnBoard(gh as Required<Pick<typeof gh, "title">> & typeof gh, content, payload.projectPath as string);
+            }
           },
         });
 
@@ -594,6 +599,39 @@ export class SkillDispatcherPlugin implements Plugin {
       timestamp: Date.now(),
       payload,
     });
+  }
+
+  private async _fileTriageOnBoard(
+    github: { title: string; owner?: string; repo?: string; number?: number; url?: string },
+    triageSummary: string | undefined,
+    projectPath: string,
+  ): Promise<void> {
+    const apiKey = process.env.WORKSTACEAN_API_KEY;
+    const port = process.env.WORKSTACEAN_HTTP_PORT ?? "3000";
+    const title = `[GH#${github.number}] ${github.title}`;
+    const description = [
+      `GitHub: ${github.url ?? `${github.owner}/${github.repo}#${github.number}`}`,
+      "",
+      "## Quinn triage summary",
+      triageSummary ?? "(no triage output)",
+    ].join("\n");
+    try {
+      const resp = await fetch(`http://localhost:${port}/api/board/features/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { "X-API-Key": apiKey } : {}),
+        },
+        body: JSON.stringify({ projectPath, title, description, status: "backlog", source: "github-triage" }),
+      });
+      if (resp.ok) {
+        console.log(`[skill-dispatcher] Filed GitHub triage on board: ${title}`);
+      } else {
+        console.warn(`[skill-dispatcher] Board filing failed: ${resp.status}`);
+      }
+    } catch (err) {
+      console.warn("[skill-dispatcher] Board filing error:", err);
+    }
   }
 
   private _publishFlowEvent(topic: string, item: FlowItemPayload): void {
