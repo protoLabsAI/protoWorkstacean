@@ -22,6 +22,7 @@ import { createRoutes as agentCardRoutes } from "./agent-card.ts";
 import { createRoutes as widgetsRoutes } from "./widgets.ts";
 import { createRoutes as observabilityRoutes } from "./observability.ts";
 import { createRoutes as operatorRoutes } from "./operator.ts";
+import { createRoutes as openaiCompatRoutes } from "./openai-compat.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
@@ -43,5 +44,6 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...widgetsRoutes(ctx),
     ...observabilityRoutes(ctx),
     ...operatorRoutes(ctx),
+    ...openaiCompatRoutes(ctx),
   ];
 }
