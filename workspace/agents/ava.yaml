@@ -133,6 +133,7 @@ tools:
   - manage_cron
   - react
   - send_update
+  - msg_operator
 
 maxTurns: 10
 

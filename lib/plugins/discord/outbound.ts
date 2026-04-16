@@ -250,6 +250,38 @@ export function registerOutboundHandlers(ctx: DiscordContext): void {
     }
   });
 
+  // ── DM-by-user-id: resolve a user ID to their DM channel on demand ───────
+  // Subscribers publish to `message.outbound.discord.dm.user.{userId}` when
+  // they want to DM a user without knowing the channel ID. The agent bot
+  // (stamped via payload.agentId) opens the DM via users.fetch().createDM()
+  // so the message comes from the correct bot identity.
+  ctx.bus.subscribe("message.outbound.discord.dm.user.#", "discord-dm-user", async (msg: BusMessage) => {
+    const payload = msg.payload as Record<string, unknown>;
+    const content = String(payload.content ?? "").slice(0, 2000);
+    if (!content) return;
+
+    // Extract user ID from topic: message.outbound.discord.dm.user.{userId}
+    const parts = msg.topic.split(".");
+    const userId = parts[parts.length - 1];
+    if (!userId || !/^\d+$/.test(userId)) {
+      console.warn(`[discord] Invalid user ID on DM topic ${msg.topic}`);
+      return;
+    }
+
+    const agentId = payload.agentId as string | undefined;
+    const agentClient = agentId ? ctx.agentClients.get(agentId) : undefined;
+    const client = agentClient ?? ctx.client;
+
+    try {
+      const user = await client.users.fetch(userId);
+      const dm = await user.createDM();
+      await dm.send({ content });
+      console.log(`[discord] DM delivered to user ${userId} via ${agentId ?? "default"} bot`);
+    } catch (err) {
+      console.error(`[discord] DM to user ${userId} failed:`, err);
+    }
+  });
+
   // ── HITL renderer registration ────────────────────────────────────────────
   if (ctx.hitlPlugin) {
     ctx.hitlPlugin.registerRenderer("discord", {

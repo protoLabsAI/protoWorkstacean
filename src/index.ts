@@ -406,6 +406,15 @@ configChangePlugin.setWorkspaceDir(workspaceDir);
 configChangePlugin.install(bus);
 registeredPlugins.push(configChangePlugin);
 
+// ── OperatorRoutingPlugin — abstracts operator messaging across transports ──
+// Agents publish `operator.message.request`; this plugin picks channel(s)
+// (Discord DM today; SMS/Signal/push future) and dispatches. Pre-installed so
+// any other plugin that wants to reach the operator has a stable contract.
+const { OperatorRoutingPlugin } = await import("../lib/plugins/operator-routing.js");
+const operatorRoutingPlugin = new OperatorRoutingPlugin();
+operatorRoutingPlugin.install(bus);
+registeredPlugins.push(operatorRoutingPlugin);
+
 for (const entry of pluginRegistry) {
   if (entry.condition()) {
     const plugin = await entry.factory();
