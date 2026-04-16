@@ -102,6 +102,13 @@ export class BlastRegistry {
     this.byKey.clear();
   }
 
+  clearAgent(agentName: string): void {
+    const prefix = `${agentName}::`;
+    for (const key of this.byKey.keys()) {
+      if (key.startsWith(prefix)) this.byKey.delete(key);
+    }
+  }
+
   get size(): number {
     return this.byKey.size;
   }
