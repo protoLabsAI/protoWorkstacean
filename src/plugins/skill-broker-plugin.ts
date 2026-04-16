@@ -57,6 +57,15 @@ interface AgentDef {
   /** Extra static request headers — e.g. extension opt-in. */
   headers?: Record<string, string>;
   streaming?: boolean;
+  /**
+   * Agent runs on an external network (Tailscale, public Internet) rather
+   * than the shared docker network. When true, push-notification callback
+   * URLs use WORKSTACEAN_BASE_URL (operator-configured external/Tailscale
+   * hostname) instead of the docker-internal workstacean:3000. Required for
+   * agents whose hostnames are single-label but not docker service names
+   * (e.g. protoPen on steamdeck via Tailscale MagicDNS).
+   */
+  external?: boolean;
   skills?: Array<AgentSkill | string>;
 }
 
@@ -122,6 +131,7 @@ export class SkillBrokerPlugin implements Plugin {
         auth: agent.auth,
         extraHeaders: agent.headers,
         streaming: agent.streaming ?? false,
+        external: agent.external ?? false,
         onStreamUpdate: opsChannel
           ? (update) => {
               bus.publish(`message.outbound.discord.push.${opsChannel}`, {
