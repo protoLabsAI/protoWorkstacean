@@ -278,7 +278,7 @@ describe("TaskTracker", () => {
         }),
         cancelTask: async () => ({ text: "", isError: false, correlationId: "c1" }),
         resubscribeTask: async () => { throw new Error("not used"); },
-        resumeTask: async (_taskId: string, text: string) => { resumedWith.push(text); },
+        resumeTask: async (_taskId: string, _contextId: string, text: string) => { resumedWith.push(text); },
       };
       return { executor: fake as unknown as A2AExecutor, resumedWith };
     }

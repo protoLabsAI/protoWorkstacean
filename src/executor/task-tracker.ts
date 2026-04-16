@@ -330,7 +330,7 @@ export class TaskTracker {
 
       const resp = msg.payload as AgentSkillResponsePayload | undefined;
       const answer = typeof resp?.content === "string" ? resp.content.trim() : "";
-      if (resp?.isError || !answer) {
+      if (resp?.error || !answer) {
         console.log(
           `[task-tracker] dispatcher ${dispatcher} returned empty/error reply — falling back to renderer chain`,
         );
@@ -379,7 +379,10 @@ export class TaskTracker {
     try {
       await task.executor.resumeTask(
         task.taskId,
+        task.taskId,
         `Dispatcher (${dispatcher}) response:\n${answerText}`,
+        task.correlationId,
+        task.parentId,
       );
       task.awaitingHuman = false;
       task.lastPolledAt = Date.now();
