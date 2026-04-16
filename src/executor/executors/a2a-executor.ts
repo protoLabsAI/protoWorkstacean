@@ -227,9 +227,24 @@ export class A2AExecutor implements IExecutor {
         },
       };
 
-      const result = this.config.streaming
+      let result = this.config.streaming
         ? await this._executeStream(client, params, req)
         : await this._executeBlocking(client, params, req);
+
+      // Graceful degradation: if the streaming path returned nothing usable
+      // (no taskId, no terminal text), the agent's SSE events likely don't
+      // match the @a2a-js/sdk discriminator shape (missing `kind` field or
+      // similar). Fall through to message/send so the dispatcher + TaskTracker
+      // still get a proper Task handle to work with. Logs the slip so we can
+      // spot agents that need a spec-compliance fix.
+      if (this.config.streaming && !result.isError
+        && !result.data?.taskId
+        && (!result.text || result.text.startsWith(`Skill "${req.skill}" completed by`))) {
+        console.warn(
+          `[a2a-executor] ${this.config.name}: streaming returned empty result — falling back to message/send (agent SSE events may be missing "kind" field)`,
+        );
+        result = await this._executeBlocking(client, params, req);
+      }
 
       // Run extension after-hooks — they read result.data (usage, confidence,
       // worldstate-delta) and emit observability events or record samples.
