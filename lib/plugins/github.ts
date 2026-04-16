@@ -328,6 +328,7 @@ export class GitHubPlugin implements Plugin {
 
       const content = String((msg.payload as Record<string, unknown>).content ?? "").trim();
       if (!content) return;
+      if (/^Skill ".+" completed by \w+$/i.test(content)) return;
 
       await this._postComment(getToken, pending, content);
     });
@@ -552,6 +553,10 @@ export class GitHubPlugin implements Plugin {
     console.log(`[github] ${event} on ${ctx.owner}/${ctx.repo}#${ctx.number} → ${skillHint ?? "default"}`);
   }
 
+  /** Tracks recently-dispatched (owner/repo#number) to suppress duplicate webhook deliveries. */
+  private recentDispatches = new Map<string, number>();
+  private static readonly DEDUP_WINDOW_MS = 60_000;
+
   private _handleAutoTriage(
     event: string,
     payload: Record<string, unknown>,
@@ -560,6 +565,14 @@ export class GitHubPlugin implements Plugin {
     bus: EventBus,
     getToken: (owner: string, repo: string) => Promise<string>,
   ): void {
+    const dedupKey = `${ctx.owner}/${ctx.repo}#${ctx.number}`;
+    const lastDispatched = this.recentDispatches.get(dedupKey);
+    if (lastDispatched && Date.now() - lastDispatched < GitHubPlugin.DEDUP_WINDOW_MS) {
+      console.log(`[github] Auto-triage: skipping duplicate ${dedupKey} (dispatched ${Date.now() - lastDispatched}ms ago)`);
+      return;
+    }
+    this.recentDispatches.set(dedupKey, Date.now());
+
     (async () => {
       try {
         const token = await getToken(ctx.owner, ctx.repo);

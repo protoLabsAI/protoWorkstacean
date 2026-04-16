@@ -31,6 +31,11 @@ import {
   HITL_MODE_URI,
   type HitlMode,
 } from "../executor/extensions/hitl-mode.ts";
+import {
+  defaultBlastRegistry,
+  BLAST_URI,
+  type BlastRadius,
+} from "../executor/extensions/blast.ts";
 
 interface AgentSkill {
   name: string;
@@ -269,6 +274,7 @@ export class SkillBrokerPlugin implements Plugin {
       }
 
       this._loadHitlModeDeclarations(agent.name, card);
+      this._loadBlastDeclarations(agent.name, card);
     } catch (err) {
       console.debug(`[skill-broker] ${agent.name}: card discovery skipped:`, err instanceof Error ? err.message : err);
     }
@@ -309,6 +315,36 @@ export class SkillBrokerPlugin implements Plugin {
 
     if (declared > 0) {
       console.log(`[skill-broker] ${agentName}: loaded ${declared} hitl-mode declaration(s)`);
+    }
+  }
+
+  private _loadBlastDeclarations(agentName: string, card: AgentCard): void {
+    defaultBlastRegistry.clearAgent(agentName);
+
+    const ext = (card.capabilities?.extensions ?? []).find(e => e?.uri === BLAST_URI);
+    if (!ext) return;
+
+    const params = (ext.params ?? {}) as { skills?: Record<string, unknown> };
+    const entries = params.skills && typeof params.skills === "object" ? params.skills : {};
+    const validRadii = new Set(["self", "project", "repo", "fleet", "public"]);
+    let declared = 0;
+
+    for (const [skill, rawEntry] of Object.entries(entries)) {
+      const entry = rawEntry as { radius?: unknown; note?: unknown } | undefined;
+      if (!entry || typeof entry !== "object") continue;
+      if (typeof entry.radius !== "string" || !validRadii.has(entry.radius)) continue;
+
+      defaultBlastRegistry.declare({
+        agentName,
+        skill,
+        radius: entry.radius as BlastRadius,
+        ...(typeof entry.note === "string" ? { note: entry.note } : {}),
+      });
+      declared++;
+    }
+
+    if (declared > 0) {
+      console.log(`[skill-broker] ${agentName}: loaded ${declared} blast declaration(s)`);
     }
   }
 
