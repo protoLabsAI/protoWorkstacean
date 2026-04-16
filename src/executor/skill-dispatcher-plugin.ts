@@ -361,7 +361,15 @@ export class SkillDispatcherPlugin implements Plugin {
         // burn a round-trip on every long-running task against every agent,
         // most of which reject. SkillBrokerPlugin refreshes the flag every
         // 10 min so capability changes land automatically.
-        const callbackBaseUrl = process.env.WORKSTACEAN_BASE_URL;
+        //
+        // Callback URL routing:
+        //   - Docker-internal agents (hostname like `http://quinn:7870`) use
+        //     WORKSTACEAN_INTERNAL_BASE_URL (default http://workstacean:3000)
+        //     which resolves inside the shared docker network.
+        //   - External agents reached over Tailscale / public networks
+        //     (hostname has a dot, e.g. `http://host.tailnet.ts.net:...`)
+        //     use WORKSTACEAN_BASE_URL — the operator-configured public URL.
+        const callbackBaseUrl = this._pickCallbackBaseUrl(a2aExecutor.url);
         if (callbackBaseUrl && a2aExecutor.pushNotifications) {
           const callbackUrl = `${callbackBaseUrl.replace(/\/$/, "")}/api/a2a/callback/${encodeURIComponent(taskId)}`;
           void a2aExecutor.registerPushNotification(taskId, callbackUrl, callbackToken, correlationId, parentId)
@@ -599,6 +607,29 @@ export class SkillDispatcherPlugin implements Plugin {
       timestamp: Date.now(),
       payload,
     });
+  }
+
+  /**
+   * Pick the callback base URL for push notifications based on whether the
+   * target agent is docker-internal or external. Docker service names are
+   * short hostnames (no dots); external hosts use FQDNs or IPs.
+   *
+   * Internal default: http://workstacean:3000 (resolves on shared docker net).
+   * External default: process.env.WORKSTACEAN_BASE_URL.
+   */
+  private _pickCallbackBaseUrl(agentUrl: string | undefined): string | undefined {
+    if (!agentUrl) return process.env.WORKSTACEAN_BASE_URL;
+    try {
+      const { hostname } = new URL(agentUrl);
+      // Docker service names are single-label (no dot, not an IP).
+      const isDockerInternal = !hostname.includes(".") && !hostname.includes(":");
+      if (isDockerInternal) {
+        return process.env.WORKSTACEAN_INTERNAL_BASE_URL ?? "http://workstacean:3000";
+      }
+      return process.env.WORKSTACEAN_BASE_URL;
+    } catch {
+      return process.env.WORKSTACEAN_BASE_URL;
+    }
   }
 
   private async _fileTriageOnBoard(

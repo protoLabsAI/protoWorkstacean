@@ -152,6 +152,11 @@ export class A2AExecutor implements IExecutor {
     return this.config.name;
   }
 
+  /** Expose the configured agent URL so the dispatcher can pick an appropriate callback base URL. */
+  get url(): string {
+    return this.config.url;
+  }
+
   /**
    * Update the streaming + pushNotifications capability flags from the agent
    * card. Called by SkillBrokerPlugin after every card discovery pass so the
@@ -457,6 +462,16 @@ export class A2AExecutor implements IExecutor {
           // Extract worldstate-delta parts from seeded task snapshot
           const delta = this._worldStateDeltaFromParts(artifact.parts);
           if (delta) streamDeltaData[WORLDSTATE_DELTA_MIME_TYPE] = delta;
+        }
+        // Non-terminal state (submitted / working / input-required) on the
+        // initial task event → stop consuming the SSE stream and let
+        // TaskTracker drive the task to completion via tasks/get polling.
+        // Holding the stream open longer forces slow agents to keep their
+        // SSE generator alive for minutes, which crashes them when the
+        // sync caller eventually times out and closes the connection.
+        if (taskState !== "completed" && taskState !== "failed"
+          && taskState !== "canceled" && taskState !== "rejected") {
+          break;
         }
         continue;
       }
