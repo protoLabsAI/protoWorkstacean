@@ -28,9 +28,7 @@ AGENTS=(
   "quinn:7873:a2a:Quinn (QA Engineer)"
   "protocontent:18791:a2a:protoContent / Jon (Content Pipeline)"
   "researcher:7874:a2a:Researcher (rabbit-hole.io)"
-  "protovoice:7880:http:protoVoice (Voice Agent)"
-  "protoaudio:8210:health:protoAudio (Audio Pipeline)"
-  "workstacean:8081:http:Workstacean (Orchestrator — hosts Ava + protoBot DeepAgents)"
+  "workstacean:8081:http:Workstacean (Orchestrator — hosts Ava + protoBot + Tuner DeepAgents)"
 )
 
 # Remote agents — not Docker containers, accessed over Tailscale
