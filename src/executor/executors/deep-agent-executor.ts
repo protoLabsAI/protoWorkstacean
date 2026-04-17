@@ -262,19 +262,41 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
       async (input) => JSON.stringify(await http.post(`/api/ceremonies/${input.ceremonyId}/run`, {})),
       { name: "run_ceremony", description: "Trigger a ceremony.", schema: z.object({ ceremonyId: z.string() }) },
     ),
-    web_search: tool(
+    searxng_search: tool(
       async (input) => {
-        const searxngUrl = process.env.SEARXNG_URL ?? "http://searxng:8080";
-        const params = new URLSearchParams({ q: input.query, format: "json", engines: "google,duckduckgo" });
-        const resp = await fetch(`${searxngUrl}/search?${params}`, { signal: AbortSignal.timeout(10_000) });
-        const data = await resp.json() as { results?: Array<{ title: string; content?: string; url?: string }> };
-        const results = (data.results ?? []).slice(0, 5);
-        return JSON.stringify(results.map(r => ({ title: r.title, snippet: r.content ?? "", url: r.url ?? "" })));
+        const endpoint = process.env.SEARXNG_URL ?? "http://searxng:8080";
+        const url = new URL("/search", endpoint);
+        url.searchParams.set("q", input.query);
+        url.searchParams.set("format", "json");
+        if (input.category) url.searchParams.set("categories", input.category);
+        if (input.time_range) url.searchParams.set("time_range", input.time_range);
+        const resp = await fetch(url.toString(), {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(15_000),
+        });
+        const data = await resp.json() as {
+          results?: Array<{ title: string; url: string; content: string; engine: string; score?: number }>;
+          answers?: string[];
+          suggestions?: string[];
+          infoboxes?: Array<{ infobox: string; content: string }>;
+        };
+        const cap = input.max_results ?? 10;
+        return JSON.stringify({
+          results: (data.results ?? []).slice(0, cap).map(r => ({ title: r.title, url: r.url, snippet: r.content, engine: r.engine })),
+          ...(data.answers?.length ? { answers: data.answers } : {}),
+          ...(data.suggestions?.length ? { suggestions: data.suggestions } : {}),
+          ...(data.infoboxes?.length ? { infoboxes: data.infoboxes.map(ib => ({ title: ib.infobox, content: ib.content })) } : {}),
+        });
       },
       {
-        name: "web_search",
-        description: "Quick web search via SearXNG. For deep research, use chat_with_agent with the researcher agent.",
-        schema: z.object({ query: z.string().describe("Search query") }),
+        name: "searxng_search",
+        description: "Search via SearXNG with category routing (general, news, science, it). Supports bang syntax (!wp, !scholar, !gh). For deep research, use chat_with_agent with the researcher agent.",
+        schema: z.object({
+          query: z.string().describe("Search query. Supports SearXNG bang syntax."),
+          category: z.enum(["general", "news", "science", "it"]).optional().describe("SearXNG category."),
+          time_range: z.enum(["day", "week", "month", "year"]).optional().describe("Limit to time range."),
+          max_results: z.number().optional().describe("Max results. Default: 10."),
+        }),
       },
     ),
     // ── Discord operations (protoBot agent) ──────────────────────────────────
