@@ -267,12 +267,39 @@ The webhook payload is a `TaskStatusUpdateEvent` — same shape as on the wire, 
 
 Fire webhooks on **every** transition the caller cares about — `working`, `completed`, `failed`, `canceled`. Missing the cancel transition is a common bug (we fixed it in Quinn PR #19).
 
-Implementation checklist:
+### Token parsing — accept BOTH shapes
+
+The A2A spec's `PushNotificationConfig` permits two interchangeable shapes for the bearer token, and SDKs are inconsistent about which one they send:
+
+```json
+// Shape 1 — top-level `token` (what @a2a-js/sdk serialises by default,
+//          what Workstacean's SkillDispatcherPlugin sends)
+{
+  "url": "http://caller/api/a2a/callback/{taskId}",
+  "token": "per-task-secret"
+}
+
+// Shape 2 — structured RFC-8821 AuthenticationInfo
+{
+  "url": "http://caller/api/a2a/callback/{taskId}",
+  "authentication": {
+    "schemes": ["Bearer"],
+    "credentials": "per-task-secret"
+  }
+}
+```
+
+Your `tasks/pushNotificationConfig/set` handler (and `/tasks/{id}/pushNotificationConfigs` REST alias) **must read both** and store the resolved string. Only reading one side silently breaks whichever caller picked the other shape — the webhook fires, the caller returns 401 "Invalid notification token", and the behaviour is identical to "never delivered" unless you have INFO-level logs. This was Quinn #61 — cost us a day of polling fallback to find.
+
+Reference: Quinn's [`_extract_push_token`](https://github.com/protoLabsAI/quinn/blob/main/a2a_handler.py) — one helper, both shapes, top-level wins when both present.
+
+### Implementation checklist
 
 - Retry delivery 3× with exponential backoff (1s / 3s / 9s)
 - Skip retry on 4xx — the caller doesn't want it and retrying won't help
-- Send `Authorization: Bearer <token>` if the caller registered a token
+- Send `Authorization: Bearer <token>` if the caller registered a token (see token-parsing above)
 - Do NOT log the webhook body or token — these carry task artifacts, which may contain sensitive data
+- **Log delivery attempts at INFO, not DEBUG.** The default Python root level is WARNING; without `logging.basicConfig(level=INFO)` on your server, "webhook delivered" lines silently vanish and you can't tell delivery from silent-drop (Quinn #61). `curl` the agent's container env for `LOG_LEVEL` — if it's unset and the server doesn't set a basicConfig, you're flying blind.
 
 ## Health = outcomes (automatic)
 
@@ -375,8 +402,10 @@ A protoAgent that ticks all of these is a first-class fleet citizen — routing,
 - [ ] Terminal tasks evict on a TTL (default 1h)
 - [ ] Webhook delivery tasks have strong references (Python 3.11 GC trap)
 - [ ] Cancel is an atomic `check-and-write` under the lock
-- [ ] Webhook URLs pass SSRF validation (loopback / RFC1918 / link-local rejected)
+- [ ] Webhook URLs pass SSRF validation (loopback / RFC1918 / link-local rejected) with an operator allowlist for trusted docker-network hosts (Quinn #53)
 - [ ] Push config read from the live record on every delivery, not closed over
+- [ ] Push config parser accepts **both** token shapes — top-level `token` AND `authentication.credentials` (Quinn #61)
+- [ ] Webhook delivery logs at INFO (include taskId + state + response status); `logging.basicConfig(level=INFO)` installed on server boot so INFO actually reaches stderr
 - [ ] Background producer runs independently of any SSE connection
 
 ### SSE semantics
