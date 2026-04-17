@@ -127,7 +127,10 @@ tools:
   - chat_with_agent
   - delegate_task
   - get_world_state
-  - web_search
+  - get_ci_health
+  - get_pr_pipeline
+  - get_incidents
+  - searxng_search
   - manage_board
   - create_github_issue
   - manage_cron
