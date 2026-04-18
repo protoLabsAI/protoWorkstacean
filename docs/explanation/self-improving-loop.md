@@ -171,11 +171,42 @@ Agents with no data (`totalOutcomes === 0`) get weight 1.0 so new agents still r
 
 ---
 
-## Closing the other side — goal proposals from chronic failures
+## Closing the other side — Ava as the self-improvement agent
 
-`OutcomeAnalysisPlugin` has always emitted `ops.alert.action_quality` on chronic failure clusters. Arc 9.2 added a second output: an `agent.skill.request { skill: "goal_proposal" }` targeting Ava. Ava reads the cluster context (skill, actual vs expected success rate, recent failures) and either proposes a new goal — which `GoalHotReloadPlugin` applies without a restart — or files a feature on the board describing what's missing.
+The self-improvement loop has three mechanisms, all converging through Ava:
 
-"Bottlenecks are growth" operationalized: the system's own failures become inputs to its own goal backlog, closing the loop from observation → ranking → planner selection → outcome → **goal refinement**.
+### 1. Goal proposals from chronic failures
+
+`OutcomeAnalysisPlugin` emits `ops.alert.action_quality` on chronic failure clusters (< 50% success over 10+ attempts). It also dispatches `agent.skill.request { skill: "goal_proposal" }` targeting Ava. Ava reads the cluster context and drafts a `goals.yaml` entry — which `GoalHotReloadPlugin` applies without a restart after human approval.
+
+The same pipeline fires for repeated HITL escalations (3+ escalations for the same target): "what capability would unblock this automatically?"
+
+### 2. Config change proposals via `propose_config_change`
+
+Ava has direct access to the `propose_config_change` tool, which proposes YAML diffs to `goals.yaml`, `actions.yaml`, or any agent's YAML config. Proposals are submitted to `ConfigChangeHITLPlugin`, which renders an approval card in Discord. On approval, the change is applied live; on rejection, it's discarded with the reason preserved.
+
+This lets Ava close the loop at every layer:
+- **New goals** — "CI has no goal for main-branch-red; I'll propose one"
+- **New actions** — "goal is violated but no action addresses it"
+- **Agent tuning** — "Quinn's pr_review is too expensive at Opus; downshift to Sonnet"
+
+All proposals require evidence from `get_cost_summary` or `get_confidence_summary` (sampleCount >= 50 for agent tuning).
+
+### 3. GOAP-dispatched operational skills
+
+When fleet health goals are violated, the GOAP action dispatcher invokes Ava's operational skills directly:
+
+| Skill | Trigger | What Ava does |
+|---|---|---|
+| `debug_ci_failures` | CI success rate < 70% | Read CI health, delegate to Quinn for root cause, file issues |
+| `fleet_incident_response` | Agent failure rate > 50% for 1h | Report incident, investigate, notify operator |
+| `downshift_models` | Fleet cost > $50/day | Review spend, propose model downgrades for non-critical skills |
+| `investigate_orphaned_skills` | Skills with 0 success in 24h | Diagnose capability regression, file issues or propose fixes |
+| `diagnose_pr_stuck` | Repeated update-branch 422 failures | Classify conflict (redundant/rebasable/decomposable/genuine) |
+
+These skills use Ava's full tool access and main system prompt (except `diagnose_pr_stuck` and `goal_proposal`, which use `systemPromptOverride` for structured output).
+
+"Bottlenecks are growth" operationalized: the system's own failures become inputs to its own goal backlog, closing the loop from observation → ranking → planner selection → outcome → **goal refinement** → **config change** → **re-evaluation**.
 
 ---
 
@@ -185,6 +216,7 @@ Agents with no data (`totalOutcomes === 0`) get weight 1.0 so new agents still r
 - **Durable cost/confidence stores** — current stores are in-memory with 200-sample rolling windows; a SQLite-backed store would let rankings survive restarts and feed historical dashboards
 - **Learned policy replacing the hand-tuned weights** — the 2.0 / 0.5 / 0.3 coefficients are intuitive but not optimal. Once the observation stream is persistent, a bandit or Q-learner can pick weights that minimize regret on the goal-violated → dispatched pair
 - **Memory-health remediation actions** — `memory.graphiti_healthy` + `memory.search_working` goals evaluate correctly but have no registered action. Graphiti going dark today causes silent degradation rather than an alert + restart
+- **Action proposals** — Ava can propose new goals via `goal_proposal` and config changes via `propose_config_change`, but cannot yet propose entirely new GOAP actions. Today she files issues/features for missing actions; a `propose_action` mechanism would let her draft action YAML directly
 
 ---
 

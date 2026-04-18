@@ -31,12 +31,16 @@ skills:
     keywords:         # optional — override automatic keyword extraction
       - foo
       - bar
-    chain:            # optional — auto-dispatch to another agent after completion
-      agent: other-agent
-      skill: followup_skill
+    systemPromptOverride: |   # optional — replace agent's main prompt for this skill
+      You are performing a specific structured task...
 ```
 
-The `description` is used both for human documentation and as the source for automatic keyword extraction at startup.
+| Field | Required | Purpose |
+|---|---|---|
+| `name` | yes | Skill identifier — must match `skillHint` values sent on `agent.skill.request` |
+| `description` | no | Human documentation and automatic keyword extraction source |
+| `keywords` | no | Override automatic keyword extraction with explicit match terms |
+| `systemPromptOverride` | no | Replace the agent's main `systemPrompt` for this skill invocation. Use for structured-output skills that need narrow, format-enforcing prompts (e.g. JSON-only output, YAML drafting). Skills without this field use the agent's main prompt. |
 
 ---
 
@@ -66,7 +70,13 @@ skills:
 
 `AgentRuntimePlugin` picks up the file on next restart and registers `my_skill` for routing.
 
-Available tools: `publish_event`, `get_world_state`, `get_incidents`, `report_incident`, `get_ceremonies`, `run_ceremony`.
+Available tools (see [DeepAgent Runtime](../integrations/runtimes/deep-agent) for the full list):
+
+**Orchestration:** `chat_with_agent`, `delegate_task`, `publish_event`, `manage_cron`, `run_ceremony`
+**Observation:** `get_world_state`, `get_projects`, `get_ci_health`, `get_pr_pipeline`, `get_branch_drift`, `get_outcomes`, `get_incidents`, `get_ceremonies`, `get_cost_summary`, `get_confidence_summary`, `web_search`
+**Write/Act:** `manage_board`, `create_github_issue`, `report_incident`, `propose_config_change`
+**Conversation:** `react`, `send_update`, `msg_operator`
+**Discord (protoBot):** `discord_server_stats`, `discord_list_channels`, `discord_create_channel`, `discord_send`, `discord_list_members`
 
 ### External A2A agent
 
