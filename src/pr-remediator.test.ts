@@ -242,13 +242,12 @@ describe("PrRemediatorPlugin — fix_ci", () => {
   afterEach(() => plugin.uninstall());
 
   test("dispatches to Ava for each failing-CI PR with project targeting and directive prompt", async () => {
+    const dispatches = captureOn(bus, "agent.skill.request");
     pushWorldState(bus, [
       makePr({ number: 100, ciStatus: "fail", title: "bug: foo", repo: "protoLabsAI/protoMaker" }),
       makePr({ number: 200, ciStatus: "pass", repo: "protoLabsAI/protoMaker" }),  // should be skipped
       makePr({ number: 300, ciStatus: "fail", title: "bug: bar", repo: "protoLabsAI/rabbit-hole.io" }),
     ]);
-    const dispatches = captureOn(bus, "agent.skill.request");
-    dispatch(bus, "pr.remediate.fix_ci");
     await flushMicrotasks();
     expect(dispatches.length).toBe(2);
 
@@ -304,12 +303,11 @@ describe("PrRemediatorPlugin — address_feedback", () => {
   afterEach(() => plugin.uninstall());
 
   test("dispatches to Ava for changes_requested PRs with project targeting", async () => {
+    const dispatches = captureOn(bus, "agent.skill.request");
     pushWorldState(bus, [
       makePr({ number: 55, reviewState: "changes_requested", repo: "protoLabsAI/protoMaker" }),
       makePr({ number: 56, reviewState: "approved", repo: "protoLabsAI/protoMaker" }),
     ]);
-    const dispatches = captureOn(bus, "agent.skill.request");
-    dispatch(bus, "pr.remediate.address_feedback");
     await flushMicrotasks();
     expect(dispatches.length).toBe(1);
     const p = dispatches[0].payload as {
@@ -380,14 +378,17 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       const plugin = new PrRemediatorPlugin();
       plugin.install(bus);
 
+      const captured = captureOn(bus, "agent.skill.request");
+
       pushWorldState(bus, [
         makePr({ number: 100, ciStatus: "fail", readyToMerge: false }),
       ]);
+      await flushMicrotasks();
 
-      const captured = captureOn(bus, "agent.skill.request");
+      // Self-dispatch fires exactly once for the failing PR.
+      expect(captured.length).toBe(1);
 
-      // Three triggers back-to-back — should only dispatch once.
-      dispatch(bus, "pr.remediate.fix_ci");
+      // Explicit triggers are blocked — the PR is already in-flight.
       dispatch(bus, "pr.remediate.fix_ci");
       dispatch(bus, "pr.remediate.fix_ci");
       await flushMicrotasks();
@@ -401,14 +402,14 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       const plugin = new PrRemediatorPlugin();
       plugin.install(bus);
 
+      const captured = captureOn(bus, "agent.skill.request");
+
       pushWorldState(bus, [
         makePr({ number: 100, ciStatus: "fail", readyToMerge: false }),
       ]);
-
-      const captured = captureOn(bus, "agent.skill.request");
-
-      dispatch(bus, "pr.remediate.fix_ci");
       await flushMicrotasks();
+
+      // Self-dispatch fires the first handler call.
       expect(captured.length).toBe(1);
 
       // Simulate the skill completing — the remediator should clear its slot.
@@ -435,16 +436,15 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       const plugin = new PrRemediatorPlugin();
       plugin.install(bus);
 
+      const captured = captureOn(bus, "agent.skill.request");
+
       pushWorldState(bus, [
         makePr({ number: 100, ciStatus: "fail", readyToMerge: false }),
         makePr({ number: 200, ciStatus: "fail", readyToMerge: false }),
       ]);
-
-      const captured = captureOn(bus, "agent.skill.request");
-
-      dispatch(bus, "pr.remediate.fix_ci");
       await flushMicrotasks();
-      // Both failing PRs dispatch concurrently — they're independent slots.
+
+      // Both failing PRs dispatch concurrently via self-dispatch — independent slots.
       expect(captured.length).toBe(2);
 
       // A second trigger finds both in-flight and dispatches nothing new.
@@ -460,26 +460,26 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       const plugin = new PrRemediatorPlugin();
       plugin.install(bus);
 
+      const captured = captureOn(bus, "agent.skill.request");
+
       pushWorldState(bus, [
         makePr({ number: 100, ciStatus: "fail", readyToMerge: false }),
       ]);
-
-      const captured = captureOn(bus, "agent.skill.request");
-
-      dispatch(bus, "pr.remediate.fix_ci");
       await flushMicrotasks();
+      // Self-dispatch fires for PR #100.
       expect(captured.length).toBe(1);
 
       // PR #100 is gone (merged/closed) — world state no longer lists it.
       pushWorldState(bus, []);
-      // New PR appears with failing CI.
+      await flushMicrotasks();
+
+      // New PR appears with failing CI — self-dispatch fires for #101.
       pushWorldState(bus, [
         makePr({ number: 101, ciStatus: "fail", readyToMerge: false }),
       ]);
-
-      dispatch(bus, "pr.remediate.fix_ci");
       await flushMicrotasks();
-      // PR #101 gets a fresh dispatch even though #100 is no longer blocking.
+
+      // PR #101 gets a fresh dispatch; #100's in-flight entry was pruned.
       expect(captured.length).toBe(2);
       expect(captured[1]!.payload).toHaveProperty("skill", "bug_triage");
 
@@ -491,42 +491,46 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       const plugin = new PrRemediatorPlugin();
       plugin.install(bus);
 
-      pushWorldState(bus, [
-        makePr({ number: 999, ciStatus: "fail", title: "bug: stuck forever", readyToMerge: false }),
-      ]);
-
       const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
       const skillCaptured = captureOn(bus, "agent.skill.request");
 
-      // Drive the in-flight entry directly to the exhausted state by firing
-      // MAX_ATTEMPTS_PER_PR dispatches with completion responses + TTL-expired
-      // cooldowns between them. Easier to drive the internal state by calling
-      // the public API than to simulate 15 minutes of wall-clock time.
-      //
-      // Each dispatch increments attempts; when attempts >= 3 on the next
-      // _shouldDispatch call, the entry is marked exhausted AND escalated.
-      for (let i = 0; i < 3; i++) {
+      pushWorldState(bus, [
+        makePr({ number: 999, ciStatus: "fail", title: "bug: stuck forever", readyToMerge: false }),
+      ]);
+      await flushMicrotasks();
+
+      // Self-dispatch fires attempt 1. Drive toward exhaustion by completing
+      // each attempt with backdated cooldowns. MAX_ATTEMPTS_PER_PR = 3.
+      expect(skillCaptured.length).toBe(1); // attempt 1 from self-dispatch
+
+      // Complete attempt 1 + backdate cooldown so attempt 2 can fire.
+      const completeAndBackdate = async () => {
+        const latest = skillCaptured[skillCaptured.length - 1]!;
+        bus.publish(`agent.skill.response.${latest.correlationId}`, {
+          id: crypto.randomUUID(),
+          correlationId: latest.correlationId,
+          topic: `agent.skill.response.${latest.correlationId}`,
+          timestamp: Date.now(),
+          payload: { text: "done", isError: false, correlationId: latest.correlationId },
+        });
+        await flushMicrotasks();
+        const inFlight = (plugin as unknown as { inFlight: Map<string, { completedAt?: number; startedAt: number }> }).inFlight;
+        for (const entry of inFlight.values()) {
+          if (entry.completedAt) entry.completedAt -= 10 * 60 * 1000;
+          entry.startedAt -= 10 * 60 * 1000;
+        }
+      };
+
+      // Attempts 2 and 3 via explicit dispatch (slot freed after completing previous).
+      for (let i = 0; i < 2; i++) {
+        await completeAndBackdate();
         dispatch(bus, "pr.remediate.fix_ci");
         await flushMicrotasks();
-        // Simulate completion of each skill call so cooldown applies on next attempt
-        const latest = skillCaptured[skillCaptured.length - 1];
-        if (latest) {
-          bus.publish(`agent.skill.response.${latest.correlationId}`, {
-            id: crypto.randomUUID(),
-            correlationId: latest.correlationId,
-            topic: `agent.skill.response.${latest.correlationId}`,
-            timestamp: Date.now() - 10 * 60 * 1000, // backdate so cooldown passes
-            payload: { text: "done", isError: false, correlationId: latest.correlationId },
-          });
-          await flushMicrotasks();
-          // Backdate the in-flight entry so ATTEMPT_COOLDOWN_MS has passed
-          const inFlight = (plugin as unknown as { inFlight: Map<string, { completedAt?: number; startedAt: number }> }).inFlight;
-          for (const entry of inFlight.values()) {
-            if (entry.completedAt) entry.completedAt -= 10 * 60 * 1000;
-            entry.startedAt -= 10 * 60 * 1000;
-          }
-        }
       }
+      expect(skillCaptured.length).toBe(3);
+
+      // Complete attempt 3 and backdate.
+      await completeAndBackdate();
 
       // The fourth attempt (now exceeds MAX_ATTEMPTS_PER_PR) should trigger
       // exhaustion + HITL escalation, NOT another dispatch.
@@ -545,8 +549,6 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       expect(req.summary).toContain("bug: stuck forever");
       expect(req.summary).toContain("feature request");
       expect(req.options).toEqual(["investigate", "mark_non_remediable", "manual_unblock"]);
-      // sourceMeta.interface must be set so the HITL plugin can route to Discord.
-      // Previously missing → silent drops (7 PRs affected before the fix).
       expect(req.sourceMeta?.interface).toBe("discord");
 
       // Subsequent triggers must NOT emit additional escalations (rate-limited)
@@ -583,6 +585,9 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       const plugin = new PrRemediatorPlugin();
       plugin.install(bus);
 
+      const captured = captureOn(bus, "agent.skill.request");
+
+      // PR has both failing CI and changes_requested — self-dispatch fires both handlers.
       pushWorldState(bus, [
         makePr({
           number: 100,
@@ -591,20 +596,17 @@ describe("PrRemediatorPlugin — world state tracking", () => {
           readyToMerge: false,
         }),
       ]);
-
-      const captured = captureOn(bus, "agent.skill.request");
-
-      dispatch(bus, "pr.remediate.fix_ci");
       await flushMicrotasks();
-      expect(captured.length).toBe(1);
 
-      // address_feedback is a different remediation kind — not blocked by fix_ci.
-      dispatch(bus, "pr.remediate.address_feedback");
+      // Self-dispatch fires both fix_ci and address_feedback — independent kinds.
+      expect(captured.length).toBe(2);
+
+      // Explicit dispatches are blocked — both kinds already in-flight.
+      dispatch(bus, "pr.remediate.fix_ci");
       await flushMicrotasks();
       expect(captured.length).toBe(2);
 
-      // But a second fix_ci on the same PR IS blocked.
-      dispatch(bus, "pr.remediate.fix_ci");
+      dispatch(bus, "pr.remediate.address_feedback");
       await flushMicrotasks();
       expect(captured.length).toBe(2);
 
