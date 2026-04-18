@@ -5,4 +5,4 @@ skill: pr_review
 targets:
   - all
 notifyChannel: ""
-enabled: true
+enabled: false

@@ -454,11 +454,19 @@ export class DeepAgentExecutor implements IExecutor {
       : [];
 
     try {
+      // Resolve skill-level systemPromptOverride if this skill defines one.
+      // Skills like goal_proposal and diagnose_pr_stuck have narrow, structured
+      // output requirements that replace the agent's general-purpose prompt.
+      const skillDef = req.skill
+        ? this.agentDef.skills.find(s => s.name === req.skill)
+        : undefined;
+      const basePrompt = skillDef?.systemPromptOverride ?? this.agentDef.systemPrompt;
+
       // Inject cached world state into system prompt for instant situational awareness
       const worldSummary = await this.worldCache.getSummary();
       const enrichedPrompt = worldSummary
-        ? `${this.agentDef.systemPrompt}\n\n## Current system state (auto-refreshed, do not repeat verbatim)\n\n${worldSummary}`
-        : this.agentDef.systemPrompt;
+        ? `${basePrompt}\n\n## Current system state (auto-refreshed, do not repeat verbatim)\n\n${worldSummary}`
+        : basePrompt;
 
       const agent = createReactAgent({
         llm: this.model,
