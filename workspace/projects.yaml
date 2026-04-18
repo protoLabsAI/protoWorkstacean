@@ -85,3 +85,21 @@ projects:
       release:
         channelId: "1490978891207282718"
         webhook: "https://discord.com/api/webhooks/1491952349604872202/QOR15cx1UvzhrzluB5DrZiWv6zikuGFOixPtIuMUmaqO0rWk5tSdZe-zGgzJTMitFkiB"
+
+  - slug: protoagent
+    title: protoAgent
+    team: dev
+    github: protoLabsAI/protoAgent
+    repoUrl: "https://github.com/protoLabsAI/protoAgent"
+    projectPath: /home/josh/dev/labs/protoAgent
+    defaultBranch: main
+    status: active
+    onboardedAt: "2026-04-17T20:15:40.845Z"
+    agents: [quinn]
+    discord:
+      dev:
+        channelId: ""
+        webhook: ""
+      release:
+        channelId: ""
+        webhook: ""
