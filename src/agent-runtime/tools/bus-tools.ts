@@ -300,21 +300,27 @@ export function createBusTools(opts: BusToolsOptions = {}) {
 
   const manageBoard = tool(
     "manage_board",
-    "Create or update features on the protoMaker board. Use action 'create' to file " +
-      "new work items, 'update' to change status/priority/description of existing features.",
+    "Create, update, or list features on the protoMaker board. Use 'list' to query " +
+      "features by status, 'create' to file new work items, 'update' to change existing features.",
     {
-      action: z.enum(["create", "update"]).describe("Operation to perform"),
+      action: z.enum(["create", "update", "list"]).describe("Operation to perform"),
       projectPath: z.string().describe("Absolute path to the project directory"),
       title: z.string().optional().describe("Feature title (required for create)"),
       description: z.string().optional().describe("Feature description"),
       featureId: z.string().optional().describe("Feature ID (required for update)"),
-      status: z.enum(["backlog", "in-progress", "review", "done"]).optional(),
+      status: z.enum(["backlog", "in-progress", "review", "done"]).optional().describe("Filter by status (for list) or set status (for create/update)"),
       priority: z.number().optional().describe("0=none, 1=urgent, 2=high, 3=normal, 4=low"),
       complexity: z.enum(["small", "medium", "large", "architectural"]).optional(),
       projectSlug: z.string().optional(),
     },
     async ({ action, projectPath, title, description, featureId, status, priority, complexity, projectSlug }) => {
       try {
+        if (action === "list") {
+          const query = new URLSearchParams({ projectPath });
+          if (status) query.set("status", status);
+          const data = await http.get(`/api/board/features/list?${query}`);
+          return ok(data);
+        }
         const endpoint = action === "create" ? "/api/board/features/create" : "/api/board/features/update";
         const data = await http.post(endpoint, {
           projectPath, title, description, featureId, status, priority, complexity, projectSlug,
