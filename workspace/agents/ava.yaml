@@ -313,3 +313,7 @@ skills:
   - name: investigate_orphaned_skills
     description: Investigate orphaned skills (active skills with zero successes in 24h). Check agent health for the affected agents, run diagnostic conversations, determine if the skill is misconfigured, the agent is down, or the capability has regressed, and file issues or propose fixes.
     keywords: [orphan, orphaned, skill, regression, capability, dead, unused]
+
+  - name: issue_triage
+    description: Triage open GitHub issues across managed repos. For each issue, determine the right action — resolve directly, convert to a board feature, delegate to the owning agent, or close with rationale. Goal is issue zero across all projects.
+    keywords: [issue, triage, github, bug, enhancement, zero, backlog, stale]

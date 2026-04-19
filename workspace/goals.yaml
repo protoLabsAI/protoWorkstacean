@@ -228,3 +228,31 @@ goals:
     selector: "domains.agent_fleet_health.data.orphanedSkillCount"
     max: 0
     description: "Every skill seen in the 24h window must have at least one successful execution — orphaned skills (active but never succeeding) signal capability regression"
+
+  # ── Issue Zero — zero open GitHub issues across all projects ─────
+  #
+  # Every open issue is unfinished work. Critical/bug issues demand
+  # immediate triage; enhancements should be converted to board
+  # features or closed. The GOAP loop keeps this visible and
+  # dispatches triage when issues accumulate.
+
+  - id: issues.zero_critical
+    type: Threshold
+    severity: critical
+    selector: "domains.github_issues.data.criticalOpen"
+    max: 0
+    description: "No critical-labeled issues should be open — triage or resolve immediately"
+
+  - id: issues.zero_bugs
+    type: Threshold
+    severity: high
+    selector: "domains.github_issues.data.bugOpen"
+    max: 0
+    description: "No bug-labeled issues should be open — file a fix or close with rationale"
+
+  - id: issues.total_low
+    type: Threshold
+    severity: medium
+    selector: "domains.github_issues.data.totalOpen"
+    max: 5
+    description: "Total open issues across all repos should stay under 5 — convert enhancements to board features or close"
