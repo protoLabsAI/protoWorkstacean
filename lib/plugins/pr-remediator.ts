@@ -373,8 +373,9 @@ const AUTO_APPROVE_TITLE_PREFIXES = ["promote:", "chore(deps", "chore(release", 
 
 function isAutoApproveClass(pr: PrDomainEntry): boolean {
   if (AUTO_APPROVE_AUTHORS.has(pr.author)) return true;
+  const lower = pr.title.toLowerCase();
   for (const prefix of AUTO_APPROVE_TITLE_PREFIXES) {
-    if (pr.title.startsWith(prefix)) return true;
+    if (lower.startsWith(prefix)) return true;
   }
   return false;
 }
