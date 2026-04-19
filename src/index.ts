@@ -52,11 +52,13 @@ import { registerConfidenceExtension } from "./executor/extensions/confidence.ts
 import { registerEffectDomainExtension } from "./executor/extensions/effect-domain.ts";
 import { registerBlastExtension } from "./executor/extensions/blast.ts";
 import { registerHitlModeExtension } from "./executor/extensions/hitl-mode.ts";
+import { registerLangfuseTraceExtension } from "./executor/extensions/langfuse-trace.ts";
 registerCostExtension(bus);
 registerConfidenceExtension(bus);
 registerEffectDomainExtension(bus);
 registerBlastExtension();
 registerHitlModeExtension();
+registerLangfuseTraceExtension();
 
 // --- ChannelRegistry — loaded from workspace/channels.yaml, shared by RouterPlugin + DiscordPlugin ---
 import { ChannelRegistry } from "../lib/channels/channel-registry.js";

@@ -108,7 +108,46 @@ export function createRoutes(ctx: ApiContext): Route[] {
     }
   }
 
+  async function handleListFeatures(req: Request): Promise<Response> {
+    if (ctx.apiKey && req.headers.get("X-API-Key") !== ctx.apiKey) {
+      return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+
+    const url = new URL(req.url);
+    const projectPath = url.searchParams.get("projectPath");
+
+    if (!projectPath) {
+      return Response.json(
+        { success: false, error: "projectPath query parameter is required" },
+        { status: 400 },
+      );
+    }
+
+    const status = url.searchParams.get("status");
+
+    try {
+      const query = new URLSearchParams({ projectPath });
+      if (status) query.set("status", status);
+
+      const resp = await studioHttp.fetch(`${STUDIO_URL}/features/list?${query}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "(no body)");
+        return Response.json({ success: false, error: `Studio: ${resp.status} ${errText}` }, { status: resp.status });
+      }
+
+      const data = await resp.json();
+      return Response.json({ success: true, data });
+    } catch (e) {
+      return Response.json({ success: false, error: String(e) }, { status: 502 });
+    }
+  }
+
   return [
+    { method: "GET",  path: "/api/board/features/list",   handler: (req) => handleListFeatures(req) },
     { method: "POST", path: "/api/board/features/create", handler: (req) => handleCreateFeature(req) },
     { method: "POST", path: "/api/board/features/update", handler: (req) => handleUpdateFeature(req) },
   ];
