@@ -137,7 +137,7 @@ describe("GOAP end-to-end feedback loop", () => {
     // Spy on what actually reaches the executor — agent.skill.request is
     // the first downstream of the dispatcher's drop-or-publish decision.
     const skillRequests: unknown[] = [];
-    bus.subscribe("agent.skill.request", "spy", (m) => skillRequests.push(m.payload));
+    bus.subscribe("agent.skill.request", "spy", (m) => { skillRequests.push(m.payload); });
 
     // Spam-publish 100 violations of the same goal.
     for (let i = 0; i < 100; i++) {
