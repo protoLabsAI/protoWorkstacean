@@ -1,12 +1,23 @@
 id: agent-health
 name: "Agent Health Check"
 description: >
-  Triggered by world engine when no agents are registered (agentCount drops to 0).
-  Calls get_world_state to confirm the failure, posts a structured alert with
-  remediation steps, and logs if Discord is unreachable.
+  DISABLED 2026-04-20 — calls skill `health_check` which no agent in the
+  fleet advertises. Every cron fire dropped at the dispatcher with
+  "No executor found for targets [all] or skill 'health_check'". Result
+  was a guaranteed FAILURE on every */15 min tick, polluting logs.
+
+  The data this ceremony was meant to surface (which agents are reachable,
+  current skill counts, last probe latency) is already collected every 60s
+  by the world-state engine via the `agent_health` domain and exposed at
+  `/api/agent-health`. No re-implementation needed — operators / Ava read
+  the snapshot directly.
+
+  Re-enable with a real skill if a periodic ANNOUNCE-to-Discord behavior
+  is wanted (e.g. wire a small `agent_health_report` skill on protobot
+  that posts the snapshot to ops). Until then, this stays off.
 schedule: "*/15 * * * *"
 skill: health_check
 targets:
   - all
 notifyChannel: ""
-enabled: true
+enabled: false
