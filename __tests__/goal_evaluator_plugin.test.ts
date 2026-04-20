@@ -228,4 +228,164 @@ goals:
 
     expect(violationEvents).toHaveLength(0);
   });
+
+  // ── Issue #424 — selector drift / payload-shape regression guards ────────
+
+  test("ignores non-WorldState payloads on world.state.# (issue #424)", () => {
+    // Reproduces the original bug: CeremonyStateExtension previously published
+    // { domain: "extensions.ceremonies", data: ... } on world.state.snapshot,
+    // which matched the goal-evaluator's world.state.# subscription and caused
+    // every loaded goal to fire a Selector-not-found violation per ceremony tick.
+    writeGoals(`
+goals:
+  - id: flow.efficiency_healthy
+    type: Threshold
+    severity: medium
+    description: flow ratio >= 0.35
+    selector: domains.flow.data.efficiency.ratio
+    min: 0.35
+  - id: services.discord_connected
+    type: Invariant
+    severity: high
+    description: discord connected
+    selector: domains.services.data.discord.connected
+    operator: truthy
+  - id: agents.registered
+    type: Threshold
+    severity: high
+    description: at least one agent
+    selector: domains.agent_health.data.agentCount
+    min: 1
+`);
+
+    plugin = new GoalEvaluatorPlugin({ workspaceDir: join(TMP_DIR, "workspace") });
+    plugin.install(bus);
+
+    const violationEvents: BusMessage[] = [];
+    bus.subscribe("world.goal.violated", "test", msg => violationEvents.push(msg));
+
+    // Simulate the exact malformed payload the broken extension was emitting.
+    bus.publish("world.state.snapshot", {
+      id: "snap-1",
+      correlationId: "snap-1",
+      topic: "world.state.snapshot",
+      timestamp: Date.now(),
+      payload: {
+        domain: "extensions.ceremonies",
+        data: { ceremonies: {}, history: [], status: {}, lastRun: {}, updatedAt: Date.now() },
+      },
+    });
+
+    // No violations should fire from a malformed payload.
+    expect(violationEvents).toHaveLength(0);
+  });
+
+  test("each fixed goal evaluates without selector-not-found against a real WorldState (issue #424)", () => {
+    writeGoals(`
+goals:
+  - id: flow.efficiency_healthy
+    type: Threshold
+    severity: medium
+    description: flow ratio >= 0.35
+    selector: domains.flow.data.efficiency.ratio
+    min: 0.35
+  - id: services.discord_connected
+    type: Invariant
+    severity: high
+    description: discord connected
+    selector: domains.services.data.discord.connected
+    operator: truthy
+  - id: agents.registered
+    type: Threshold
+    severity: high
+    description: at least one agent
+    selector: domains.agent_health.data.agentCount
+    min: 1
+`);
+
+    plugin = new GoalEvaluatorPlugin({ workspaceDir: join(TMP_DIR, "workspace") });
+    plugin.install(bus);
+
+    const violationEvents: BusMessage[] = [];
+    bus.subscribe("world.goal.violated", "test", msg => violationEvents.push(msg));
+
+    // Real WorldState shape from /api/world-state — every selector resolves.
+    bus.publish("world.state.updated", {
+      id: "ws-1",
+      correlationId: "ws-1",
+      topic: "world.state.updated",
+      timestamp: Date.now(),
+      payload: {
+        timestamp: Date.now(),
+        domains: {
+          flow: { data: { efficiency: { ratio: 1 } }, metadata: { collectedAt: Date.now(), domain: "flow", tickNumber: 1 } },
+          services: { data: { discord: { connected: true } }, metadata: { collectedAt: Date.now(), domain: "services", tickNumber: 1 } },
+          agent_health: { data: { agentCount: 7 }, metadata: { collectedAt: Date.now(), domain: "agent_health", tickNumber: 1 } },
+        },
+        extensions: {},
+        snapshotVersion: 0,
+      },
+    });
+
+    // None of the three should produce a Selector-not-found violation.
+    const notFound = violationEvents.filter(e => {
+      const v = (e.payload as GoalViolatedEventPayload).violation;
+      return v.message.includes("not found in world state");
+    });
+    expect(notFound).toHaveLength(0);
+  });
+
+  test("startup validator catches an intentionally-broken goal selector", () => {
+    // One good goal, one with a selector pointing at a non-existent domain.
+    writeGoals(`
+goals:
+  - id: agents.registered
+    type: Threshold
+    severity: high
+    description: at least one agent
+    selector: domains.agent_health.data.agentCount
+    min: 1
+  - id: bogus.selector
+    type: Threshold
+    severity: medium
+    description: deliberately broken
+    selector: domains.does_not_exist.data.someField
+    max: 10
+`);
+
+    plugin = new GoalEvaluatorPlugin({ workspaceDir: join(TMP_DIR, "workspace") });
+    plugin.install(bus);
+
+    const errors: string[] = [];
+    const origError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+    };
+
+    try {
+      bus.publish("world.state.updated", {
+        id: "ws-2",
+        correlationId: "ws-2",
+        topic: "world.state.updated",
+        timestamp: Date.now(),
+        payload: {
+          timestamp: Date.now(),
+          domains: {
+            agent_health: { data: { agentCount: 7 }, metadata: { collectedAt: Date.now(), domain: "agent_health", tickNumber: 1 } },
+          },
+          extensions: {},
+          snapshotVersion: 0,
+        },
+      });
+    } finally {
+      console.error = origError;
+    }
+
+    const validatorOutput = errors.join("\n");
+    expect(validatorOutput).toContain("[goal-evaluator:validator]");
+    expect(validatorOutput).toContain("bogus.selector");
+    expect(validatorOutput).toContain("domains.does_not_exist.data.someField");
+    // The good goal must NOT be flagged.
+    expect(validatorOutput).not.toContain("agents.registered");
+  });
 });

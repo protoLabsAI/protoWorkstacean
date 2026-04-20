@@ -99,7 +99,7 @@ When a ceremony fires:
 | `agent.skill.request` | published | Dispatches the skill to an agent for execution |
 | `agent.skill.response.{runId}` | subscribed | Result from the agent skill execution |
 | `ceremony.#` | subscribed | Wildcard — used internally to intercept completed events |
-| `world.state.snapshot` | published | Ceremony state update via `CeremonyStateExtension` |
+| `ceremony.state.snapshot` | published | Ceremony state update via `CeremonyStateExtension` (NOT `world.state.#`; see issue #424) |
 
 ### Execute Payload (`ceremony.{id}.execute`)
 

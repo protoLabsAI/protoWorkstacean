@@ -33,7 +33,7 @@
  *                                              as the canonical unified outcome topic instead)
  *   autonomous.outcome.ceremony.{id}.{skill} — canonical unified outcome; emitted automatically by
  *                                              SkillDispatcherPlugin for every terminal task
- *   world.state.snapshot                     — (via CeremonyStateExtension) ceremony state update
+ *   ceremony.state.snapshot                  — (via CeremonyStateExtension) ceremony state update
  *
  * Topics subscribed:
  *   ceremony.#               — intercepts completed events for persistence/notification
