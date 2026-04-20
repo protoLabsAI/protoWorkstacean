@@ -254,6 +254,13 @@ export class CeremonyPlugin implements Plugin {
     const loaded = this.loader.loadMerged();
 
     for (const ceremony of loaded.ceremonies) {
+      if (ceremony.enabled === false) {
+        // Greenfield: disabled = disabled everywhere. Do not register, do not
+        // schedule, and skip state extension so external `ceremony.<id>.execute`
+        // triggers cannot resurrect the ceremony via the registry lookup.
+        console.log(`[ceremony] Skipping disabled ceremony: ${ceremony.id}`);
+        continue;
+      }
       this.ceremonies.set(ceremony.id, ceremony);
       this.stateExtension.registerCeremony(ceremony);
       this._scheduleCeremony(ceremony);
@@ -501,13 +508,16 @@ export class CeremonyPlugin implements Plugin {
           this.fileSnapshots.set(filePath, { mtime: Date.now(), size: stat });
 
           if (!existing) {
-            // New file — load and schedule
+            // New file — load and schedule (skipping disabled entries).
             const ceremonies = this.loader.loadGlobal();
             for (const ceremony of ceremonies) {
-              if (!this.ceremonies.has(ceremony.id)) {
-                this.registerCeremony(ceremony);
-                console.log(`[ceremony] Hot-loaded new ceremony: ${ceremony.id}`);
+              if (this.ceremonies.has(ceremony.id)) continue;
+              if (ceremony.enabled === false) {
+                console.log(`[ceremony] Skipping disabled ceremony: ${ceremony.id}`);
+                continue;
               }
+              this.registerCeremony(ceremony);
+              console.log(`[ceremony] Hot-loaded new ceremony: ${ceremony.id}`);
             }
           } else {
             // Changed file — reload all and reschedule changed ceremonies
@@ -524,6 +534,18 @@ export class CeremonyPlugin implements Plugin {
     const loaded = this.loader.loadMerged();
     for (const ceremony of loaded.ceremonies) {
       const existing = this.ceremonies.get(ceremony.id);
+
+      if (ceremony.enabled === false) {
+        // Flip enabled→disabled (or stayed-disabled): cancel any timer and
+        // drop from registry so external triggers cannot fire it. Greenfield:
+        // disabled = disabled everywhere.
+        if (existing) {
+          this.unregisterCeremony(ceremony.id);
+          console.log(`[ceremony] Hot-disabled ceremony: ${ceremony.id}`);
+        }
+        continue;
+      }
+
       if (!existing || JSON.stringify(existing) !== JSON.stringify(ceremony)) {
         this.ceremonies.set(ceremony.id, ceremony);
         this.stateExtension.registerCeremony(ceremony);
