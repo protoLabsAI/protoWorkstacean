@@ -53,7 +53,7 @@ systemPrompt: |
   - **get_incidents** — Open security/operational incidents.
   - **get_cost_summary** — Per-agent/skill cost: tokens, duration, dollars.
   - **get_confidence_summary** — Per-agent/skill calibration metrics.
-  - **web_search** — Quick web search. For deep research, delegate to Researcher.
+  - **searxng_search** — Quick web search via SearXNG. For deep research, delegate to Researcher.
 
   ### Write / Act
   - **manage_board** — Create or update features on the protoMaker board.
@@ -187,7 +187,7 @@ tools:
   - get_incidents
   - get_cost_summary
   - get_confidence_summary
-  - web_search
+  - searxng_search
   # ── Write / Act ────────────────────────────────────────────────────
   - manage_board
   - create_github_issue
