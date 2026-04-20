@@ -213,7 +213,7 @@ describe("ActionDispatcherPlugin", () => {
   describe("per-action cooldown (meta.cooldownMs)", () => {
     test("blocks repeat dispatches of the same action within window", async () => {
       const requests: BusMessage[] = [];
-      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       const action = makeAction({
         id: "cooldown-action-A",
@@ -234,7 +234,7 @@ describe("ActionDispatcherPlugin", () => {
 
     test("cooldown of action A does not affect action B", async () => {
       const requests: BusMessage[] = [];
-      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       const actionA = makeAction({
         id: "cooldown-A",
@@ -260,7 +260,7 @@ describe("ActionDispatcherPlugin", () => {
 
     test("dispatch after window expires is admitted", async () => {
       const requests: BusMessage[] = [];
-      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       const action = makeAction({
         id: "cooldown-expire",
@@ -282,7 +282,7 @@ describe("ActionDispatcherPlugin", () => {
 
     test("absent meta.cooldownMs means no cooldown (greenfield default)", async () => {
       const requests: BusMessage[] = [];
-      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       const action = makeAction({
         id: "no-cooldown",
@@ -300,7 +300,7 @@ describe("ActionDispatcherPlugin", () => {
 
     test("cooldownMs <= 0 is treated as no cooldown", async () => {
       const requests: BusMessage[] = [];
-      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       const action = makeAction({
         id: "zero-cooldown",
@@ -343,7 +343,7 @@ describe("ActionDispatcherPlugin", () => {
 
     test("admits dispatch when target is registered", async () => {
       const requests: BusMessage[] = [];
-      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       // Build a dispatcher with a registry containing the target.
       const localBus = new InMemoryEventBus();
@@ -352,7 +352,7 @@ describe("ActionDispatcherPlugin", () => {
       const guarded = new ActionDispatcherPlugin({ wipLimit: 5 }, undefined, registry as any);
       guarded.install(localBus);
       const localRequests: BusMessage[] = [];
-      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => localRequests.push(m));
+      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { localRequests.push(m); });
 
       const action = makeAction({
         id: "valid-target-action",
@@ -374,7 +374,7 @@ describe("ActionDispatcherPlugin", () => {
       const guarded = new ActionDispatcherPlugin({ wipLimit: 5 }, spy as any, registry as any);
       guarded.install(localBus);
       const requests: BusMessage[] = [];
-      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       const action = makeAction({
         id: "invalid-target-action",
@@ -406,7 +406,7 @@ describe("ActionDispatcherPlugin", () => {
       const guarded = new ActionDispatcherPlugin({ wipLimit: 5 }, undefined, registry as any);
       guarded.install(localBus);
       const requests: BusMessage[] = [];
-      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       const action = makeAction({
         id: "mixed-action",
@@ -428,7 +428,7 @@ describe("ActionDispatcherPlugin", () => {
       const guarded = new ActionDispatcherPlugin({ wipLimit: 5 }, undefined, registry as any);
       guarded.install(localBus);
       const requests: BusMessage[] = [];
-      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       const action = makeAction({
         id: "broadcast-action",
@@ -448,7 +448,7 @@ describe("ActionDispatcherPlugin", () => {
       const guarded = new ActionDispatcherPlugin({ wipLimit: 5 }, undefined, registry as any);
       guarded.install(localBus);
       const requests: BusMessage[] = [];
-      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       const action = makeAction({
         id: "skill-routed-action",
@@ -464,7 +464,7 @@ describe("ActionDispatcherPlugin", () => {
       // Default `dispatcher` constructed in beforeEach has no registry — verifies
       // that absent-registry equals 'check skipped' so existing tests stay green.
       const requests: BusMessage[] = [];
-      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
 
       const action = makeAction({
         id: "no-registry-action",
