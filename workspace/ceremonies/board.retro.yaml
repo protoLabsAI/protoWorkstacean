@@ -1,8 +1,12 @@
 id: board.retro
 name: Weekly Retrospective
 schedule: "0 9 * * 1"
+# DISABLED 2026-04-20 — calls skill `pattern_analysis` which no agent
+# advertises. Every Monday 09:00 fire dropped at the dispatcher with
+# "No executor found for targets [all] or skill 'pattern_analysis'".
+# Re-enable when a retrospective skill is wired (Quinn or Ava could host it).
 skill: pattern_analysis
 targets:
   - all
 notifyChannel: ""
-enabled: true
+enabled: false

@@ -2,8 +2,12 @@ id: daily-standup
 name: "Daily Fleet Standup"
 description: "Morning ceremony: board summary, active ceremonies, open PRs"
 schedule: "0 9 * * 1-5"
+# board_audit lives on Quinn (not Ava). Ava advertises chat / goal_proposal /
+# diagnose_pr_stuck / debug_ci_failures / fleet_incident_response /
+# downshift_models / investigate_orphaned_skills / issue_triage. Quinn is the
+# QA agent and the canonical board auditor.
 skill: board_audit
 targets:
-  - ava
+  - quinn
 notifyChannel: "1469195643590541353"
 enabled: true

@@ -1,8 +1,10 @@
 id: board.cleanup
 name: Board Cleanup
 schedule: "0 8 * * *"
+# board_audit is advertised by Quinn — broadcasting to [all] caused 404s on
+# every other agent each fire. Route to Quinn directly.
 skill: board_audit
 targets:
-  - all
+  - quinn
 notifyChannel: ""
 enabled: true
