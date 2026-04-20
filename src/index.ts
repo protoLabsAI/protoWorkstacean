@@ -299,6 +299,21 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Registers FunctionExecutors that bridge GOAP `ceremony.*` actions to
+    // the matching `ceremony.<id>.execute` bus trigger CeremonyPlugin already
+    // listens for. Without this, ActionDispatcherPlugin publishes to
+    // agent.skill.request and SkillDispatcherPlugin drops with
+    // "No executor found …" — the structural gap behind issue #430.
+    // Must install AFTER ExecutorRegistry exists (always true) and BEFORE
+    // skill-dispatcher so registrations resolve on first dispatch.
+    name: "ceremony-skill-executor",
+    condition: () => true,
+    factory: async () => {
+      const { CeremonySkillExecutorPlugin } = await import("./plugins/ceremony-skill-executor-plugin.js");
+      return new CeremonySkillExecutorPlugin(executorRegistry);
+    },
+  },
+  {
     // Intercepts ExecutorRegistry.resolve() to A/B test competing skill variants.
     // Must be installed AFTER registrars (agent-runtime, skill-broker) and
     // BEFORE skill-dispatcher so the hook is active when dispatches begin.
