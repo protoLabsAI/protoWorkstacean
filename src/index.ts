@@ -422,7 +422,8 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { AgentFleetHealthPlugin } = await import("./plugins/agent-fleet-health-plugin.js");
-      return new AgentFleetHealthPlugin();
+      // executorRegistry wired for outcome attribution whitelist (#459).
+      return new AgentFleetHealthPlugin(executorRegistry);
     },
   },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...

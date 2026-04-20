@@ -1,8 +1,26 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { InMemoryEventBus } from "../../lib/bus.ts";
 import { AgentFleetHealthPlugin } from "./agent-fleet-health-plugin.ts";
+import { ExecutorRegistry } from "../executor/executor-registry.ts";
+import type { IExecutor, SkillRequest, SkillResult } from "../executor/types.ts";
 import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 import type { BusMessage } from "../../lib/types.ts";
+
+/** Minimal executor stub — just satisfies the IExecutor shape for registry wiring. */
+class StubExecutor implements IExecutor {
+  readonly type = "stub";
+  async execute(_req: SkillRequest): Promise<SkillResult> {
+    return { text: "", isError: false, correlationId: "" };
+  }
+}
+
+const makeRegistry = (agentNames: string[]): ExecutorRegistry => {
+  const reg = new ExecutorRegistry();
+  for (const name of agentNames) {
+    reg.register("noop", new StubExecutor(), { agentName: name });
+  }
+  return reg;
+};
 
 const makeOutcomeMsg = (payload: Partial<AutonomousOutcomePayload> & { systemActor: string; skill: string }): BusMessage => ({
   id: crypto.randomUUID(),
@@ -279,6 +297,130 @@ describe("AgentFleetHealthPlugin", () => {
 
     const snapshot = plugin.getFleetHealth();
     expect(snapshot.orphanedSkillCount).toBe(0);
+  });
+
+  // ── #459: synthetic-actor whitelist via ExecutorRegistry ─────────────────
+  describe("synthetic actor filtering (#459)", () => {
+    let wlBus: InMemoryEventBus;
+    let wlPlugin: AgentFleetHealthPlugin;
+
+    beforeEach(() => {
+      wlBus = new InMemoryEventBus();
+      const registry = makeRegistry(["ava", "quinn", "protomaker"]);
+      wlPlugin = new AgentFleetHealthPlugin(registry);
+      wlPlugin.install(wlBus);
+    });
+
+    test("outcome from a registered agent lands in agents[]", async () => {
+      wlBus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "quinn", skill: "triage", success: true, durationMs: 100,
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const snap = wlPlugin.getFleetHealth();
+      expect(snap.agents).toHaveLength(1);
+      expect(snap.agents[0].agentName).toBe("quinn");
+      expect(snap.systemActors).toHaveLength(0);
+    });
+
+    test("outcome from auto-triage-sweep does NOT pollute agents[]", async () => {
+      wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
+        systemActor: "auto-triage-sweep", skill: "bug_triage", success: false, durationMs: 200,
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const snap = wlPlugin.getFleetHealth();
+      expect(snap.agents).toHaveLength(0);
+      expect(snap.systemActors).toHaveLength(1);
+      expect(snap.systemActors[0].systemActor).toBe("auto-triage-sweep");
+      expect(snap.systemActors[0].failureCount).toBe(1);
+    });
+
+    test("outcome from pr-remediator does NOT pollute agents[]", async () => {
+      wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
+        systemActor: "pr-remediator", skill: "bug_triage", success: false, durationMs: 500,
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const snap = wlPlugin.getFleetHealth();
+      expect(snap.agents).toHaveLength(0);
+      expect(snap.agents.find(a => a.agentName === "pr-remediator")).toBeUndefined();
+      expect(snap.systemActors.find(s => s.systemActor === "pr-remediator")).toBeDefined();
+    });
+
+    test("agentCount after mixed outcomes = count of real agents only", async () => {
+      // Real agents
+      wlBus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "ava", skill: "plan", success: true, durationMs: 100,
+      }));
+      wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
+        systemActor: "quinn", skill: "sweep", success: false, durationMs: 100,
+      }));
+      // Synthetic / plugin actors
+      wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
+        systemActor: "pr-remediator", skill: "bug_triage", success: false, durationMs: 100,
+      }));
+      wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
+        systemActor: "auto-triage-sweep", skill: "bug_triage", success: false, durationMs: 100,
+      }));
+      wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
+        systemActor: "user", skill: "chat", success: false, durationMs: 100,
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const snap = wlPlugin.getFleetHealth();
+      expect(snap.agents).toHaveLength(2);
+      expect(new Set(snap.agents.map(a => a.agentName))).toEqual(new Set(["ava", "quinn"]));
+      expect(snap.systemActors).toHaveLength(3);
+      expect(new Set(snap.systemActors.map(s => s.systemActor))).toEqual(
+        new Set(["pr-remediator", "auto-triage-sweep", "user"]),
+      );
+    });
+
+    test("maxFailureRate1h is not inflated by synthetic-actor failures", async () => {
+      // One real agent with full success in 1h
+      wlBus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "ava", skill: "plan", success: true, durationMs: 100,
+      }));
+      // Synthetic actor with 100% failure — must not leak into maxFailureRate1h
+      wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
+        systemActor: "pr-remediator", skill: "bug_triage", success: false, durationMs: 100,
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const snap = wlPlugin.getFleetHealth();
+      expect(snap.maxFailureRate1h).toBe(0);
+    });
+
+    test("orphanedSkillCount excludes synthetic-actor-only skills", async () => {
+      // Real agent has a successful "plan" skill
+      wlBus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "ava", skill: "plan", success: true, durationMs: 100,
+      }));
+      // Synthetic actor fails a skill nobody else runs — shouldn't count as orphaned
+      wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
+        systemActor: "pr-remediator", skill: "bug_triage", success: false, durationMs: 100,
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const snap = wlPlugin.getFleetHealth();
+      expect(snap.orphanedSkillCount).toBe(0);
+    });
+
+    test("with empty registry, all actors are filtered to systemActors[]", async () => {
+      const emptyBus = new InMemoryEventBus();
+      const emptyPlugin = new AgentFleetHealthPlugin(new ExecutorRegistry());
+      emptyPlugin.install(emptyBus);
+
+      emptyBus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "ava", skill: "plan", success: true, durationMs: 100,
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const snap = emptyPlugin.getFleetHealth();
+      expect(snap.agents).toHaveLength(0);
+      expect(snap.systemActors).toHaveLength(1);
+    });
   });
 
   test("uninstall cleans up subscription", () => {
