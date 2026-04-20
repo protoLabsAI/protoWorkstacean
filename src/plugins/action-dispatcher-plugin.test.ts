@@ -207,4 +207,112 @@ describe("ActionDispatcherPlugin", () => {
     });
     // No error = state updated successfully
   });
+
+  // ── meta.cooldownMs — per-action dedup at the dispatcher (issue #437) ──
+
+  describe("per-action cooldown (meta.cooldownMs)", () => {
+    test("blocks repeat dispatches of the same action within window", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+
+      const action = makeAction({
+        id: "cooldown-action-A",
+        meta: { fireAndForget: true, cooldownMs: 60_000 },
+      });
+
+      // Fire 5 dispatches in rapid succession.
+      for (let i = 0; i < 5; i++) {
+        bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, `corr-${i}`));
+      }
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Only the first dispatch should reach the executor; the other 4 are
+      // dropped at the dispatcher BEFORE agent.skill.request is published.
+      expect(requests).toHaveLength(1);
+      expect(dispatcher.getOutcomes().summary().total).toBe(1);
+    });
+
+    test("cooldown of action A does not affect action B", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+
+      const actionA = makeAction({
+        id: "cooldown-A",
+        meta: { fireAndForget: true, cooldownMs: 60_000 },
+      });
+      const actionB = makeAction({
+        id: "cooldown-B",
+        meta: { fireAndForget: true, cooldownMs: 60_000 },
+      });
+
+      // Fire A twice and B twice — A's second drop, B's second drop, both
+      // independent. Two should reach the executor (one per action id).
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(actionA, "a-1"));
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(actionB, "b-1"));
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(actionA, "a-2"));
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(actionB, "b-2"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(requests).toHaveLength(2);
+      const skills = requests.map((r) => (r.payload as Record<string, unknown>).skill).sort();
+      expect(skills).toEqual(["cooldown-A", "cooldown-B"]);
+    });
+
+    test("dispatch after window expires is admitted", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+
+      const action = makeAction({
+        id: "cooldown-expire",
+        // 1ms cooldown — easy to exceed via setTimeout below.
+        meta: { fireAndForget: true, cooldownMs: 1 },
+      });
+
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "c-1"));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(requests).toHaveLength(1);
+
+      // Wait past the cooldown window then re-dispatch.
+      await new Promise((r) => setTimeout(r, 20));
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "c-2"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(requests).toHaveLength(2);
+    });
+
+    test("absent meta.cooldownMs means no cooldown (greenfield default)", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+
+      const action = makeAction({
+        id: "no-cooldown",
+        meta: { fireAndForget: true },
+      });
+
+      for (let i = 0; i < 3; i++) {
+        bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, `nc-${i}`));
+      }
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Without cooldownMs there's no throttling — all 3 reach the executor.
+      expect(requests).toHaveLength(3);
+    });
+
+    test("cooldownMs <= 0 is treated as no cooldown", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => requests.push(m));
+
+      const action = makeAction({
+        id: "zero-cooldown",
+        meta: { fireAndForget: true, cooldownMs: 0 },
+      });
+
+      for (let i = 0; i < 3; i++) {
+        bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, `z-${i}`));
+      }
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(requests).toHaveLength(3);
+    });
+  });
 });

@@ -49,6 +49,15 @@ export class ActionDispatcherPlugin implements Plugin {
   /** Pending action timeouts: correlationId → timer. */
   private readonly pendingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /**
+   * Per-action cooldown bucket: action.id → timestamp of last dispatch.
+   * Honored when `action.meta.cooldownMs` is set; subsequent dispatches of
+   * the same action id within the window are dropped at the dispatcher
+   * BEFORE the executor is reached. Keyed on action id only — unrelated
+   * actions don't share buckets.
+   */
+  private readonly lastDispatchedAt = new Map<string, number>();
+
   constructor(
     private readonly config: ActionDispatcherConfig,
     private readonly telemetry?: TelemetryService,
@@ -92,6 +101,7 @@ export class ActionDispatcherPlugin implements Plugin {
       clearTimeout(timer);
     }
     this.pendingTimeouts.clear();
+    this.lastDispatchedAt.clear();
     this.queue.reset();
     this.rollbackRegistry.clearAll();
   }
@@ -111,10 +121,56 @@ export class ActionDispatcherPlugin implements Plugin {
     this.worldState = state;
   }
 
+  /** Expose cooldown state for introspection / tests. */
+  getLastDispatchedAt(actionId: string): number | undefined {
+    return this.lastDispatchedAt.get(actionId);
+  }
+
+  /**
+   * Returns true and records the timestamp if the action may proceed.
+   * Returns false (and logs a fail-fast diagnostic) if the action is still
+   * within its meta.cooldownMs window — caller must drop the dispatch.
+   * Actions without meta.cooldownMs always pass.
+   */
+  private _admitOrCooldown(action: import("../planner/types/action.ts").Action): boolean {
+    const cooldownMs = action.meta.cooldownMs;
+    if (typeof cooldownMs !== "number" || cooldownMs <= 0) {
+      // No cooldown configured — admit immediately, no bookkeeping.
+      return true;
+    }
+
+    const now = Date.now();
+    const last = this.lastDispatchedAt.get(action.id);
+    if (last !== undefined) {
+      const ageMs = now - last;
+      if (ageMs < cooldownMs) {
+        const remainingMs = cooldownMs - ageMs;
+        // Fail-fast & loud: operator must see what's being throttled.
+        console.warn(
+          `[action-dispatcher] cooldown drop action=${action.id} ` +
+            `goal=${action.goalId} ageMs=${ageMs} cooldownMs=${cooldownMs} ` +
+            `remainingMs=${remainingMs}`,
+        );
+        this.telemetry?.bump("action", action.id, "cooldown_dropped");
+        return false;
+      }
+    }
+    this.lastDispatchedAt.set(action.id, now);
+    return true;
+  }
+
   private async handleDispatch(msg: BusMessage): Promise<void> {
     const payload = msg.payload as ActionDispatchPayload;
     const { action, correlationId } = payload;
     const startedAt = Date.now();
+
+    // Per-action cooldown — the dispatcher is the single chokepoint for both
+    // alert.* (FunctionExecutor → Discord) and action.* (DeepAgent/A2A) paths,
+    // so dropping here covers everything. Honored only when meta.cooldownMs
+    // is set; absence means no cooldown.
+    if (!this._admitOrCooldown(action)) {
+      return;
+    }
 
     // Telemetry: this action was selected and is entering dispatch.
     // Counted even when queued by WIP — they still get dispatched later.

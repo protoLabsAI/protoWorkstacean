@@ -141,6 +141,8 @@ export const ActionMetaSchema = z.object({
   context: z.record(z.unknown()).optional(),
   fireAndForget: z.boolean().optional(),
   skillHint: z.string().optional(),
+  /** Per-action cooldown enforced by ActionDispatcherPlugin. */
+  cooldownMs: z.number().int().nonnegative().optional(),
 });
 
 export const ActionTierSchema = z.enum(["tier_0", "tier_1", "tier_2"]);
