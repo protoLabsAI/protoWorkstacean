@@ -314,6 +314,21 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Registers FunctionExecutors for the five `action.pr_*` /
+    // `action.dispatch_backmerge` skills whose handlers live in
+    // PrRemediatorPlugin. Without this registrar, SkillDispatcherPlugin
+    // logged "No executor found" and the startup validator (#427) raised
+    // `platform.skills_unwired` HIGH every cycle.
+    // Same install-order constraint as alert-skill-executor: AFTER the
+    // ExecutorRegistry exists, BEFORE skill-dispatcher subscribes.
+    name: "pr-remediator-skill-executor",
+    condition: () => true,
+    factory: async () => {
+      const { PrRemediatorSkillExecutorPlugin } = await import("./plugins/pr-remediator-skill-executor-plugin.js");
+      return new PrRemediatorSkillExecutorPlugin(executorRegistry);
+    },
+  },
+  {
     // Intercepts ExecutorRegistry.resolve() to A/B test competing skill variants.
     // Must be installed AFTER registrars (agent-runtime, skill-broker) and
     // BEFORE skill-dispatcher so the hook is active when dispatches begin.

@@ -907,6 +907,11 @@ export class PrRemediatorPlugin implements Plugin {
       return;
     }
 
+    // Extract hitlPolicy forwarded by PrRemediatorSkillExecutorPlugin so the
+    // fallback HITL request honours action.pr_merge_ready.meta.hitlPolicy
+    // (ttlMs: 30min, onTimeout: approve).
+    const hitlPolicy = this._extractHitlPolicy(msg);
+
     for (const pr of ready) {
       const gate = this._shouldDispatch(pr.repo, pr.number, "merge_ready");
       if (!gate.ok) {
@@ -935,7 +940,7 @@ export class PrRemediatorPlugin implements Plugin {
         // HITL so an operator can look. This is the only remaining
         // _emitHitlApproval call site.
         console.warn(`[pr-remediator] auto-merge failed ${pr.repo}#${pr.number}: ${result.error}`);
-        this._emitHitlApproval(pr, msg.correlationId, `Auto-merge failed (${result.status}): ${result.error}`);
+        this._emitHitlApproval(pr, msg.correlationId, `Auto-merge failed (${result.status}): ${result.error}`, hitlPolicy);
       }
     }
   }
@@ -1187,11 +1192,43 @@ Critical rules:
     console.warn(`[pr-remediator] ${text}`);
   }
 
-  private _emitHitlApproval(pr: PrDomainEntry, parentCorrelationId: string, note?: string): void {
+  /**
+   * Pull `meta.hitlPolicy` from the trigger bus message. The shape comes from
+   * actions.yaml and is propagated by PrRemediatorSkillExecutorPlugin into the
+   * pr.remediate.* trigger payload. Returns undefined when not present so
+   * callers fall back to their built-in defaults.
+   */
+  private _extractHitlPolicy(msg: BusMessage): { ttlMs?: number; onTimeout?: "approve" | "reject" | "escalate" } | undefined {
+    const payload = msg.payload as { meta?: Record<string, unknown> } | undefined;
+    const meta = payload?.meta;
+    if (!meta || typeof meta !== "object") return undefined;
+    const policy = (meta as Record<string, unknown>).hitlPolicy;
+    if (!policy || typeof policy !== "object") return undefined;
+    const p = policy as Record<string, unknown>;
+    const out: { ttlMs?: number; onTimeout?: "approve" | "reject" | "escalate" } = {};
+    if (typeof p.ttlMs === "number") out.ttlMs = p.ttlMs;
+    if (p.onTimeout === "approve" || p.onTimeout === "reject" || p.onTimeout === "escalate") {
+      out.onTimeout = p.onTimeout;
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+
+  private _emitHitlApproval(
+    pr: PrDomainEntry,
+    parentCorrelationId: string,
+    note?: string,
+    hitlPolicy?: { ttlMs?: number; onTimeout?: "approve" | "reject" | "escalate" },
+  ): void {
     if (!this.bus) return;
     const correlationId = crypto.randomUUID();
     const replyTopic = `hitl.response.pr.merge.${correlationId}`;
     const devChannelId = loadProjectMetaMap().get(pr.repo)?.devChannelId;
+    // Honor action.pr_merge_ready.meta.hitlPolicy when provided (forwarded by
+    // PrRemediatorSkillExecutorPlugin via the trigger msg). Defaults match the
+    // pre-existing 30-min escalation behaviour so non-policy callers (e.g. the
+    // ghMerge fallback path) keep their semantics.
+    const ttlMs = hitlPolicy?.ttlMs ?? 30 * 60 * 1000;
+    const onTimeout = hitlPolicy?.onTimeout;
     const request: HITLRequest = {
       type: "hitl_request",
       correlationId,
@@ -1205,7 +1242,9 @@ Critical rules:
         `\nhttps://github.com/${pr.repo}/pull/${pr.number}`,
       ].filter(Boolean).join("\n"),
       options: ["approve", "reject"],
-      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+      ttlMs,
+      ...(onTimeout ? { onTimeout } : {}),
       replyTopic,
       sourceMeta: { interface: "discord", ...(devChannelId ? { channelId: devChannelId } : {}) },
     };
