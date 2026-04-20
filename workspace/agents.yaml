@@ -74,6 +74,22 @@ agents:
   #     - message.inbound.discord.#
   #     - message.inbound.github.#
 
+  # protoMaker — Automaker-server agent (apps/server in protoLabsAI/ava).
+  # Hosts the project board, auto-mode runtime, and feature/PR pipeline.
+  # Reached on the docker-ai network as automaker-server:3008/a2a; advertises
+  # 10 skills (chat, sitrep, manage_feature, auto_mode, board_health,
+  # bug_triage, onboard_project, provision_discord, plan, plan_resume).
+  # Auth: AVA_API_KEY (the same Ava-app key used for HTTP /api/* — protoMaker
+  # validates X-API-Key against its per-app key table).
+  - name: protomaker
+    url: http://automaker-server:3008/a2a
+    auth:
+      scheme: apiKey
+      credentialsEnv: AVA_API_KEY
+    streaming: false
+    subscribesTo:
+      - message.inbound.github.#
+
   # protopen — security/pentest/RF recon. Remote via Tailscale
   # (PROTOPEN_BASE_URL defaults to http://steamdeck:7870 in homelab-iac).
   # Serves the legacy /.well-known/agent.json path; advertises streaming:true.
