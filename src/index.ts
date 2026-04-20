@@ -370,7 +370,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { ActionDispatcherPlugin } = await import("./plugins/action-dispatcher-plugin.js");
-      return new ActionDispatcherPlugin({ wipLimit: 5 }, telemetry);
+      return new ActionDispatcherPlugin({ wipLimit: 5 }, telemetry, executorRegistry);
     },
   },
   {
