@@ -4,7 +4,7 @@ title: "Extension: x-protolabs/hitl-mode-v1"
 
 `x-protolabs/hitl-mode-v1` lets agents declare the **approval policy** for each skill on their agent card. HITL is a gradient, not a binary — this extension lets the dispatcher + HITL plugin route each skill invocation through the right flow without goal-level config.
 
-**Extension URI**: `https://protolabs.ai/a2a/ext/hitl-mode-v1`
+**Extension URI**: `https://proto-labs.ai/a2a/ext/hitl-mode-v1`
 
 ---
 
@@ -76,7 +76,7 @@ registerHitlModeExtension();
   "capabilities": {
     "extensions": [
       {
-        "uri": "https://protolabs.ai/a2a/ext/hitl-mode-v1",
+        "uri": "https://proto-labs.ai/a2a/ext/hitl-mode-v1",
         "params": {
           "skills": {
             "sitrep":              { "mode": "autonomous" },

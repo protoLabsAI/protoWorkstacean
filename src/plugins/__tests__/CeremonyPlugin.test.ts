@@ -58,7 +58,7 @@ enabled: true
     expect(ceremonies.some((c) => c.id === "board.health")).toBe(true);
   });
 
-  test("CeremonyPlugin loader: skips disabled ceremonies from scheduling", () => {
+  test("CeremonyPlugin loader: loads disabled ceremonies but does not schedule them", () => {
     writeCeremony(
       "board.disabled.yaml",
       `id: board.disabled
@@ -72,9 +72,10 @@ enabled: false
 
     plugin.install(bus);
     const ceremonies = plugin.getCeremonies();
-    // Disabled ceremonies are filtered out by the loader before reaching the plugin
+    // Disabled ceremonies are loaded (so hot-reload can cancel timers) but not scheduled
     const disabled = ceremonies.find((c) => c.id === "board.disabled");
-    expect(disabled).toBeUndefined();
+    expect(disabled).toBeDefined();
+    expect(disabled!.enabled).toBe(false);
   });
 
   test("ceremony YAML: registerCeremony adds ceremony to registry", () => {

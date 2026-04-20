@@ -457,11 +457,91 @@ export function createRoutes(ctx: ApiContext): Route[] {
     }
   }
 
+  // ── GitHub Issues domain ────────────────────────────────────────────────────
+  // Aggregate open issue counts per repo for the issue_zero GOAP goal.
+  // Polls `/repos/{repo}/issues?state=open` and classifies by label priority.
+
+  async function handleGetGithubIssues(): Promise<Response> {
+    const repoList = repos();
+    if (!repoList.length || !GITHUB_TOKEN) return Response.json({
+      totalOpen: 0, criticalOpen: 0, bugOpen: 0, enhancementOpen: 0, repos: [],
+    });
+
+    const repoSummaries: Array<{
+      repo: string;
+      openCount: number;
+      criticalCount: number;
+      bugCount: number;
+      enhancementCount: number;
+      oldest: string | null;
+      issues: Array<{
+        number: number;
+        title: string;
+        labels: string[];
+        createdAt: string;
+        updatedAt: string;
+        author: string;
+      }>;
+    }> = [];
+
+    for (const repo of repoList) {
+      try {
+        const issues = await ghApi(
+          `/repos/${repo}/issues?state=open&per_page=100&sort=created&direction=asc`,
+        ) as Array<{
+          number: number;
+          title: string;
+          labels: Array<{ name: string }>;
+          created_at: string;
+          updated_at: string;
+          user: { login: string } | null;
+          pull_request?: unknown;
+        }>;
+
+        // GitHub's issues endpoint includes PRs — filter them out
+        const realIssues = issues.filter(i => !i.pull_request);
+
+        const labels = (i: typeof realIssues[0]) => i.labels.map(l => l.name);
+        const criticalCount = realIssues.filter(i => labels(i).includes("critical")).length;
+        const bugCount = realIssues.filter(i => labels(i).includes("bug")).length;
+        const enhancementCount = realIssues.filter(i => labels(i).includes("enhancement")).length;
+
+        repoSummaries.push({
+          repo,
+          openCount: realIssues.length,
+          criticalCount,
+          bugCount,
+          enhancementCount,
+          oldest: realIssues.length > 0 ? realIssues[0]!.created_at : null,
+          issues: realIssues.map(i => ({
+            number: i.number,
+            title: i.title,
+            labels: labels(i),
+            createdAt: i.created_at,
+            updatedAt: i.updated_at,
+            author: i.user?.login ?? "unknown",
+          })),
+        });
+      } catch {
+        // Skip unreachable repos
+      }
+    }
+
+    return Response.json({
+      totalOpen: repoSummaries.reduce((s, r) => s + r.openCount, 0),
+      criticalOpen: repoSummaries.reduce((s, r) => s + r.criticalCount, 0),
+      bugOpen: repoSummaries.reduce((s, r) => s + r.bugCount, 0),
+      enhancementOpen: repoSummaries.reduce((s, r) => s + r.enhancementCount, 0),
+      repos: repoSummaries,
+    });
+  }
+
   return [
     { method: "GET",  path: "/api/ci-health",          handler: () => handleGetCiHealth() },
     { method: "GET",  path: "/api/pr-pipeline",        handler: () => handleGetPrPipeline() },
     { method: "GET",  path: "/api/branch-drift",       handler: () => handleGetBranchDrift() },
     { method: "GET",  path: "/api/branch-protection",  handler: () => handleGetBranchProtection() },
+    { method: "GET",  path: "/api/github-issues",      handler: () => handleGetGithubIssues() },
     { method: "POST", path: "/api/github/issues",      handler: (req) => handleCreateIssue(req) },
   ];
 }

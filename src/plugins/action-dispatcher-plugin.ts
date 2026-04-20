@@ -163,11 +163,11 @@ export class ActionDispatcherPlugin implements Plugin {
     }
 
     try {
-      // Tier-0 actions are declarative world-state-only effects that don't require a
-      // skill call — their effects were already applied above. Resolve immediately as
-      // success without a dispatch. (Arc 1.4 removed the meta.topic indirection which
-      // used to gate this; the tier check preserves the original semantics.)
-      if (action.tier === "tier_0") {
+      // Tier-0 actions with no dispatch intent are pure state effects — their
+      // effects were already applied above. Complete immediately.
+      // Actions that declare fireAndForget fall through to the dispatch path
+      // below so they actually publish to agent.skill.request.
+      if (action.tier === "tier_0" && !action.meta.fireAndForget) {
         await this.completeAction(action, correlationId, parentCorrelationId, startedAt, true);
         return;
       }

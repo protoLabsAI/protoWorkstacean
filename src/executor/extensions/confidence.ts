@@ -16,7 +16,7 @@
  *     ConfidenceSample, publishes `autonomous.confidence.{systemActor}.{skill}`
  *     for observability.
  *
- * Extension URI: https://protolabs.ai/a2a/ext/confidence-v1
+ * Extension URI: https://proto-labs.ai/a2a/ext/confidence-v1
  */
 
 import type { EventBus } from "../../../lib/types.ts";
@@ -26,7 +26,7 @@ import {
   type ExtensionContext,
 } from "../extension-registry.ts";
 
-export const CONFIDENCE_URI = "https://protolabs.ai/a2a/ext/confidence-v1";
+export const CONFIDENCE_URI = "https://proto-labs.ai/a2a/ext/confidence-v1";
 
 /** One observed confidence score from a completed task. */
 export interface ConfidenceSample {

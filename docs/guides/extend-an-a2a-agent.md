@@ -41,11 +41,11 @@ Here's what it looks like when an agent opts in to all five:
     "pushNotifications": true,
     "stateTransitionHistory": false,
     "extensions": [
-      { "uri": "https://protolabs.ai/a2a/ext/cost-v1" },
-      { "uri": "https://protolabs.ai/a2a/ext/confidence-v1" },
+      { "uri": "https://proto-labs.ai/a2a/ext/cost-v1" },
+      { "uri": "https://proto-labs.ai/a2a/ext/confidence-v1" },
 
       {
-        "uri": "https://protolabs.ai/a2a/ext/effect-domain-v1",
+        "uri": "https://proto-labs.ai/a2a/ext/effect-domain-v1",
         "params": {
           "skills": {
             "pr_review":     { "effects": [{ "domain": "pr_pipeline", "path": "data.conflicting", "delta": -1, "confidence": 0.7 }] },
@@ -56,7 +56,7 @@ Here's what it looks like when an agent opts in to all five:
       },
 
       {
-        "uri": "https://protolabs.ai/a2a/ext/blast-v1",
+        "uri": "https://proto-labs.ai/a2a/ext/blast-v1",
         "params": {
           "skills": {
             "sitrep":          { "radius": "self" },
@@ -69,7 +69,7 @@ Here's what it looks like when an agent opts in to all five:
       },
 
       {
-        "uri": "https://protolabs.ai/a2a/ext/hitl-mode-v1",
+        "uri": "https://proto-labs.ai/a2a/ext/hitl-mode-v1",
         "params": {
           "skills": {
             "sitrep":          { "mode": "autonomous" },

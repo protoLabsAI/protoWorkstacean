@@ -146,7 +146,7 @@ targets: [all]
     expect(ceremonies[0]!.enabled).toBe(true);
   });
 
-  test("respects enabled: false — excluded from returned array", () => {
+  test("returns disabled ceremonies with enabled: false (so hot-reload can cancel timers)", () => {
     writeFileSync(
       join(TEST_DIR, "ceremonies", "board.health.yaml"),
       `id: board.health
@@ -159,7 +159,9 @@ enabled: false
     );
 
     const ceremonies = loader.loadGlobal();
-    expect(ceremonies).toHaveLength(0);
+    expect(ceremonies).toHaveLength(1);
+    expect(ceremonies[0]!.id).toBe("board.health");
+    expect(ceremonies[0]!.enabled).toBe(false);
   });
 
   test("loads notifyChannel when present", () => {

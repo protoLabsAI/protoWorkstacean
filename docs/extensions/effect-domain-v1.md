@@ -4,7 +4,7 @@ title: "Extension: x-protolabseffect-domain-v1"
 
 `x-protolabseffect-domain-v1` is an A2A agent card extension that lets skills declare their expected world-state mutations. The L1 planner reads these declarations to score and select candidate skills when building a plan.
 
-**Extension URI**: `https://protolabs.ai/a2a/ext/effect-domain-v1`
+**Extension URI**: `https://proto-labs.ai/a2a/ext/effect-domain-v1`
 
 ---
 
@@ -26,7 +26,7 @@ Declared inside the A2A agent card under `capabilities.extensions`:
 ```yaml
 capabilities:
   extensions:
-    - uri: https://protolabs.ai/a2a/ext/effect-domain-v1
+    - uri: https://proto-labs.ai/a2a/ext/effect-domain-v1
       params:
         skills:
           <skill_name>:
@@ -55,7 +55,7 @@ A skill may declare multiple effects if it mutates more than one path.
 ```yaml
 capabilities:
   extensions:
-    - uri: https://protolabs.ai/a2a/ext/effect-domain-v1
+    - uri: https://proto-labs.ai/a2a/ext/effect-domain-v1
       params:
         skills:
           pr_review:
@@ -117,7 +117,7 @@ Add the extension to the agent's `/.well-known/agent-card.json`:
   "capabilities": {
     "extensions": [
       {
-        "uri": "https://protolabs.ai/a2a/ext/effect-domain-v1",
+        "uri": "https://proto-labs.ai/a2a/ext/effect-domain-v1",
         "params": {
           "skills": {
             "pr_review": {
@@ -139,4 +139,4 @@ Add the extension to the agent's `/.well-known/agent-card.json`:
 
 ## Versioning
 
-This is version 1 of the effect-domain extension. The URI `https://protolabs.ai/a2a/ext/effect-domain-v1` is stable. Breaking changes (field renames, semantic changes to `confidence` interpretation) will be published under a new versioned URI.
+This is version 1 of the effect-domain extension. The URI `https://proto-labs.ai/a2a/ext/effect-domain-v1` is stable. Breaking changes (field renames, semantic changes to `confidence` interpretation) will be published under a new versioned URI.

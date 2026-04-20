@@ -4,7 +4,7 @@ title: "Extension: x-protolabs/cost-v1"
 
 `x-protolabs/cost-v1` records per-(agent, skill) token + wall-time actuals for every A2A dispatch, feeds a rolling in-memory store, and publishes `autonomous.cost.*` observability events. The planner reads from the store to rank candidate skills by observed success rate + cost-per-call.
 
-**Extension URI**: `https://protolabs.ai/a2a/ext/cost-v1`
+**Extension URI**: `https://proto-labs.ai/a2a/ext/cost-v1`
 
 ---
 

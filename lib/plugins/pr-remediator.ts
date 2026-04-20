@@ -358,21 +358,24 @@ async function ghUpdateBranch(
 /**
  * Is this PR in a class that Quinn can auto-approve?
  *
- *   - dependabot / renovate authors (automated dep bumps)
+ *   - dependabot / renovate / github-actions authors (automated changes)
  *   - "promote:" title prefix (release pipeline — content already reviewed)
- *   - "chore(deps" title prefix (manual dep bump)
+ *   - "chore(deps" / "chore(release" title prefix (automated dep/version bumps)
+ *   - "docs(" title prefix (documentation-only changes)
+ *   - "chore:" prefix for back-merge and other maintenance PRs
  *
- * All three classes are structurally safe: they either contain no
- * hand-written code (dep bumps) or are re-promoting content that's
- * already passed review on the upstream branch.
+ * All classes are structurally safe: they either contain no hand-written
+ * code (dep bumps, releases, back-merges), are re-promoting content
+ * that's already passed review, or are documentation-only.
  */
-const AUTO_APPROVE_AUTHORS = new Set(["dependabot[bot]", "renovate[bot]"]);
-const AUTO_APPROVE_TITLE_PREFIXES = ["promote:", "chore(deps"];
+const AUTO_APPROVE_AUTHORS = new Set(["dependabot[bot]", "renovate[bot]", "app/github-actions"]);
+const AUTO_APPROVE_TITLE_PREFIXES = ["promote:", "chore(deps", "chore(release", "chore:", "docs("];
 
 function isAutoApproveClass(pr: PrDomainEntry): boolean {
   if (AUTO_APPROVE_AUTHORS.has(pr.author)) return true;
+  const lower = pr.title.toLowerCase();
   for (const prefix of AUTO_APPROVE_TITLE_PREFIXES) {
-    if (pr.title.startsWith(prefix)) return true;
+    if (lower.startsWith(prefix)) return true;
   }
   return false;
 }
@@ -543,6 +546,15 @@ export class PrRemediatorPlugin implements Plugin {
         // tick flips readyToMerge, _handleMergeReady auto-merges.
         void this._runAutoApprovePass().catch(err =>
           console.error("[pr-remediator] auto-approve pass error:", err),
+        );
+        // Self-dispatch: drive remediation directly from world state.
+        // The pr.remediate.* topics exist for external triggers but are not
+        // published by the GOAP action dispatcher (tier_0 actions dispatch to
+        // agent.skill.request, not custom topics). Self-driving from the
+        // cached snapshot ensures remediation runs on every domain tick
+        // regardless of how the action dispatcher routes.
+        void this._selfDispatchRemediation(msg).catch(err =>
+          console.error("[pr-remediator] self-dispatch error:", err),
         );
       } else if (state?.domains) {
         // Domain missing from a valid state update — drop stale cache
@@ -862,6 +874,28 @@ export class PrRemediatorPlugin implements Plugin {
         this.autoApprovedAt.delete(key);
       }
     }
+  }
+
+  // ── Self-dispatch ─────────────────────────────────────────────────────────
+  //
+  // Checks the cached pr_pipeline snapshot and invokes the appropriate
+  // remediation handler for each active class. Loop protection
+  // (_shouldDispatch) prevents runaway cascades — the same guards apply
+  // whether the handler was triggered by a bus message or by self-dispatch.
+
+  private async _selfDispatchRemediation(triggerMsg: BusMessage): Promise<void> {
+    const data = this.latestPrData;
+    if (!data?.prs?.length) return;
+
+    const readyCount = data.prs.filter(p => p.readyToMerge).length;
+    const dirtyCount = data.prs.filter(p => p.mergeable === "dirty").length;
+    const failCiCount = data.prs.filter(p => p.ciStatus === "fail").length;
+    const feedbackCount = data.prs.filter(p => p.reviewState === "changes_requested").length;
+
+    if (readyCount > 0) void this._handleMergeReady(triggerMsg);
+    if (dirtyCount > 0) void this._handleUpdateBranch(triggerMsg);
+    if (failCiCount > 0) void this._handleFixCi(triggerMsg);
+    if (feedbackCount > 0) void this._handleAddressFeedback(triggerMsg);
   }
 
   // ── merge_ready ────────────────────────────────────────────────────────────

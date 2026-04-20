@@ -300,21 +300,27 @@ export function createBusTools(opts: BusToolsOptions = {}) {
 
   const manageBoard = tool(
     "manage_board",
-    "Create or update features on the protoMaker board. Use action 'create' to file " +
-      "new work items, 'update' to change status/priority/description of existing features.",
+    "Create, update, or list features on the protoMaker board. Use 'list' to query " +
+      "features by status, 'create' to file new work items, 'update' to change existing features.",
     {
-      action: z.enum(["create", "update"]).describe("Operation to perform"),
+      action: z.enum(["create", "update", "list"]).describe("Operation to perform"),
       projectPath: z.string().describe("Absolute path to the project directory"),
       title: z.string().optional().describe("Feature title (required for create)"),
       description: z.string().optional().describe("Feature description"),
       featureId: z.string().optional().describe("Feature ID (required for update)"),
-      status: z.enum(["backlog", "in-progress", "review", "done"]).optional(),
+      status: z.enum(["backlog", "in-progress", "review", "done"]).optional().describe("Filter by status (for list) or set status (for create/update)"),
       priority: z.number().optional().describe("0=none, 1=urgent, 2=high, 3=normal, 4=low"),
       complexity: z.enum(["small", "medium", "large", "architectural"]).optional(),
       projectSlug: z.string().optional(),
     },
     async ({ action, projectPath, title, description, featureId, status, priority, complexity, projectSlug }) => {
       try {
+        if (action === "list") {
+          const query = new URLSearchParams({ projectPath });
+          if (status) query.set("status", status);
+          const data = await http.get(`/api/board/features/list?${query}`);
+          return ok(data);
+        }
         const endpoint = action === "create" ? "/api/board/features/create" : "/api/board/features/update";
         const data = await http.post(endpoint, {
           projectPath, title, description, featureId, status, priority, complexity, projectSlug,
@@ -384,23 +390,66 @@ export function createBusTools(opts: BusToolsOptions = {}) {
     },
   );
 
-  const webSearch = tool(
-    "web_search",
-    "Quick web search via SearXNG. Use for simple factual lookups. " +
+  const searxngSearch = tool(
+    "searxng_search",
+    "Search via SearXNG with category routing (general, news, science, it). " +
+      "Replaces dedicated web search, news, Wikipedia tools by routing through SearXNG categories. " +
+      "Supports bang syntax in the query (!wp for Wikipedia, !scholar for Google Scholar, !gh for GitHub). " +
+      "Returns results, direct answers, infoboxes, and suggestions. " +
       "For deep multi-source research, use chat_with_agent with the researcher agent instead.",
     {
-      query: z.string().describe("Search query"),
+      query: z.string().describe("Search query. Supports SearXNG bang syntax (e.g. !wp, !scholar, !gh)."),
+      category: z.enum(["general", "news", "science", "it"]).optional().describe("SearXNG category. Defaults to general."),
+      time_range: z.enum(["day", "week", "month", "year"]).optional().describe("Limit results to a time range."),
+      max_results: z.number().optional().describe("Max results to return. Default: 10."),
     },
-    async ({ query }) => {
-      const searxngUrl = process.env.SEARXNG_URL ?? "http://searxng:8080";
+    async ({ query, category, time_range, max_results }) => {
+      const endpoint = process.env.SEARXNG_URL ?? "http://searxng:8080";
       try {
-        const params = new URLSearchParams({ q: query, format: "json", engines: "google,duckduckgo" });
-        const resp = await fetch(`${searxngUrl}/search?${params}`, { signal: AbortSignal.timeout(10_000) });
+        const url = new URL("/search", endpoint);
+        url.searchParams.set("q", query);
+        url.searchParams.set("format", "json");
+        if (category) url.searchParams.set("categories", category);
+        if (time_range) url.searchParams.set("time_range", time_range);
+
+        const resp = await fetch(url.toString(), {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(15_000),
+        });
         if (!resp.ok) return err(`SearXNG ${resp.status}`);
-        const data = await resp.json() as { results?: Array<{ title: string; content?: string; url?: string }> };
-        const results = (data.results ?? []).slice(0, 5);
-        if (!results.length) return ok({ results: [], message: "No results found." });
-        return ok({ results: results.map(r => ({ title: r.title, snippet: r.content ?? "", url: r.url ?? "" })) });
+
+        const data = await resp.json() as {
+          results?: Array<{ title: string; url: string; content: string; engine: string; score?: number }>;
+          suggestions?: string[];
+          infoboxes?: Array<{ infobox: string; content: string; attributes?: Array<{ label: string; value: string }> }>;
+          answers?: string[];
+        };
+
+        const cap = max_results ?? 10;
+        const results = (data.results ?? []).slice(0, cap).map(r => ({
+          title: r.title, url: r.url, snippet: r.content, engine: r.engine,
+          ...(r.score != null ? { score: r.score } : {}),
+        }));
+        const answers = data.answers ?? [];
+        const suggestions = data.suggestions ?? [];
+        const infoboxes = (data.infoboxes ?? []).map(ib => ({
+          title: ib.infobox, content: ib.content,
+          attributes: ib.attributes ?? [],
+        }));
+
+        if (!results.length && !answers.length && !infoboxes.length) {
+          return ok({ results: [], message: `No results for "${query}"`, suggestions });
+        }
+
+        return ok({
+          query,
+          ...(category ? { category } : {}),
+          ...(time_range ? { time_range } : {}),
+          results,
+          ...(answers.length ? { answers } : {}),
+          ...(infoboxes.length ? { infoboxes } : {}),
+          ...(suggestions.length ? { suggestions } : {}),
+        });
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
       }
@@ -525,7 +574,7 @@ export function createBusTools(opts: BusToolsOptions = {}) {
   return [
     publishEvent, getWorldState, getIncidents, reportIncident, getProjects,
     getCiHealth, getPrPipeline, getBranchDrift, getOutcomes, getCeremonies, runCeremony,
-    chatWithAgent, delegateTask, manageBoard, createGitHubIssue, manageCron, webSearch,
+    chatWithAgent, delegateTask, manageBoard, createGitHubIssue, manageCron, searxngSearch,
     getCostSummary, getConfidenceSummary, proposeConfigChange, msgOperator,
   ];
 }
@@ -551,7 +600,7 @@ export const BUS_TOOL_NAMES = [
   "manage_board",
   "create_github_issue",
   "manage_cron",
-  "web_search",
+  "searxng_search",
   // Discord operations (protoBot agent)
   "discord_server_stats",
   "discord_list_channels",

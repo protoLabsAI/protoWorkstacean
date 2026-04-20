@@ -1,8 +1,20 @@
 # protoWorkstacean
 
-Homeostatic agent orchestration platform. Monitors world state, evaluates goals, and drives the protoLabs agent fleet — **Ava** (chief-of-staff), **protoBot** (Discord infrastructure: channels, categories, webhooks), **Quinn** (QA/PR review), **Researcher** (deep research), **Jon** (content strategy), **protoPen** (security/pentest), plus the protoMaker team — to close deviations continuously and autonomously.
+Homeostatic agent orchestration platform. Monitors world state, evaluates goals, and drives the protoLabs agent fleet to close deviations continuously and autonomously.
 
-The loop observes skill execution through A2A extensions, writes episodic memory to Graphiti, and ranks future candidates by observed cost/confidence — so the planner gets better the more it runs. See [docs/explanation/self-improving-loop.md](docs/explanation/self-improving-loop.md).
+**Ava** is the primary communication interface — all user interaction flows through her. She directs the rest of the system through tools and delegation:
+
+| Agent | Role | Runtime |
+|---|---|---|
+| **Ava** | Chief-of-staff. Orchestration, delegation, observation, self-improvement. 22 tools, 7 skills. | In-process (LangGraph) |
+| **protoBot** | Discord server infrastructure: channels, categories, webhooks | In-process (LangGraph) |
+| **Quinn** | QA engineer: PR review, bug triage, security analysis | External (A2A) |
+| **protoMaker** | Board operations, velocity tracking, auto-mode | External (A2A) |
+| **Researcher** | Deep multi-source research: papers, code, web | External (A2A) |
+| **Jon** | Content strategy, antagonistic review | External (A2A) |
+| **protoPen** | Security/pentest: recon, threat intel | External (A2A) |
+
+The loop observes skill execution through A2A extensions, writes episodic memory to Graphiti, and ranks future candidates by observed cost/confidence — so the planner gets better the more it runs. When the system detects chronic failures, Ava proposes new goals and config changes (subject to human approval) to close the self-improvement loop. See [docs/explanation/self-improving-loop.md](docs/explanation/self-improving-loop.md).
 
 ---
 
@@ -13,14 +25,16 @@ External surfaces (GitHub, Discord, Plane, HTTP)
   → Interface plugins → Event Bus
     → RouterPlugin → agent.skill.request
       → SkillDispatcherPlugin → ExecutorRegistry
-        → ProtoSdkExecutor (in-process @protolabsai/sdk)
-        → A2AExecutor (HTTP/JSON-RPC 2.0 → protoMaker team / Quinn / protoContent / Frank)
+        → DeepAgentExecutor (in-process LangGraph agents: Ava, protoBot)
+        → A2AExecutor (HTTP/JSON-RPC 2.0 → Quinn / protoMaker / Researcher / Jon / protoPen)
 
 World engine loop (parallel):
   WorldStateEngine (domain pollers)
     → GoalEvaluatorPlugin → world.goal.violated
       → PlannerPluginL0 → world.action.dispatch
         → ActionDispatcherPlugin → agent.skill.request
+          → Ava: debug_ci_failures, fleet_incident_response, downshift_models,
+            investigate_orphaned_skills, goal_proposal, diagnose_pr_stuck
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for the full picture.
@@ -73,7 +87,7 @@ Plugins are loaded in `src/index.ts`. Each implements `install(bus) / uninstall(
 | Plugin | Condition | Role |
 |---|---|---|
 | `RouterPlugin` | always | Translates inbound messages + cron events → `agent.skill.request` |
-| `AgentRuntimePlugin` | always | Registers `ProtoSdkExecutor` per `workspace/agents/*.yaml` into `ExecutorRegistry` |
+| `AgentRuntimePlugin` | always | Registers `DeepAgentExecutor` per `workspace/agents/*.yaml` into `ExecutorRegistry` |
 | `SkillBrokerPlugin` | always | Registers `A2AExecutor` per `workspace/agents.yaml` into `ExecutorRegistry` |
 | `SkillDispatcherPlugin` | always | Sole `agent.skill.request` subscriber; dispatches via `ExecutorRegistry` |
 | `WorldStateEngine` | always | Generic domain poller; domains registered via `discoverAndRegister()` at startup |
@@ -110,7 +124,7 @@ ExecutorRegistry.resolve(skill, targets?)
 
 | Type | Class | When |
 |---|---|---|
-| `proto-sdk` | `ProtoSdkExecutor` | In-process agents defined in `workspace/agents/*.yaml` |
+| `deep-agent` | `DeepAgentExecutor` | In-process LangGraph agents defined in `workspace/agents/*.yaml` |
 | `a2a` | `A2AExecutor` | External agents via HTTP/JSON-RPC 2.0 (`workspace/agents.yaml`) |
 | `function` | `FunctionExecutor` | Inline functions, used in tests |
 | `workflow` | `WorkflowExecutor` | Sequences of bus publishes with optional reply waiting |

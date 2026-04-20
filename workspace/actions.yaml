@@ -631,3 +631,98 @@ actions:
       skillHint: investigate_orphaned_skills
       agentId: ava
       fireAndForget: true
+
+  # ── Issue Zero — triage open GitHub issues ────────────────────────
+  #
+  # Dispatches Ava to triage issues when they accumulate. Critical
+  # issues get immediate triage; bugs get prioritized; the total
+  # count alert surfaces when enhancement debt piles up.
+
+  - id: alert.issues_critical
+    goalId: issues.zero_critical
+    tier: tier_0
+    priority: 90
+    cost: 0
+    name: "Alert on critical open GitHub issues"
+    preconditions:
+      - path: "extensions.github_issues_available"
+        operator: eq
+        value: true
+      - path: "domains.github_issues.data.criticalOpen"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: action.issues_triage_critical
+    goalId: issues.zero_critical
+    tier: tier_0
+    priority: 80
+    cost: 1
+    name: "Dispatch Ava to triage critical GitHub issues"
+    preconditions:
+      - path: "extensions.github_issues_available"
+        operator: eq
+        value: true
+      - path: "domains.github_issues.data.criticalOpen"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      skillHint: issue_triage
+      agentId: ava
+      fireAndForget: true
+
+  - id: alert.issues_bugs
+    goalId: issues.zero_bugs
+    tier: tier_0
+    priority: 40
+    cost: 0
+    name: "Alert on open bug issues"
+    preconditions:
+      - path: "extensions.github_issues_available"
+        operator: eq
+        value: true
+      - path: "domains.github_issues.data.bugOpen"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      fireAndForget: true
+
+  - id: action.issues_triage_bugs
+    goalId: issues.zero_bugs
+    tier: tier_0
+    priority: 35
+    cost: 1
+    name: "Dispatch Ava to triage open bug issues"
+    preconditions:
+      - path: "extensions.github_issues_available"
+        operator: eq
+        value: true
+      - path: "domains.github_issues.data.bugOpen"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      skillHint: issue_triage
+      agentId: ava
+      fireAndForget: true
+
+  - id: alert.issues_total_high
+    goalId: issues.total_low
+    tier: tier_0
+    priority: 10
+    cost: 0
+    name: "Alert when total open issues exceed threshold"
+    preconditions:
+      - path: "extensions.github_issues_available"
+        operator: eq
+        value: true
+      - path: "domains.github_issues.data.totalOpen"
+        operator: gt
+        value: 5
+    effects: []
+    meta:
+      fireAndForget: true
