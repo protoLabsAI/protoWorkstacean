@@ -10,10 +10,21 @@
  *
  * Inbound topics:
  *   autonomous.outcome.#  — every autonomous task terminal state
+ *
+ * Outcome attribution (issue #459):
+ *   Outcome `systemActor` values are whitelisted against the live
+ *   ExecutorRegistry before being recorded under the per-agent window.
+ *   Unknown actors (plugin names like `pr-remediator`, synthetic labels like
+ *   `auto-triage-sweep`, `goap`, `user`) are routed to a separate
+ *   `systemActors[]` bucket in the snapshot so they don't pollute agentCount,
+ *   reachableCount, orphanedSkillCount, or maxFailureRate1h. Same chokepoint
+ *   discipline as the ActionDispatcher cooldown (#437) and registry guard
+ *   (#444): invariants belong at the point an outcome is written.
  */
 
 import type { Plugin, EventBus } from "../../lib/types.ts";
 import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
+import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import { MODEL_RATES } from "../../lib/types/budget.ts";
 
 const WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 hours
@@ -67,6 +78,21 @@ export interface AgentFleetMetrics {
   failureRate1h: number;
 }
 
+/**
+ * Outcome attribution for a systemActor that is NOT a registered A2A or
+ * DeepAgent executor. Tracked separately so dashboards + GOAP selectors can
+ * see that traffic without treating it as agent health signal.
+ *
+ * Examples: `goap`, `pr-remediator`, `auto-triage-sweep`, `outcome-analysis`,
+ * `ceremony.*`. These are plugin / subsystem labels, not agents.
+ */
+export interface SystemActorOutcomeSummary {
+  systemActor: string;
+  totalOutcomes: number;
+  successCount: number;
+  failureCount: number;
+}
+
 export interface FleetHealthSnapshot {
   agents: AgentFleetMetrics[];
   /** Always 24 — documents the rolling window. */
@@ -79,12 +105,21 @@ export interface FleetHealthSnapshot {
   /** Sum of all LLM costs across all agents over the 24h window (USD). Used by fleet.cost_under_budget (Arc 8.3). */
   totalCostUsd1d: number;
   /**
-   * Count of skills seen in any outcome in the 24h window that have had
+   * Count of skills seen in any agent outcome in the 24h window that have had
    * no successful execution during that window. > 0 signals capability
-   * regression — a skill is active but consistently failing.
+   * regression — a skill is active but consistently failing. Only counts
+   * outcomes recorded against REAL agents; synthetic-actor outcomes are
+   * excluded so plugin failures don't inflate the orphan count (#459).
    * Used by fleet.no_skill_orphaned (Arc 8.5).
    */
   orphanedSkillCount: number;
+  /**
+   * Outcomes attributed to systemActor values that are NOT registered
+   * executors — plugin / subsystem labels like `pr-remediator`,
+   * `auto-triage-sweep`, `goap`. Kept separate so agentCount and the fleet
+   * health metrics reflect the real agent fleet (#459).
+   */
+  systemActors: SystemActorOutcomeSummary[];
   collectedAt: number;
 }
 
@@ -98,8 +133,25 @@ export class AgentFleetHealthPlugin implements Plugin {
 
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
-  /** Per-agent rolling window. Keys are systemActor values. */
+  /** Per-agent rolling window. Keys are systemActor values that match a registered executor. */
   private readonly agentWindows = new Map<string, OutcomeRecord[]>();
+  /** Per-systemActor rolling window for names NOT in the ExecutorRegistry. */
+  private readonly systemActorWindows = new Map<string, OutcomeRecord[]>();
+  /** Synthetic actors seen since last startup — used for the one-time warn. */
+  private readonly seenSyntheticActors = new Set<string>();
+
+  constructor(
+    /**
+     * ExecutorRegistry handle for outcome-attribution whitelist (issue #459).
+     * When set, every inbound outcome's `systemActor` is checked against the
+     * live registry before being aggregated into `agents[]`. Absent-from-
+     * registry actors land in a separate `systemActors[]` bucket. When the
+     * registry is not wired (test fixtures that only exercise aggregation
+     * math), every actor is treated as an agent — preserving pre-#459 shape
+     * for legacy tests until they opt in.
+     */
+    private readonly executorRegistry?: ExecutorRegistry,
+  ) {}
 
   install(bus: EventBus): void {
     this.bus = bus;
@@ -132,6 +184,8 @@ export class AgentFleetHealthPlugin implements Plugin {
     const agents: AgentFleetMetrics[] = [];
 
     // Per-skill: track whether any success exists in the window.
+    // Only real agents contribute — synthetic-actor failures shouldn't
+    // flag a skill as orphaned (#459).
     const skillSeenInWindow = new Set<string>();
     const skillHasSuccessInWindow = new Set<string>();
 
@@ -196,7 +250,30 @@ export class AgentFleetHealthPlugin implements Plugin {
       if (!skillHasSuccessInWindow.has(skill)) orphanedSkillCount++;
     }
 
-    return { agents, windowHours: 24, maxFailureRate1h, totalCostUsd1d, orphanedSkillCount, collectedAt: now };
+    // Prune + summarize synthetic-actor buckets.
+    const systemActors: SystemActorOutcomeSummary[] = [];
+    for (const [actor, records] of this.systemActorWindows) {
+      const fresh = records.filter(r => r.timestamp >= cutoff);
+      this.systemActorWindows.set(actor, fresh);
+      if (fresh.length === 0) continue;
+      const successCount = fresh.filter(r => r.success).length;
+      systemActors.push({
+        systemActor: actor,
+        totalOutcomes: fresh.length,
+        successCount,
+        failureCount: fresh.length - successCount,
+      });
+    }
+
+    return {
+      agents,
+      windowHours: 24,
+      maxFailureRate1h,
+      totalCostUsd1d,
+      orphanedSkillCount,
+      systemActors,
+      collectedAt: now,
+    };
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
@@ -217,9 +294,43 @@ export class AgentFleetHealthPlugin implements Plugin {
       failureReason: p.success ? undefined : (p.taskState ?? "failed"),
     };
 
-    const existing = this.agentWindows.get(p.systemActor) ?? [];
+    if (this._isRegisteredAgent(p.systemActor)) {
+      const existing = this.agentWindows.get(p.systemActor) ?? [];
+      existing.push(record);
+      this.agentWindows.set(p.systemActor, existing);
+      return;
+    }
+
+    // Synthetic actor: plugin / subsystem label that isn't a real executor.
+    // Log once per distinct actor so operators can see what's being filtered
+    // without flooding on every outcome.
+    if (!this.seenSyntheticActors.has(p.systemActor)) {
+      this.seenSyntheticActors.add(p.systemActor);
+      console.warn(
+        `[agent-fleet-health] synthetic_actor_filtered systemActor=${p.systemActor} ` +
+          `skill=${p.skill} — not in ExecutorRegistry; aggregating under systemActors[] ` +
+          `instead of agents[]. Fix source so it doesn't masquerade as an agent.`,
+      );
+    }
+    const existing = this.systemActorWindows.get(p.systemActor) ?? [];
     existing.push(record);
-    this.agentWindows.set(p.systemActor, existing);
+    this.systemActorWindows.set(p.systemActor, existing);
+  }
+
+  /**
+   * Returns true when `actor` is a registered executor agentName.
+   *
+   * No registry wired → every actor is treated as an agent (preserves
+   * pre-#459 aggregation shape for legacy tests that don't need the guard).
+   * Empty registry → nothing is an agent; all outcomes go to systemActors[].
+   */
+  private _isRegisteredAgent(actor: string): boolean {
+    if (!this.executorRegistry) return true;
+    const known = this.executorRegistry
+      .list()
+      .map(r => r.agentName)
+      .filter((n): n is string => typeof n === "string" && n.length > 0);
+    return known.includes(actor);
   }
 }
 
