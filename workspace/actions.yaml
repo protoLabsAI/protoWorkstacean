@@ -498,40 +498,49 @@ actions:
   # incident, page on-call, and pause auto-routing to the stuck
   # agent until its failure rate falls below 50%.
 
-  - id: alert.fleet_agent_stuck
-    goalId: fleet.no_agent_stuck
-    tier: tier_0
-    priority: 20
-    cost: 0
-    name: "Alert when an agent's 1h failure rate exceeds 50%"
-    preconditions:
-      - path: "extensions.agent_fleet_health_available"
-        operator: eq
-        value: true
-      - path: "domains.agent_fleet_health.data.maxFailureRate1h"
-        operator: gt
-        value: 0.5
-    effects: []
-    meta:
-      fireAndForget: true
-
-  - id: action.fleet_incident_response
-    goalId: fleet.no_agent_stuck
-    tier: tier_0
-    priority: 30
-    cost: 1
-    name: "Dispatch Ava to open incident, page on-call, and pause routing for stuck agent"
-    preconditions:
-      - path: "extensions.agent_fleet_health_available"
-        operator: eq
-        value: true
-      - path: "domains.agent_fleet_health.data.maxFailureRate1h"
-        operator: gt
-        value: 0.5
-    effects: []
-    meta:
-      skillHint: fleet_incident_response
-      fireAndForget: true
+  # DISABLED 2026-04-20 — both actions had no cooldown and no `effects`,
+  # so GOAP re-fired them every planning cycle while the goal stayed
+  # violated. Result: 7+ duplicate INC-* incidents filed in seconds plus
+  # Discord alert spam (observed: INC-003 through INC-009 in ~30s,
+  # auto-triage-sweep stuck loop). Reinstate after a dedup/cooldown is
+  # added on the action side AND Ava's fleet_incident_response skill
+  # checks for an existing open incident before filing a new one.
+  # Tracking: protoLabsAI/protoWorkstacean#TBD
+  #
+  # - id: alert.fleet_agent_stuck
+  #   goalId: fleet.no_agent_stuck
+  #   tier: tier_0
+  #   priority: 20
+  #   cost: 0
+  #   name: "Alert when an agent's 1h failure rate exceeds 50%"
+  #   preconditions:
+  #     - path: "extensions.agent_fleet_health_available"
+  #       operator: eq
+  #       value: true
+  #     - path: "domains.agent_fleet_health.data.maxFailureRate1h"
+  #       operator: gt
+  #       value: 0.5
+  #   effects: []
+  #   meta:
+  #     fireAndForget: true
+  #
+  # - id: action.fleet_incident_response
+  #   goalId: fleet.no_agent_stuck
+  #   tier: tier_0
+  #   priority: 30
+  #   cost: 1
+  #   name: "Dispatch Ava to open incident, page on-call, and pause routing for stuck agent"
+  #   preconditions:
+  #     - path: "extensions.agent_fleet_health_available"
+  #       operator: eq
+  #       value: true
+  #     - path: "domains.agent_fleet_health.data.maxFailureRate1h"
+  #       operator: gt
+  #       value: 0.5
+  #   effects: []
+  #   meta:
+  #     skillHint: fleet_incident_response
+  #     fireAndForget: true
 
   # ── HITL routing health ───────────────────────────────────────────
   #
