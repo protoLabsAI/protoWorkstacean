@@ -81,14 +81,18 @@ agents:
   # bug_triage, onboard_project, provision_discord, plan, plan_resume).
   # Auth: AVA_API_KEY (the same Ava-app key used for HTTP /api/* — protoMaker
   # validates X-API-Key against its per-app key table).
+  #
+  # No subscribesTo: protoMaker is reached via explicit GOAP `targets:
+  # [protomaker]` dispatches (board_health, auto_mode, bug_triage etc.) — it
+  # is not a broadcast inbound listener. Quinn already subscribes to GitHub
+  # inbound and triages on protoMaker's behalf via `bug_triage`; adding a
+  # second subscriber here would duplicate dispatch with no extra value.
   - name: protomaker
     url: http://automaker-server:3008/a2a
     auth:
       scheme: apiKey
       credentialsEnv: AVA_API_KEY
     streaming: false
-    subscribesTo:
-      - message.inbound.github.#
 
   # protopen — security/pentest/RF recon. Remote via Tailscale
   # (PROTOPEN_BASE_URL defaults to http://steamdeck:7870 in homelab-iac).
