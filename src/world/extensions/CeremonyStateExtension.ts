@@ -1,10 +1,19 @@
 /**
- * CeremonyStateExtension — maintains ceremony state in WorldState.extensions.ceremonies.
+ * CeremonyStateExtension — maintains ceremony state and publishes snapshots
+ * on the `ceremony.state.snapshot` topic.
  *
  * Subscribes to ceremony.*.completed events and updates the in-memory ceremonies
- * state, then publishes a world.state.snapshot update to the EventBus.
+ * state, then publishes a `ceremony.state.snapshot` update to the EventBus.
  *
- * Consumers can read WorldState.extensions.ceremonies to get:
+ * IMPORTANT: This snapshot is NOT a WorldState — it's a CeremoniesState payload
+ * scoped to the ceremony subsystem. It MUST NOT publish on the `world.state.#`
+ * namespace because GoalEvaluatorPlugin subscribes there and expects a full
+ * WorldState shape ({ domains, extensions, ... }). A previous version published
+ * on `world.state.snapshot`, which caused every loaded goal to fire a
+ * `Selector "..." not found in world state` violation each time a ceremony
+ * completed (every 15min cron tick). See issue #424.
+ *
+ * Consumers can read CeremoniesState to get:
  *   - registered ceremonies
  *   - execution history (most recent first, capped at 100)
  *   - current status per ceremony
@@ -106,7 +115,8 @@ export class CeremonyStateExtension {
   private _publishSnapshot(): void {
     if (!this.bus) return;
 
-    const topic = "world.state.snapshot";
+    // ceremony.state.snapshot — NOT world.state.# (see class JSDoc / issue #424)
+    const topic = "ceremony.state.snapshot";
     this.bus.publish(topic, {
       id: crypto.randomUUID(),
       correlationId: crypto.randomUUID(),
