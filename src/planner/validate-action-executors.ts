@@ -10,7 +10,8 @@
  * gap surfaces in the operator dashboard instead of being buried in logs.
  *
  * Called once at startup AFTER all registrar plugins (agent-runtime,
- * skill-broker, alert-skill-executor, ceremony-skill-executor) have installed. Pre-existing
+ * skill-broker, alert-skill-executor, ceremony-skill-executor,
+ * pr-remediator-skill-executor) have installed. Pre-existing
  * unwired actions don't crash the process — but each one is a feature
  * request signal that the GOAP loop is dispatching into the void on
  * every planning cycle (issue #426).
@@ -45,8 +46,8 @@ export class UnwiredActionsError extends Error {
       `SkillDispatcherPlugin to silently drop the dispatch on every GOAP ` +
       `planning cycle.\n${lines.join("\n")}\n` +
       `Fix: register an executor (agent-runtime, skill-broker, alert-skill-executor, ` +
-      `ceremony-skill-executor, or a FunctionExecutor) for each skill, or remove the action from ` +
-      `workspace/actions.yaml.`,
+      `ceremony-skill-executor, pr-remediator-skill-executor, or a FunctionExecutor) ` +
+      `for each skill, or remove the action from workspace/actions.yaml.`,
     );
     this.name = "UnwiredActionsError";
     this.unwired = unwired;
