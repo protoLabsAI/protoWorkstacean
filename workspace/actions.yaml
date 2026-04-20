@@ -3,6 +3,13 @@
 #
 # Every action that reads a domain must guard on extensions.{domain}_available.
 # The engine sets this flag on each successful/failed tick.
+#
+# meta.cooldownMs (per-action, keyed on action id) is enforced by
+# ActionDispatcherPlugin and is the single source of dedup for GOAP-side
+# spam. Defaults: alert.* = 15 min, action.* with skillHint = 30 min,
+# action.pr_* = 5 min, ceremony.* = 30 min. Actions with their own
+# in-handler cooldown (e.g. action.dispatch_backmerge → pr-remediator)
+# omit it so the in-handler cooldown stays authoritative. See #437.
 
 actions:
   - id: alert.efficiency_low
@@ -21,6 +28,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min — alerts repeat but don't spam (#437)
 
   # alert.distribution_drift — REMOVED alongside flow.distribution_balanced goal
 
@@ -40,6 +48,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: ceremony.security_triage
     goalId: security.no_open_incidents
@@ -57,6 +66,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — ceremony nudge, treat like skill dispatch (#437)
 
   - id: alert.discord_disconnected
     goalId: services.discord_connected
@@ -77,6 +87,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.no_agents
     goalId: agents.registered
@@ -94,6 +105,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── Service + Agent Ceremonies ─────────────────────────────────────
 
@@ -116,6 +128,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — ceremony nudge (#437)
 
   # ── CI + PR Pipeline ─────────────────────────────────────────────
 
@@ -135,6 +148,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: ci.debug_failures
     goalId: ci.success_rate_healthy
@@ -153,6 +167,7 @@ actions:
     meta:
       skillHint: debug_ci_failures
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   # alert.pr_conflicts was retired in favour of action.pr_update_branch below.
   # The planner-plugin-l0 violation path dispatches one action per goal per
@@ -179,6 +194,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 300000   # 5 min — PR remediation needs to be responsive (#437)
 
   - id: alert.pr_stale
     goalId: pr.no_stale
@@ -196,6 +212,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── PR Remediation — closes the loop via PrRemediatorPlugin ───────────────
 
@@ -215,6 +232,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 300000   # 5 min — PR remediation responsive window (#437)
       hitlPolicy:
         ttlMs: 1800000   # 30 minutes — auto-approve if no human responds
         onTimeout: approve
@@ -235,6 +253,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 300000   # 5 min — PR remediation responsive window (#437)
 
   - id: action.pr_address_feedback
     goalId: pr.no_changes_requested
@@ -252,6 +271,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 300000   # 5 min — PR remediation responsive window (#437)
 
   - id: alert.branch_drift
     goalId: branch.drift_low
@@ -269,6 +289,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── protoMaker team (multi-agent board runtime) ──────────────────
 
@@ -288,6 +309,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: action.protomaker_triage_blocked
     goalId: protomaker.board_healthy
@@ -307,6 +329,7 @@ actions:
       skillHint: board_health
       agentId: protomaker
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   - id: alert.protomaker_backlog_piling
     goalId: protomaker.backlog_not_piling
@@ -324,6 +347,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: action.protomaker_start_auto_mode
     goalId: protomaker.backlog_not_piling
@@ -349,6 +373,7 @@ actions:
       skillHint: auto_mode
       agentId: protomaker
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   # ── Branch protection ─────────────────────────────────────────────
 
@@ -365,6 +390,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.branch_unprotected
     goalId: branch.main_protected
@@ -379,6 +405,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.ci_main_red
     goalId: ci.main_last_push_green
@@ -393,6 +420,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── Branch drift remediation ──────────────────────────────────────
   #
@@ -401,6 +429,11 @@ actions:
   # The pr-remediator plugin subscribes to this topic and drives the
   # actual GitHub API calls. Idempotent — skipped if a backmerge is
   # already in flight for the same repo.
+  #
+  # No yaml-level cooldownMs: pr-remediator owns an in-handler per-repo
+  # backmerge cooldown (lib/plugins/pr-remediator.ts ~line 1265). Adding
+  # a yaml cooldown here would shadow the per-repo bucket with a single
+  # global one — keep the in-handler cooldown authoritative. See #437.
 
   - id: action.dispatch_backmerge
     goalId: branch.drift_low
@@ -431,6 +464,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.plane_stale_backlog
     goalId: plane.no_stale_backlog
@@ -445,6 +479,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.plane_unassigned_piling
     goalId: plane.unassigned_not_piling
@@ -459,6 +494,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── Memory / Graphiti health ──────────────────────────────────────
 
@@ -475,6 +511,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.memory_search_broken
     goalId: memory.search_working
@@ -489,6 +526,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── Agent fleet health ────────────────────────────────────────────
   #
@@ -497,50 +535,44 @@ actions:
   # fleet_incident_response action dispatches Ava to open an
   # incident, page on-call, and pause auto-routing to the stuck
   # agent until its failure rate falls below 50%.
+  # Re-enabled with cooldown added per #437.
 
-  # DISABLED 2026-04-20 — both actions had no cooldown and no `effects`,
-  # so GOAP re-fired them every planning cycle while the goal stayed
-  # violated. Result: 7+ duplicate INC-* incidents filed in seconds plus
-  # Discord alert spam (observed: INC-003 through INC-009 in ~30s,
-  # auto-triage-sweep stuck loop). Reinstate after a dedup/cooldown is
-  # added on the action side AND Ava's fleet_incident_response skill
-  # checks for an existing open incident before filing a new one.
-  # Tracking: protoLabsAI/protoWorkstacean#TBD
-  #
-  # - id: alert.fleet_agent_stuck
-  #   goalId: fleet.no_agent_stuck
-  #   tier: tier_0
-  #   priority: 20
-  #   cost: 0
-  #   name: "Alert when an agent's 1h failure rate exceeds 50%"
-  #   preconditions:
-  #     - path: "extensions.agent_fleet_health_available"
-  #       operator: eq
-  #       value: true
-  #     - path: "domains.agent_fleet_health.data.maxFailureRate1h"
-  #       operator: gt
-  #       value: 0.5
-  #   effects: []
-  #   meta:
-  #     fireAndForget: true
-  #
-  # - id: action.fleet_incident_response
-  #   goalId: fleet.no_agent_stuck
-  #   tier: tier_0
-  #   priority: 30
-  #   cost: 1
-  #   name: "Dispatch Ava to open incident, page on-call, and pause routing for stuck agent"
-  #   preconditions:
-  #     - path: "extensions.agent_fleet_health_available"
-  #       operator: eq
-  #       value: true
-  #     - path: "domains.agent_fleet_health.data.maxFailureRate1h"
-  #       operator: gt
-  #       value: 0.5
-  #   effects: []
-  #   meta:
-  #     skillHint: fleet_incident_response
-  #     fireAndForget: true
+  - id: alert.fleet_agent_stuck
+    goalId: fleet.no_agent_stuck
+    tier: tier_0
+    priority: 20
+    cost: 0
+    name: "Alert when an agent's 1h failure rate exceeds 50%"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.maxFailureRate1h"
+        operator: gt
+        value: 0.5
+    effects: []
+    meta:
+      fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
+
+  - id: action.fleet_incident_response
+    goalId: fleet.no_agent_stuck
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Dispatch Ava to open incident, page on-call, and pause routing for stuck agent"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.maxFailureRate1h"
+        operator: gt
+        value: 0.5
+    effects: []
+    meta:
+      skillHint: fleet_incident_response
+      fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch, expensive (#437)
 
   # ── HITL routing health ───────────────────────────────────────────
   #
@@ -562,6 +594,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
       hitlPolicy:
         ttlMs: 3600000  # 1 hour — escalate (no auto-action) so humans must intervene
         onTimeout: escalate
@@ -584,26 +617,26 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
-  # DISABLED 2026-04-20 — same no-cooldown loop bug as #436. Re-fires every
-  # GOAP cycle while fleet.cost_under_budget is violated. Tracking: #437.
-  # - id: action.fleet_downshift_models
-  #   goalId: fleet.cost_under_budget
-  #   tier: tier_0
-  #   priority: 30
-  #   cost: 1
-  #   name: "Downshift to cheaper models on low-blast skills when fleet spend exceeds budget"
-  #   preconditions:
-  #     - path: "extensions.agent_fleet_health_available"
-  #       operator: eq
-  #       value: true
-  #     - path: "domains.agent_fleet_health.data.totalCostUsd1d"
-  #       operator: gt
-  #       value: 50
-  #   effects: []
-  #   meta:
-  #     skillHint: downshift_models
-  #     fireAndForget: true
+  - id: action.fleet_downshift_models
+    goalId: fleet.cost_under_budget
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Downshift to cheaper models on low-blast skills when fleet spend exceeds budget"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.totalCostUsd1d"
+        operator: gt
+        value: 50
+    effects: []
+    meta:
+      skillHint: downshift_models
+      fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   # ── Skill orphan detection (Arc 8.5) ──────────────────────────────
 
@@ -623,30 +656,27 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
-  # DISABLED 2026-04-20 — confirmed Discord spam source. No cooldown means
-  # Ava re-investigates orphaned skills every GOAP cycle (~3s) while the
-  # goal stays violated, posting a new diagnosis to Discord ops each time.
-  # Observed: 8+ near-identical "Orphaned Skill Investigation Complete"
-  # posts in 1 min on 2026-04-20T07:28-07:31. Tracking: #437.
-  # - id: action.fleet_investigate_orphaned_skills
-  #   goalId: fleet.no_skill_orphaned
-  #   tier: tier_0
-  #   priority: 30
-  #   cost: 1
-  #   name: "Dispatch Ava to investigate orphaned skills and diagnose capability regression"
-  #   preconditions:
-  #     - path: "extensions.agent_fleet_health_available"
-  #       operator: eq
-  #       value: true
-  #     - path: "domains.agent_fleet_health.data.orphanedSkillCount"
-  #       operator: gt
-  #       value: 0
-  #   effects: []
-  #   meta:
-  #     skillHint: investigate_orphaned_skills
-  #     agentId: ava
-  #     fireAndForget: true
+  - id: action.fleet_investigate_orphaned_skills
+    goalId: fleet.no_skill_orphaned
+    tier: tier_0
+    priority: 30
+    cost: 1
+    name: "Dispatch Ava to investigate orphaned skills and diagnose capability regression"
+    preconditions:
+      - path: "extensions.agent_fleet_health_available"
+        operator: eq
+        value: true
+      - path: "domains.agent_fleet_health.data.orphanedSkillCount"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      skillHint: investigate_orphaned_skills
+      agentId: ava
+      fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   # ── Issue Zero — triage open GitHub issues ────────────────────────
   #
@@ -670,28 +700,27 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
-  # DISABLED 2026-04-20 — same loop pattern as #436. ~447 fires in 30 min
-  # observed today. Each fire dispatches Ava to triage every open critical
-  # issue again, with no idempotency check. Tracking: #437.
-  # - id: action.issues_triage_critical
-  #   goalId: issues.zero_critical
-  #   tier: tier_0
-  #   priority: 80
-  #   cost: 1
-  #   name: "Dispatch Ava to triage critical GitHub issues"
-  #   preconditions:
-  #     - path: "extensions.github_issues_available"
-  #       operator: eq
-  #       value: true
-  #     - path: "domains.github_issues.data.criticalOpen"
-  #       operator: gt
-  #       value: 0
-  #   effects: []
-  #   meta:
-  #     skillHint: issue_triage
-  #     agentId: ava
-  #     fireAndForget: true
+  - id: action.issues_triage_critical
+    goalId: issues.zero_critical
+    tier: tier_0
+    priority: 80
+    cost: 1
+    name: "Dispatch Ava to triage critical GitHub issues"
+    preconditions:
+      - path: "extensions.github_issues_available"
+        operator: eq
+        value: true
+      - path: "domains.github_issues.data.criticalOpen"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      skillHint: issue_triage
+      agentId: ava
+      fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   - id: alert.issues_bugs
     goalId: issues.zero_bugs
@@ -709,28 +738,27 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
-  # DISABLED 2026-04-20 — same loop pattern as #436. ~447 fires in 30 min
-  # observed today. Each fire dispatches Ava to triage every open bug,
-  # cascading into duplicate board features (downstream of #3503). Tracking: #437.
-  # - id: action.issues_triage_bugs
-  #   goalId: issues.zero_bugs
-  #   tier: tier_0
-  #   priority: 35
-  #   cost: 1
-  #   name: "Dispatch Ava to triage open bug issues"
-  #   preconditions:
-  #     - path: "extensions.github_issues_available"
-  #       operator: eq
-  #       value: true
-  #     - path: "domains.github_issues.data.bugOpen"
-  #       operator: gt
-  #       value: 0
-  #   effects: []
-  #   meta:
-  #     skillHint: issue_triage
-  #     agentId: ava
-  #     fireAndForget: true
+  - id: action.issues_triage_bugs
+    goalId: issues.zero_bugs
+    tier: tier_0
+    priority: 35
+    cost: 1
+    name: "Dispatch Ava to triage open bug issues"
+    preconditions:
+      - path: "extensions.github_issues_available"
+        operator: eq
+        value: true
+      - path: "domains.github_issues.data.bugOpen"
+        operator: gt
+        value: 0
+    effects: []
+    meta:
+      skillHint: issue_triage
+      agentId: ava
+      fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   - id: alert.issues_total_high
     goalId: issues.total_low
@@ -748,3 +776,4 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)

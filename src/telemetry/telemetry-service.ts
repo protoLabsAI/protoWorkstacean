@@ -20,10 +20,10 @@ import { dirname, resolve } from "node:path";
 export type TelemetryKind = "goal" | "action";
 
 export type GoalEvent = "evaluated" | "satisfied" | "violated";
-export type ActionEvent = "dispatched" | "success" | "failure" | "timeout";
+export type ActionEvent = "dispatched" | "success" | "failure" | "timeout" | "cooldown_dropped";
 
 export const GOAL_EVENTS: GoalEvent[] = ["evaluated", "satisfied", "violated"];
-export const ACTION_EVENTS: ActionEvent[] = ["dispatched", "success", "failure", "timeout"];
+export const ACTION_EVENTS: ActionEvent[] = ["dispatched", "success", "failure", "timeout", "cooldown_dropped"];
 
 export interface CounterRow {
   kind: TelemetryKind;
