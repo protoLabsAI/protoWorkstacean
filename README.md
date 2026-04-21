@@ -61,7 +61,8 @@ bun run src/index.ts
 | `AVA_API_KEY` | For domain polling | protoMaker team API key (`X-API-Key`) |
 | `WORKSTACEAN_HTTP_PORT` | No | HTTP API port (default: `3000`) |
 | `WORKSTACEAN_API_KEY` | No | API key for `/publish` endpoint |
-| `WORKSTACEAN_BASE_URL` | For A2A push notifications | Externally-reachable URL of the workstacean API (e.g. `http://ava:8081`). Stamped into push-notification callback URLs registered with remote A2A agents that advertise `capabilities.pushNotifications: true`. Unset → silently falls back to task polling. |
+| `WORKSTACEAN_BASE_URL` | For A2A push notifications | Externally-reachable URL of the workstacean API (e.g. `http://workstacean:3000`). Stamped into push-notification callback URLs registered with remote A2A agents that advertise `capabilities.pushNotifications: true`. Unset → silently falls back to task polling. |
+| `WORKSTACEAN_PUBLIC_BASE_URL` | For external A2A discovery | Canonical externally-reachable base URL advertised in `/.well-known/agent-card.json` (e.g. `https://ava.proto-labs.ai`). Sets the card's `url` to `${WORKSTACEAN_PUBLIC_BASE_URL}/a2a`. Unset → card defaults to `http://${WORKSTACEAN_INTERNAL_HOST:-workstacean}:${WORKSTACEAN_HTTP_PORT}/a2a` for docker-network reachability. |
 | `GRAPHITI_URL` | For memory enrichment | Base URL of the Graphiti knowledge-graph service (default: `http://graphiti:8000`). Skill dispatcher pulls `<recalled_memory>` context before every user-originated skill call and writes episodic memory on success. Memory enrichment applies to all channels (Discord, GitHub, Plane, Slack, Signal) — not just Discord. |
 | `ROUTER_DM_DEFAULT_AGENT` | For DM conversations | Agent to route Discord DMs to when no keyword matches (e.g. `quinn`). Required to enable natural DM conversations. |
 | `ROUTER_DM_DEFAULT_SKILL` | For DM conversations | Skill used for DMs routed by `ROUTER_DM_DEFAULT_AGENT` (default: `chat`). |
