@@ -1087,4 +1087,57 @@ describe("PrRemediatorPlugin — hitlPolicy", () => {
     });
     expect(policy).toEqual({ ttlMs: 1000 });
   });
+
+  test("_extractHitlPolicy rejects Infinity as ttlMs", () => {
+    const plugin = new PrRemediatorPlugin();
+    const policy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: {
+        meta: {
+          hitlPolicy: { ttlMs: Infinity, onTimeout: "approve" },
+        },
+      },
+    });
+    expect(policy).toEqual({ onTimeout: "approve" });
+  });
+
+  test("_extractHitlPolicy rejects NaN as ttlMs", () => {
+    const plugin = new PrRemediatorPlugin();
+    const policy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: {
+        meta: {
+          hitlPolicy: { ttlMs: NaN, onTimeout: "reject" },
+        },
+      },
+    });
+    expect(policy).toEqual({ onTimeout: "reject" });
+  });
+
+  test("_extractHitlPolicy rejects zero and negative ttlMs", () => {
+    const plugin = new PrRemediatorPlugin();
+    const zeroPolicy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: { meta: { hitlPolicy: { ttlMs: 0 } } },
+    });
+    expect(zeroPolicy).toBeUndefined();
+
+    const negativePolicy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: { meta: { hitlPolicy: { ttlMs: -1000 } } },
+    });
+    expect(negativePolicy).toBeUndefined();
+  });
 });

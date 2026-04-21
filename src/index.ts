@@ -322,7 +322,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     // Same install-order constraint as alert-skill-executor: AFTER the
     // ExecutorRegistry exists, BEFORE skill-dispatcher subscribes.
     name: "pr-remediator-skill-executor",
-    condition: () => true,
+    condition: () => !!(process.env.QUINN_APP_PRIVATE_KEY || process.env.GITHUB_TOKEN),
     factory: async () => {
       const { PrRemediatorSkillExecutorPlugin } = await import("./plugins/pr-remediator-skill-executor-plugin.js");
       return new PrRemediatorSkillExecutorPlugin(executorRegistry);
