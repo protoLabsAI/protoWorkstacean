@@ -115,6 +115,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
       repo: string; number: number; title: string; headSha: string;
       author: string;
       baseRef: string;
+      headRef: string;
       mergeable: "clean" | "dirty" | "blocked" | "unknown";
       ciStatus: "pass" | "fail" | "pending" | "none";
       reviewState: "approved" | "changes_requested" | "pending" | "none";
@@ -130,7 +131,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
     for (const repo of repoList) {
       type PrListItem = {
         number: number; title: string; updated_at: string; draft: boolean;
-        head: { sha: string };
+        head: { sha: string; ref: string };
         base: { ref: string };
         user: { login: string } | null;
         labels: Array<{ name: string }>;
@@ -233,6 +234,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
           repo, number: pr.number, title: pr.title, headSha: pr.head.sha,
           author: pr.user?.login ?? "unknown",
           baseRef: pr.base.ref,
+          headRef: pr.head.ref,
           mergeable, ciStatus, reviewState,
           isDraft: pr.draft,
           readyToMerge,

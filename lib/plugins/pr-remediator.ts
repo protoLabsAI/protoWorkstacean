@@ -226,6 +226,7 @@ interface PrDomainEntry {
   headSha: string;
   author: string;
   baseRef: string;
+  headRef?: string;
   mergeable: "clean" | "dirty" | "blocked" | "unknown";
   ciStatus: "pass" | "fail" | "pending" | "none";
   reviewState: "approved" | "changes_requested" | "pending" | "none";
@@ -377,6 +378,31 @@ function isAutoApproveClass(pr: PrDomainEntry): boolean {
   for (const prefix of AUTO_APPROVE_TITLE_PREFIXES) {
     if (lower.startsWith(prefix)) return true;
   }
+  return false;
+}
+
+/**
+ * Promotion PR detector — used as a guard at every destructive verdict site
+ * (right now just `decomposable`, but the chokepoint pattern is the same as
+ * #437/#444/#459: refuse a destructive verb against a release-pipeline branch).
+ *
+ * A promotion PR is one where:
+ *   - the head branch is `dev` or `staging`, OR
+ *   - the base branch is `main` or `staging`, OR
+ *   - the title starts with `Promote` or `promote:` (case-insensitive).
+ *
+ * Conflicts on a promotion always reflect drift between branches, never
+ * "clusters that could be split" — splitting a 17-PR promotion makes no
+ * sense. The recovery is a back-merge, not a close+decompose.
+ */
+const PROTECTED_HEAD_REFS = new Set(["dev", "staging"]);
+const PROTECTED_BASE_REFS = new Set(["main", "staging"]);
+
+function isPromotionPr(pr: { headRef?: string; baseRef: string; title: string }): boolean {
+  if (pr.headRef && PROTECTED_HEAD_REFS.has(pr.headRef)) return true;
+  if (PROTECTED_BASE_REFS.has(pr.baseRef)) return true;
+  const lower = pr.title.toLowerCase();
+  if (lower.startsWith("promote:") || lower.startsWith("promote ")) return true;
   return false;
 }
 
@@ -1416,6 +1442,7 @@ Critical rules:
 PR: ${pr.repo}#${pr.number} — ${pr.title}
 Author: ${pr.author}
 Base branch: ${pr.baseRef}
+Head branch: ${pr.headRef ?? "(unknown)"}
 Head SHA: ${pr.headSha}
 Mergeable: ${pr.mergeable}
 CI Status: ${pr.ciStatus}
@@ -1550,6 +1577,45 @@ Do NOT ask for confirmation. Act.`;
       }
 
       case "decomposable": {
+        // Defense-in-depth guard (mirrors #437/#444/#459): refuse to apply a
+        // destructive verdict — close+propose-split — to a release-pipeline
+        // PR. A 17-PR promotion can't be "decomposed"; conflicts always
+        // reflect drift between branches and the recovery is a back-merge.
+        // If Ava's prompt drifts and returns decomposable for a promotion
+        // anyway, the chokepoint catches it.
+        if (isPromotionPr(pr)) {
+          console.warn(
+            `[pr-remediator] PROMOTION GUARD: refusing decomposable verdict on protected PR ${prKey} ` +
+              `(head=${pr.headRef ?? "unknown"} base=${pr.baseRef} title="${pr.title}"). ` +
+              `Promotion conflicts indicate drift, not need-to-decompose. Escalating to HITL.`,
+          );
+          const ubKey = this._inFlightKey(pr.repo, pr.number, "update_branch");
+          const entry = this.inFlight.get(ubKey);
+          if (entry) {
+            entry.exhausted = true;
+            entry.escalated = true;
+          }
+          const effectiveEntry: InFlightEntry = entry ?? {
+            kind: "update_branch",
+            startedAt: Date.now() - DIAGNOSE_AFTER_ATTEMPTS * IN_FLIGHT_TTL_MS,
+            correlationId: parentCorrelationId,
+            attempts: DIAGNOSE_AFTER_ATTEMPTS,
+            exhausted: true,
+            escalated: true,
+          };
+          this._emitStuckHitlEscalation(
+            pr.repo,
+            pr.number,
+            "update_branch",
+            effectiveEntry,
+            `Promotion-PR guard tripped: Ava returned \`decomposable\` for a release-pipeline PR ` +
+              `(head=\`${pr.headRef ?? "unknown"}\` base=\`${pr.baseRef}\`). ` +
+              `Recovery is a back-merge of \`${pr.baseRef}\` into \`${pr.headRef ?? "head"}\`, not a split. ` +
+              `Original evidence: ${diagnosis.evidence}`,
+          );
+          break;
+        }
+
         const fileList = diagnosis.conflictingFiles?.length
           ? diagnosis.conflictingFiles.map((f) => `- \`${f}\``).join("\n")
           : "See diagnosis evidence above.";
