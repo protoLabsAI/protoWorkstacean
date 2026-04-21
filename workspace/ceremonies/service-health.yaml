@@ -1,13 +1,21 @@
 id: service-health
 name: "Service Health Recovery"
 description: >
-  Triggered by world engine when a critical service (Discord bot or LLM gateway)
-  becomes unavailable. Calls get_world_state to confirm the failure, posts a
-  structured alert to the Discord alerts channel with remediation steps, and
-  falls back to logging if Discord itself is unreachable.
+  DISABLED 2026-04-20 — calls skill `health_check` which no agent in the
+  fleet advertises (same gap as agent-health.yaml). Every 4-hour cron fire
+  dropped at the dispatcher.
+
+  The data this ceremony was meant to surface (Discord bot reachability,
+  LLM gateway availability) is already collected every 60s by the
+  world-state engine via the `services` domain and exposed at
+  `/api/services`.
+
+  Re-enable with a real skill if a periodic ANNOUNCE-to-Discord behavior
+  is wanted (e.g. wire a small `service_health_report` skill on protobot
+  that posts the snapshot to ops). Until then, this stays off.
 schedule: "0 */4 * * *"
 skill: health_check
 targets:
   - all
 notifyChannel: ""
-enabled: true
+enabled: false

@@ -114,6 +114,43 @@ describe("GOAP end-to-end feedback loop", () => {
     expect(dispatches).toHaveLength(1); // still 1 — cooldown blocked the re-dispatch
   });
 
+  test("meta.cooldownMs collapses 100 rapid violations to 1 executor dispatch (#437)", async () => {
+    const bus = new InMemoryEventBus();
+    const registry = new ActionRegistry();
+    // Action with NO effects (fleet.no_skill_orphaned style) — without
+    // meta.cooldownMs each violation would re-fire because the planner's
+    // post-success cooldown only kicks in for actions with effects.
+    registry.upsert(
+      makeAction({
+        id: "fleet.investigate_orphaned_skills",
+        goalId: "fleet.no_skill_orphaned",
+        effects: [],
+        meta: { fireAndForget: true, cooldownMs: 1_800_000 },
+      })
+    );
+
+    const planner = new PlannerPluginL0(registry);
+    const dispatcher = new ActionDispatcherPlugin({ wipLimit: 5 });
+    planner.install(bus);
+    dispatcher.install(bus);
+
+    // Spy on what actually reaches the executor — agent.skill.request is
+    // the first downstream of the dispatcher's drop-or-publish decision.
+    const skillRequests: unknown[] = [];
+    bus.subscribe("agent.skill.request", "spy", (m) => { skillRequests.push(m.payload); });
+
+    // Spam-publish 100 violations of the same goal.
+    for (let i = 0; i < 100; i++) {
+      bus.publish("world.goal.violated", makeViolation("fleet.no_skill_orphaned", `corr-${i}`));
+    }
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Exactly 1 dispatch reaches the executor; the cooldown drops the rest.
+    // The planner's inFlightGoals + ActionDispatcher's cooldown both contribute,
+    // but the cooldown is what holds after the outcome clears inFlightGoals.
+    expect(skillRequests).toHaveLength(1);
+  });
+
   test("outcome payload carries actionId + goalId so planner can correlate", async () => {
     const bus = new InMemoryEventBus();
     const registry = new ActionRegistry();

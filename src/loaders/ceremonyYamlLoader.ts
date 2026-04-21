@@ -118,10 +118,12 @@ export class CeremonyYamlLoader {
 
     const c = raw as Record<string, unknown>;
 
-    // Disabled ceremonies are still returned (with enabled: false) so hot-reload
-    // can cancel their timers. Previously returning null here meant
-    // _reloadChangedCeremonies never saw the disabled entry and the old timer
-    // kept firing — the ceremony was "disabled" in YAML but alive in memory.
+    // Disabled ceremonies are still returned (with enabled: false). The
+    // CeremonyPlugin scheduler is responsible for filtering them — at both
+    // initial load and hot-reload — so a disabled entry never lands in the
+    // ceremony registry and external `ceremony.<id>.execute` triggers cannot
+    // resurrect it. Previously returning null here also broke hot-reload's
+    // _reloadChangedCeremonies path, which couldn't see a disappearing entry.
 
     if (typeof c.id !== "string" || !c.id) {
       console.warn(`[ceremony-loader] Skipping ${filePath} (${source}): missing required 'id' field`);

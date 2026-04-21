@@ -285,6 +285,50 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Registers Discord-alert FunctionExecutors for tier_0 `alert.*` skills
+    // that have no agent-backed handler. Without this, ActionDispatcherPlugin
+    // publishes to agent.skill.request and SkillDispatcherPlugin drops with
+    // "No executor found …" — the structural bug behind issue #426.
+    // Must install AFTER ExecutorRegistry exists (always true) and BEFORE
+    // skill-dispatcher so registrations resolve on first dispatch.
+    name: "alert-skill-executor",
+    condition: () => true,
+    factory: async () => {
+      const { AlertSkillExecutorPlugin } = await import("./plugins/alert-skill-executor-plugin.js");
+      return new AlertSkillExecutorPlugin(executorRegistry);
+    },
+  },
+  {
+    // Registers FunctionExecutors that bridge GOAP `ceremony.*` actions to
+    // the matching `ceremony.<id>.execute` bus trigger CeremonyPlugin already
+    // listens for. Without this, ActionDispatcherPlugin publishes to
+    // agent.skill.request and SkillDispatcherPlugin drops with
+    // "No executor found …" — the structural gap behind issue #430.
+    // Must install AFTER ExecutorRegistry exists (always true) and BEFORE
+    // skill-dispatcher so registrations resolve on first dispatch.
+    name: "ceremony-skill-executor",
+    condition: () => true,
+    factory: async () => {
+      const { CeremonySkillExecutorPlugin } = await import("./plugins/ceremony-skill-executor-plugin.js");
+      return new CeremonySkillExecutorPlugin(executorRegistry);
+    },
+  },
+  {
+    // Registers FunctionExecutors for the five `action.pr_*` /
+    // `action.dispatch_backmerge` skills whose handlers live in
+    // PrRemediatorPlugin. Without this registrar, SkillDispatcherPlugin
+    // logged "No executor found" and the startup validator (#427) raised
+    // `platform.skills_unwired` HIGH every cycle.
+    // Same install-order constraint as alert-skill-executor: AFTER the
+    // ExecutorRegistry exists, BEFORE skill-dispatcher subscribes.
+    name: "pr-remediator-skill-executor",
+    condition: () => true,
+    factory: async () => {
+      const { PrRemediatorSkillExecutorPlugin } = await import("./plugins/pr-remediator-skill-executor-plugin.js");
+      return new PrRemediatorSkillExecutorPlugin(executorRegistry);
+    },
+  },
+  {
     // Intercepts ExecutorRegistry.resolve() to A/B test competing skill variants.
     // Must be installed AFTER registrars (agent-runtime, skill-broker) and
     // BEFORE skill-dispatcher so the hook is active when dispatches begin.
@@ -326,7 +370,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { ActionDispatcherPlugin } = await import("./plugins/action-dispatcher-plugin.js");
-      return new ActionDispatcherPlugin({ wipLimit: 5 }, telemetry);
+      return new ActionDispatcherPlugin({ wipLimit: 5 }, telemetry, executorRegistry);
     },
   },
   {
@@ -378,7 +422,8 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { AgentFleetHealthPlugin } = await import("./plugins/agent-fleet-health-plugin.js");
-      return new AgentFleetHealthPlugin();
+      // executorRegistry wired for outcome attribution whitelist (#459).
+      return new AgentFleetHealthPlugin(executorRegistry);
     },
   },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
@@ -460,6 +505,23 @@ for (const entry of pluginRegistry) {
 
     // Local self-polling domains are registered AFTER Bun.serve() starts (see below)
     // to avoid "Unable to connect" on the initial immediate tick.
+  }
+}
+
+// --- Fail-loud wiring validation ---
+// Cross-check every loaded action against the live ExecutorRegistry. Any
+// action that resolves to a null executor would cause SkillDispatcherPlugin
+// to silently drop dispatches forever — see issue #426. Surface each gap
+// as a HIGH-severity Discord alert (goal `platform.skills_unwired`) and
+// log loudly. Set WORKSTACEAN_STRICT_WIRING=1 to crash startup instead.
+{
+  const { validateActionExecutors } = await import("./planner/validate-action-executors.js");
+  const unwired = validateActionExecutors(actionRegistry, executorRegistry, {
+    bus,
+    throwOnUnwired: process.env.WORKSTACEAN_STRICT_WIRING === "1",
+  });
+  if (unwired.length === 0) {
+    console.log(`[startup-validator] All ${actionRegistry.size} action(s) have a registered executor.`);
   }
 }
 

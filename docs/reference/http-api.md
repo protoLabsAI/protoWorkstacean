@@ -790,7 +790,12 @@ A legacy alias at `GET /.well-known/agent.json` returns the same body for client
 }
 ```
 
-`url` is derived from `WORKSTACEAN_BASE_URL` (falling back to `http://localhost:$WORKSTACEAN_HTTP_PORT` when unset).
+`url` is the canonical A2A endpoint that spec-compliant clients hit after card discovery. Resolution order:
+
+1. `WORKSTACEAN_PUBLIC_BASE_URL` — operator-set canonical public base (e.g. `https://ava.proto-labs.ai`). When set, the card advertises `${WORKSTACEAN_PUBLIC_BASE_URL}/a2a`.
+2. Otherwise, `http://${WORKSTACEAN_INTERNAL_HOST ?? "workstacean"}:${WORKSTACEAN_HTTP_PORT ?? 3000}/a2a` — the docker-network service name + the actual API port.
+
+`additionalInterfaces` mirrors the same URL under the explicit `JSONRPC` transport so clients that walk the interfaces list can pick deterministically. `WORKSTACEAN_BASE_URL` is **not** consulted here — that variable is the externally-reachable URL stamped into A2A push-notification callbacks (see Env Vars), not the agent card.
 
 ---
 

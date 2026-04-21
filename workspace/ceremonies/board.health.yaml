@@ -2,7 +2,10 @@ id: board.health
 name: Board Health Check
 schedule: "*/30 * * * *"
 skill: board_health
+# Only protomaker (apps/server in protoLabsAI/ava) advertises board_health —
+# the previous targets:[all] broadcast caused 404s on quinn/jon/researcher
+# every fire because they don't have the skill.
 targets:
-  - all
+  - protomaker
 notifyChannel: ""
 enabled: true

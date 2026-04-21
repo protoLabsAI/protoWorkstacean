@@ -25,6 +25,13 @@ import { OutcomeTracker } from "../dispatcher/outcome-tracker.ts";
 import { applyEffects } from "../planner/state-updater.ts";
 import { StateRollbackRegistry } from "../planner/state-rollback.ts";
 import type { TelemetryService } from "../telemetry/telemetry-service.ts";
+import type { ExecutorRegistry } from "../executor/executor-registry.ts";
+
+/**
+ * Sentinel target value meaning "broadcast to whoever subscribes".
+ * Skips the registry-existence check — see _admitOrTargetUnresolved.
+ */
+const TARGET_BROADCAST = "all";
 
 export interface ActionDispatcherConfig {
   wipLimit: number;
@@ -49,9 +56,27 @@ export class ActionDispatcherPlugin implements Plugin {
   /** Pending action timeouts: correlationId → timer. */
   private readonly pendingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /**
+   * Per-action cooldown bucket: action.id → timestamp of last dispatch.
+   * Honored when `action.meta.cooldownMs` is set; subsequent dispatches of
+   * the same action id within the window are dropped at the dispatcher
+   * BEFORE the executor is reached. Keyed on action id only — unrelated
+   * actions don't share buckets.
+   */
+  private readonly lastDispatchedAt = new Map<string, number>();
+
   constructor(
     private readonly config: ActionDispatcherConfig,
     private readonly telemetry?: TelemetryService,
+    /**
+     * ExecutorRegistry handle for the pre-dispatch target-existence check
+     * (issue #444). When set, every dispatch with a named `meta.agentId`
+     * (other than the broadcast sentinel "all") is verified against the
+     * live registry before reaching the WIP queue or executor. When absent,
+     * the check is skipped — only test fixtures that don't exercise
+     * target-routed actions should omit the registry.
+     */
+    private readonly executorRegistry?: ExecutorRegistry,
   ) {
     this.queue = new DispatchQueue({ wipLimit: config.wipLimit });
     this.outcomes = new OutcomeTracker();
@@ -92,6 +117,7 @@ export class ActionDispatcherPlugin implements Plugin {
       clearTimeout(timer);
     }
     this.pendingTimeouts.clear();
+    this.lastDispatchedAt.clear();
     this.queue.reset();
     this.rollbackRegistry.clearAll();
   }
@@ -111,10 +137,112 @@ export class ActionDispatcherPlugin implements Plugin {
     this.worldState = state;
   }
 
+  /** Expose cooldown state for introspection / tests. */
+  getLastDispatchedAt(actionId: string): number | undefined {
+    return this.lastDispatchedAt.get(actionId);
+  }
+
+  /**
+   * Returns true and records the timestamp if the action may proceed.
+   * Returns false (and logs a fail-fast diagnostic) if the action is still
+   * within its meta.cooldownMs window — caller must drop the dispatch.
+   * Actions without meta.cooldownMs always pass.
+   */
+  private _admitOrCooldown(action: import("../planner/types/action.ts").Action): boolean {
+    const cooldownMs = action.meta.cooldownMs;
+    if (typeof cooldownMs !== "number" || cooldownMs <= 0) {
+      // No cooldown configured — admit immediately, no bookkeeping.
+      return true;
+    }
+
+    const now = Date.now();
+    const last = this.lastDispatchedAt.get(action.id);
+    if (last !== undefined) {
+      const ageMs = now - last;
+      if (ageMs < cooldownMs) {
+        const remainingMs = cooldownMs - ageMs;
+        // Fail-fast & loud: operator must see what's being throttled.
+        console.warn(
+          `[action-dispatcher] cooldown drop action=${action.id} ` +
+            `goal=${action.goalId} ageMs=${ageMs} cooldownMs=${cooldownMs} ` +
+            `remainingMs=${remainingMs}`,
+        );
+        this.telemetry?.bump("action", action.id, "cooldown_dropped");
+        return false;
+      }
+    }
+    this.lastDispatchedAt.set(action.id, now);
+    return true;
+  }
+
+  /**
+   * Pre-dispatch target-existence guard (issue #444).
+   *
+   * The GOAP planner can name a target agent in `action.meta.agentId` that
+   * doesn't exist in the live ExecutorRegistry — e.g. an agent renamed,
+   * removed, or never registered. Without this check the dispatcher would
+   * fire anyway, the executor would error, and the failure cascades into
+   * stuck work items + duplicate incident filings (INC-003 through INC-018).
+   *
+   * Returns true and lets dispatch proceed when:
+   *   - no registry is wired (test fixtures that don't exercise target routing)
+   *   - action has no `meta.agentId` (skill-routed dispatch — admitted)
+   *   - target is the broadcast sentinel "all"
+   *   - target matches at least one registered executor's agentName
+   *
+   * Returns false (drop the dispatch, log loud, telemetry bump) when the
+   * named target is not in the registry. The dispatcher is the single
+   * chokepoint for this invariant — code that wants to dispatch into
+   * unknown territory must opt in via the broadcast sentinel "all".
+   */
+  private _admitOrTargetUnresolved(action: import("../planner/types/action.ts").Action): boolean {
+    if (!this.executorRegistry) return true;
+
+    const target = action.meta.agentId;
+    if (!target || target === TARGET_BROADCAST) return true;
+
+    const registrations = this.executorRegistry.list();
+    const knownAgents = Array.from(
+      new Set(
+        registrations
+          .map((r) => r.agentName)
+          .filter((n): n is string => typeof n === "string" && n.length > 0),
+      ),
+    );
+
+    if (knownAgents.includes(target)) return true;
+
+    // Fail-fast & loud: operators must see the unresolvable target alongside
+    // the agents that DO exist, so the routing mistake is immediately diagnosable.
+    console.warn(
+      `[action-dispatcher] target_unresolved drop action=${action.id} ` +
+        `goal=${action.goalId} unresolvableTargets=[${target}] ` +
+        `knownAgents=[${knownAgents.join(", ")}]`,
+    );
+    this.telemetry?.bump("action", action.id, "target_unresolved");
+    return false;
+  }
+
   private async handleDispatch(msg: BusMessage): Promise<void> {
     const payload = msg.payload as ActionDispatchPayload;
     const { action, correlationId } = payload;
     const startedAt = Date.now();
+
+    // Per-action cooldown — the dispatcher is the single chokepoint for both
+    // alert.* (FunctionExecutor → Discord) and action.* (DeepAgent/A2A) paths,
+    // so dropping here covers everything. Honored only when meta.cooldownMs
+    // is set; absence means no cooldown.
+    if (!this._admitOrCooldown(action)) {
+      return;
+    }
+
+    // Pre-dispatch target registry guard (issue #444). Drops the action
+    // before the WIP queue / executor when meta.agentId names an agent that
+    // isn't in the live ExecutorRegistry. The only opt-out is the broadcast
+    // sentinel "all"; absence of meta.agentId routes by skill (also admitted).
+    if (!this._admitOrTargetUnresolved(action)) {
+      return;
+    }
 
     // Telemetry: this action was selected and is entering dispatch.
     // Counted even when queued by WIP — they still get dispatched later.

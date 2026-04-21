@@ -64,6 +64,10 @@ export const EnvSchema = z
     MAILBOX_TTL_MS:               z.string().optional(),
     /** Public URL of workstacean API — used by A2A push-notification webhooks (e.g. http://workstacean:3000). */
     WORKSTACEAN_BASE_URL:         z.string().optional(),
+    /** Canonical externally-reachable base URL advertised in the A2A agent card (e.g. https://ava.proto-labs.ai). When set, the card's `url` becomes `${WORKSTACEAN_PUBLIC_BASE_URL}/a2a`. */
+    WORKSTACEAN_PUBLIC_BASE_URL:  z.string().optional(),
+    /** Docker-network hostname to advertise in the A2A agent card when WORKSTACEAN_PUBLIC_BASE_URL is unset. Defaults to `workstacean`. */
+    WORKSTACEAN_INTERNAL_HOST:    z.string().optional(),
 
     // GitHub
     GITHUB_TOKEN:          z.string().optional(),

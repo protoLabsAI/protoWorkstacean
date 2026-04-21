@@ -207,4 +207,273 @@ describe("ActionDispatcherPlugin", () => {
     });
     // No error = state updated successfully
   });
+
+  // ── meta.cooldownMs — per-action dedup at the dispatcher (issue #437) ──
+
+  describe("per-action cooldown (meta.cooldownMs)", () => {
+    test("blocks repeat dispatches of the same action within window", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      const action = makeAction({
+        id: "cooldown-action-A",
+        meta: { fireAndForget: true, cooldownMs: 60_000 },
+      });
+
+      // Fire 5 dispatches in rapid succession.
+      for (let i = 0; i < 5; i++) {
+        bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, `corr-${i}`));
+      }
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Only the first dispatch should reach the executor; the other 4 are
+      // dropped at the dispatcher BEFORE agent.skill.request is published.
+      expect(requests).toHaveLength(1);
+      expect(dispatcher.getOutcomes().summary().total).toBe(1);
+    });
+
+    test("cooldown of action A does not affect action B", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      const actionA = makeAction({
+        id: "cooldown-A",
+        meta: { fireAndForget: true, cooldownMs: 60_000 },
+      });
+      const actionB = makeAction({
+        id: "cooldown-B",
+        meta: { fireAndForget: true, cooldownMs: 60_000 },
+      });
+
+      // Fire A twice and B twice — A's second drop, B's second drop, both
+      // independent. Two should reach the executor (one per action id).
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(actionA, "a-1"));
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(actionB, "b-1"));
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(actionA, "a-2"));
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(actionB, "b-2"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(requests).toHaveLength(2);
+      const skills = requests.map((r) => (r.payload as Record<string, unknown>).skill).sort();
+      expect(skills).toEqual(["cooldown-A", "cooldown-B"]);
+    });
+
+    test("dispatch after window expires is admitted", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      const action = makeAction({
+        id: "cooldown-expire",
+        // 1ms cooldown — easy to exceed via setTimeout below.
+        meta: { fireAndForget: true, cooldownMs: 1 },
+      });
+
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "c-1"));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(requests).toHaveLength(1);
+
+      // Wait past the cooldown window then re-dispatch.
+      await new Promise((r) => setTimeout(r, 20));
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "c-2"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(requests).toHaveLength(2);
+    });
+
+    test("absent meta.cooldownMs means no cooldown (greenfield default)", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      const action = makeAction({
+        id: "no-cooldown",
+        meta: { fireAndForget: true },
+      });
+
+      for (let i = 0; i < 3; i++) {
+        bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, `nc-${i}`));
+      }
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Without cooldownMs there's no throttling — all 3 reach the executor.
+      expect(requests).toHaveLength(3);
+    });
+
+    test("cooldownMs <= 0 is treated as no cooldown", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      const action = makeAction({
+        id: "zero-cooldown",
+        meta: { fireAndForget: true, cooldownMs: 0 },
+      });
+
+      for (let i = 0; i < 3; i++) {
+        bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, `z-${i}`));
+      }
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(requests).toHaveLength(3);
+    });
+  });
+
+  // ── target registry guard — drop dispatches to unregistered agents (issue #444) ──
+
+  describe("pre-dispatch target registry guard (meta.agentId)", () => {
+    // Lightweight stub matching ExecutorRegistry.list() contract — only
+    // .list() is called by the dispatcher's target-existence check.
+    const makeRegistryWithAgents = (agentNames: string[]) => ({
+      list: () => agentNames.map((agentName) => ({
+        skill: "_test",
+        executor: { execute: async () => ({ ok: true }) },
+        agentName,
+        priority: 0,
+      })),
+    });
+
+    // Capture telemetry bumps to assert `target_unresolved` is emitted.
+    const makeTelemetrySpy = () => {
+      const bumps: Array<{ kind: string; id: string; event: string }> = [];
+      const spy = {
+        bump: (kind: string, id: string, event: string) => {
+          bumps.push({ kind, id, event });
+        },
+      };
+      return { spy, bumps };
+    };
+
+    test("admits dispatch when target is registered", async () => {
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      // Build a dispatcher with a registry containing the target.
+      const localBus = new InMemoryEventBus();
+      const registry = makeRegistryWithAgents(["protomaker"]);
+      // deno-lint-ignore no-explicit-any
+      const guarded = new ActionDispatcherPlugin({ wipLimit: 5 }, undefined, registry as any);
+      guarded.install(localBus);
+      const localRequests: BusMessage[] = [];
+      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { localRequests.push(m); });
+
+      const action = makeAction({
+        id: "valid-target-action",
+        meta: { fireAndForget: true, agentId: "protomaker" },
+      });
+      localBus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "vt-1"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(localRequests).toHaveLength(1);
+      // Sanity: the original dispatcher (without registry) is unaffected.
+      expect(requests).toHaveLength(0);
+    });
+
+    test("drops dispatch when target is not in registry and emits target_unresolved", async () => {
+      const localBus = new InMemoryEventBus();
+      const registry = makeRegistryWithAgents(["protomaker", "ava"]);
+      const { spy, bumps } = makeTelemetrySpy();
+      // deno-lint-ignore no-explicit-any
+      const guarded = new ActionDispatcherPlugin({ wipLimit: 5 }, spy as any, registry as any);
+      guarded.install(localBus);
+      const requests: BusMessage[] = [];
+      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      const action = makeAction({
+        id: "invalid-target-action",
+        meta: { fireAndForget: true, agentId: "auto-triage-sweep" },
+      });
+      localBus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "iv-1"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      // No skill request reaches the executor.
+      expect(requests).toHaveLength(0);
+      // No outcome recorded — the action was dropped before WIP / executor.
+      expect(guarded.getOutcomes().summary().total).toBe(0);
+      // Telemetry: target_unresolved bumped with the action id.
+      expect(bumps).toContainEqual({
+        kind: "action",
+        id: "invalid-target-action",
+        event: "target_unresolved",
+      });
+    });
+
+    test("drops dispatch even when one of multiple targets is invalid (single-target shape via meta.agentId)", async () => {
+      // Action.meta.agentId is a single string today, so 'mix of valid+invalid'
+      // means 'invalid by itself'. The intent recorded in #444 is that ANY
+      // unresolvable target breaks the action's intent — exercised here by
+      // dispatching with the invalid name only and confirming the drop.
+      const localBus = new InMemoryEventBus();
+      const registry = makeRegistryWithAgents(["protomaker", "ava"]);
+      // deno-lint-ignore no-explicit-any
+      const guarded = new ActionDispatcherPlugin({ wipLimit: 5 }, undefined, registry as any);
+      guarded.install(localBus);
+      const requests: BusMessage[] = [];
+      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      const action = makeAction({
+        id: "mixed-action",
+        // Even though `protomaker` IS valid, the named target `user` is not —
+        // the dispatcher must not partial-fire toward the valid name.
+        meta: { fireAndForget: true, agentId: "user" },
+      });
+      localBus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "mx-1"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(requests).toHaveLength(0);
+    });
+
+    test("admits dispatch when target is the broadcast sentinel 'all'", async () => {
+      const localBus = new InMemoryEventBus();
+      // Empty registry — broadcast sentinel skips the check entirely.
+      const registry = makeRegistryWithAgents([]);
+      // deno-lint-ignore no-explicit-any
+      const guarded = new ActionDispatcherPlugin({ wipLimit: 5 }, undefined, registry as any);
+      guarded.install(localBus);
+      const requests: BusMessage[] = [];
+      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      const action = makeAction({
+        id: "broadcast-action",
+        meta: { fireAndForget: true, agentId: "all" },
+      });
+      localBus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "bc-1"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(requests).toHaveLength(1);
+    });
+
+    test("admits dispatch when meta.agentId is absent — skill-routed dispatch", async () => {
+      const localBus = new InMemoryEventBus();
+      // Empty registry — no targets named, no check needed.
+      const registry = makeRegistryWithAgents([]);
+      // deno-lint-ignore no-explicit-any
+      const guarded = new ActionDispatcherPlugin({ wipLimit: 5 }, undefined, registry as any);
+      guarded.install(localBus);
+      const requests: BusMessage[] = [];
+      localBus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      const action = makeAction({
+        id: "skill-routed-action",
+        meta: { fireAndForget: true, skillHint: "do_something" },
+      });
+      localBus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "sr-1"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(requests).toHaveLength(1);
+    });
+
+    test("admits dispatch when no registry is wired (legacy test fixtures)", async () => {
+      // Default `dispatcher` constructed in beforeEach has no registry — verifies
+      // that absent-registry equals 'check skipped' so existing tests stay green.
+      const requests: BusMessage[] = [];
+      bus.subscribe(TOPICS.AGENT_SKILL_REQUEST, "spy", (m) => { requests.push(m); });
+
+      const action = makeAction({
+        id: "no-registry-action",
+        meta: { fireAndForget: true, agentId: "anything" },
+      });
+      bus.publish(TOPICS.WORLD_ACTION_DISPATCH, makeDispatchMsg(action, "nr-1"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(requests).toHaveLength(1);
+    });
+  });
 });

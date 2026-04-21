@@ -95,12 +95,12 @@ describe("WorldState ceremony extension", () => {
     expect(ext.getState().status["board.health"]).toBe("failed");
   });
 
-  test("publishes world.state.snapshot after ceremony completes", () => {
+  test("publishes ceremony.state.snapshot after ceremony completes", () => {
     ext.registerCeremony(makeCeremony("board.health"));
     const outcome = makeOutcome("board.health");
 
     let snapshotPublished = false;
-    bus.subscribe("world.state.snapshot", "test", (msg: BusMessage) => {
+    bus.subscribe("ceremony.state.snapshot", "test", (msg: BusMessage) => {
       const payload = msg.payload as { domain?: string; data?: unknown };
       if (payload?.domain === "extensions.ceremonies") {
         snapshotPublished = true;
@@ -116,6 +116,29 @@ describe("WorldState ceremony extension", () => {
     });
 
     expect(snapshotPublished).toBe(true);
+  });
+
+  test("does NOT publish on the world.state.# namespace (issue #424 regression guard)", () => {
+    // GoalEvaluatorPlugin subscribes to world.state.#. If ceremony state ever leaks
+    // into that namespace, every loaded goal fires a Selector-not-found violation
+    // each time a ceremony completes. Lock the namespace boundary here.
+    ext.registerCeremony(makeCeremony("board.health"));
+    const outcome = makeOutcome("board.health");
+
+    const worldStateMessages: BusMessage[] = [];
+    bus.subscribe("world.state.#", "regression-guard", (msg: BusMessage) => {
+      worldStateMessages.push(msg);
+    });
+
+    bus.publish("ceremony.board.health.completed", {
+      id: crypto.randomUUID(),
+      correlationId: outcome.runId,
+      topic: "ceremony.board.health.completed",
+      timestamp: Date.now(),
+      payload: { type: "ceremony.completed", outcome },
+    });
+
+    expect(worldStateMessages).toHaveLength(0);
   });
 
   test("history capped at 100 entries", () => {

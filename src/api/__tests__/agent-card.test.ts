@@ -5,7 +5,12 @@
  * bypassing Bun.serve. They lock down:
  *   - Skills deduplication when multiple agents register the same skill
  *   - The agent-card.json → agent.json legacy alias
- *   - WORKSTACEAN_BASE_URL is honored when building the card's url
+ *   - The card's `url` resolves to the actual A2A endpoint, not the dashboard:
+ *       * default → http://workstacean:${HTTP_PORT}/a2a
+ *       * WORKSTACEAN_PUBLIC_BASE_URL set → ${publicBase}/a2a
+ *       * WORKSTACEAN_INTERNAL_HOST overrides the docker-network host
+ *       * WORKSTACEAN_HTTP_PORT overrides the port
+ *   - additionalInterfaces[0] mirrors the top-level url under JSONRPC
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
@@ -27,11 +32,18 @@ function fakeExecutor(type = "a2a"): IExecutor {
 describe("GET /.well-known/agent-card.json", () => {
   let registry: ExecutorRegistry;
   let ctx: ApiContext;
-  let origBaseUrl: string | undefined;
+  const envKeys = [
+    "WORKSTACEAN_PUBLIC_BASE_URL",
+    "WORKSTACEAN_INTERNAL_HOST",
+    "WORKSTACEAN_HTTP_PORT",
+  ] as const;
+  const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    origBaseUrl = process.env.WORKSTACEAN_BASE_URL;
-    process.env.WORKSTACEAN_BASE_URL = "https://workstacean.example.com";
+    for (const k of envKeys) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
     registry = new ExecutorRegistry();
     ctx = {
       workspaceDir: "/tmp",
@@ -42,8 +54,10 @@ describe("GET /.well-known/agent-card.json", () => {
   });
 
   afterEach(() => {
-    if (origBaseUrl === undefined) delete process.env.WORKSTACEAN_BASE_URL;
-    else process.env.WORKSTACEAN_BASE_URL = origBaseUrl;
+    for (const k of envKeys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
   });
 
   test("emits two routes (agent-card.json + legacy agent.json)", () => {
@@ -79,10 +93,43 @@ describe("GET /.well-known/agent-card.json", () => {
     expect(chatSkills).toHaveLength(1);
   });
 
-  test("honors WORKSTACEAN_BASE_URL for the card's url", () => {
+  test("default url is the docker-network workstacean:3000/a2a — never the dashboard", () => {
     const card = buildAgentCard(ctx);
-    expect(card.url).toBe("https://workstacean.example.com/a2a");
+    expect(card.url).toBe("http://workstacean:3000/a2a");
     expect(card.preferredTransport).toBe("JSONRPC");
+  });
+
+  test("WORKSTACEAN_PUBLIC_BASE_URL produces the canonical public URL", () => {
+    process.env.WORKSTACEAN_PUBLIC_BASE_URL = "https://ava.proto-labs.ai";
+    const card = buildAgentCard(ctx);
+    expect(card.url).toBe("https://ava.proto-labs.ai/a2a");
+  });
+
+  test("WORKSTACEAN_PUBLIC_BASE_URL strips a trailing slash before appending /a2a", () => {
+    process.env.WORKSTACEAN_PUBLIC_BASE_URL = "https://ava.proto-labs.ai/";
+    const card = buildAgentCard(ctx);
+    expect(card.url).toBe("https://ava.proto-labs.ai/a2a");
+  });
+
+  test("WORKSTACEAN_INTERNAL_HOST overrides the docker-network host", () => {
+    process.env.WORKSTACEAN_INTERNAL_HOST = "ava-host";
+    const card = buildAgentCard(ctx);
+    expect(card.url).toBe("http://ava-host:3000/a2a");
+  });
+
+  test("WORKSTACEAN_HTTP_PORT overrides the port", () => {
+    process.env.WORKSTACEAN_HTTP_PORT = "4000";
+    const card = buildAgentCard(ctx);
+    expect(card.url).toBe("http://workstacean:4000/a2a");
+  });
+
+  test("additionalInterfaces lists the JSON-RPC transport at the same url", () => {
+    process.env.WORKSTACEAN_PUBLIC_BASE_URL = "https://ava.proto-labs.ai";
+    const card = buildAgentCard(ctx);
+    expect(card.additionalInterfaces).toBeDefined();
+    expect(card.additionalInterfaces).toHaveLength(1);
+    expect(card.additionalInterfaces?.[0]?.transport).toBe("JSONRPC");
+    expect(card.additionalInterfaces?.[0]?.url).toBe(card.url);
   });
 
   test("declares streaming + push notification capabilities", () => {

@@ -3,6 +3,13 @@
 #
 # Every action that reads a domain must guard on extensions.{domain}_available.
 # The engine sets this flag on each successful/failed tick.
+#
+# meta.cooldownMs (per-action, keyed on action id) is enforced by
+# ActionDispatcherPlugin and is the single source of dedup for GOAP-side
+# spam. Defaults: alert.* = 15 min, action.* with skillHint = 30 min,
+# action.pr_* = 5 min, ceremony.* = 30 min. Actions with their own
+# in-handler cooldown (e.g. action.dispatch_backmerge → pr-remediator)
+# omit it so the in-handler cooldown stays authoritative. See #437.
 
 actions:
   - id: alert.efficiency_low
@@ -21,6 +28,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min — alerts repeat but don't spam (#437)
 
   # alert.distribution_drift — REMOVED alongside flow.distribution_balanced goal
 
@@ -40,6 +48,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: ceremony.security_triage
     goalId: security.no_open_incidents
@@ -57,6 +66,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — ceremony nudge, treat like skill dispatch (#437)
 
   - id: alert.discord_disconnected
     goalId: services.discord_connected
@@ -77,6 +87,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.no_agents
     goalId: agents.registered
@@ -94,6 +105,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── Service + Agent Ceremonies ─────────────────────────────────────
 
@@ -116,6 +128,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — ceremony nudge (#437)
 
   # ── CI + PR Pipeline ─────────────────────────────────────────────
 
@@ -135,6 +148,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: ci.debug_failures
     goalId: ci.success_rate_healthy
@@ -153,6 +167,7 @@ actions:
     meta:
       skillHint: debug_ci_failures
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   # alert.pr_conflicts was retired in favour of action.pr_update_branch below.
   # The planner-plugin-l0 violation path dispatches one action per goal per
@@ -179,6 +194,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 300000   # 5 min — PR remediation needs to be responsive (#437)
 
   - id: alert.pr_stale
     goalId: pr.no_stale
@@ -196,6 +212,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── PR Remediation — closes the loop via PrRemediatorPlugin ───────────────
 
@@ -215,6 +232,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 300000   # 5 min — PR remediation responsive window (#437)
       hitlPolicy:
         ttlMs: 1800000   # 30 minutes — auto-approve if no human responds
         onTimeout: approve
@@ -235,6 +253,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 300000   # 5 min — PR remediation responsive window (#437)
 
   - id: action.pr_address_feedback
     goalId: pr.no_changes_requested
@@ -252,6 +271,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 300000   # 5 min — PR remediation responsive window (#437)
 
   - id: alert.branch_drift
     goalId: branch.drift_low
@@ -269,6 +289,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── protoMaker team (multi-agent board runtime) ──────────────────
 
@@ -288,6 +309,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: action.protomaker_triage_blocked
     goalId: protomaker.board_healthy
@@ -307,6 +329,7 @@ actions:
       skillHint: board_health
       agentId: protomaker
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   - id: alert.protomaker_backlog_piling
     goalId: protomaker.backlog_not_piling
@@ -324,6 +347,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: action.protomaker_start_auto_mode
     goalId: protomaker.backlog_not_piling
@@ -349,6 +373,7 @@ actions:
       skillHint: auto_mode
       agentId: protomaker
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   # ── Branch protection ─────────────────────────────────────────────
 
@@ -365,6 +390,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.branch_unprotected
     goalId: branch.main_protected
@@ -379,6 +405,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.ci_main_red
     goalId: ci.main_last_push_green
@@ -393,6 +420,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── Branch drift remediation ──────────────────────────────────────
   #
@@ -401,6 +429,11 @@ actions:
   # The pr-remediator plugin subscribes to this topic and drives the
   # actual GitHub API calls. Idempotent — skipped if a backmerge is
   # already in flight for the same repo.
+  #
+  # No yaml-level cooldownMs: pr-remediator owns an in-handler per-repo
+  # backmerge cooldown (lib/plugins/pr-remediator.ts ~line 1265). Adding
+  # a yaml cooldown here would shadow the per-repo bucket with a single
+  # global one — keep the in-handler cooldown authoritative. See #437.
 
   - id: action.dispatch_backmerge
     goalId: branch.drift_low
@@ -431,6 +464,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.plane_stale_backlog
     goalId: plane.no_stale_backlog
@@ -445,6 +479,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.plane_unassigned_piling
     goalId: plane.unassigned_not_piling
@@ -459,6 +494,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── Memory / Graphiti health ──────────────────────────────────────
 
@@ -475,6 +511,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: alert.memory_search_broken
     goalId: memory.search_working
@@ -489,6 +526,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   # ── Agent fleet health ────────────────────────────────────────────
   #
@@ -497,6 +535,7 @@ actions:
   # fleet_incident_response action dispatches Ava to open an
   # incident, page on-call, and pause auto-routing to the stuck
   # agent until its failure rate falls below 50%.
+  # Re-enabled with cooldown added per #437.
 
   - id: alert.fleet_agent_stuck
     goalId: fleet.no_agent_stuck
@@ -514,6 +553,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: action.fleet_incident_response
     goalId: fleet.no_agent_stuck
@@ -532,6 +572,7 @@ actions:
     meta:
       skillHint: fleet_incident_response
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch, expensive (#437)
 
   # ── HITL routing health ───────────────────────────────────────────
   #
@@ -553,6 +594,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
       hitlPolicy:
         ttlMs: 3600000  # 1 hour — escalate (no auto-action) so humans must intervene
         onTimeout: escalate
@@ -575,6 +617,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: action.fleet_downshift_models
     goalId: fleet.cost_under_budget
@@ -593,6 +636,7 @@ actions:
     meta:
       skillHint: downshift_models
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   # ── Skill orphan detection (Arc 8.5) ──────────────────────────────
 
@@ -612,6 +656,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: action.fleet_investigate_orphaned_skills
     goalId: fleet.no_skill_orphaned
@@ -631,6 +676,7 @@ actions:
       skillHint: investigate_orphaned_skills
       agentId: ava
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   # ── Issue Zero — triage open GitHub issues ────────────────────────
   #
@@ -654,6 +700,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: action.issues_triage_critical
     goalId: issues.zero_critical
@@ -673,6 +720,7 @@ actions:
       skillHint: issue_triage
       agentId: ava
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   - id: alert.issues_bugs
     goalId: issues.zero_bugs
@@ -690,6 +738,7 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)
 
   - id: action.issues_triage_bugs
     goalId: issues.zero_bugs
@@ -709,6 +758,7 @@ actions:
       skillHint: issue_triage
       agentId: ava
       fireAndForget: true
+      cooldownMs: 1800000  # 30 min — agent skill dispatch (#437)
 
   - id: alert.issues_total_high
     goalId: issues.total_low
@@ -726,3 +776,4 @@ actions:
     effects: []
     meta:
       fireAndForget: true
+      cooldownMs: 900000   # 15 min (#437)

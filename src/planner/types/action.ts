@@ -50,6 +50,13 @@ export interface ActionMeta {
   fireAndForget?: boolean;
   /** Hint for SkillBrokerPlugin: which skill to invoke. */
   skillHint?: string;
+  /**
+   * Per-action cooldown in milliseconds. When set, the ActionDispatcherPlugin
+   * records a timestamp on each successful dispatch and drops any subsequent
+   * dispatch of the same action id within the window. Keyed on `action.id`
+   * alone — each action gets its own bucket. Absence means no cooldown.
+   */
+  cooldownMs?: number;
 }
 
 export type ActionTier = "tier_0" | "tier_1" | "tier_2";
