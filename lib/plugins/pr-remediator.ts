@@ -1206,7 +1206,7 @@ Critical rules:
     if (!policy || typeof policy !== "object") return undefined;
     const p = policy as Record<string, unknown>;
     const out: { ttlMs?: number; onTimeout?: "approve" | "reject" | "escalate" } = {};
-    if (typeof p.ttlMs === "number") out.ttlMs = p.ttlMs;
+    if (typeof p.ttlMs === "number" && Number.isFinite(p.ttlMs) && p.ttlMs > 0) out.ttlMs = p.ttlMs;
     if (p.onTimeout === "approve" || p.onTimeout === "reject" || p.onTimeout === "escalate") {
       out.onTimeout = p.onTimeout;
     }
