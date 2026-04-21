@@ -24,6 +24,7 @@ interface PrEntry {
   headSha: string;
   author: string;
   baseRef: string;
+  headRef?: string;
   mergeable: "clean" | "dirty" | "blocked" | "unknown";
   ciStatus: "pass" | "fail" | "pending" | "none";
   reviewState: "approved" | "changes_requested" | "pending" | "none";
@@ -39,7 +40,8 @@ function makePr(overrides: Partial<PrEntry> = {}): PrEntry {
     title: "feat: widget",
     headSha: "abc1234",
     author: "alice",
-    baseRef: "main",
+    baseRef: "dev",
+    headRef: "feature/x",
     mergeable: "clean",
     ciStatus: "pass",
     reviewState: "approved",
@@ -795,6 +797,184 @@ describe("PrRemediatorPlugin — diagnose_pr_stuck", () => {
 
     // Malformed response falls back to genuine → HITL
     expect(hitlCaptured.length).toBeGreaterThan(0);
+
+    plugin.uninstall();
+  });
+
+  // ── Promotion-PR guard (issue #465) ────────────────────────────────────────
+  //
+  // A `decomposable` verdict on a release-pipeline PR (head ∈ {dev,staging} or
+  // base ∈ {main,staging} or title starts "Promote") is structurally wrong:
+  // the conflict is drift between branches, not within commits, so a back-merge
+  // is the recovery, not a split. Guard at the chokepoint refuses the verdict
+  // and escalates to HITL — same defense-in-depth pattern as #437/#444/#459.
+
+  test("decomposable verdict on a refactor PR (head=feature/x, base=dev) still closes", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [
+      makePr({ number: 101, headRef: "feature/x", baseRef: "dev", mergeable: "dirty", readyToMerge: false }),
+    ]);
+
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+
+    const pr = makePr({
+      number: 101,
+      headRef: "feature/x",
+      baseRef: "dev",
+      mergeable: "dirty",
+      readyToMerge: false,
+    });
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: {
+        text:
+          '```json\n{"verdict":"decomposable","evidence":"conflicts cluster in src/auth.ts and src/api.ts","conflictingFiles":["src/auth.ts","src/api.ts"]}\n```',
+      },
+    });
+    await flushMicrotasks();
+
+    // Refactor PR — guard does NOT trip; the close path runs (silently fails
+    // without GH creds in tests, but importantly does not escalate to HITL).
+    expect(hitlCaptured.length).toBe(0);
+
+    plugin.uninstall();
+  });
+
+  test("decomposable verdict on dev→main promotion PR escalates to HITL, does NOT close", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [
+      makePr({ number: 463, headRef: "dev", baseRef: "main", title: "Promote v0.7.22 to main", mergeable: "dirty", readyToMerge: false }),
+    ]);
+
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+
+    const pr = makePr({
+      number: 463,
+      headRef: "dev",
+      baseRef: "main",
+      title: "Promote v0.7.22 to main",
+      mergeable: "dirty",
+      readyToMerge: false,
+    });
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: {
+        text:
+          '```json\n{"verdict":"decomposable","evidence":"conflicts cluster in 4 files","conflictingFiles":["a.ts","b.ts","c.ts","d.ts"]}\n```',
+      },
+    });
+    await flushMicrotasks();
+
+    // Promotion PR — guard MUST trip and escalate to HITL.
+    expect(hitlCaptured.length).toBe(1);
+    const req = hitlCaptured[0]!.payload as HITLRequest;
+    expect(req.title).toContain("#463");
+    expect(req.summary).toContain("Promotion-PR guard");
+    expect(req.summary).toContain("back-merge");
+
+    plugin.uninstall();
+  });
+
+  test("decomposable verdict on staging→main promotion PR escalates to HITL", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [
+      makePr({ number: 470, headRef: "staging", baseRef: "main", mergeable: "dirty", readyToMerge: false }),
+    ]);
+
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+
+    const pr = makePr({
+      number: 470,
+      headRef: "staging",
+      baseRef: "main",
+      mergeable: "dirty",
+      readyToMerge: false,
+    });
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: {
+        text:
+          '```json\n{"verdict":"decomposable","evidence":"clusters in 3 files","conflictingFiles":["x.ts","y.ts","z.ts"]}\n```',
+      },
+    });
+    await flushMicrotasks();
+
+    expect(hitlCaptured.length).toBe(1);
+    const req = hitlCaptured[0]!.payload as HITLRequest;
+    expect(req.summary).toContain("staging");
+
+    plugin.uninstall();
+  });
+
+  test("decomposable verdict on dev→staging promotion PR escalates to HITL", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [
+      makePr({ number: 471, headRef: "dev", baseRef: "staging", mergeable: "dirty", readyToMerge: false }),
+    ]);
+
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+
+    const pr = makePr({
+      number: 471,
+      headRef: "dev",
+      baseRef: "staging",
+      mergeable: "dirty",
+      readyToMerge: false,
+    });
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: {
+        text:
+          '```json\n{"verdict":"decomposable","evidence":"clusters in 2 files","conflictingFiles":["a.ts","b.ts"]}\n```',
+      },
+    });
+    await flushMicrotasks();
+
+    expect(hitlCaptured.length).toBe(1);
 
     plugin.uninstall();
   });

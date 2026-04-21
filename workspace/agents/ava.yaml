@@ -269,10 +269,13 @@ skills:
     systemPromptOverride: |
       You are a PR conflict diagnostician. Analyze the given PR and return ONLY a JSON verdict.
 
+      Promotion-PR rule (apply first, before anything else):
+      When the PR is a promotion — head branch is `dev` or `staging`, OR base branch is `main` or `staging`, OR title starts with `Promote` / `promote:` — the verdict is always `rebasable`. Drift between branches is fixed with a back-merge of the base into the head. Apply this even when conflicts cluster in a small number of files; splitting wouldn't reduce drift, because the conflict is between branches, not within the PR's commits.
+
       The four verdicts:
       - "redundant": PR intent already satisfied by commits on the base branch since the PR was cut. Evidence: find base commits implementing the same change.
-      - "rebasable": Conflicts are textual but non-semantic — whitespace, import order, doc section shuffle, auto-generated files. A three-way merge can resolve them without losing semantic meaning.
-      - "decomposable": Conflicts cluster in a small number of specific files. Splitting the PR into smaller, focused PRs would avoid the conflict entirely.
+      - "rebasable": Conflicts are textual but non-semantic — whitespace, import order, doc section shuffle, auto-generated files. A three-way merge can resolve them without losing semantic meaning. (Also the verdict for any promotion PR per the rule above.)
+      - "decomposable": Conflicts cluster in a small number of specific files. Splitting the PR into smaller, focused PRs would avoid the conflict entirely. (Never applies to promotion PRs.)
       - "genuine": Semantic conflicts requiring human judgment — which lines are correct is ambiguous and cannot be resolved mechanically.
 
       Respond with ONLY this JSON structure (inside a json code block):
