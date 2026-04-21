@@ -38,6 +38,43 @@ import type { BusMessage } from "../../lib/types.ts";
 import { buildAgentCard } from "./agent-card.ts";
 
 /**
+ * Detect when an upstream payload looks like an HTML error page (usually the
+ * result of a misrouted HTTP call to a sub-agent whose card URL is wrong —
+ * e.g. `<!DOCTYPE html>...Cannot POST /...`). We treat these as failures and
+ * sanitize them before they surface as the assistant's reply text.
+ *
+ * Sentinels cover Express default error body, generic 4xx/5xx HTML, and any
+ * payload that's clearly markup rather than a text reply.
+ */
+function looksLikeHtmlError(text: string): boolean {
+  if (!text) return false;
+  const head = text.slice(0, 256).toLowerCase();
+  return (
+    head.startsWith("<!doctype")
+    || head.startsWith("<html")
+    || head.includes("cannot post /")
+    || head.includes("cannot get /")
+    || head.includes("404 not found")
+  );
+}
+
+function sanitizeHtmlError(raw: string): string {
+  // Strip tags + `<!DOCTYPE ...>` so the debug hint itself contains no markup
+  // — the whole point is that the caller shouldn't see HTML in their reply.
+  const hint = raw
+    .replace(/<!DOCTYPE[^>]*>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+  return (
+    "Downstream agent returned an HTTP error (possibly a card misconfiguration). "
+    + "See workstacean logs for details. "
+    + `[debug hint: ${hint}]`
+  );
+}
+
+/**
  * Bridges A2A RequestContext → agent.skill.request bus message and back.
  *
  * Skill resolution:
@@ -74,9 +111,20 @@ class BusAgentExecutor implements AgentExecutor {
     const skill = (typeof metadata.skillHint === "string" && metadata.skillHint)
       || (typeof metadata.skill === "string" && metadata.skill)
       || "chat";
-    const targets = Array.isArray(metadata.targets)
+    const explicitTargets = Array.isArray(metadata.targets)
       ? (metadata.targets as unknown[]).filter((v): v is string => typeof v === "string")
       : [];
+    // This endpoint (ava.proto-labs.ai/a2a) defaults to Ava when no target is
+    // specified. The orchestrator agent card aggregates the full fleet's
+    // skills, but the routing default must be Ava — she's the helm. Callers
+    // route elsewhere by passing explicit `metadata.targets`.
+    let targets: string[];
+    if (explicitTargets.length === 0) {
+      targets = ["ava"];
+      console.log("[a2a-server] no target specified, defaulting to [ava] for message/send");
+    } else {
+      targets = explicitTargets;
+    }
 
     // Emit initial Task event so the caller gets a taskId immediately
     eventBus.publish({
@@ -102,8 +150,29 @@ class BusAgentExecutor implements AgentExecutor {
         this.activeCancels.delete(taskId);
 
         const payload = (msg.payload ?? {}) as { content?: string; error?: string };
-        const errorText = typeof payload.error === "string" ? payload.error : undefined;
-        const contentText = typeof payload.content === "string" ? payload.content : "";
+        const rawError = typeof payload.error === "string" ? payload.error : undefined;
+        const rawContent = typeof payload.content === "string" ? payload.content : "";
+
+        // Detect raw HTML error pages bubbling up from a misrouted A2A sub-call
+        // (e.g. upstream card URL is wrong — see protoLabsAI/protoMaker#3536).
+        // Sanitize them so the caller doesn't see `<!DOCTYPE html>...Cannot
+        // POST /...` as the assistant's reply text. Log the raw payload loudly
+        // so operators can trace the upstream misconfiguration.
+        let errorText = rawError;
+        let contentText = rawContent;
+        if (rawError && looksLikeHtmlError(rawError)) {
+          console.warn(
+            `[a2a-server] upstream error payload contained HTML (taskId=${taskId.slice(0, 8)}…); sanitizing. Raw:\n${rawError}`,
+          );
+          errorText = sanitizeHtmlError(rawError);
+        }
+        if (!errorText && rawContent && looksLikeHtmlError(rawContent)) {
+          console.warn(
+            `[a2a-server] upstream content payload contained HTML (taskId=${taskId.slice(0, 8)}…); treating as failure. Raw:\n${rawContent}`,
+          );
+          errorText = sanitizeHtmlError(rawContent);
+          contentText = "";
+        }
 
         const finalState = errorText ? "failed" : "completed";
         const finalText = errorText || contentText || "";
