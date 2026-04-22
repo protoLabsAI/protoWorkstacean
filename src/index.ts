@@ -508,23 +508,6 @@ for (const entry of pluginRegistry) {
   }
 }
 
-// --- Fail-loud wiring validation ---
-// Cross-check every loaded action against the live ExecutorRegistry. Any
-// action that resolves to a null executor would cause SkillDispatcherPlugin
-// to silently drop dispatches forever — see issue #426. Surface each gap
-// as a HIGH-severity Discord alert (goal `platform.skills_unwired`) and
-// log loudly. Set WORKSTACEAN_STRICT_WIRING=1 to crash startup instead.
-{
-  const { validateActionExecutors } = await import("./planner/validate-action-executors.js");
-  const unwired = validateActionExecutors(actionRegistry, executorRegistry, {
-    bus,
-    throwOnUnwired: process.env.WORKSTACEAN_STRICT_WIRING === "1",
-  });
-  if (unwired.length === 0) {
-    console.log(`[startup-validator] All ${actionRegistry.size} action(s) have a registered executor.`);
-  }
-}
-
 // --- Dynamic plugin loading from workspace/plugins/ ---
 function isPlugin(value: unknown): value is Plugin {
   return (
@@ -576,6 +559,29 @@ async function loadWorkspacePlugins(): Promise<Plugin[]> {
 const workspacePlugins = await loadWorkspacePlugins();
 
 const allPlugins = [...corePlugins, ...registeredPlugins, ...workspacePlugins];
+
+// --- Fail-loud wiring validation ---
+// Cross-check every loaded action against the live ExecutorRegistry. Any
+// action that resolves to a null executor would cause SkillDispatcherPlugin
+// to silently drop dispatches forever — see issue #426. Surface each gap
+// as a HIGH-severity Discord alert (goal `platform.skills_unwired`) and
+// log loudly. Set WORKSTACEAN_STRICT_WIRING=1 to crash startup instead.
+//
+// Runs AFTER loadWorkspacePlugins() so executor registrars shipped as
+// workspace plugins are seen, AND on every config.reload so new
+// actions.yaml entries are validated without a restart (issue #467 #5).
+const { validateActionExecutors } = await import("./planner/validate-action-executors.js");
+function runWiringValidator(reason: "startup" | "reload"): void {
+  const unwired = validateActionExecutors(actionRegistry, executorRegistry, {
+    bus,
+    throwOnUnwired: process.env.WORKSTACEAN_STRICT_WIRING === "1",
+  });
+  if (unwired.length === 0) {
+    const tag = reason === "startup" ? "[startup-validator]" : "[reload-validator]";
+    console.log(`${tag} All ${actionRegistry.size} action(s) have a registered executor.`);
+  }
+}
+runWiringValidator("startup");
 
 // ── Wire dormant alert paths → Discord ──────────────────────────────────────
 // ops.alert.budget and world.action.queue_full are published but had no consumers.
@@ -663,6 +669,9 @@ bus.subscribe(TOPICS.CONFIG_RELOAD, "config-reloader", () => {
     telemetry.registerKnown("action", action.id, ACTION_EVENTS);
   }
   console.info(`[config-reload] Actions reloaded: ${actionRegistry.size} active. Goals reload handled by goal-evaluator plugin.`);
+  // Re-validate against the registry — newly added actions get the same
+  // fail-loud cross-check as startup (issue #467 #5).
+  runWiringValidator("reload");
 });
 
 const apiContext: ApiContext = {

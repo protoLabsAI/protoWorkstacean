@@ -2,7 +2,7 @@ Run the agent roll call smoke test. Reports status of all agents (in-process Dee
 
 ## Steps
 
-1. Run `bash /home/josh/dev/protoWorkstacean/scripts/agent-rollcall.sh`
+1. From the repo root, run `bash scripts/agent-rollcall.sh`
 2. Report the output to the user
 3. If any services are down, suggest remediation steps
 
