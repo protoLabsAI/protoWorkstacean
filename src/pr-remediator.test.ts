@@ -24,6 +24,7 @@ interface PrEntry {
   headSha: string;
   author: string;
   baseRef: string;
+  headRef?: string;
   mergeable: "clean" | "dirty" | "blocked" | "unknown";
   ciStatus: "pass" | "fail" | "pending" | "none";
   reviewState: "approved" | "changes_requested" | "pending" | "none";
@@ -39,7 +40,8 @@ function makePr(overrides: Partial<PrEntry> = {}): PrEntry {
     title: "feat: widget",
     headSha: "abc1234",
     author: "alice",
-    baseRef: "main",
+    baseRef: "dev",
+    headRef: "feature/x",
     mergeable: "clean",
     ciStatus: "pass",
     reviewState: "approved",
@@ -797,6 +799,346 @@ describe("PrRemediatorPlugin — diagnose_pr_stuck", () => {
     expect(hitlCaptured.length).toBeGreaterThan(0);
 
     plugin.uninstall();
+  });
+
+  // ── Promotion-PR guard (issue #465) ────────────────────────────────────────
+  //
+  // A `decomposable` verdict on a release-pipeline PR (head ∈ {dev,staging} or
+  // base ∈ {main,staging} or title starts "Promote") is structurally wrong:
+  // the conflict is drift between branches, not within commits, so a back-merge
+  // is the recovery, not a split. Guard at the chokepoint refuses the verdict
+  // and escalates to HITL — same defense-in-depth pattern as #437/#444/#459.
+
+  test("decomposable verdict on a refactor PR (head=feature/x, base=dev) still closes", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [
+      makePr({ number: 101, headRef: "feature/x", baseRef: "dev", mergeable: "dirty", readyToMerge: false }),
+    ]);
+
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+
+    const pr = makePr({
+      number: 101,
+      headRef: "feature/x",
+      baseRef: "dev",
+      mergeable: "dirty",
+      readyToMerge: false,
+    });
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: {
+        text:
+          '```json\n{"verdict":"decomposable","evidence":"conflicts cluster in src/auth.ts and src/api.ts","conflictingFiles":["src/auth.ts","src/api.ts"]}\n```',
+      },
+    });
+    await flushMicrotasks();
+
+    // Refactor PR — guard does NOT trip; the close path runs (silently fails
+    // without GH creds in tests, but importantly does not escalate to HITL).
+    expect(hitlCaptured.length).toBe(0);
+
+    plugin.uninstall();
+  });
+
+  test("decomposable verdict on dev→main promotion PR escalates to HITL, does NOT close", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [
+      makePr({ number: 463, headRef: "dev", baseRef: "main", title: "Promote v0.7.22 to main", mergeable: "dirty", readyToMerge: false }),
+    ]);
+
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+
+    const pr = makePr({
+      number: 463,
+      headRef: "dev",
+      baseRef: "main",
+      title: "Promote v0.7.22 to main",
+      mergeable: "dirty",
+      readyToMerge: false,
+    });
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: {
+        text:
+          '```json\n{"verdict":"decomposable","evidence":"conflicts cluster in 4 files","conflictingFiles":["a.ts","b.ts","c.ts","d.ts"]}\n```',
+      },
+    });
+    await flushMicrotasks();
+
+    // Promotion PR — guard MUST trip and escalate to HITL.
+    expect(hitlCaptured.length).toBe(1);
+    const req = hitlCaptured[0]!.payload as HITLRequest;
+    expect(req.title).toContain("#463");
+    expect(req.summary).toContain("Promotion-PR guard");
+    expect(req.summary).toContain("back-merge");
+
+    plugin.uninstall();
+  });
+
+  test("decomposable verdict on staging→main promotion PR escalates to HITL", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [
+      makePr({ number: 470, headRef: "staging", baseRef: "main", mergeable: "dirty", readyToMerge: false }),
+    ]);
+
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+
+    const pr = makePr({
+      number: 470,
+      headRef: "staging",
+      baseRef: "main",
+      mergeable: "dirty",
+      readyToMerge: false,
+    });
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: {
+        text:
+          '```json\n{"verdict":"decomposable","evidence":"clusters in 3 files","conflictingFiles":["x.ts","y.ts","z.ts"]}\n```',
+      },
+    });
+    await flushMicrotasks();
+
+    expect(hitlCaptured.length).toBe(1);
+    const req = hitlCaptured[0]!.payload as HITLRequest;
+    expect(req.summary).toContain("staging");
+
+    plugin.uninstall();
+  });
+
+  test("decomposable verdict on dev→staging promotion PR escalates to HITL", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    pushWorldState(bus, [
+      makePr({ number: 471, headRef: "dev", baseRef: "staging", mergeable: "dirty", readyToMerge: false }),
+    ]);
+
+    const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+    const skillCaptured = captureOn(bus, "agent.skill.request");
+
+    const pr = makePr({
+      number: 471,
+      headRef: "dev",
+      baseRef: "staging",
+      mergeable: "dirty",
+      readyToMerge: false,
+    });
+    privateOf(plugin)._dispatchDiagnose(pr, crypto.randomUUID());
+    await flushMicrotasks();
+
+    const cid = skillCaptured[0]!.correlationId;
+    bus.publish(`agent.skill.response.${cid}`, {
+      id: crypto.randomUUID(),
+      correlationId: cid,
+      topic: `agent.skill.response.${cid}`,
+      timestamp: Date.now(),
+      payload: {
+        text:
+          '```json\n{"verdict":"decomposable","evidence":"clusters in 2 files","conflictingFiles":["a.ts","b.ts"]}\n```',
+      },
+    });
+    await flushMicrotasks();
+
+    expect(hitlCaptured.length).toBe(1);
+
+    plugin.uninstall();
+  });
+});
+
+// ── hitlPolicy propagation ───────────────────────────────────────────────────
+//
+// action.pr_merge_ready in workspace/actions.yaml declares
+//   meta.hitlPolicy: { ttlMs: 1800000, onTimeout: approve }
+// The PrRemediatorSkillExecutorPlugin forwards meta into the trigger payload
+// on `pr.remediate.merge_ready`. _handleMergeReady extracts it via
+// _extractHitlPolicy and applies it to the HITL request raised when ghMerge
+// fails. This test exercises _emitHitlApproval directly via the same
+// `as unknown as` cast pattern used by the diagnose_pr_stuck tests.
+
+describe("PrRemediatorPlugin — hitlPolicy", () => {
+  type PluginPrivate = {
+    _emitHitlApproval(
+      pr: PrEntry,
+      parentCorrelationId: string,
+      note?: string,
+      hitlPolicy?: { ttlMs?: number; onTimeout?: "approve" | "reject" | "escalate" },
+    ): void;
+    _extractHitlPolicy(msg: BusMessage): { ttlMs?: number; onTimeout?: "approve" | "reject" | "escalate" } | undefined;
+  };
+  function privateOf(plugin: PrRemediatorPlugin): PluginPrivate {
+    return plugin as unknown as PluginPrivate;
+  }
+
+  test("_emitHitlApproval honours hitlPolicy onTimeout=approve and ttlMs", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    const captured = captureOn(bus, "hitl.request.pr.merge.#");
+    const pr = makePr({ number: 555 });
+    const before = Date.now();
+    privateOf(plugin)._emitHitlApproval(pr, crypto.randomUUID(), "test fallback", {
+      ttlMs: 1_800_000,
+      onTimeout: "approve",
+    });
+    await flushMicrotasks();
+    expect(captured.length).toBe(1);
+    const req = captured[0]!.payload as HITLRequest;
+    expect(req.onTimeout).toBe("approve");
+    expect(req.ttlMs).toBe(1_800_000);
+    const expiresAtMs = Date.parse(req.expiresAt);
+    // Expiry should be ~30 min in the future (allow generous tolerance for CI).
+    expect(expiresAtMs - before).toBeGreaterThanOrEqual(1_800_000 - 1000);
+    expect(expiresAtMs - before).toBeLessThanOrEqual(1_800_000 + 5000);
+
+    plugin.uninstall();
+  });
+
+  test("_emitHitlApproval falls back to 30min escalation when no policy passed", async () => {
+    const bus = new InMemoryEventBus();
+    const plugin = new PrRemediatorPlugin();
+    plugin.install(bus);
+
+    const captured = captureOn(bus, "hitl.request.pr.merge.#");
+    privateOf(plugin)._emitHitlApproval(makePr({ number: 556 }), crypto.randomUUID(), "no-policy");
+    await flushMicrotasks();
+    const req = captured[0]!.payload as HITLRequest;
+    expect(req.onTimeout).toBeUndefined(); // → escalate behaviour in HITLPlugin
+    expect(req.ttlMs).toBe(30 * 60 * 1000);
+
+    plugin.uninstall();
+  });
+
+  test("_extractHitlPolicy parses meta.hitlPolicy from a trigger msg", () => {
+    const plugin = new PrRemediatorPlugin();
+    const policy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: {
+        meta: {
+          hitlPolicy: { ttlMs: 1_800_000, onTimeout: "approve" },
+        },
+      },
+    });
+    expect(policy).toEqual({ ttlMs: 1_800_000, onTimeout: "approve" });
+  });
+
+  test("_extractHitlPolicy returns undefined when meta.hitlPolicy is missing", () => {
+    const plugin = new PrRemediatorPlugin();
+    const policy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: { meta: {} },
+    });
+    expect(policy).toBeUndefined();
+  });
+
+  test("_extractHitlPolicy ignores unknown onTimeout values", () => {
+    const plugin = new PrRemediatorPlugin();
+    const policy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: {
+        meta: {
+          hitlPolicy: { ttlMs: 1000, onTimeout: "bogus" },
+        },
+      },
+    });
+    expect(policy).toEqual({ ttlMs: 1000 });
+  });
+
+  test("_extractHitlPolicy rejects Infinity as ttlMs", () => {
+    const plugin = new PrRemediatorPlugin();
+    const policy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: {
+        meta: {
+          hitlPolicy: { ttlMs: Infinity, onTimeout: "approve" },
+        },
+      },
+    });
+    expect(policy).toEqual({ onTimeout: "approve" });
+  });
+
+  test("_extractHitlPolicy rejects NaN as ttlMs", () => {
+    const plugin = new PrRemediatorPlugin();
+    const policy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: {
+        meta: {
+          hitlPolicy: { ttlMs: NaN, onTimeout: "reject" },
+        },
+      },
+    });
+    expect(policy).toEqual({ onTimeout: "reject" });
+  });
+
+  test("_extractHitlPolicy rejects zero and negative ttlMs", () => {
+    const plugin = new PrRemediatorPlugin();
+    const zeroPolicy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: { meta: { hitlPolicy: { ttlMs: 0 } } },
+    });
+    expect(zeroPolicy).toBeUndefined();
+
+    const negativePolicy = privateOf(plugin)._extractHitlPolicy({
+      id: "x",
+      correlationId: "y",
+      topic: "pr.remediate.merge_ready",
+      timestamp: Date.now(),
+      payload: { meta: { hitlPolicy: { ttlMs: -1000 } } },
+    });
+    expect(negativePolicy).toBeUndefined();
   });
 });
 
