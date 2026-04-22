@@ -508,23 +508,6 @@ for (const entry of pluginRegistry) {
   }
 }
 
-// --- Fail-loud wiring validation ---
-// Cross-check every loaded action against the live ExecutorRegistry. Any
-// action that resolves to a null executor would cause SkillDispatcherPlugin
-// to silently drop dispatches forever — see issue #426. Surface each gap
-// as a HIGH-severity Discord alert (goal `platform.skills_unwired`) and
-// log loudly. Set WORKSTACEAN_STRICT_WIRING=1 to crash startup instead.
-{
-  const { validateActionExecutors } = await import("./planner/validate-action-executors.js");
-  const unwired = validateActionExecutors(actionRegistry, executorRegistry, {
-    bus,
-    throwOnUnwired: process.env.WORKSTACEAN_STRICT_WIRING === "1",
-  });
-  if (unwired.length === 0) {
-    console.log(`[startup-validator] All ${actionRegistry.size} action(s) have a registered executor.`);
-  }
-}
-
 // --- Dynamic plugin loading from workspace/plugins/ ---
 function isPlugin(value: unknown): value is Plugin {
   return (
