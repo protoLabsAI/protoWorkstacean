@@ -100,6 +100,16 @@ Agents can declare their own Discord bot tokens via `discordBotTokenEnvKey` in e
 | `PLANE_WEBHOOK_SECRET` | _(none)_ | PlanePlugin | HMAC secret for verifying Plane webhook payloads. |
 | `PLANE_WEBHOOK_PORT` | _(none)_ | PlanePlugin | Port for the Plane webhook receiver. |
 
+## Linear
+
+| Variable | Default | Plugin | Description |
+|----------|---------|--------|-------------|
+| `LINEAR_API_KEY` | _(none)_ | LinearPlugin | Linear personal API key for outbound GraphQL mutations (comment/create/update issues). If unset, outbound is disabled. |
+| `LINEAR_WEBHOOK_SECRET` | _(none)_ | LinearPlugin | HMAC-SHA256 signing secret from Linear webhook config. Unset = signature verification disabled (dev mode only). |
+| `LINEAR_WEBHOOK_PORT` | `8084` | LinearPlugin | Port for the Linear webhook HTTP server. |
+
+`LinearPlugin` installs when either `LINEAR_API_KEY` or `LINEAR_WEBHOOK_SECRET` is set; with neither it's skipped.
+
 ## Google Workspace
 
 | Variable | Default | Plugin | Description |

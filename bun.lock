@@ -10,6 +10,7 @@
         "@langchain/langgraph": "^1.2.8",
         "@langchain/openai": "^1.4.4",
         "@langfuse/langchain": "^5.1.0",
+        "@linear/sdk": "^82.1.0",
         "@makeplane/plane-node-sdk": "^0.2.9",
         "@mariozechner/pi-coding-agent": "^0.64.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
@@ -216,6 +217,8 @@
 
     "@google/genai": ["@google/genai@1.48.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-plonYK4ML2PrxsRD9SeqmFt76eREWkQdPCglOA6aYDzL1AAbE+7PUnT54SvpWGfws13L0AZEqGSpL7+1IPnTxQ=="],
 
+    "@graphql-typed-document-node/core": ["@graphql-typed-document-node/core@3.2.0", "", { "peerDependencies": { "graphql": "^0.8.0 || ^0.9.0 || ^0.10.0 || ^0.11.0 || ^0.12.0 || ^0.13.0 || ^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-mB9oAsNCm9aM3/SOv4YtBMqZbYj10R7dkq8byBqxGY/ncFwhf2oQzMV+LCRlWoDSEBJ3COiR1yeDvMtsoOsuFQ=="],
+
     "@hono/node-server": ["@hono/node-server@1.19.13", "", { "peerDependencies": { "hono": "^4" } }, "sha512-TsQLe4i2gvoTtrHje625ngThGBySOgSK3Xo2XRYOdqGN1teR8+I7vchQC46uLJi8OF62YTYA3AhSpumtkhsaKQ=="],
 
     "@isaacs/cliui": ["@isaacs/cliui@8.0.2", "", { "dependencies": { "string-width": "^5.1.2", "string-width-cjs": "npm:string-width@^4.2.0", "strip-ansi": "^7.0.1", "strip-ansi-cjs": "npm:strip-ansi@^6.0.1", "wrap-ansi": "^8.1.0", "wrap-ansi-cjs": "npm:wrap-ansi@^7.0.0" } }, "sha512-O8jcjabXaleOG9DQ0+ARXWZBTfnP4WNAqzuiJK7ll44AmxGKv/J2M4TPjxjY3znBCfvBXFzucm1twdyFybFqEA=="],
@@ -285,6 +288,8 @@
     "@langfuse/langchain": ["@langfuse/langchain@5.1.0", "", { "dependencies": { "@langfuse/core": "^5.1.0", "@langfuse/tracing": "^5.1.0" }, "peerDependencies": { "@langchain/core": ">=0.3.8", "@opentelemetry/api": "^1.9.0" } }, "sha512-daBSFV/gzv6oZZHOTAKJtC3BaEGItnuPAAuruE9FaCnKOuzG61caf9OFTi4w0sYgUmE+mZrW/kmnf39kp/SVvg=="],
 
     "@langfuse/tracing": ["@langfuse/tracing@5.1.0", "", { "dependencies": { "@langfuse/core": "^5.1.0" }, "peerDependencies": { "@opentelemetry/api": "^1.9.0" } }, "sha512-ScwYnQzqLZOaMPZkCsWizx139eb02GI8tD5yxs5XVjGNGZxKdw1DfRPTIONSlOhaAYCY9ILGTJdkqAtNTzsbRg=="],
+
+    "@linear/sdk": ["@linear/sdk@82.1.0", "", { "dependencies": { "@graphql-typed-document-node/core": "^3.2.0" } }, "sha512-Ok7o+LqXaenx6Um58NQqjQoQanDsCgAIe9yNgpVbqRSh5APz3Ds1kZUz2vWmSNTNATFZm1zDQtEktTMga2X7UQ=="],
 
     "@makeplane/plane-node-sdk": ["@makeplane/plane-node-sdk@0.2.9", "", { "dependencies": { "axios": "1.13.5", "ts-jest": "^29.4.4" } }, "sha512-yxat/aWhV4CFHqC9U/31K/6BwzVTUr2nutRXj+BmV6qyJGRaeGGsW0XC4ZrOQlNhDwAEzYOKVEKxGCpvtKkwug=="],
 
@@ -829,6 +834,8 @@
     "gopd": ["gopd@1.2.0", "", {}, "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg=="],
 
     "graceful-fs": ["graceful-fs@4.2.11", "", {}, "sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ=="],
+
+    "graphql": ["graphql@16.13.2", "", {}, "sha512-5bJ+nf/UCpAjHM8i06fl7eLyVC9iuNAjm9qzkiu2ZGhM0VscSvS6WDPfAwkdkBuoXGM9FJSbKl6wylMwP9Ktig=="],
 
     "handlebars": ["handlebars@4.7.9", "", { "dependencies": { "minimist": "^1.2.5", "neo-async": "^2.6.2", "source-map": "^0.6.1", "wordwrap": "^1.0.0" }, "optionalDependencies": { "uglify-js": "^3.1.4" }, "bin": { "handlebars": "bin/handlebars" } }, "sha512-4E71E0rpOaQuJR2A3xDZ+GM1HyWYv1clR58tC8emQNeQe3RH7MAzSbat+V0wG78LQBo6m6bzSG/L4pBuCsgnUQ=="],
 

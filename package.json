@@ -14,6 +14,7 @@
     "@langchain/langgraph": "^1.2.8",
     "@langchain/openai": "^1.4.4",
     "@langfuse/langchain": "^5.1.0",
+    "@linear/sdk": "^82.1.0",
     "@makeplane/plane-node-sdk": "^0.2.9",
     "@mariozechner/pi-coding-agent": "^0.64.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
