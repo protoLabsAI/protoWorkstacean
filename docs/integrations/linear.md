@@ -116,6 +116,63 @@ LinearPlugin outbound subscriber  → client.addComment(issueId, text)
 Comment appears on the Linear issue.
 ```
 
-## Decoupled protoMaker integration
+## Linear → protoMaker board bridge
 
-Want Linear issues to become features on the protoMaker board? Write a tiny plugin that subscribes to `message.inbound.linear.issue.created` and publishes `agent.skill.request` with `skill: "manage_feature"` — `LinearPlugin` doesn't need to know about protoMaker, and protoMaker doesn't need to know about Linear. That's the bus contract doing its job.
+`LinearProtoMakerBridgePlugin` (`lib/plugins/linear-protomaker-bridge.ts`) wires inbound Linear issues into the protoMaker board with no direct dependency on either side — pure bus contract. It's installed unconditionally and is a no-op until `workspace/linear-board-mappings.yaml` exists.
+
+### Configuration
+
+Copy `workspace/linear-board-mappings.yaml.example` to `workspace/linear-board-mappings.yaml` and edit:
+
+```yaml
+mappings:
+  - linearTeamKey: "ENG"
+    protoMakerProjectSlug: "engineering"
+    triggerLabel: "board"
+  - linearTeamKey: "DESIGN"
+    protoMakerProjectSlug: "design-system"
+    triggerLabel: "board"
+```
+
+Each mapping says: when an inbound Linear issue from `linearTeamKey` carries `triggerLabel`, file it as a feature on `protoMakerProjectSlug` via the `manage_feature` skill. Issues without the label drop straight through (RouterPlugin's chat path still handles them per `channels.yaml`).
+
+The mapping file is hot-reloaded at a 5-second interval — add or remove routes without a restart.
+
+### Flow
+
+```
+User creates Linear issue with the "board" label
+  ↓
+LinearPlugin publishes:           message.inbound.linear.issue.created
+  ↓                               { teamKey: "ENG", labels: ["board"], ... }
+  ↓
+LinearProtoMakerBridgePlugin matches the team + label and publishes:
+  agent.skill.request {
+    skill:   "manage_feature",
+    targets: ["protomaker"],
+    content: "Create a feature on project 'engineering' ...",
+    meta:    { sourceLinearIssueId, sourceLinearIdentifier, ... },
+    reply:   { topic: "linear.reply.{issueId}" }
+  }
+  ↓
+SkillDispatcherPlugin routes to protoMaker, which creates the board feature
+  ↓
+ProtoMaker's response is published on linear.reply.{issueId}
+  ↓
+LinearPlugin outbound subscriber comments on the Linear issue:
+  "Filed on board as feature ENG-XXX..."
+```
+
+### Filing close-the-loop is done; "feature done" close-the-loop is deferred
+
+When the protoMaker board feature later transitions to **done**, ideally a comment is posted back on the Linear issue. This isn't yet wired — there's no bus event today for board feature lifecycle (only skill-completion events from `SkillDispatcherPlugin`).
+
+Once protoMaker emits a `protomaker.feature.completed` (or similar) event on the bus, adding the done-loop is a ~10-line subscriber here that maps `featureId → linearIssueId` and publishes `linear.reply.{linearIssueId}` with the completion text.
+
+### What this plugin doesn't do
+
+- Doesn't import from `lib/plugins/linear.ts`.
+- Doesn't import from anything protoMaker-specific.
+- Doesn't reach Linear or protoMaker over the network — every operation is a bus publish.
+
+That's the no-cross-plugin-dependency contract.
