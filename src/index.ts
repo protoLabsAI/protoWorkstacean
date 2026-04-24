@@ -229,6 +229,20 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Linear webhook receiver + outbound mutations. Gated on either of the
+    // two env vars being present — without LINEAR_WEBHOOK_SECRET inbound
+    // verification is disabled (dev mode), without LINEAR_API_KEY outbound
+    // is disabled. Loading the plugin with neither is pointless, so require
+    // at least one to be set before installing.
+    name: "linear",
+    condition: () =>
+      Boolean(process.env.LINEAR_WEBHOOK_SECRET || process.env.LINEAR_API_KEY),
+    factory: async () => {
+      const { LinearPlugin } = await import("../lib/plugins/linear");
+      return new LinearPlugin();
+    },
+  },
+  {
     name: "onboarding",
     condition: () => true,
     factory: async () => {
