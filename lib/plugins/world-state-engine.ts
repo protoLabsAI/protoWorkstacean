@@ -479,31 +479,41 @@ export class WorldStateEngine implements Plugin {
   }
 
   private _initLangfuse(): void {
-    const secretKey = process.env.LANGFUSE_SECRET_KEY;
+    // OTEL-based tracing. The tracer provider is registered once at app
+    // startup in src/telemetry/langfuse-tracer.ts; we just consume it.
+    // When LANGFUSE_* credentials are missing, no provider is registered
+    // and the underlying startObservation falls through to the no-op OTEL
+    // tracer, so the local NoopTracer below is a belt-and-braces guard
+    // that also short-circuits the dynamic import.
     const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
-    const baseUrl = process.env.LANGFUSE_BASE_URL ?? "https://cloud.langfuse.com";
-
-    if (!secretKey || !publicKey) {
+    const secretKey = process.env.LANGFUSE_SECRET_KEY;
+    if (!publicKey || !secretKey) {
       console.warn("[world-state-engine] Langfuse keys not set — tracing disabled");
       return;
     }
 
-    // @ts-ignore — langfuse is an optional peer dependency
-    import("langfuse")
-      .then(({ Langfuse }) => {
-        const langfuse = new Langfuse({ secretKey, publicKey, baseUrl });
+    void import("@langfuse/tracing")
+      .then(({ startObservation }) => {
         this.tracer = {
           startSpan: (name, data) => {
-            const trace = langfuse.trace({ name, input: data });
-            const span = trace.span({ name });
-            return { end: (endData) => { span.end({ output: endData }); } };
+            const span = startObservation(name, { input: data });
+            return {
+              end: (endData) => {
+                if (endData) span.update({ output: endData });
+                span.end();
+              },
+            };
           },
-          flush: () => (langfuse as { flushAsync?: () => Promise<void> }).flushAsync?.() ?? Promise.resolve(),
+          // Flush is owned by the LangfuseSpanProcessor registered in the
+          // tracer bootstrap — it batches + flushes on its own schedule and
+          // on process shutdown. No per-plugin flush needed.
+          flush: () => Promise.resolve(),
         };
-        console.log("[world-state-engine] Langfuse tracing initialized");
+        console.log("[world-state-engine] Langfuse tracing initialized (v5 OTEL)");
       })
-      .catch(() => {
-        console.warn("[world-state-engine] langfuse not available — tracing disabled");
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[world-state-engine] @langfuse/tracing not available — tracing disabled: ${msg}`);
       });
   }
 
