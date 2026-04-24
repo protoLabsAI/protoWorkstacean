@@ -243,6 +243,19 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Linear → protoMaker board feature bridge. No-op when
+    // workspace/linear-board-mappings.yaml is absent or empty, so it's
+    // safe to install unconditionally.
+    name: "linear-protomaker-bridge",
+    condition: () => true,
+    factory: async () => {
+      const { LinearProtoMakerBridgePlugin } = await import(
+        "../lib/plugins/linear-protomaker-bridge"
+      );
+      return new LinearProtoMakerBridgePlugin(workspaceDir);
+    },
+  },
+  {
     name: "onboarding",
     condition: () => true,
     factory: async () => {
