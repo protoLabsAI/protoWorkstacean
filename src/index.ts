@@ -13,6 +13,15 @@ import type { Action } from "./planner/types/action";
 import { parseEnv } from "./config/env.ts";
 // Fail-fast env validation — exits immediately on misconfiguration.
 parseEnv();
+
+// --- Langfuse OTEL tracer — register BEFORE any plugin that emits spans ---
+// Without this, @langfuse/langchain's CallbackHandler (used by
+// DeepAgentExecutor) and @langfuse/tracing's startObservation (used by
+// WorldStateEngine) both fall through to the no-op OTEL tracer and
+// nothing is captured. Gated on LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY.
+import { initLangfuseTracer } from "./telemetry/langfuse-tracer.ts";
+const langfuseEnabled = initLangfuseTracer();
+console.log(`[langfuse] OTEL tracer ${langfuseEnabled ? "registered" : "skipped (no credentials)"}`);
 // --- Workspace config ---
 const workspaceDir = resolve(
   process.env.WORKSPACE_DIR || join(process.cwd(), "workspace")
@@ -217,6 +226,33 @@ const pluginRegistry: PluginRegistryEntry[] = [
     factory: async () => {
       const { PlanePlugin } = await import("../lib/plugins/plane");
       return new PlanePlugin(workspaceDir);
+    },
+  },
+  {
+    // Linear webhook receiver + outbound mutations. Gated on either of the
+    // two env vars being present — without LINEAR_WEBHOOK_SECRET inbound
+    // verification is disabled (dev mode), without LINEAR_API_KEY outbound
+    // is disabled. Loading the plugin with neither is pointless, so require
+    // at least one to be set before installing.
+    name: "linear",
+    condition: () =>
+      Boolean(process.env.LINEAR_WEBHOOK_SECRET || process.env.LINEAR_API_KEY),
+    factory: async () => {
+      const { LinearPlugin } = await import("../lib/plugins/linear");
+      return new LinearPlugin();
+    },
+  },
+  {
+    // Linear → protoMaker board feature bridge. No-op when
+    // workspace/linear-board-mappings.yaml is absent or empty, so it's
+    // safe to install unconditionally.
+    name: "linear-protomaker-bridge",
+    condition: () => true,
+    factory: async () => {
+      const { LinearProtoMakerBridgePlugin } = await import(
+        "../lib/plugins/linear-protomaker-bridge"
+      );
+      return new LinearProtoMakerBridgePlugin(workspaceDir);
     },
   },
   {

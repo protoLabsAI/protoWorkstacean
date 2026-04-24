@@ -1,0 +1,24 @@
+# LinearProtoMakerBridgePlugin configuration.
+#
+# Each mapping declares: when an inbound Linear issue from `linearTeamKey`
+# carries `triggerLabel`, file it as a feature on `protoMakerProjectSlug`
+# via the `manage_feature` skill. ProtoMaker's response is routed back as
+# a comment on the originating Linear issue.
+#
+# Issues without the trigger label are dropped here — RouterPlugin still
+# handles the chat path via workspace/channels.yaml independently.
+#
+# Hot-reload: watched at 5s interval. Add / remove mappings without a
+# restart.
+#
+# Copy this file to `linear-board-mappings.yaml` and edit. The bridge is
+# a no-op without it.
+
+mappings:
+  - linearTeamKey: "ENG"
+    protoMakerProjectSlug: "engineering"
+    triggerLabel: "board"
+
+  - linearTeamKey: "DESIGN"
+    protoMakerProjectSlug: "design-system"
+    triggerLabel: "board"

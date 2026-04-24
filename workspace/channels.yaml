@@ -9,3 +9,26 @@ channels:
       enabled: true
       timeoutMs: 300000
       requireMentionAfterFirst: false
+
+  # ── Linear — example channel registrations ─────────────────────────────────
+  # Linear channels can be scoped by team key, a specific issue id, or a
+  # project id. RouterPlugin matches the inbound message's source.channelId
+  # (set by LinearPlugin to teamKey for issues/comments and projectId for
+  # project events) against these entries.
+  #
+  # Uncomment + customize when wiring Linear to an agent.
+  #
+  # - id: linear-eng-triage
+  #   platform: linear
+  #   channelId: "ENG"
+  #   agent: ava
+  #   description: Engineering team — all Linear issues & comments route to Ava
+  #   conversation:
+  #     enabled: true
+  #     timeoutMs: 600000
+  #
+  # - id: linear-single-ticket
+  #   platform: linear
+  #   channelId: "ENG-142"
+  #   agent: quinn
+  #   description: Quinn owns this specific ticket end-to-end

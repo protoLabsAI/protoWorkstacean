@@ -85,6 +85,11 @@ export const EnvSchema = z
     PLANE_WEBHOOK_SECRET: z.string().optional(),
     PLANE_WEBHOOK_PORT:   z.string().optional(),
 
+    // Linear
+    LINEAR_API_KEY:        z.string().optional(),
+    LINEAR_WEBHOOK_SECRET: z.string().optional(),
+    LINEAR_WEBHOOK_PORT:   z.string().optional(),
+
     // LLM gateway
     LLM_GATEWAY_URL:   z.string().optional(),
     OPENAI_API_KEY:    z.string().optional(),
