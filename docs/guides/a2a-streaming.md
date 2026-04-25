@@ -262,3 +262,7 @@ submitted → working → working (text="...") → working (percent=40, step="..
 ```
 
 Same task lifecycle, real-time visibility into what the agent is doing.
+
+## Push-notification configs survive restart
+
+Inbound A2A clients can register a webhook callback via `tasks/pushNotificationConfig/set` so workstacean POSTs them when long-running work terminates. Those configs are persisted to `${DATA_DIR}/push-notifications.db` (SQLite, WAL journal) so they survive container restarts — important on `:dev` where watchtower auto-pulls multiple times per day. Each config carries a 24-hour TTL by default; expired rows are filtered from `load()` and opportunistically purged on subsequent `save()` calls. Falls back to the SDK's in-memory store when `DATA_DIR` is unset (tests + ephemeral setups).

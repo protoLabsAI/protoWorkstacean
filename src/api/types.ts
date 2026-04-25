@@ -30,6 +30,8 @@ export interface Route {
  */
 export interface ApiContext {
   workspaceDir: string;
+  /** Persistent storage root — where SQLite dbs live (knowledge.db, push-notifications.db, …). */
+  dataDir?: string;
   bus: EventBus;
   plugins: Plugin[];
   executorRegistry: ExecutorRegistry;

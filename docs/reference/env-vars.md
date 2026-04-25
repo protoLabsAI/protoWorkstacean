@@ -16,7 +16,7 @@ All environment variables recognised by protoWorkstacean, their defaults, and wh
 | `WORKSTACEAN_INTERNAL_HOST` | `workstacean` | Agent card | Docker-network hostname advertised in the A2A agent card when `WORKSTACEAN_PUBLIC_BASE_URL` is unset. The card's `url` becomes `http://${WORKSTACEAN_INTERNAL_HOST}:${WORKSTACEAN_HTTP_PORT}/a2a`. |
 | `WORKSPACE_DIR` | `./workspace` | All loaders | Path to the workspace directory containing agent, goal, action, ceremony, and domain YAML files |
 | `PROTOLABS_AGENTS_JSON` | _(none)_ | SkillBrokerPlugin | If set, overrides `workspace/agents.yaml`. Expected shape: `{ "agents": [ { name, url, auth, ... } ] }`. Intended for Infisical-backed deployments where pushing a yaml file to every host is inconvenient — ship the whole registry through a single secret instead. |
-| `DATA_DIR` | `./data` | LoggerPlugin, SQLite | Directory for the SQLite event log (`events.db`) |
+| `DATA_DIR` | `./data` | LoggerPlugin, SQLite | Directory for SQLite databases — event log (`events.db`), telemetry (`knowledge.db`), push-notification configs (`push-notifications.db`) |
 | `TZ` | system default | SchedulerPlugin | Timezone for cron schedule evaluation |
 | `DEBUG` | _(none)_ | All | Set to any value to enable verbose debug logging |
 | `DISABLE_EVENT_VIEWER` | _(none)_ | Event viewer | Set to disable the live event viewer UI |
