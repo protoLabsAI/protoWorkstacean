@@ -201,3 +201,64 @@ This lets a researcher stream a 2000-word report as 20 × 100-word chunks. Each 
 ## Long-running tasks
 
 If your agent returns a non-terminal task (`working`, `submitted`, `input-required`) rather than a final result, `TaskTracker` polls `tasks/get` (or uses `tasks/resubscribe` for streaming agents) and publishes the response on the original `replyTopic` once terminal. No caller-side timeout tuning needed.
+
+## Streaming progress out of workstacean (inbound A2A clients)
+
+Everything above is about how `A2AExecutor` consumes a remote agent's stream. The reverse direction — when an external A2A client calls workstacean's `/a2a` endpoint and we want to surface intermediate progress to that caller — is wired through the bus with a single topic family.
+
+### Topic contract
+
+```
+agent.skill.progress.{correlationId}
+```
+
+`BusAgentExecutor` (the A2A server adapter) subscribes to this topic on every inbound `message/send` or `message/stream` call alongside the reply topic. Each event published there is translated into an A2A `status-update` with `state: "working"` and `final: false`, sent over the SSE channel.
+
+Payload shape:
+
+```ts
+interface AgentSkillProgressPayload {
+  text?: string;                  // visible message body in the streamed update
+  percent?: number;               // 0-100 progress
+  step?: string;                  // named phase the executor is in
+  meta?: Record<string, unknown>; // arbitrary structured progress
+}
+```
+
+All fields are optional. The bus consumer only attaches a `message` body to the streamed `status-update` when `text` is set; `percent` / `step` / `meta` go into `status.metadata` for clients that render progress affordances rather than text.
+
+### Opt-in publishing from a skill executor
+
+A skill executor that wants to stream progress publishes during work:
+
+```ts
+bus.publish(`agent.skill.progress.${req.correlationId}`, {
+  id: crypto.randomUUID(),
+  correlationId: req.correlationId,
+  topic: `agent.skill.progress.${req.correlationId}`,
+  timestamp: Date.now(),
+  payload: { text: "Searching project history…", percent: 25, step: "search" },
+});
+```
+
+Executors that don't publish to this topic lose nothing — the existing `submitted → working → completed` lifecycle still works as before.
+
+### Late-event safety
+
+Progress events that arrive after the terminal reply (race with an unusually fast executor) are silently dropped — `BusAgentExecutor` tracks the settled state and unsubscribes both `agent.skill.progress.*` and `agent.skill.response.*` together on terminal / cancel. No leaked subscriptions across overlapping task ids.
+
+### Consumer expectations
+
+A streaming A2A client subscribed to `message/stream` previously saw:
+
+```
+submitted → working → ··· silence ··· → completed (full text)
+```
+
+Now sees (when the executor emits progress):
+
+```
+submitted → working → working (text="...") → working (percent=40, step="...") → ··· → completed
+```
+
+Same task lifecycle, real-time visibility into what the agent is doing.

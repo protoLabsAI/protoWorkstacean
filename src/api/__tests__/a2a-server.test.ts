@@ -327,6 +327,126 @@ describe("BusAgentExecutor (Phase 7)", () => {
     }
   });
 
+  test("intermediate agent.skill.progress.{cid} events stream as working status-updates (#472 Gap 1)", async () => {
+    const bus = new InMemoryEventBus();
+    const ctx: ApiContext = {
+      workspaceDir: "/tmp",
+      bus,
+      plugins: [],
+      executorRegistry: new ExecutorRegistry(),
+    };
+
+    // Mimic a long-running executor: fire 3 progress events with varying
+    // shapes (text-only, percent+step, full meta), then publish the final
+    // reply.
+    bus.subscribe("agent.skill.request", "test", (msg) => {
+      const cid = msg.correlationId!;
+      const progressTopic = `agent.skill.progress.${cid}`;
+      const replyTopic = msg.reply!.topic!;
+      setTimeout(() => bus.publish(progressTopic, {
+        id: crypto.randomUUID(), correlationId: cid, topic: progressTopic, timestamp: Date.now(),
+        payload: { text: "Reading the prompt…" },
+      }), 0);
+      setTimeout(() => bus.publish(progressTopic, {
+        id: crypto.randomUUID(), correlationId: cid, topic: progressTopic, timestamp: Date.now(),
+        payload: { percent: 50, step: "thinking" },
+      }), 5);
+      setTimeout(() => bus.publish(progressTopic, {
+        id: crypto.randomUUID(), correlationId: cid, topic: progressTopic, timestamp: Date.now(),
+        payload: { text: "Wrapping up…", meta: { tool: "search", model: "claude-opus" } },
+      }), 10);
+      setTimeout(() => bus.publish(replyTopic, {
+        id: crypto.randomUUID(), correlationId: cid, topic: replyTopic, timestamp: Date.now(),
+        payload: { content: "done", correlationId: cid },
+      }), 15);
+    });
+
+    const adapter = new BusAgentExecutor(ctx);
+    const eventBus = new DefaultExecutionEventBus();
+    const collected: AgentExecutionEvent[] = [];
+    eventBus.on("event", (e) => collected.push(e));
+    const done = new Promise<void>(resolve => eventBus.on("finished", () => resolve()));
+
+    const reqCtx = makeRequestContext("Long task");
+    await adapter.execute(reqCtx, eventBus);
+    await done;
+
+    type StatusUpdate = AgentExecutionEvent & { kind: "status-update"; final: boolean; status: { state: string; message?: { parts: Array<{ text?: string }> }; metadata?: Record<string, unknown> } };
+    const workingEvts = collected.filter(
+      (e): e is StatusUpdate =>
+        e.kind === "status-update" &&
+        "status" in e &&
+        (e as StatusUpdate).status.state === "working",
+    );
+
+    // Expect: initial "working" (pre-dispatch transition) + 3 progress streams
+    // = 4 working status updates, all final=false.
+    expect(workingEvts.length).toBe(4);
+    expect(workingEvts.every(e => e.final === false)).toBe(true);
+
+    const texts = workingEvts.map(e =>
+      e.status.message?.parts?.map(p => ("text" in p ? (p as { text: string }).text : "")).join("") ?? "",
+    );
+    expect(texts).toContain("Reading the prompt…");
+    expect(texts).toContain("Wrapping up…");
+
+    // The percent+step event has no text but its metadata should reach the consumer.
+    const metaEvt = workingEvts.find(e => e.status.metadata && (e.status.metadata as { percent?: number }).percent === 50);
+    expect(metaEvt).toBeDefined();
+    expect((metaEvt!.status.metadata as { step?: string }).step).toBe("thinking");
+
+    // Terminal completed event arrives at the end with final=true.
+    const completedEvt = collected.find(
+      (e): e is StatusUpdate =>
+        e.kind === "status-update" && (e as StatusUpdate).status.state === "completed",
+    ) as StatusUpdate | undefined;
+    expect(completedEvt).toBeDefined();
+    expect(completedEvt!.final).toBe(true);
+  });
+
+  test("progress events arriving after terminal are silently dropped (no extra status-update)", async () => {
+    const bus = new InMemoryEventBus();
+    const ctx: ApiContext = {
+      workspaceDir: "/tmp",
+      bus,
+      plugins: [],
+      executorRegistry: new ExecutorRegistry(),
+    };
+
+    bus.subscribe("agent.skill.request", "test", (msg) => {
+      const cid = msg.correlationId!;
+      const replyTopic = msg.reply!.topic!;
+      const progressTopic = `agent.skill.progress.${cid}`;
+      // Reply first, then a late progress event — should be dropped.
+      setTimeout(() => bus.publish(replyTopic, {
+        id: crypto.randomUUID(), correlationId: cid, topic: replyTopic, timestamp: Date.now(),
+        payload: { content: "fast result", correlationId: cid },
+      }), 0);
+      setTimeout(() => bus.publish(progressTopic, {
+        id: crypto.randomUUID(), correlationId: cid, topic: progressTopic, timestamp: Date.now(),
+        payload: { text: "late progress, should be ignored" },
+      }), 10);
+    });
+
+    const adapter = new BusAgentExecutor(ctx);
+    const eventBus = new DefaultExecutionEventBus();
+    const collected: AgentExecutionEvent[] = [];
+    eventBus.on("event", (e) => collected.push(e));
+    const done = new Promise<void>(resolve => eventBus.on("finished", () => resolve()));
+
+    await adapter.execute(makeRequestContext("Quick"), eventBus);
+    await done;
+    // Give the late progress event a tick to fire (it shouldn't reach the consumer).
+    await new Promise(r => setTimeout(r, 30));
+
+    const lateEvt = collected.find(e =>
+      e.kind === "status-update" &&
+      "status" in e &&
+      (e as { status: { message?: { parts: Array<{ text?: string }> } } }).status.message?.parts?.some(p => p.text === "late progress, should be ignored"),
+    );
+    expect(lateEvt).toBeUndefined();
+  });
+
   test("cancelTask yields canceled status and unblocks execute()", async () => {
     const bus = new InMemoryEventBus();
     const ctx: ApiContext = {

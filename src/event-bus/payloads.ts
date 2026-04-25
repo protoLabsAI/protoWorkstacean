@@ -76,6 +76,35 @@ export interface AgentSkillResponsePayload {
   correlationId: string;
 }
 
+// ── agent.skill.progress.* ───────────────────────────────────────────────────
+
+/**
+ * Payload for `agent.skill.progress.{correlationId}` — fire-and-forget
+ * intermediate-progress events published by skill executors during long-running
+ * work. BusAgentExecutor (the A2A server side) subscribes alongside the
+ * reply topic and translates each event into an A2A `status-update` with
+ * `state: "working"` and `final: false`.
+ *
+ * Every field is optional; the bus consumer surfaces whatever is set:
+ *   - `text` becomes the visible message body in the streamed status update
+ *   - `percent` and `step` go into status-update metadata for clients that
+ *     render progress affordances
+ *   - `meta` carries arbitrary extra data (tool name, model, token counts,
+ *     whatever the executor wants to expose)
+ *
+ * Skill executors opt in by publishing — those that don't lose nothing.
+ */
+export interface AgentSkillProgressPayload {
+  /** Human-readable progress message (rendered in the streamed status update). */
+  text?: string;
+  /** Optional 0-100 progress percentage. */
+  percent?: number;
+  /** Optional named step / phase the executor is currently in. */
+  step?: string;
+  /** Arbitrary structured progress metadata. */
+  meta?: Record<string, unknown>;
+}
+
 // ── message.inbound.* ────────────────────────────────────────────────────────
 
 /**
