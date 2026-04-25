@@ -34,12 +34,9 @@ describe("validateProjectEntry — valid entries", () => {
         alerts: "333",
         releases: "444",
       },
-      planeProjectId: "plane-abc-123",
       onboardedAt: "2025-01-01T00:00:00Z",
       onboardingState: {
-        planeProject: "ok" as const,
-        planeWebhook: "ok" as const,
-        githubWebhook: "skip" as const,
+        githubWebhook: "ok" as const,
         projectsYaml: "ok" as const,
       },
     };
@@ -60,15 +57,6 @@ describe("validateProjectEntry — valid entries", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.entry.googleWorkspace?.driveFolderId).toBe("folder-xyz");
-    }
-  });
-
-  test("entry with planeProjectId set", () => {
-    const entry = { ...minimalValid, planeProjectId: "plane-999" };
-    const result = validateProjectEntry(entry);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.entry.planeProjectId).toBe("plane-999");
     }
   });
 });
@@ -115,15 +103,6 @@ describe("validateProjectEntry — invalid entries", () => {
     const result = validateProjectEntry(entry);
     expect(result.ok).toBe(false);
   });
-
-  test("planeProjectId wrong type — number instead of string", () => {
-    const entry = { ...minimalValid, planeProjectId: 12345 };
-    const result = validateProjectEntry(entry);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.errors.some(e => e.includes("planeProjectId"))).toBe(true);
-    }
-  });
 });
 
 describe("validateProjectEntry — validation on load (a2a + OnboardingPlugin pattern)", () => {
@@ -157,14 +136,12 @@ describe("validateProjectEntry — validation on load (a2a + OnboardingPlugin pa
   });
 
   test("OnboardingPlugin write pattern — valid entry passes through unchanged", () => {
-    // Simulates the write validation in lib/plugins/onboarding.ts step 6
-    const entry = { ...minimalValid, planeProjectId: "plane-xyz" };
+    // Simulates the write validation in lib/plugins/onboarding.ts
+    const entry = { ...minimalValid };
     const result = validateProjectEntry(entry);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      // Plugin would write result.entry to YAML
       expect(result.entry.slug).toBe(entry.slug);
-      expect(result.entry.planeProjectId).toBe("plane-xyz");
     }
   });
 

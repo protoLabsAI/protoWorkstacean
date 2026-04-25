@@ -59,7 +59,7 @@ export interface GoalViolation {
    * instead of ActionRegistry.getByGoal() to select candidate skills.
    */
   desiredEffect?: {
-    /** World-state domain (e.g. "ci", "plane"). */
+    /** World-state domain (e.g. "ci", "github_issues"). */
     domain: string;
     /** Dot-separated path into the domain's data object (e.g. "data.blockedPRs"). */
     path: string;

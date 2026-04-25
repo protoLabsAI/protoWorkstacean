@@ -79,7 +79,7 @@ interface BusMessage {
   };
   reply?: string;           // outbound topic for responses
   source?: {
-    interface: string;      // "discord" | "github" | "plane" | "cron" | ...
+    interface: string;      // "discord" | "github" | "linear" | "cron" | ...
     channelId: string;
     userId: string;
   };

@@ -100,7 +100,7 @@ function verifyLinearSignature(body: Buffer, signature: string, secret: string):
 }
 
 // ── Deduplication ring buffer ────────────────────────────────────────────────
-// Linear retries on non-2xx. Same shape as PlanePlugin's dedup — last 10k IDs
+// Linear retries on non-2xx. Standard ring-buffer dedup — last 10k IDs
 // in-memory, evicted FIFO. Keyed on the webhook envelope's webhookTimestamp +
 // data.id when present; falls back to a stable hash of the body.
 
@@ -348,8 +348,8 @@ export class LinearPlugin implements Plugin {
   // ── Outbound ───────────────────────────────────────────────────────────────
 
   private _wireOutbound(bus: EventBus, client: LinearClient): void {
-    // linear.reply.{issueId} — post a comment. Matches Plane's reply shape so
-    // agents that already know how to reply to Plane issues work here too.
+    // linear.reply.{issueId} — post a comment using the standard
+    // reply-on-topic convention agents already know.
     bus.subscribe("linear.reply.#", "linear-outbound", async (msg: BusMessage) => {
       const topic = msg.topic ?? "";
       const issueId = topic.startsWith("linear.reply.") ? topic.slice("linear.reply.".length) : "";

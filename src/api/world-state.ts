@@ -84,10 +84,6 @@ export function createRoutes(ctx: ApiContext): Route[] {
         configured: !!(process.env.GITHUB_TOKEN || process.env.QUINN_APP_PRIVATE_KEY),
         authType: resolveGithubAuthType(),
       },
-      plane: {
-        configured: !!process.env.PLANE_API_KEY,
-        baseUrl: process.env.PLANE_BASE_URL || null,
-      },
       gateway: {
         configured: !!process.env.LLM_GATEWAY_URL,
         url: process.env.LLM_GATEWAY_URL || null,

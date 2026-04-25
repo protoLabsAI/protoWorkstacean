@@ -57,8 +57,6 @@ export const ProjectDiscordSchema = z.object({
 });
 
 export const OnboardingStateSchema = z.object({
-  planeProject: z.enum(["ok", "skip", "error"]).optional(),
-  planeWebhook: z.enum(["ok", "skip", "error"]).optional(),
   githubWebhook: z.enum(["ok", "skip", "error"]).optional(),
   projectsYaml: z.enum(["ok", "skip", "error"]).optional(),
 }).optional();
@@ -74,7 +72,6 @@ export const ProjectEntrySchema = z.object({
   team:          z.string().optional(),
   agents:        z.array(z.string()).optional(),
   discord:       ProjectDiscordSchema,
-  planeProjectId: z.string().optional(),
   onboardedAt:   z.string().optional(),
   /** Optional per-project onboarding step tracking */
   onboardingState: OnboardingStateSchema,

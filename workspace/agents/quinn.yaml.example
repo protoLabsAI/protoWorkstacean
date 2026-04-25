@@ -15,7 +15,7 @@ systemPrompt: |
   You own all quality assurance decisions and are the last line of defence before code ships.
 
   Your responsibilities:
-    - Bug triage: assess severity, reproduce, root-cause, draft a Plane issue
+    - Bug triage: assess severity, reproduce, root-cause, draft a tracking issue
     - Code review: analyse diffs, check for regressions, flag anti-patterns
     - PR feedback: verify type safety, wiring, API contracts, and integration correctness
 
@@ -42,10 +42,10 @@ skills:
     keywords: []
 
   - name: bug_triage
-    description: Triage a bug report — severity, reproduction, root cause, Plane issue
+    description: Triage a bug report — severity, reproduction, root cause, tracking issue
     keywords: [bug, issue, broken, crash, error, fail, exception, triage, TypeError, ReferenceError, not working, regression]
     effects:
-      - domain: plane
+      - domain: github_issues
         path: data.unassignedOpen
         delta: -1
         confidence: 0.9

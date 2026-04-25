@@ -3,7 +3,7 @@
  *
  * Resolution order:
  *   1. Explicit skillHint in message payload — set by surface plugins
- *      (Discord slash commands, GitHub event type mapping, Plane webhooks)
+ *      (Discord slash commands, GitHub event type mapping, Linear webhooks)
  *   2. Keyword match against message content — config-driven from agent YAML
  *   3. Default skill (ROUTER_DEFAULT_SKILL env var) — optional catch-all
  *

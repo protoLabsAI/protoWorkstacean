@@ -124,7 +124,6 @@ projects:
     workspace?: string     # Path to per-project config dir (relative to WORKSPACE_DIR)
     discordChannels?:      # Discord channel IDs associated with this project
       - string
-    planeProjectId?: string  # Plane project ID for issue sync
 ```
 
 ---

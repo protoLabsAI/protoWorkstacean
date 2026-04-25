@@ -45,7 +45,7 @@ The Automaker `gitWorkflow.prBaseBranch` is set to `dev`. Auto-mode agents targe
 
 ```
 src/              Application entry + runtime plugins (RouterPlugin, SkillDispatcherPlugin, etc.)
-lib/plugins/      Integration plugins (Discord, GitHub, Plane, FlowMonitor, HITL, etc.)
+lib/plugins/      Integration plugins (Discord, GitHub, Linear, FlowMonitor, HITL, etc.)
 lib/channels/     ChannelRegistry — loads workspace/channels.yaml
 lib/types/        Shared type definitions
 workspace/        Runtime config (goals.yaml, actions.yaml, channels.yaml, agents/*.yaml)

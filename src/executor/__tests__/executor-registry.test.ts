@@ -140,10 +140,10 @@ describe("ExecutorRegistry", () => {
       const registry = new ExecutorRegistry();
       registry.registerEffect("deploy", undefined, [
         { domain: "ci", path: "data.failCount", expectedDelta: -1, confidence: 0.8 },
-        { domain: "plane", path: "data.openIssues", expectedDelta: -1, confidence: 0.7 },
+        { domain: "github_issues", path: "data.openIssues", expectedDelta: -1, confidence: 0.7 },
       ]);
       expect(registry.resolveByEffect({ domain: "ci", path: "data.failCount" })).toHaveLength(1);
-      expect(registry.resolveByEffect({ domain: "plane", path: "data.openIssues" })).toHaveLength(1);
+      expect(registry.resolveByEffect({ domain: "github_issues", path: "data.openIssues" })).toHaveLength(1);
     });
 
     it("resolveByEffect returns a copy — mutations do not affect internal state", () => {

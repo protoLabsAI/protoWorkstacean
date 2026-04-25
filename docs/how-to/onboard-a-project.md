@@ -7,7 +7,7 @@ _This is a how-to guide. It assumes the workstacean container is running and you
 
 ---
 
-Onboarding a project provisions it across every system protoLabs uses: GitHub (`.automaker/` scaffold), Plane (project created), and Discord (category + channels created). The `onboard_project` skill on Ava orchestrates the full chain.
+Onboarding a project provisions it across every system protoLabs uses: GitHub (`.automaker/` scaffold) and Discord (category + channels created). The `onboard_project` skill on Ava orchestrates the full chain.
 
 ## Trigger options
 
@@ -54,9 +54,8 @@ Ava's `onboard_project` skill runs these steps in sequence:
 1. **GitHub API** — fetches repo metadata (description, topics, visibility)
 2. **`.automaker/` scaffold** — writes `project.json` and `settings.json` into the target repo, commits and pushes
 3. **`.gitignore` + worktree init** — adds worktree paths to `.gitignore` in the target repo
-4. **Plane API** — creates a new Plane project, stores the returned `plane_project_id`
-5. **Discord provisioning** — calls Quinn's `provision_discord` skill (via chain), which creates a Discord category with three channels: `dev`, `alerts`, `releases`
-6. **Write-back** — stores Discord channel IDs in both `.automaker/settings.json` (in the target repo) and `workspace/projects.yaml` (in this repo)
+4. **Discord provisioning** — calls Quinn's `provision_discord` skill (via chain), which creates a Discord category with three channels: `dev`, `alerts`, `releases`
+5. **Write-back** — stores Discord channel IDs in both `.automaker/settings.json` (in the target repo) and `workspace/projects.yaml` (in this repo)
 
 On completion, a summary message is sent to the originating interface (Discord channel or the bus outbound topic).
 
@@ -68,7 +67,6 @@ Check `workspace/projects.yaml` for a new entry:
 
 ```yaml
 - repo: protoLabsAI/my-new-repo
-  plane_project_id: "<uuid>"
   discord:
     dev: "<channel-id>"
     alerts: "<channel-id>"
@@ -85,7 +83,7 @@ gh api repos/protoLabsAI/my-new-repo/contents/.automaker/project.json
 
 ## If provisioning fails partway through
 
-The onboard chain is not atomic. If Discord provisioning fails (e.g., bot permissions), the Plane project and `.automaker/` scaffold are still created. The error is logged and a partial-onboard notice is sent to the originating interface.
+The onboard chain is not atomic. If Discord provisioning fails (e.g., bot permissions), the `.automaker/` scaffold is still created. The error is logged and a partial-onboard notice is sent to the originating interface.
 
 To re-run Discord provisioning only:
 

@@ -19,7 +19,7 @@ Each channel entry in `workspace/channels.yaml` does three things:
 
 channels:
   - id: quinn-pr-reviews          # unique ID (used in logs and API)
-    platform: discord              # discord | github | signal | slack | plane
+    platform: discord              # discord | github | linear | signal | slack
     channelId: "1234567890"        # Discord channel ID
     agent: quinn                   # agent that handles this channel
     agentBotTokenEnv: QUINN_DISCORD_TOKEN  # env var for Quinn's bot token
@@ -186,7 +186,7 @@ When a message arrives, RouterPlugin resolves the agent in this order:
 | Priority | Source | Example |
 |---|---|---|
 | 1 | `channels.yaml` channel assignment | `channelId: "1234"` → `agent: quinn` |
-| 2 | `payload.skillHint` from surface plugin | Discord slash command, Plane webhook |
+| 2 | `payload.skillHint` from surface plugin | Discord slash command, Linear webhook |
 | 3 | Keyword match from `workspace/agents/*.yaml` | message content contains "review" → quinn |
 | 4 | `ROUTER_DEFAULT_SKILL` env var | catch-all for unmatched messages |
 

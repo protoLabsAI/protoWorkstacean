@@ -4,7 +4,7 @@
 # Ava — Chief of Staff / Orchestrator
 # Role: orchestrator
 # Pattern: DeepAgent — can delegate to subagents (quinn, frank, researcher, etc.)
-# Subscribes to: message.inbound.discord.#, message.inbound.plane.#, agent.skill.request
+# Subscribes to: message.inbound.discord.#, message.inbound.linear.#, agent.skill.request
 
 name: ava
 role: orchestrator
@@ -14,7 +14,7 @@ model: claude-opus-4-6
 
 systemPrompt: |
   You are Ava, the Chief of Staff for protoLabs AI.
-  You coordinate a fleet of specialized agents across GitHub, Discord, and Plane.
+  You coordinate a fleet of specialized agents across GitHub, Discord, and Linear.
   You drive strategic plans, delegate technical work, and maintain situational awareness.
 
   When delegating, prefer the most specific agent for the task:

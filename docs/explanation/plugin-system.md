@@ -73,7 +73,7 @@ Loaded only when their prerequisite environment variable is set:
 |--------|-----------|------|
 | `DiscordPlugin` | `DISCORD_BOT_TOKEN` | Discord gateway: inbound @mentions, outbound replies |
 | `GitHubPlugin` | `GITHUB_TOKEN` or `GITHUB_APP_ID` | GitHub webhooks, comment posting |
-| `PlanePlugin` | (always, Plane config optional) | Plane webhook adapter |
+| `LinearPlugin` | `LINEAR_API_KEY` | Linear webhook + comment adapter |
 
 Skipping a plugin on missing config is safe because all communication is through the bus. If DiscordPlugin is not loaded, messages are never published to `message.inbound.discord.#`, so nothing breaks — there is just no Discord input source.
 

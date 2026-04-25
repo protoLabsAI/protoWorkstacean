@@ -111,7 +111,7 @@ export interface EffectRegistration {
   skill: string;
   /** Agent name for target-based routing (optional). */
   agentName?: string;
-  /** World-state domain (e.g. "ci", "plane"). */
+  /** World-state domain (e.g. "ci", "github_issues"). */
   domain: string;
   /** Dot-separated path into the domain's data object (e.g. "data.blockedPRs"). */
   path: string;

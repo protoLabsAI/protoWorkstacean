@@ -8,7 +8,7 @@ _This is an explanation doc. It explains why the fleet uses separate identities 
 
 ## The fleet today
 
-protoWorkstacean routes messages to multiple agents, each with a distinct identity and a distinct role. When an agent posts back to GitHub, Discord, or Plane, the response should appear as that agent, not as a generic "protoBot" catch-all. Attribution, filtering, and trust signals all depend on the posting identity matching the agent that produced the reply.
+protoWorkstacean routes messages to multiple agents, each with a distinct identity and a distinct role. When an agent posts back to GitHub, Discord, or Linear, the response should appear as that agent, not as a generic "protoBot" catch-all. Attribution, filtering, and trust signals all depend on the posting identity matching the agent that produced the reply.
 
 The current roster:
 
@@ -76,7 +76,7 @@ If a message hits the shared protoBot client (guild @-mention, DM to protoBot di
 
 The `onboard_project` skill is owned by the protoMaker team, but the `provision_discord` skill that creates Discord channels is owned by Quinn. This is a chain: protoMaker calls Quinn via `chain[onboard_project]: quinn/provision_discord`.
 
-The reason is that Quinn has the Discord API client code and the knowledge of the standard channel structure (dev, alerts, releases). The protoMaker team handles the broader project provisioning logic (GitHub scaffold, Plane project creation, write-back to `projects.yaml`). The chain keeps these responsibilities separate.
+The reason is that Quinn has the Discord API client code and the knowledge of the standard channel structure (dev, alerts, releases). The protoMaker team handles the broader project provisioning logic (GitHub scaffold, write-back to `projects.yaml`). The chain keeps these responsibilities separate.
 
 When the channel IDs come back from Discord, they are written to both `settings.json` in the target repo and `projects.yaml` in the protoWorkstacean repo. This makes the IDs available to both the agent running in the target repo context and the workstacean routing layer.
 
@@ -94,7 +94,7 @@ Agent conversation memory is scoped by `contextId` in the JSON-RPC call:
 }
 ```
 
-`contextId` is derived from the message channel. For Discord, it's the Discord channel ID. For GitHub, it's `{owner}/{repo}#{number}`. For Plane, it's the `correlationId` (`plane-{issueId}`).
+`contextId` is derived from the message channel. For Discord, it's the Discord channel ID. For GitHub, it's `{owner}/{repo}#{number}`. For Linear, it's the `correlationId` (`linear-{issueId}`).
 
 This means:
 - All messages in the same GitHub issue share a conversation thread in the agent's memory

@@ -10,7 +10,7 @@
  * or SkillBrokerPlugin (external A2A fallback) will execute.
  *
  * Subscribes to:
- *   message.inbound.#  — from Discord, GitHub, Plane, Google, HTTP API
+ *   message.inbound.#  — from Discord, GitHub, Linear, Google, HTTP API
  *   cron.#             — from SchedulerPlugin
  *
  * Publishes:

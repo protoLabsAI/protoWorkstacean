@@ -10,7 +10,7 @@ HITL is what happens when an executor returns `input-required` — or when any p
 
 ## The unified pipeline
 
-Every skill request — whether triggered by a Discord DM, a Plane webhook, or an autonomous GOAP action — travels the same path:
+Every skill request — whether triggered by a Discord DM, a Linear webhook, or an autonomous GOAP action — travels the same path:
 
 ```
 inbound event
@@ -24,7 +24,7 @@ inbound event
 
 HITL enters this pipeline at the executor boundary. When an executor returns a task with state `input-required`, the pipeline pauses — the task stays open, and control transfers to a human. When the human responds, the pipeline resumes from the same task.
 
-The HITL renderer is a **pure UI thin client** over `input-required`. It presents the pause point to a human on whichever interface originated the request (Discord, Plane, Signal, API). It has no business logic, no routing opinion, and no knowledge of what the agent is doing. It collects a decision and publishes an `HITLResponse` to the bus. That is its entire job.
+The HITL renderer is a **pure UI thin client** over `input-required`. It presents the pause point to a human on whichever interface originated the request (Discord, Linear, Signal, API). It has no business logic, no routing opinion, and no knowledge of what the agent is doing. It collects a decision and publishes an `HITLResponse` to the bus. That is its entire job.
 
 ---
 
@@ -55,7 +55,7 @@ interface HITLRequest {
   expiresAt: string;        // ISO timestamp — HITLPlugin sweeps expired entries every 60s
   replyTopic: string;       // where to publish HITLResponse on the bus
   sourceMeta?: {            // originating interface — used to pick the renderer
-    interface: string;      // "discord" | "plane" | "signal" | "slack" | "api"
+    interface: string;      // "discord" | "linear" | "signal" | "slack" | "api"
     channelId?: string;
     userId?: string;
   };
@@ -320,13 +320,13 @@ The decision is relayed verbatim as the resume message text. Ava parses it and t
 
 | Decision | What happens |
 |---|---|
-| `approve` | Board features created, Plane issue → "In Progress", summary comment posted |
+| `approve` | Board features created, Linear issue → "In Progress", summary comment posted |
 | `reject` | Plan archived, rejection notice sent to originating channel |
 | `modify` | PRD re-drafted with `feedback` applied, antagonistic review re-run, new `input-required` emitted |
 
 ### Auto-approve
 
-Plane issues with the `auto` label skip the gate entirely. `PlanePlugin` sets `autoApprove: true` in the bus message, and the agent either never enters `input-required` or short-circuits itself.
+Linear issues with the `auto` label skip the gate entirely. `LinearPlugin` sets `autoApprove: true` in the bus message, and the agent either never enters `input-required` or short-circuits itself.
 
 ---
 
@@ -334,7 +334,7 @@ Plane issues with the `auto` label skip the gate entirely. `PlanePlugin` sets `a
 
 | Origin | Format | Example |
 |---|---|---|
-| Plane issue | `plane-{issueId}` | `plane-abc123de-f456-...` |
+| Linear issue | `linear-{issueId}` | `linear-abc123de-f456-...` |
 | Discord | `discord-{channelId}-{uuid8}` | `discord-1469080556720623699-a1b2c3d4` |
 | Budget | `budget-{requestId}` | `budget-3f8a12...` |
 | Goal violation | `goal-{goalId}-{uuid8}` | `goal-flow.efficiency_healthy-9f2b1c` |
@@ -403,13 +403,13 @@ That's it. The renderer handles presentation only. The rest — routing to `repl
 curl -s -X POST http://localhost:3000/publish \
   -H "Content-Type: application/json" \
   -d '{
-    "topic": "message.inbound.plane.issue.created",
+    "topic": "message.inbound.linear.issue.created",
     "payload": {
       "skillHint": "plan",
-      "correlationId": "plane-test-001",
+      "correlationId": "linear-test-001",
       "content": "Add a weekly digest of merged PRs to the Discord dev channel",
-      "source": { "interface": "plane", "channelId": "test" },
-      "reply": { "topic": "plane.reply.plane-test-001" },
+      "source": { "interface": "linear", "channelId": "test" },
+      "reply": { "topic": "linear.reply.linear-test-001" },
       "autoApprove": false
     }
   }'
@@ -421,10 +421,10 @@ curl -s -X POST http://localhost:3000/publish \
 curl -s -X POST http://localhost:3000/publish \
   -H "Content-Type: application/json" \
   -d '{
-    "topic": "hitl.response.plan.plane-test-001",
+    "topic": "hitl.response.plan.linear-test-001",
     "payload": {
       "type": "hitl_response",
-      "correlationId": "plane-test-001",
+      "correlationId": "linear-test-001",
       "decision": "approve",
       "decidedBy": "test-injection"
     }
@@ -437,10 +437,10 @@ curl -s -X POST http://localhost:3000/publish \
 curl -s -X POST http://localhost:3000/publish \
   -H "Content-Type: application/json" \
   -d '{
-    "topic": "hitl.response.plan.plane-test-001",
+    "topic": "hitl.response.plan.linear-test-001",
     "payload": {
       "type": "hitl_response",
-      "correlationId": "plane-test-001",
+      "correlationId": "linear-test-001",
       "decision": "modify",
       "feedback": "Scope it down — weekly only, no per-PR detail",
       "decidedBy": "test-injection"
@@ -472,6 +472,6 @@ curl http://localhost:3000/api/hitl/pending
 - Every skill request — human-initiated or autonomous — enters the same `agent.skill.request` pipeline. HITL is not a special path; it is a pause state within that path.
 - The HITL renderer is a pure UI thin client. It shows a prompt, collects a response, publishes to the bus. It has no knowledge of what comes before or after.
 - `HITLPlugin` is a router — it stores state, dispatches to renderers, and routes responses. It has no opinion on format, display, or what to do with the decision.
-- Each interface plugin (Discord, Plane, Signal, Slack, API) owns rendering for its platform.
+- Each interface plugin (Discord, Linear, Signal, Slack, API) owns rendering for its platform.
 - The requester (BudgetPlugin, GoalEvaluator, Ava) owns what to do with the response — HITL doesn't know or care.
 - `correlationId` is immutable across the entire lifecycle.

@@ -2,7 +2,7 @@
 title: Linear
 ---
 
-Linear is an optional communication interface for users to talk to agents and supply context about projects, issues, and work. The flow mirrors Plane: a user writes a Linear issue or comments on one, Workstacean's `LinearPlugin` publishes the event to the internal bus, `RouterPlugin` routes it to the agent configured in `workspace/channels.yaml`, and the agent's reply comes back as a Linear comment.
+Linear is an optional communication interface for users to talk to agents and supply context about projects, issues, and work. A user writes a Linear issue or comments on one, Workstacean's `LinearPlugin` publishes the event to the internal bus, `RouterPlugin` routes it to the agent configured in `workspace/channels.yaml`, and the agent's reply comes back as a Linear comment.
 
 The plugin also exposes outbound mutations so agents can file or update Linear tickets as part of their work.
 
@@ -89,8 +89,6 @@ Every inbound message carries `source.interface = "linear"`, `source.channelId` 
 | `linear.reply.{issueId}` | `{ text }` | Posts a comment on the issue |
 | `linear.update.issue.{issueId}` | `{ stateName?, priority?, assigneeId?, labelIds? }` | Mutates the issue |
 | `linear.create.issue` | `{ teamKey, title, description?, priority?, assigneeId?, labelIds?, stateName? }` | Creates a new issue; publishes result on `linear.create.issue.result.{correlationId}` |
-
-The `linear.reply.#` shape matches Plane's `plane.reply.#` — an agent that already knows how to reply to a Plane ticket works here unchanged.
 
 ## Multi-layer conversation example
 

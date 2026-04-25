@@ -1,29 +1,16 @@
 /**
- * TODO(refactor): This file is 631 lines with 9 pipeline steps in one class.
- * When next touching this file, decompose into:
- *   lib/plugins/onboarding/steps/validate.ts
- *   lib/plugins/onboarding/steps/plane-project.ts
- *   lib/plugins/onboarding/steps/plane-webhook.ts
- *   lib/plugins/onboarding/steps/github-webhook.ts
- *   lib/plugins/onboarding/steps/discord-provision.ts
- *   lib/plugins/onboarding/steps/projects-yaml.ts
- *   lib/plugins/onboarding/steps/bus-notify.ts
- *   lib/plugins/onboarding.ts — orchestrator (runs pipeline, handles rollback)
- * Each step = { name, execute(ctx), rollback?(ctx) } interface.
- *
- * OnboardingPlugin — deterministic 8-step project onboarding pipeline.
+ * OnboardingPlugin — deterministic project onboarding pipeline.
  *
  * Each step is idempotent: re-running for the same project slug is safe.
  *
  * Steps:
  *   1. validate       — check required fields, validate github format
  *   2. idempotency    — skip if project slug already in projects.yaml
- *   3. plane_project  — create Plane project (no-op if no PLANE_API_KEY)
- *   4. plane_webhook  — register Plane webhook (no-op if no PLANE_API_KEY)
- *   5. github_webhook — register GitHub webhook (no-op if no GitHub auth)
- *   6. projects_yaml  — upsert project entry into workspace/projects.yaml
- *   7. bus_notify     — publish message.inbound.onboard.complete for downstream consumers
- *   8. reply          — send confirmation to reply topic / Discord
+ *   3. github_webhook — register GitHub webhook (no-op if no GitHub auth)
+ *   4. drive_folder   — create per-project Drive folder under the org root
+ *   5. projects_yaml  — upsert project entry into workspace/projects.yaml
+ *   6. bus_notify     — publish message.inbound.onboard.complete for downstream consumers
+ *   7. reply          — send confirmation to reply topic / Discord
  *
  * Inbound triggers:
  *   message.inbound.onboard   (from POST /api/onboard or Discord /onboard command)
@@ -33,7 +20,6 @@
  *   msg.reply.topic                  — confirmation text back to caller
  *
  * Env vars:
- *   PLANE_API_KEY, PLANE_BASE_URL, PLANE_WORKSPACE_SLUG, PLANE_WEBHOOK_SECRET
  *   QUINN_APP_ID, QUINN_APP_PRIVATE_KEY, GITHUB_TOKEN
  *   GITHUB_WEBHOOK_SECRET
  *   WORKSTACEAN_PUBLIC_URL  base URL for webhook registration (e.g. https://ws.example.com)
@@ -43,7 +29,6 @@ import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
-import { PlaneClient } from "../plane-client.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
 import { validateProjectEntry } from "../project-schema.ts";
 import { createDriveFolder } from "./google.ts";
@@ -85,8 +70,6 @@ interface StepResult {
 }
 
 interface OnboardSteps {
-  planeProject?: StepResult & { projectId?: string };
-  planeWebhook?: StepResult;
   githubWebhook?: StepResult;
   driveFolder?: StepResult & { folderId?: string };
   projectsYaml?: StepResult;
@@ -263,29 +246,20 @@ export class OnboardingPlugin implements Plugin {
     console.log(`[onboarding] Starting pipeline for "${req.slug}" (${req.github})`);
     const steps: OnboardSteps = {};
 
-    // ── Step 3: Plane project ────────────────────────────────────────────────
-    steps.planeProject = await this._stepPlaneProject(req);
-    console.log(`[onboarding] Step 3 plane_project: ${steps.planeProject.status} — ${steps.planeProject.detail ?? ""}`);
-
-    // ── Step 4: Plane webhook ────────────────────────────────────────────────
-    steps.planeWebhook = await this._stepPlaneWebhook(req);
-    console.log(`[onboarding] Step 4 plane_webhook: ${steps.planeWebhook.status} — ${steps.planeWebhook.detail ?? ""}`);
-
-    // ── Step 5: GitHub webhook ───────────────────────────────────────────────
+    // ── Step 3: GitHub webhook ───────────────────────────────────────────────
     steps.githubWebhook = await this._stepGitHubWebhook(req);
-    console.log(`[onboarding] Step 5 github_webhook: ${steps.githubWebhook.status} — ${steps.githubWebhook.detail ?? ""}`);
+    console.log(`[onboarding] Step 3 github_webhook: ${steps.githubWebhook.status} — ${steps.githubWebhook.detail ?? ""}`);
 
-    // ── Step 6: Drive folder creation ────────────────────────────────────────
+    // ── Step 4: Drive folder creation ────────────────────────────────────────
     steps.driveFolder = await this._stepDriveFolder(req);
-    console.log(`[onboarding] Step 6 drive_folder: ${steps.driveFolder.status} — ${steps.driveFolder.detail ?? ""}`);
+    console.log(`[onboarding] Step 4 drive_folder: ${steps.driveFolder.status} — ${steps.driveFolder.detail ?? ""}`);
 
-    // ── Step 7: Update projects.yaml (serialised to prevent TOCTOU races) ────
-    const planeProjectId = steps.planeProject?.data?.projectId as string | undefined;
+    // ── Step 5: Update projects.yaml (serialised to prevent TOCTOU races) ────
     const driveFolderId = steps.driveFolder?.data?.folderId as string | undefined;
     await withProjectsYamlLock(() => {
-      steps.projectsYaml = this._stepUpdateProjectsYaml(req, projectsPath, planeProjectId, driveFolderId);
+      steps.projectsYaml = this._stepUpdateProjectsYaml(req, projectsPath, driveFolderId);
     });
-    console.log(`[onboarding] Step 7 projects_yaml: ${steps.projectsYaml!.status} — ${steps.projectsYaml!.detail ?? ""}`);
+    console.log(`[onboarding] Step 5 projects_yaml: ${steps.projectsYaml!.status} — ${steps.projectsYaml!.detail ?? ""}`);
 
     if (steps.projectsYaml!.status === "error") {
       this._reply(bus, msg, {
@@ -296,13 +270,13 @@ export class OnboardingPlugin implements Plugin {
       return;
     }
 
-    // ── Step 8: Bus notify ───────────────────────────────────────────────────
+    // ── Step 6: Bus notify ───────────────────────────────────────────────────
     this._stepBusNotify(bus, req, steps, msg.correlationId);
-    console.log(`[onboarding] Step 8 bus_notify: ok — published message.inbound.onboard.complete`);
+    console.log(`[onboarding] Step 6 bus_notify: ok — published message.inbound.onboard.complete`);
 
-    // ── Step 9: Reply ────────────────────────────────────────────────────────
+    // ── Step 7: Reply ────────────────────────────────────────────────────────
     const summary = this._buildSummary(req, steps);
-    console.log(`[onboarding] Step 9 reply: ok — ${req.slug} onboarded`);
+    console.log(`[onboarding] Step 7 reply: ok — ${req.slug} onboarded`);
     this._reply(bus, msg, {
       success: true,
       step: "complete",
@@ -311,8 +285,6 @@ export class OnboardingPlugin implements Plugin {
       github: req.github,
       summary,
       steps: {
-        planeProject: steps.planeProject?.status,
-        planeWebhook: steps.planeWebhook?.status,
         githubWebhook: steps.githubWebhook?.status,
         driveFolder: steps.driveFolder?.status,
         projectsYaml: steps.projectsYaml?.status,
@@ -322,76 +294,7 @@ export class OnboardingPlugin implements Plugin {
 
   // ── Step implementations ───────────────────────────────────────────────────
 
-  /** Step 3: Create Plane project. */
-  private async _stepPlaneProject(req: OnboardRequest): Promise<StepResult & { projectId?: string }> {
-    const apiKey = process.env.PLANE_API_KEY;
-    if (!apiKey) {
-      return { status: "skip", detail: "PLANE_API_KEY not set" };
-    }
-
-    const baseUrl = process.env.PLANE_BASE_URL ?? "http://ava:3002";
-    const workspaceSlug = process.env.PLANE_WORKSPACE_SLUG ?? "protolabsai";
-    const client = new PlaneClient(baseUrl, workspaceSlug, apiKey);
-
-    // Derive a short Plane identifier from the slug (max 12 chars, uppercase, alphanumeric)
-    const identifier = req.slug
-      .replace(/[^a-zA-Z0-9]/g, "")
-      .slice(0, 12)
-      .toUpperCase() || "PROJECT";
-
-    try {
-      const project = await client.createProject(req.title, identifier, `GitHub: ${req.github}`);
-      if (!project) {
-        return { status: "error", detail: "Plane project creation returned null" };
-      }
-      return {
-        status: "ok",
-        detail: `Created Plane project "${project.name}" (${project.id})`,
-        data: { projectId: project.id, identifier: project.identifier },
-        projectId: project.id,
-      };
-    } catch (err) {
-      return {
-        status: "error",
-        detail: `Plane project creation failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-  }
-
-  /** Step 4: Register Plane webhook. */
-  private async _stepPlaneWebhook(req: OnboardRequest): Promise<StepResult> {
-    const apiKey = process.env.PLANE_API_KEY;
-    if (!apiKey) {
-      return { status: "skip", detail: "PLANE_API_KEY not set" };
-    }
-
-    const baseUrl = process.env.PLANE_BASE_URL ?? "http://ava:3002";
-    const workspaceSlug = process.env.PLANE_WORKSPACE_SLUG ?? "protolabsai";
-    const publicUrl = process.env.WORKSTACEAN_PUBLIC_URL;
-
-    if (!publicUrl) {
-      return { status: "skip", detail: "WORKSTACEAN_PUBLIC_URL not set — skipping Plane webhook registration" };
-    }
-
-    const webhookUrl = `${publicUrl}/webhooks/plane`;
-    const secret = process.env.PLANE_WEBHOOK_SECRET;
-    const client = new PlaneClient(baseUrl, workspaceSlug, apiKey);
-
-    try {
-      const ok = await client.registerWebhook(webhookUrl, secret);
-      if (!ok) {
-        return { status: "error", detail: `Failed to register Plane webhook for ${req.github}` };
-      }
-      return { status: "ok", detail: `Plane webhook registered → ${webhookUrl}` };
-    } catch (err) {
-      return {
-        status: "error",
-        detail: `Plane webhook registration failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-  }
-
-  /** Step 5: Register GitHub webhook. */
+  /** Step 3: Register GitHub webhook. */
   private async _stepGitHubWebhook(req: OnboardRequest): Promise<StepResult> {
     const getToken = makeGitHubAuth();
     if (!getToken) {
@@ -429,7 +332,7 @@ export class OnboardingPlugin implements Plugin {
     }
   }
 
-  /** Step 6: Create Drive folder for this project under the org root. */
+  /** Step 4: Create Drive folder for this project under the org root. */
   private async _stepDriveFolder(req: OnboardRequest): Promise<StepResult & { folderId?: string }> {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REFRESH_TOKEN) {
       return { status: "skip", detail: "Google credentials not set — skipping Drive folder creation" };
@@ -476,11 +379,10 @@ export class OnboardingPlugin implements Plugin {
     }
   }
 
-  /** Step 7: Upsert project entry into workspace/projects.yaml. */
+  /** Step 5: Upsert project entry into workspace/projects.yaml. */
   private _stepUpdateProjectsYaml(
     req: OnboardRequest,
     projectsPath: string,
-    planeProjectId?: string,
     driveFolderId?: string,
   ): StepResult {
     try {
@@ -506,10 +408,6 @@ export class OnboardingPlugin implements Plugin {
           ...(req.discord ?? {}),
         },
       };
-
-      if (planeProjectId) {
-        entry.planeProjectId = planeProjectId;
-      }
 
       // Add Google Workspace metadata (folder ID populated if Drive step succeeded)
       entry.googleWorkspace = {
@@ -549,7 +447,7 @@ export class OnboardingPlugin implements Plugin {
     }
   }
 
-  /** Step 7: Publish completion event to bus. */
+  /** Step 6: Publish completion event to bus. */
   private _stepBusNotify(
     bus: EventBus,
     req: OnboardRequest,
@@ -570,11 +468,8 @@ export class OnboardingPlugin implements Plugin {
         team: req.team ?? "dev",
         agents: req.agents ?? ["protomaker", "quinn"],
         discord: req.discord ?? {},
-        planeProjectId: steps.planeProject?.data?.projectId,
         driveFolderId: steps.driveFolder?.data?.folderId,
         steps: {
-          planeProject: steps.planeProject?.status,
-          planeWebhook: steps.planeWebhook?.status,
           githubWebhook: steps.githubWebhook?.status,
           driveFolder: steps.driveFolder?.status,
         },
@@ -625,8 +520,6 @@ export class OnboardingPlugin implements Plugin {
       `GitHub: \`${req.github}\``,
       "",
       "Steps:",
-      `  • Plane project: ${this._statusEmoji(steps.planeProject?.status)} ${steps.planeProject?.detail ?? ""}`,
-      `  • Plane webhook: ${this._statusEmoji(steps.planeWebhook?.status)} ${steps.planeWebhook?.detail ?? ""}`,
       `  • GitHub webhook: ${this._statusEmoji(steps.githubWebhook?.status)} ${steps.githubWebhook?.detail ?? ""}`,
       `  • Drive folder: ${this._statusEmoji(steps.driveFolder?.status)} ${steps.driveFolder?.detail ?? ""}`,
       `  • projects.yaml: ${this._statusEmoji(steps.projectsYaml?.status)} ${steps.projectsYaml?.detail ?? ""}`,

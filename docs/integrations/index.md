@@ -14,7 +14,7 @@ protoWorkstacean connects to external services through **plugins** and runs agen
 |-------------|----------|------------------------|
 | [Discord](discord) | @mentions, slash commands, reactions | `DISCORD_BOT_TOKEN` |
 | [GitHub](github) | Webhooks — issues, PRs, org events | `GITHUB_TOKEN` or `GITHUB_APP_ID` |
-| [Plane](plane) | Issue webhooks → PRD + feature creation | `PLANE_BASE_URL` + `PLANE_API_KEY` |
+| [Linear](linear) | Issue webhooks → routing + comment reply | `LINEAR_API_KEY` |
 | [Google Workspace](google-workspace) | Gmail polling, Calendar polling, Drive/Docs write | `GOOGLE_CLIENT_ID` |
 | [Signal](signal) | Inbound/outbound Signal messages | `SIGNAL_URL` + `SIGNAL_NUMBER` |
 
