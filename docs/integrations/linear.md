@@ -61,7 +61,7 @@ channels:
 | Variable | Required | Description |
 |---|---|---|
 | `LINEAR_API_KEY` | For outbound | Personal API key for GraphQL mutations |
-| `LINEAR_WEBHOOK_SECRET` | For inbound | HMAC-SHA256 signing secret from Linear webhook config. Unset = verification disabled (dev mode only) |
+| `LINEAR_WEBHOOK_SECRET` | For inbound | HMAC-SHA256 signing secret from Linear webhook config. **REQUIRED** when `NODE_ENV=production` or `WORKSTACEAN_PUBLIC_BASE_URL` is set — `LinearPlugin` refuses to start without it (open-relay safety). Unset is allowed in dev only and disables signature verification. |
 | `LINEAR_WEBHOOK_PORT` | No | Webhook server port (default: `8084`) |
 
 The plugin is condition-gated on either env var being present — with neither set, it doesn't install.
@@ -80,15 +80,21 @@ The plugin is condition-gated on either env var being present — with neither s
 | `message.inbound.linear.project.created` | Project created | `projectId`, `name`, `description`, `state`, `creatorId` |
 | `message.inbound.linear.project.updated` | Project updated | same shape |
 
-Every inbound message carries `source.interface = "linear"`, `source.channelId` (team key / issue id / project id), and `reply.topic = linear.reply.{issueId}` when applicable.
+Every inbound message carries `source.interface = "linear"`, `source.channelId` (team key / issue id / project id), and `reply.topic = linear.reply.{issueId}` (with `format: "markdown"` so agents emit Linear-renderable comment bodies) when applicable.
+
+Inbound webhooks are validated against a Zod envelope schema — a malformed Linear payload is rejected with HTTP 400 before reaching the bus. Replay protection rejects events whose `webhookTimestamp` is more than 5 minutes off real time.
 
 ### Outbound (bus → Linear)
 
 | Topic | Payload | Effect |
 |---|---|---|
-| `linear.reply.{issueId}` | `{ text }` | Posts a comment on the issue |
-| `linear.update.issue.{issueId}` | `{ stateName?, priority?, assigneeId?, labelIds? }` | Mutates the issue |
-| `linear.create.issue` | `{ teamKey, title, description?, priority?, assigneeId?, labelIds?, stateName? }` | Creates a new issue; publishes result on `linear.create.issue.result.{correlationId}` |
+| `linear.reply.{issueId}` | `{ text }` | Posts a comment. Result published on `linear.reply.result.{correlationId}` |
+| `linear.update.issue.{issueId}` | `{ stateName?, priority?, assigneeId?, labelIds? }` | Mutates the issue. Result published on `linear.update.issue.result.{correlationId}` |
+| `linear.create.issue` | `{ teamKey, title, description?, priority?, assigneeId?, labelIds?, stateName? }` | Creates a new issue. Result published on `linear.create.issue.result.{correlationId}` |
+
+**Result-topic shape:** every outbound mutation publishes a `{family}.result.{correlationId}` event with `{ success: boolean, error?: string, issueId?: string }`. A `linear.reply.{issueId}` that hits a Linear rate-limit, has an empty body, or comes from a revoked API key surfaces as a `linear.reply.result.{cid}` with `success: false, error: "..."` — instead of silently swallowing the failure as the V1 plugin did.
+
+**Priority semantics:** `priority: "none"` on `linear.update.issue.*` sets Linear's "No priority" (value `0`), which is a real Linear value distinct from "leave unchanged." Pass `priority: undefined` (omit the field) to leave the existing priority untouched.
 
 ## Multi-layer conversation example
 

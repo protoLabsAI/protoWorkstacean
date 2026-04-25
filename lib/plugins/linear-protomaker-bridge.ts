@@ -40,18 +40,21 @@
 import { existsSync, readFileSync, watchFile } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 
-interface LinearBoardMapping {
-  linearTeamKey: string;
-  protoMakerProjectSlug: string;
+const LinearBoardMappingSchema = z.object({
+  linearTeamKey: z.string().min(1),
+  protoMakerProjectSlug: z.string().min(1),
   /** Label that gates filing. Issue must carry this label to fire. */
-  triggerLabel: string;
-}
+  triggerLabel: z.string().min(1),
+});
 
-interface LinearBoardMappingsFile {
-  mappings?: LinearBoardMapping[];
-}
+const LinearBoardMappingsFileSchema = z.object({
+  mappings: z.array(LinearBoardMappingSchema).optional(),
+});
+
+type LinearBoardMapping = z.infer<typeof LinearBoardMappingSchema>;
 
 interface LinearIssuePayload {
   issueId: string;
@@ -115,29 +118,29 @@ export class LinearProtoMakerBridgePlugin implements Plugin {
       return;
     }
     try {
-      const parsed = parseYaml(readFileSync(path, "utf8")) as LinearBoardMappingsFile;
-      const next: LinearBoardMapping[] = [];
-      for (const m of parsed.mappings ?? []) {
-        if (!m.linearTeamKey || !m.protoMakerProjectSlug || !m.triggerLabel) {
-          console.warn(
-            `[linear-protomaker-bridge] mapping missing required fields, skipping: ${JSON.stringify(m)}`,
-          );
-          continue;
-        }
-        next.push({
-          linearTeamKey: m.linearTeamKey,
-          protoMakerProjectSlug: m.protoMakerProjectSlug,
-          triggerLabel: m.triggerLabel,
-        });
+      const raw = parseYaml(readFileSync(path, "utf8"));
+      const fileParsed = LinearBoardMappingsFileSchema.safeParse(raw);
+      if (!fileParsed.success) {
+        const issues = fileParsed.error.issues
+          .map(i => `${i.path.join(".")}: ${i.message}`)
+          .join("; ");
+        console.error(`[linear-protomaker-bridge] mappings file failed schema — ${issues}. Keeping prior mappings.`);
+        return;
       }
+      // Per-entry validation already happened via the array schema above —
+      // any malformed entry would have failed the safeParse, so we'd never
+      // see partial mappings. This means an operator typo in one entry now
+      // rejects the whole file rather than silently filtering it. That's
+      // intentional fail-loud for config — clearer signal than a partial
+      // load + warning.
+      const next = fileParsed.data.mappings ?? [];
       this.mappings = next;
       console.log(
         `[linear-protomaker-bridge] reloaded ${next.length} mapping(s) from ${path}`,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[linear-protomaker-bridge] failed to parse ${path}: ${msg}`);
-      // Keep prior mappings on parse error — fail-soft hot reload.
+      console.error(`[linear-protomaker-bridge] failed to parse ${path}: ${msg}. Keeping prior mappings.`);
     }
   }
 
@@ -196,7 +199,8 @@ export class LinearProtoMakerBridgePlugin implements Plugin {
       },
       reply: {
         topic: replyTopic,
-        format: "structured",
+        // Linear comment bodies render markdown.
+        format: "markdown",
       },
       source: { interface: "linear" as const },
     });
