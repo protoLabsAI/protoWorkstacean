@@ -140,13 +140,67 @@ class BusAgentExecutor implements AgentExecutor {
     });
 
     const replyTopic = `agent.skill.response.${correlationId}`;
+    const progressTopic = `agent.skill.progress.${correlationId}`;
     let settled = false;
     let cancelled = false;
     const done = new Promise<void>(resolve => {
+      // Progress subscriber — translates intermediate executor-emitted
+      // progress events into A2A `status-update` (state=working, final=false).
+      // Late events arriving after `settled` are dropped silently. The
+      // subscription is torn down on terminal / cancel below to avoid
+      // leaking subscriptions across overlapping task ids.
+      const progressSubId = this.ctx.bus.subscribe(progressTopic, "a2a-server-progress", (msg: BusMessage) => {
+        if (settled) return;
+        const p = (msg.payload ?? {}) as {
+          text?: string;
+          percent?: number;
+          step?: string;
+          meta?: Record<string, unknown>;
+        };
+        // Only build a `message` body when the executor supplied `text`.
+        // Some emitters may want to push pure-metadata progress (percent /
+        // step) for clients that render affordances rather than free text.
+        const messageObj = p.text
+          ? {
+            message: {
+              kind: "message" as const,
+              messageId: crypto.randomUUID(),
+              role: "agent" as const,
+              taskId,
+              contextId,
+              parts: [{ kind: "text" as const, text: p.text }],
+            },
+          }
+          : {};
+        const metadataObj =
+          p.percent !== undefined || p.step !== undefined || p.meta
+            ? {
+              metadata: {
+                ...(p.percent !== undefined ? { percent: p.percent } : {}),
+                ...(p.step !== undefined ? { step: p.step } : {}),
+                ...(p.meta ?? {}),
+              },
+            }
+            : {};
+        eventBus.publish({
+          kind: "status-update",
+          taskId,
+          contextId,
+          status: {
+            state: "working",
+            timestamp: new Date().toISOString(),
+            ...messageObj,
+            ...metadataObj,
+          },
+          final: false,
+        });
+      });
+
       const subId = this.ctx.bus.subscribe(replyTopic, "a2a-server", (msg: BusMessage) => {
         if (settled) return;
         settled = true;
         this.ctx.bus.unsubscribe(subId);
+        this.ctx.bus.unsubscribe(progressSubId);
         this.activeCancels.delete(taskId);
 
         const payload = (msg.payload ?? {}) as { content?: string; error?: string };
@@ -206,6 +260,7 @@ class BusAgentExecutor implements AgentExecutor {
         settled = true;
         cancelled = true;
         this.ctx.bus.unsubscribe(subId);
+        this.ctx.bus.unsubscribe(progressSubId);
         this.activeCancels.delete(taskId);
         eventBus.publish({
           kind: "status-update",
