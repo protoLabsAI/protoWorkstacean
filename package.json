@@ -6,7 +6,8 @@
     "start": "bun run src/index.ts",
     "mcp": "bun run mcp/server.ts",
     "lint": "biome lint src lib",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "audit:bus": "bun run scripts/audit-bus-topics.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "^0.3.13",
@@ -31,7 +32,7 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@types/bun": "latest",
-    "typescript": "^5.7.0"
+    "typescript": "~5.7"
   },
   "trustedDependencies": [
     "@biomejs/biome"
