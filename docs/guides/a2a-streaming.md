@@ -201,3 +201,7 @@ This lets a researcher stream a 2000-word report as 20 × 100-word chunks. Each 
 ## Long-running tasks
 
 If your agent returns a non-terminal task (`working`, `submitted`, `input-required`) rather than a final result, `TaskTracker` polls `tasks/get` (or uses `tasks/resubscribe` for streaming agents) and publishes the response on the original `replyTopic` once terminal. No caller-side timeout tuning needed.
+
+## Push-notification configs survive restart
+
+Inbound A2A clients can register a webhook callback via `tasks/pushNotificationConfig/set` so workstacean POSTs them when long-running work terminates. Those configs are persisted to `${DATA_DIR}/push-notifications.db` (SQLite, WAL journal) so they survive container restarts — important on `:dev` where watchtower auto-pulls multiple times per day. Each config carries a 24-hour TTL by default; expired rows are filtered from `load()` and opportunistically purged on subsequent `save()` calls. Falls back to the SDK's in-memory store when `DATA_DIR` is unset (tests + ephemeral setups).

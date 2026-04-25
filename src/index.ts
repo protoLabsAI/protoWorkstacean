@@ -696,6 +696,7 @@ bus.subscribe(TOPICS.CONFIG_RELOAD, "config-reloader", () => {
 
 const apiContext: ApiContext = {
   workspaceDir,
+  dataDir,
   bus,
   plugins: allPlugins,
   executorRegistry,
