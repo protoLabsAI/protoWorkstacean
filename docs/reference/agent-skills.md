@@ -14,7 +14,7 @@ Skills are declared in `workspace/agents/<name>.yaml` (in-process agents) or `wo
 
 Skills are matched in priority order:
 
-1. **Explicit hint** — `payload.skillHint` bypasses keyword matching (set by GitHubPlugin, DiscordPlugin, PlanePlugin)
+1. **Explicit hint** — `payload.skillHint` bypasses keyword matching (set by GitHubPlugin, DiscordPlugin, LinearPlugin)
 2. **Keyword match** — content scanned against the keyword table in each agent's YAML
 3. **Default** — falls back to the agent declared as `default: true` in `agents.yaml`
 

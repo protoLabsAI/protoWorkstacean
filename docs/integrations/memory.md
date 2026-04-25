@@ -95,7 +95,7 @@ users:
     identities:
       discord: "123456789012345678"   # Discord snowflake
       github: "bioshazard"
-      plane: "98de077d-fcdc-4708-93dc-3f2cde045f38"  # Plane member UUID (not email)
+      linear: "98de077d-fcdc-4708-93dc-3f2cde045f38"  # Linear user UUID (not email)
       signal: "+15555555555"          # E.164
 ```
 

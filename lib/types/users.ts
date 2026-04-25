@@ -43,7 +43,7 @@ export interface UserIdentity {
    * github:  username
    * signal:  E.164 phone number
    * slack:   member ID (Uxxxxxxxx)
-   * plane:   user email or UUID
+   * linear:  user UUID (from Linear API: viewer.id)
    */
   identities: PlatformIdentities;
 }

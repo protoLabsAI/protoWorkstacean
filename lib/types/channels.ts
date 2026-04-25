@@ -7,7 +7,7 @@
  * this agent, using this identity."
  */
 
-export type ChannelPlatform = "discord" | "github" | "signal" | "slack" | "plane";
+export type ChannelPlatform = "discord" | "github" | "signal" | "slack" | "linear";
 
 /**
  * Per-channel conversation settings (Discord only for now).

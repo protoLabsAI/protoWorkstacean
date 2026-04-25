@@ -65,7 +65,7 @@ describe("effect-domain interceptor", () => {
     const deltaData: WorldStateDeltaArtifactData = {
       deltas: [
         { domain: "ci", path: "data.blockedPRs", op: "inc", value: -1 },
-        { domain: "plane", path: "data.inProgress", op: "inc", value: 1 },
+        { domain: "github_issues", path: "data.inProgress", op: "inc", value: 1 },
       ],
     };
 
@@ -99,7 +99,7 @@ describe("effect-domain interceptor", () => {
       value: -1,
     });
     expect(effectData?.deltas[1]).toEqual({
-      domain: "plane",
+      domain: "github_issues",
       path: "data.inProgress",
       op: "inc",
       value: 1,

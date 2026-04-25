@@ -7,7 +7,7 @@ export interface BusMessage {
   payload: unknown;
   // source: where this message originated
   source?: {
-    interface: "discord" | "slack" | "voice" | "github" | "plane" | "api" | string;
+    interface: "discord" | "slack" | "voice" | "github" | "linear" | "api" | string;
     channelId?: string;
     userId?: string;
   };

@@ -63,7 +63,7 @@ The `data` field of the artifact part:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `domain` | `string` | yes | World-state domain name (e.g. `"ci"`, `"plane"`) |
+| `domain` | `string` | yes | World-state domain name (e.g. `"ci"`, `"board"`) |
 | `path` | `string` | yes | Dot-separated path into the domain's `data` object (e.g. `"data.blockedPRs"`) |
 | `op` | `"set" \| "inc" \| "push"` | yes | Mutation operation (see below) |
 | `value` | `unknown` | yes | Value to apply. Must be a number for `"inc"`. |
@@ -85,8 +85,8 @@ The `data` field of the artifact part:
 ```json
 {
   "deltas": [
-    { "domain": "plane", "path": "data.untriaged", "op": "inc", "value": -1 },
-    { "domain": "plane", "path": "data.inProgress", "op": "inc", "value": 1 }
+    { "domain": "board", "path": "data.untriaged", "op": "inc", "value": -1 },
+    { "domain": "board", "path": "data.inProgress", "op": "inc", "value": 1 }
   ]
 }
 ```

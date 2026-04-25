@@ -27,7 +27,7 @@ export const HITL_MODE_URI = "https://proto-labs.ai/a2a/ext/hitl-mode-v1";
  *
  * - `autonomous`   — no human in the loop. Task runs, outcome is what it is.
  * - `notification` — runs autonomously; a read-only notification is rendered
- *   to the originating surface (Discord, Plane) for awareness.
+ *   to the originating surface (Discord, Linear) for awareness.
  * - `veto`         — short TTL window after dispatch where a human can cancel
  *   before side effects complete (via `tasks/cancel`). Auto-approved on TTL.
  * - `gated`        — blocking `input-required` before any side effect. No

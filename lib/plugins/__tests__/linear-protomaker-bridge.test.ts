@@ -149,26 +149,25 @@ mappings:
     expect(dispatched).toHaveLength(0);
   });
 
-  test("malformed mapping entries are skipped, valid ones still load", () => {
+  test("malformed mapping entry rejects the WHOLE file (fail-loud config)", () => {
+    // V2 behavior change: a typo in any one mapping now invalidates the whole
+    // file rather than partially loading it. That's a clearer signal —
+    // operator sees a loud schema error instead of confused silent-drop on
+    // the entry they expected to fire. Per the audit's "fail loud on config" finding.
     writeMappings(`
 mappings:
   - linearTeamKey: ENG
-    # missing protoMakerProjectSlug + triggerLabel — should be skipped
+    # missing protoMakerProjectSlug + triggerLabel
   - linearTeamKey: DESIGN
     protoMakerProjectSlug: design-system
     triggerLabel: board
 `);
     installPlugin();
 
-    // ENG is malformed and should not match
+    // Neither entry loads — the whole file failed schema validation.
     publishIssueCreated(bus, makeIssuePayload({ teamKey: "ENG" }));
-    expect(dispatched).toHaveLength(0);
-
-    // DESIGN with the trigger label fires correctly
     publishIssueCreated(bus, makeIssuePayload({ teamKey: "DESIGN" }));
-    expect(dispatched).toHaveLength(1);
-    const meta = (dispatched[0].payload as { meta: Record<string, unknown> }).meta;
-    expect(meta.protoMakerProjectSlug).toBe("design-system");
+    expect(dispatched).toHaveLength(0);
   });
 
   test("missing required Linear fields short-circuit (no crash, no dispatch)", () => {

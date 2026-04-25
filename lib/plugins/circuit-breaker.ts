@@ -206,7 +206,7 @@ const _apiBreaker = new CircuitBreaker({
  * On network-level failure (fn throws): records the failure, may open the circuit.
  * On success: records the success, may close a HALF_OPEN circuit.
  *
- * @param name  Unique circuit name, e.g. "plane-api", "google-api", "github-api"
+ * @param name  Unique circuit name, e.g. "linear-api", "google-api", "github-api"
  * @param fn    The async function to guard
  */
 export async function withCircuitBreaker<T>(

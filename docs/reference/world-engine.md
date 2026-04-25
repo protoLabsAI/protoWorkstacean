@@ -163,7 +163,7 @@ L2 — Ava (LLM reasoning)
     ▼
 L3 — Human in the loop (HITL)
     BudgetPlugin publishes hitl.request.budget.{requestId}
-    Human approves/rejects via Discord/Plane/API
+    Human approves/rejects via Discord/Linear/API
 ```
 
 Each escalation tier corresponds to a cost threshold enforced by `BudgetPlugin` and `TierRouter`:

@@ -6,7 +6,7 @@ How to add Server-Sent Events (SSE) streaming to an A2A agent so consumers get i
 
 ## Where streaming fits in the dispatch pipeline
 
-All skill requests — whether triggered by a Discord DM, a Plane webhook, or an autonomous GOAP action — travel the same unified dispatch path:
+All skill requests — whether triggered by a Discord DM, a Linear webhook, or an autonomous GOAP action — travel the same unified dispatch path:
 
 ```
 inbound event

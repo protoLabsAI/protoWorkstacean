@@ -13,7 +13,7 @@ flowchart TD
     subgraph Surfaces["External Surfaces"]
         GH[GitHub webhooks]
         DC[Discord gateway]
-        PL[Plane webhooks]
+        LN[Linear webhooks]
         HTTP["HTTP API :3000\n/publish · /api/*"]
         MCP["MCP Server\n(Claude Code agents)"]
     end
@@ -23,7 +23,7 @@ flowchart TD
     subgraph Adapters["Interface Plugins"]
         GHP[GitHubPlugin]
         DCP[DiscordPlugin]
-        PLP[PlanePlugin]
+        LNP[LinearPlugin]
     end
 
     subgraph Routing["Skill Routing"]
@@ -57,11 +57,11 @@ flowchart TD
 
     GH --> GHP
     DC --> DCP
-    PL --> PLP
+    LN --> LNP
     HTTP --> BUS
     MCP --> BUS
 
-    GHP & DCP & PLP --> BUS
+    GHP & DCP & LNP --> BUS
 
     BUS -- "message.inbound.#\ncron.#" --> RTP
     RTP -- "agent.skill.request" --> BUS

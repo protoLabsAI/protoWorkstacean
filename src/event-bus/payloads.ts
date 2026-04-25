@@ -80,7 +80,7 @@ export interface AgentSkillResponsePayload {
 
 /**
  * Common fields present on all `message.inbound.*` payloads.
- * Surface plugins (Discord, GitHub, Plane, etc.) extend this with their
+ * Surface plugins (Discord, GitHub, Linear, etc.) extend this with their
  * own platform-specific fields.
  */
 export interface InboundMessagePayload {
@@ -287,7 +287,7 @@ export interface AutonomousOutcomePayload {
  * Idempotent: sourceTaskId is unique per task so consumers can deduplicate.
  */
 export interface WorldStateDeltaV1Payload {
-  /** World-state domain (e.g. "ci", "plane"). */
+  /** World-state domain (e.g. "ci", "github_issues"). */
   domain: string;
   /** Dot-separated path into the domain's data object (e.g. "data.blockedPRs"). */
   path: string;
