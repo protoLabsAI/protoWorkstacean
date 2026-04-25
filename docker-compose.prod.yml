@@ -7,7 +7,6 @@ services:
     ports:
       - "8081:8080"   # Event viewer UI
       - "8082:8082"   # GitHub webhook receiver
-      - "8083:8083"   # Plane webhook receiver
       # Port 3000 (HTTP API) is on the Docker network only
     volumes:
       - ./workspace:/workspace   # bind-mount so agent YAMLs live in the repo
@@ -56,11 +55,6 @@ services:
       - AVA_APP_ID=${AVA_APP_ID:-}
       - AVA_APP_PRIVATE_KEY=${AVA_APP_PRIVATE_KEY:-}
 
-      # ── Plane ────────────────────────────────────────────────────
-      - PLANE_API_KEY=${PLANE_API_KEY:-}
-      - PLANE_WEBHOOK_SECRET=${PLANE_WEBHOOK_SECRET:-}
-      - PLANE_BASE_URL=${PLANE_BASE_URL:-}
-      - PLANE_WORKSPACE_SLUG=${PLANE_WORKSPACE_SLUG:-protolabsai}
 
       # ── A2A external agents ──────────────────────────────────────
       - AVA_API_KEY=${AVA_API_KEY:-}

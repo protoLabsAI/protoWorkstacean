@@ -19,7 +19,6 @@ export interface ServiceHealth {
 export interface ServicesResponse {
   discord?: ServiceHealth;
   github?: ServiceHealth;
-  plane?: ServiceHealth;
   [key: string]: ServiceHealth | undefined;
 }
 

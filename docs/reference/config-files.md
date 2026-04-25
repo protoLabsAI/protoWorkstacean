@@ -44,14 +44,13 @@ _This is a reference doc. It covers all `workspace/*.yaml` schemas and environme
 | `DISCORD_GUILD_ID` | Yes | Guild ID for slash command registration |
 | `DISCORD_DIGEST_CHANNEL` | No | Fallback channel ID for cron pushes (overridden by `discord.yaml`) |
 
-### Plane Plugin
+### Linear Plugin
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `PLANE_WEBHOOK_SECRET` | Yes | HMAC key for webhook signature validation |
-| `PLANE_API_KEY` | Yes | For `/api/v1/` reads and writes |
-| `PLANE_BASE_URL` | No | Defaults to `http://ava:3002` |
-| `PLANE_WORKSPACE_SLUG` | No | Defaults to `protolabsai` |
+| `LINEAR_API_KEY` | For outbound | Personal API key for GraphQL mutations (comment/create/update issues) |
+| `LINEAR_WEBHOOK_SECRET` | For inbound | HMAC-SHA256 signing secret from Linear webhook config |
+| `LINEAR_WEBHOOK_PORT` | No | Defaults to `8084` |
 
 ### Google Plugin
 
@@ -129,7 +128,7 @@ maxTurns: 15
 # Skills this agent handles — matched against agent.skill.request skillHint
 skills:
   - name: bug_triage
-    description: Triage a bug report — severity, root cause, Plane issue
+    description: Triage a bug report — severity, root cause, board feature
   - name: pr_review
     description: Review a pull request diff
 ```

@@ -90,16 +90,6 @@ Agents can declare their own Discord bot tokens via `discordBotTokenEnvKey` in e
 | `QUINN_APP_ID` | _(none)_ | GitHubPlugin | App ID for Quinn's dedicated GitHub App installation. |
 | `QUINN_APP_PRIVATE_KEY` | _(none)_ | GitHubPlugin | PEM private key for Quinn's GitHub App. |
 
-## Plane
-
-| Variable | Default | Plugin | Description |
-|----------|---------|--------|-------------|
-| `PLANE_BASE_URL` | _(none)_ | PlanePlugin | Base URL of the Plane instance (e.g. `https://plane.example.com`). If unset, PlanePlugin is skipped. |
-| `PLANE_API_KEY` | _(none)_ | PlanePlugin | Plane API key for issue/project operations. |
-| `PLANE_WORKSPACE_SLUG` | _(none)_ | PlanePlugin | Plane workspace slug. |
-| `PLANE_WEBHOOK_SECRET` | _(none)_ | PlanePlugin | HMAC secret for verifying Plane webhook payloads. |
-| `PLANE_WEBHOOK_PORT` | _(none)_ | PlanePlugin | Port for the Plane webhook receiver. |
-
 ## Linear
 
 | Variable | Default | Plugin | Description |

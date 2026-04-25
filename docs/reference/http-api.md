@@ -367,7 +367,6 @@ Service connectivity summary for the Overview dashboard. Checks env-var presence
 {
   "discord":  { "configured": true, "connected": true, "bot": "Quinn#1234" },
   "github":   { "configured": true, "authType": "app" },
-  "plane":    { "configured": true, "baseUrl": "https://plane.example.com" },
   "gateway":  { "configured": true, "url": "http://gateway:4000/v1" },
   "langfuse": { "configured": true },
   "graphiti": { "configured": false, "url": null }

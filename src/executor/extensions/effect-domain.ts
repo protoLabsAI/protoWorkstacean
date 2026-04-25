@@ -32,7 +32,7 @@ export const EFFECT_DOMAIN_URI = "https://proto-labs.ai/a2a/ext/effect-domain-v1
 
 /** A single world-state mutation declared for a skill in the agent card. */
 export interface EffectDomainDelta {
-  /** Name of the world-state domain (e.g. "ci", "plane"). */
+  /** Name of the world-state domain (e.g. "ci", "github_issues"). */
   domain: string;
   /** Dot-separated path into the domain's data object (e.g. "data.blockedPRs"). */
   path: string;

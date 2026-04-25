@@ -153,7 +153,6 @@ export interface WorldStateResponse {
 export interface ServicesResponse {
   discord: { configured: boolean; connected: boolean; bot: string | null };
   github: { configured: boolean; authType: string | null };
-  plane: { configured: boolean; baseUrl: string | null };
   gateway: { configured: boolean; url: string | null };
   langfuse: { configured: boolean };
   graphiti: { configured: boolean; url: string | null };

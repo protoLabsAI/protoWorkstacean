@@ -133,35 +133,6 @@ goals:
     max: 0
     description: "The latest push to any managed repo's main branch must have passing checks"
 
-  # ── Plane board health ──────────────────────────────────────────
-  #
-  # These goals watch the rollup surfaced by /api/plane-board. Each
-  # managed project that has a planeProjectId contributes to the
-  # counters. Selectors target the top-level rollup; per-project
-  # detail is available via domains.plane.data.projects[*] for
-  # future scope-aware actions.
-
-  - id: plane.no_urgent_stale
-    type: Threshold
-    severity: critical
-    selector: "domains.plane.data.urgentOpen"
-    max: 5
-    description: "No more than 5 urgent-priority Plane issues should be open at once"
-
-  - id: plane.no_stale_backlog
-    type: Threshold
-    severity: high
-    selector: "domains.plane.data.staleOpen"
-    max: 10
-    description: "No more than 10 Plane issues should be open longer than 14 days"
-
-  - id: plane.unassigned_not_piling
-    type: Threshold
-    severity: medium
-    selector: "domains.plane.data.unassignedOpen"
-    max: 20
-    description: "Unassigned Plane issues should not pile up — triage regularly"
-
   # ── Memory / Graphiti health ────────────────────────────────────
   #
   # Graphiti is the episodic memory backend. Healthcheck catches the

@@ -280,7 +280,7 @@ export class TaskTracker {
    *      task with the dispatcher's answer. No Discord prompt is raised
    *      unless this path fails.
    *   3. Fallback: emit the traditional `hitl.request.*` event so the
-   *      registered renderer (Discord, Plane) asks a human.
+   *      registered renderer (Discord, Linear) asks a human.
    */
   private _raiseHitl(task: TrackedTask, question: string | undefined): void {
     if (task.awaitingHuman) return; // already raised, avoid duplicate
@@ -398,7 +398,7 @@ export class TaskTracker {
 
   /**
    * Publish the traditional `hitl.request.{correlationId}` event for the
-   * HITL plugin to render (Discord button, Plane comment, etc.). Used both
+   * HITL plugin to render (Discord button, Linear comment, etc.). Used both
    * as the direct operator-only path and as a fallback from the dispatcher
    * caller-first chain.
    */

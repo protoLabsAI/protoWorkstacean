@@ -66,11 +66,11 @@ capabilities:
                 confidence: 0.8
           bug_triage:
             effects:
-              - domain: plane
+              - domain: board
                 path: data.untriaged
                 delta: -1
                 confidence: 0.9
-              - domain: plane
+              - domain: board
                 path: data.inProgress
                 delta: 1
                 confidence: 0.9

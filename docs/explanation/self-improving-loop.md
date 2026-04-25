@@ -119,7 +119,7 @@ All five interceptors are registered once at startup (`src/index.ts`) and fire o
 
 Observations aren't the only thing captured on each dispatch. `SkillDispatcherPlugin` also writes a Graphiti episode for every successful skill completion:
 
-- **Human-originated** dispatches write to two groups: `user_{platform}_{userId}` (shared across agents — the user's common memory) and `agent_{agentName}__{user_...}` (this specific agent's relationship with this user). This applies to all channels — Discord, GitHub, Plane, Slack, Signal — wherever `msg.source.userId` and `msg.source.platform` are present.
+- **Human-originated** dispatches write to two groups: `user_{platform}_{userId}` (shared across agents — the user's common memory) and `agent_{agentName}__{user_...}` (this specific agent's relationship with this user). This applies to all channels — Discord, GitHub, Linear, Slack, Signal — wherever `msg.source.userId` and `msg.source.platform` are present.
 - **Bot-originated** dispatches (`meta.systemActor` set, e.g. `"goap"`) write to a single `system_{actor}` group — the autonomous loop's own episodic log of what it did.
 
 On the next turn, before the skill fires, the dispatcher reads back a `<recalled_memory>` block from Graphiti and injects it into the prompt. Ava and protoBot's system prompts explicitly tell them what the block is ("trusted background — prior commitments, workflow preferences, past provisioning decisions") so they use it silently.

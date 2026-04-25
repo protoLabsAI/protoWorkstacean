@@ -32,7 +32,7 @@ export type WorldStateDeltaOp = "set" | "inc" | "push";
 
 /** A single observed mutation to a world-state domain. */
 export interface WorldStateDeltaEntry {
-  /** Name of the world-state domain (e.g. "ci", "plane"). */
+  /** Name of the world-state domain (e.g. "ci", "github_issues"). */
   domain: string;
   /** Dot-separated path into the domain's data object (e.g. "data.blockedPRs"). */
   path: string;

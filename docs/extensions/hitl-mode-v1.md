@@ -15,7 +15,7 @@ Ordered from least-gated to most-gated:
 | Mode | Semantics |
 |---|---|
 | `autonomous` | No human in the loop. Task runs, outcome is what it is. |
-| `notification` | Runs autonomously. A read-only notification is rendered on the originating surface (Discord, Plane) for awareness. |
+| `notification` | Runs autonomously. A read-only notification is rendered on the originating surface (Discord, Linear) for awareness. |
 | `veto` | Short TTL window after dispatch where a human can cancel via `tasks/cancel` before side effects complete. Auto-approved on TTL expiry. |
 | `gated` | Blocking `input-required` **before** any side effect. No auto-approve; execution halts until a decision. |
 | `compound` | Multi-checkpoint gated. The agent emits multiple `input-required` states across the task lifecycle (draft → review → publish); each requires its own decision. |
@@ -38,7 +38,7 @@ The reviewer precedence is:
 ```
 input-required
   → dispatching agent (if present; agent-scoped resolution)
-  → renderer chain (Discord, Plane, etc.) as final fallback
+  → renderer chain (Discord, Linear, etc.) as final fallback
 ```
 
 `TaskTracker` reads the original dispatch's `source.agentId` to decide the first hop. Sub-agent chains (Ava → Quinn → protoMaker) walk the chain back until a resolver wants the question or the chain terminates at the operator.

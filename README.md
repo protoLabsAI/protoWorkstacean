@@ -21,7 +21,7 @@ The loop observes skill execution through A2A extensions, writes episodic memory
 ## Architecture overview
 
 ```
-External surfaces (GitHub, Discord, Plane, HTTP)
+External surfaces (GitHub, Discord, Linear, HTTP)
   → Interface plugins → Event Bus
     → RouterPlugin → agent.skill.request
       → SkillDispatcherPlugin → ExecutorRegistry
@@ -64,7 +64,7 @@ bun run src/index.ts
 | `WORKSTACEAN_BASE_URL` | For A2A push notifications | Externally-reachable URL of the workstacean API (e.g. `http://workstacean:3000`). Stamped into push-notification callback URLs registered with remote A2A agents that advertise `capabilities.pushNotifications: true`. Unset → silently falls back to task polling. |
 | `WORKSTACEAN_PUBLIC_BASE_URL` | For external A2A discovery | Canonical externally-reachable base URL advertised in `/.well-known/agent-card.json` (e.g. `https://ava.proto-labs.ai`). Sets the card's `url` to `${WORKSTACEAN_PUBLIC_BASE_URL}/a2a`. Unset → card falls back to the internal docker-network URL (see `WORKSTACEAN_INTERNAL_HOST`). |
 | `WORKSTACEAN_INTERNAL_HOST` | No | Hostname used in the agent-card fallback URL when `WORKSTACEAN_PUBLIC_BASE_URL` is unset (default: `workstacean`). Combined with `WORKSTACEAN_HTTP_PORT` to form `http://${WORKSTACEAN_INTERNAL_HOST}:${WORKSTACEAN_HTTP_PORT}/a2a`. Override when running outside the default docker network. |
-| `GRAPHITI_URL` | For memory enrichment | Base URL of the Graphiti knowledge-graph service (default: `http://graphiti:8000`). Skill dispatcher pulls `<recalled_memory>` context before every user-originated skill call and writes episodic memory on success. Memory enrichment applies to all channels (Discord, GitHub, Plane, Slack, Signal) — not just Discord. |
+| `GRAPHITI_URL` | For memory enrichment | Base URL of the Graphiti knowledge-graph service (default: `http://graphiti:8000`). Skill dispatcher pulls `<recalled_memory>` context before every user-originated skill call and writes episodic memory on success. Memory enrichment applies to all channels (Discord, GitHub, Linear, Slack, Signal) — not just Discord. |
 | `ROUTER_DM_DEFAULT_AGENT` | For DM conversations | Agent to route Discord DMs to when no keyword matches (e.g. `quinn`). Required to enable natural DM conversations. |
 | `ROUTER_DM_DEFAULT_SKILL` | For DM conversations | Skill used for DMs routed by `ROUTER_DM_DEFAULT_AGENT` (default: `chat`). |
 | `DM_CONVERSATION_TIMEOUT_MS` | For DM conversations | Idle timeout (ms) before a DM conversation session expires (default: `900000` = 15 min). |
@@ -100,7 +100,7 @@ Plugins are loaded in `src/index.ts`. Each implements `install(bus) / uninstall(
 | `CeremonyPlugin` | always | Scheduled fleet rituals from `workspace/ceremonies/*.yaml` |
 | `DiscordPlugin` | `DISCORD_BOT_TOKEN` | Discord gateway; multi-bot pool from `channels.yaml`; `ConversationManager` tracks per-user conversation sessions for multi-turn DMs and opted-in guild channels |
 | `GitHubPlugin` | `GITHUB_TOKEN` or `GITHUB_APP_ID` | GitHub webhooks |
-| `PlanePlugin` | always | Plane webhook adapter |
+| `LinearPlugin` | `LINEAR_API_KEY` | Linear webhook adapter |
 | `EchoPlugin` | `ENABLED_PLUGINS=echo` | Test echo |
 
 **Workspace plugins**: drop a `.ts`/`.js` file in `workspace/plugins/` — loaded dynamically at startup.

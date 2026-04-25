@@ -78,13 +78,6 @@ export const EnvSchema = z
     GITHUB_WEBHOOK_SECRET: z.string().optional(),
     GITHUB_WEBHOOK_PORT:   z.string().optional(),
 
-    // Plane
-    PLANE_API_KEY:        z.string().optional(),
-    PLANE_BASE_URL:       z.string().optional(),
-    PLANE_WORKSPACE_SLUG: z.string().optional(),
-    PLANE_WEBHOOK_SECRET: z.string().optional(),
-    PLANE_WEBHOOK_PORT:   z.string().optional(),
-
     // Linear
     LINEAR_API_KEY:        z.string().optional(),
     LINEAR_WEBHOOK_SECRET: z.string().optional(),
