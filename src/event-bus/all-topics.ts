@@ -23,6 +23,17 @@ export const ACTION_TOPICS = {
   /** Published to invoke an agent skill (unified dispatch). */
   AGENT_SKILL_REQUEST: "agent.skill.request",
 
+  /**
+   * Prefix for skill-progress events. Full topic is
+   * `agent.skill.progress.{correlationId}`. Skill executors that want to
+   * stream intermediate progress to a long-running A2A caller publish to
+   * this topic; BusAgentExecutor translates each event into a
+   * `status-update` (state=working, final=false) on the A2A `message/stream`
+   * channel. Opt-in — executors that don't publish lose nothing.
+   * See AgentSkillProgressPayload in src/event-bus/payloads.ts.
+   */
+  AGENT_SKILL_PROGRESS_PREFIX: "agent.skill.progress",
+
   /** Wildcard subscription pattern — matches all cron events from SchedulerPlugin. */
   CRON_ALL: "cron.#",
 } as const;
