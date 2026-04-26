@@ -368,6 +368,95 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
         }),
       },
     ),
+    // ── Google Workspace (pull-mode reader/drafter — no auto-send) ───────────
+    gmail_list_unread: tool(
+      async (input) => {
+        const url = new URL("/api/google/gmail/list-unread", "http://x");
+        if (input.label) url.searchParams.set("label", input.label);
+        if (input.max) url.searchParams.set("max", String(input.max));
+        return JSON.stringify(await http.get(url.pathname + url.search));
+      },
+      {
+        name: "gmail_list_unread",
+        description: "List unread Gmail messages in a label (default INBOX). Use when the operator asks 'what's in my inbox?'.",
+        schema: z.object({
+          label: z.string().optional().describe("Gmail label (default INBOX)"),
+          max: z.number().optional().describe("Max results (default 20, max 100)"),
+        }),
+      },
+    ),
+    gmail_search: tool(
+      async (input) => {
+        const url = new URL("/api/google/gmail/search", "http://x");
+        url.searchParams.set("q", input.query);
+        if (input.max) url.searchParams.set("max", String(input.max));
+        return JSON.stringify(await http.get(url.pathname + url.search));
+      },
+      {
+        name: "gmail_search",
+        description: "Search Gmail with native Gmail query syntax (from:, subject:, after:, has:attachment, etc.).",
+        schema: z.object({
+          query: z.string().describe("Gmail search query"),
+          max: z.number().optional().describe("Max results (default 20, max 100)"),
+        }),
+      },
+    ),
+    gmail_get_thread: tool(
+      async (input) => JSON.stringify(await http.get(`/api/google/gmail/thread/${encodeURIComponent(input.threadId)}`)),
+      {
+        name: "gmail_get_thread",
+        description: "Read the full message history of a Gmail thread. Returns headers and bodies for every message.",
+        schema: z.object({ threadId: z.string() }),
+      },
+    ),
+    gmail_create_draft: tool(
+      async (input) => JSON.stringify(await http.post("/api/google/gmail/draft", input)),
+      {
+        name: "gmail_create_draft",
+        description:
+          "Create a Gmail DRAFT reply. The draft lands in the operator's Drafts folder for manual review and send — nothing is sent automatically. " +
+          "If threadId is provided, To/Subject/In-Reply-To are auto-resolved from the thread.",
+        schema: z.object({
+          threadId: z.string().optional().describe("Thread to reply to. Auto-resolves To/Subject/In-Reply-To."),
+          body: z.string().describe("Plain-text body of the draft"),
+          to: z.string().optional().describe("Recipient (required when threadId is omitted)"),
+          subject: z.string().optional().describe("Subject (required when threadId is omitted)"),
+          inReplyTo: z.string().optional(),
+          references: z.string().optional(),
+        }),
+      },
+    ),
+    calendar_list_upcoming: tool(
+      async (input) => {
+        const url = new URL("/api/google/calendar/upcoming", "http://x");
+        if (input.days) url.searchParams.set("days", String(input.days));
+        if (input.calendarId) url.searchParams.set("calendarId", input.calendarId);
+        return JSON.stringify(await http.get(url.pathname + url.search));
+      },
+      {
+        name: "calendar_list_upcoming",
+        description: "List upcoming calendar events for the next N days (default 7) on the primary calendar.",
+        schema: z.object({
+          days: z.number().optional().describe("Window in days (default 7, max 90)"),
+          calendarId: z.string().optional().describe("Calendar ID (default 'primary')"),
+        }),
+      },
+    ),
+    calendar_event_detail: tool(
+      async (input) => {
+        const url = new URL(`/api/google/calendar/event/${encodeURIComponent(input.eventId)}`, "http://x");
+        if (input.calendarId) url.searchParams.set("calendarId", input.calendarId);
+        return JSON.stringify(await http.get(url.pathname + url.search));
+      },
+      {
+        name: "calendar_event_detail",
+        description: "Fetch full detail (description, attendees, RSVPs) for a single calendar event.",
+        schema: z.object({
+          eventId: z.string(),
+          calendarId: z.string().optional().describe("Calendar ID (default 'primary')"),
+        }),
+      },
+    ),
     // ── Conversation feedback tools (require correlationId) ──────────────────
     react: tool(
       async (input) => {

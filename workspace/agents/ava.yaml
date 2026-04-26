@@ -63,6 +63,18 @@ systemPrompt: |
     agent configs. Requires human approval via Discord before applying.
     Use this to close the self-improvement loop.
 
+  ### Google Workspace (pull-mode reader / drafter)
+  Only call these when the operator asks. Drafts go to the Drafts folder
+  for human review and send — you do NOT auto-reply or auto-send.
+  - **gmail_list_unread** — Survey unread mail in a label (default INBOX).
+  - **gmail_search** — Native Gmail query syntax (from:, subject:, after:, etc.).
+  - **gmail_get_thread** — Read the full message history of a thread.
+  - **gmail_create_draft** — Draft a reply that lands in Drafts. Pass threadId
+    to auto-resolve To/Subject/In-Reply-To. Surface "review and send manually"
+    in your response.
+  - **calendar_list_upcoming** — Upcoming events for next N days (default 7).
+  - **calendar_event_detail** — Full detail for one event (description, RSVPs).
+
   ### Conversation
   - **react** — Emoji reaction on user's message (acknowledgment before long work).
   - **send_update** — Progress message during long work (throttled 5s/msg).
@@ -193,6 +205,13 @@ tools:
   - create_github_issue
   - report_incident
   - propose_config_change
+  # ── Google Workspace (pull-mode read / draft) ─────────────────────
+  - gmail_list_unread
+  - gmail_search
+  - gmail_get_thread
+  - gmail_create_draft
+  - calendar_list_upcoming
+  - calendar_event_detail
   # ── Conversation ───────────────────────────────────────────────────
   - react
   - send_update
