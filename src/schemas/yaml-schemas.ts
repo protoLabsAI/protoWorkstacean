@@ -189,6 +189,7 @@ export const ChannelPlatformSchema = z.enum([
   "signal",
   "slack",
   "linear",
+  "google",
 ]);
 
 export const ConversationConfigSchema = z.object({

@@ -32,3 +32,18 @@ channels:
   #   channelId: "ENG-142"
   #   agent: quinn
   #   description: Quinn owns this specific ticket end-to-end
+
+  # ── Google Gmail ───────────────────────────────────────────────────────────
+  # GooglePlugin polls labels listed in workspace/google.yaml and publishes
+  # message.inbound.google.gmail.{labelSlug}.{threadId}. ChannelRegistry
+  # matches the labelSlug segment (lowercase, non-alphanumeric → "-").
+  # `channelId` here is the LABEL NAME — not the slug — and the registry
+  # normalizes it during indexing.
+  - id: google-gmail-inbox
+    platform: google
+    channelId: "INBOX"
+    agent: ava
+    description: Every email landing in the user's primary inbox routes to Ava as a chat
+    conversation:
+      enabled: true
+      timeoutMs: 1800000   # 30 min — email replies can take a while

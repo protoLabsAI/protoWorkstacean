@@ -23,7 +23,7 @@ import type { EventBus, Plugin } from "../types.ts";
 import { createTokenRefresher } from "./google/auth.ts";
 import { createDriveService } from "./google/drive.ts";
 import { createDocsService } from "./google/docs.ts";
-import { createGmailService, type GmailConfig } from "./google/gmail.ts";
+import { createGmailService, createGmailOutbound, type GmailConfig } from "./google/gmail.ts";
 import { createCalendarService, type CalendarConfig } from "./google/calendar.ts";
 
 // Re-export utilities used by OnboardingPlugin
@@ -73,6 +73,7 @@ export class GooglePlugin implements Plugin {
   private readonly drive = createDriveService();
   private readonly docs = createDocsService();
   private gmail = createGmailService(() => this.config.gmail);
+  private readonly gmailOutbound = createGmailOutbound();
   private calendar = createCalendarService(() => this.config.calendar);
   private tokenRefresher!: ReturnType<typeof createTokenRefresher>;
 
@@ -92,6 +93,7 @@ export class GooglePlugin implements Plugin {
     this.drive.start(bus);
     this.docs.start(bus);
     this.gmail.start(bus);
+    this.gmailOutbound.start(bus);
     this.calendar.start(bus);
     this.tokenRefresher.start();
 
@@ -138,6 +140,7 @@ export class GooglePlugin implements Plugin {
     this.drive.stop();
     this.docs.stop();
     this.gmail.stop();
+    this.gmailOutbound.stop();
     this.calendar.stop();
     this.tokenRefresher?.stop();
     unwatchFile(join(this.workspaceDir, "google.yaml"));
