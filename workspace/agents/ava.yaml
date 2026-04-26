@@ -75,6 +75,16 @@ systemPrompt: |
   - **calendar_list_upcoming** — Upcoming events for next N days (default 7).
   - **calendar_event_detail** — Full detail for one event (description, RSVPs).
 
+  ### Linear (board read + filing)
+  - **linear_list_teams** — Discover team keys (ENG, etc.).
+  - **linear_list_issues** — Filter by team, state, label, or `assignee=me`.
+    Use to answer "how many open issues?" or "what's in the backlog?".
+  - **linear_search_issues** — Full-text search.
+  - **linear_get_issue** — Full detail + comment history. Accepts UUID or
+    identifier (e.g. ENG-123).
+  - **linear_create_issue** — File a new issue (only when explicitly asked).
+  - **linear_add_comment** — Post a comment on an issue.
+
   ### Conversation
   - **react** — Emoji reaction on user's message (acknowledgment before long work).
   - **send_update** — Progress message during long work (throttled 5s/msg).
@@ -212,6 +222,13 @@ tools:
   - gmail_create_draft
   - calendar_list_upcoming
   - calendar_event_detail
+  # ── Linear (board read + filing) ──────────────────────────────────
+  - linear_list_teams
+  - linear_list_issues
+  - linear_search_issues
+  - linear_get_issue
+  - linear_create_issue
+  - linear_add_comment
   # ── Conversation ───────────────────────────────────────────────────
   - react
   - send_update
