@@ -1462,13 +1462,20 @@ Analyze the PR and return a JSON object with this exact shape:
 \`\`\`
 
 Verdict definitions:
-- "redundant": The PR's intent is already satisfied by commits on \`${pr.baseRef}\` since the PR was cut.
-- "rebasable": Conflicts are textual but non-semantic (whitespace, import order, doc section shuffle, auto-generated files). A three-way merge can resolve them without losing meaning.
-- "decomposable": Conflicts cluster in a small number of specific files. Splitting into smaller PRs would avoid the conflict.
-- "genuine": Semantic conflicts requiring human judgment — which lines mean what is ambiguous.
+
+- "redundant": The PR's intent is already satisfied by commits on \`${pr.baseRef}\` since the PR was cut. Closing it loses nothing because the work is already on the base branch in another form.
+
+- "rebasable": Conflicts are textual or mechanical and the diff is tractable enough to merge by hand. Examples: whitespace; import order; both sides added a new section after the same doc anchor; both sides added a new entry to the same list; auto-generated files (lockfiles, audit dumps, snapshot files); a few sites where one side renamed a symbol the other side touched. The recovery path is a single back-merge of \`${pr.baseRef}\` into the head branch — usually clean, sometimes with a few keep-ours / keep-theirs decisions on obvious files. Choose "rebasable" when the PR touches fewer than ~15 files OR when the conflicts cluster only in docs / auto-generated files / a single source file.
+
+- "decomposable": The PR is large (touches many files across multiple distinct subsystems) AND the conflicts naturally cluster into independent file groups that could each ship as smaller focused PRs landing cleanly on their own. The split path is only worth proposing when the resulting smaller PRs each carry a clear standalone purpose. A small PR that conflicts with a recent, equally small PR is "rebasable" — there is nothing to decompose. Decomposable is the destructive path; it triggers an auto-close + split-proposal comment.
+
+- "genuine": Semantic conflicts requiring human judgment — which lines mean what is ambiguous, or both sides intentionally diverged on the same behavior. Escalates to HITL.
+
+Verdict precedence — pick the LEAST destructive verdict that fits the evidence: redundant → rebasable → decomposable → genuine. Default to "rebasable" whenever the PR touches fewer than 15 files or the conflict surface is purely docs / lockfiles / a single source file. Reserve "decomposable" for genuinely large multi-subsystem PRs where re-cutting as smaller PRs is the cheaper recovery than a back-merge.
 
 Use your GitHub API tools to fetch:
 1. PR files diff: GET /repos/${pr.repo}/pulls/${pr.number}/files
+   — count the files; report the count in your evidence string. When the count is below 15, "rebasable" almost always fits the situation.
 2. Recent base commits: GET /repos/${pr.repo}/commits?sha=${pr.baseRef}&per_page=20
 
 Return ONLY the JSON block. No other text.`,

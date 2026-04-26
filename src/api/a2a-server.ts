@@ -30,12 +30,15 @@ import {
   JsonRpcTransportHandler,
   type AgentExecutor,
   type ExecutionEventBus,
+  type PushNotificationStore,
   type RequestContext,
 } from "@a2a-js/sdk/server";
+import { join } from "node:path";
 import type { Message, Task } from "@a2a-js/sdk";
 import type { Route, ApiContext } from "./types.ts";
 import type { BusMessage } from "../../lib/types.ts";
 import { buildAgentCard } from "./agent-card.ts";
+import { SqlitePushNotificationStore } from "../storage/push-notification-store.ts";
 
 /**
  * Detect when an upstream payload looks like an HTML error page (usually the
@@ -140,13 +143,67 @@ class BusAgentExecutor implements AgentExecutor {
     });
 
     const replyTopic = `agent.skill.response.${correlationId}`;
+    const progressTopic = `agent.skill.progress.${correlationId}`;
     let settled = false;
     let cancelled = false;
     const done = new Promise<void>(resolve => {
+      // Progress subscriber — translates intermediate executor-emitted
+      // progress events into A2A `status-update` (state=working, final=false).
+      // Late events arriving after `settled` are dropped silently. The
+      // subscription is torn down on terminal / cancel below to avoid
+      // leaking subscriptions across overlapping task ids.
+      const progressSubId = this.ctx.bus.subscribe(progressTopic, "a2a-server-progress", (msg: BusMessage) => {
+        if (settled) return;
+        const p = (msg.payload ?? {}) as {
+          text?: string;
+          percent?: number;
+          step?: string;
+          meta?: Record<string, unknown>;
+        };
+        // Only build a `message` body when the executor supplied `text`.
+        // Some emitters may want to push pure-metadata progress (percent /
+        // step) for clients that render affordances rather than free text.
+        const messageObj = p.text
+          ? {
+            message: {
+              kind: "message" as const,
+              messageId: crypto.randomUUID(),
+              role: "agent" as const,
+              taskId,
+              contextId,
+              parts: [{ kind: "text" as const, text: p.text }],
+            },
+          }
+          : {};
+        const metadataObj =
+          p.percent !== undefined || p.step !== undefined || p.meta
+            ? {
+              metadata: {
+                ...(p.percent !== undefined ? { percent: p.percent } : {}),
+                ...(p.step !== undefined ? { step: p.step } : {}),
+                ...(p.meta ?? {}),
+              },
+            }
+            : {};
+        eventBus.publish({
+          kind: "status-update",
+          taskId,
+          contextId,
+          status: {
+            state: "working",
+            timestamp: new Date().toISOString(),
+            ...messageObj,
+            ...metadataObj,
+          },
+          final: false,
+        });
+      });
+
       const subId = this.ctx.bus.subscribe(replyTopic, "a2a-server", (msg: BusMessage) => {
         if (settled) return;
         settled = true;
         this.ctx.bus.unsubscribe(subId);
+        this.ctx.bus.unsubscribe(progressSubId);
         this.activeCancels.delete(taskId);
 
         const payload = (msg.payload ?? {}) as { content?: string; error?: string };
@@ -206,6 +263,7 @@ class BusAgentExecutor implements AgentExecutor {
         settled = true;
         cancelled = true;
         this.ctx.bus.unsubscribe(subId);
+        this.ctx.bus.unsubscribe(progressSubId);
         this.activeCancels.delete(taskId);
         eventBus.publish({
           kind: "status-update",
@@ -264,11 +322,16 @@ class BusAgentExecutor implements AgentExecutor {
 }
 
 export function createRoutes(ctx: ApiContext): Route[] {
-  // Build request handler once per process — it's stateful (task store) but
-  // stores are in-memory and all requests go through the same bus pipeline.
+  // Build request handler once per process. TaskStore stays in-memory
+  // (tasks are short-lived; the bus is the durable record), but the
+  // push-notification store is SQLite-backed when ctx.dataDir is set so
+  // configs survive container restarts (#472 Gap 2). Falls back to the
+  // SDK's in-memory store for tests / ephemeral setups without a dataDir.
   const agentCard = buildAgentCard(ctx);
   const taskStore = new InMemoryTaskStore();
-  const pushStore = new InMemoryPushNotificationStore();
+  const pushStore: PushNotificationStore = ctx.dataDir
+    ? new SqlitePushNotificationStore(join(ctx.dataDir, "push-notifications.db"))
+    : new InMemoryPushNotificationStore();
   const pushSender = new DefaultPushNotificationSender(pushStore);
   const agentExecutor = new BusAgentExecutor(ctx);
   const requestHandler = new DefaultRequestHandler(

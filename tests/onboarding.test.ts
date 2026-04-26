@@ -63,11 +63,18 @@ function findComplete(published: BusMessage[]): BusMessage | undefined {
 }
 
 // ── Mock state (shared across mock.module factories) ──────────────────────────
+//
+// We deliberately do NOT mock `../lib/project-schema.ts`. `mock.module()`
+// replacements in Bun's test runner persist for the entire process and bleed
+// into other test files run in the same `bun test` invocation — when
+// tests/project-schema.test.ts runs after this file in the same process, it
+// would pick up the mocked `validateProjectEntry` (which returned the wrong
+// success shape) and 12 tests would fail intermittently in CI. Tracked as #480.
+// The real schema is fast and pure; tests construct payloads that satisfy it.
 
 const _mocks = {
   makeGitHubAuth: null as unknown,
   createDriveFolder: null as unknown,
-  validateProjectEntry: null as unknown,
 };
 
 mock.module("../lib/github-auth.ts", () => ({
@@ -78,11 +85,6 @@ mock.module("../lib/plugins/google.ts", () => ({
   createDriveFolder: (...args: unknown[]) => (_mocks.createDriveFolder as (...a: unknown[]) => unknown)(...args),
   getGoogleAccessToken: () => Promise.resolve(null),
   GooglePlugin: class {},
-}));
-
-mock.module("../lib/project-schema.ts", () => ({
-  validateProjectEntry: (...args: unknown[]) => (_mocks.validateProjectEntry as (...a: unknown[]) => unknown)(...args),
-  parseProjectsYaml: () => ({ projects: [] }),
 }));
 
 // Import the plugin AFTER mock.module calls
@@ -126,7 +128,6 @@ describe("OnboardingPlugin — Step 1: validate", () => {
     setEnv();
     _mocks.makeGitHubAuth = mock(() => () => Promise.resolve("ghp_test"));
     _mocks.createDriveFolder = mock(() => Promise.resolve(null));
-    _mocks.validateProjectEntry = mock(() => ({ ok: true, errors: [] }));
   });
 
   afterEach(() => {
@@ -195,7 +196,6 @@ describe("OnboardingPlugin — Step 2: idempotency", () => {
     setEnv();
     _mocks.makeGitHubAuth = mock(() => () => Promise.resolve("ghp_test"));
     _mocks.createDriveFolder = mock(() => Promise.resolve(null));
-    _mocks.validateProjectEntry = mock(() => ({ ok: true, errors: [] }));
   });
 
   afterEach(() => {
@@ -244,7 +244,6 @@ describe("OnboardingPlugin — Step 3: GitHub webhook", () => {
     workspaceDir = mkdtempSync(join(tmpdir(), "onboard-test-"));
     setEnv();
     _mocks.createDriveFolder = mock(() => Promise.resolve(null));
-    _mocks.validateProjectEntry = mock(() => ({ ok: true, errors: [] }));
   });
 
   afterEach(() => {
@@ -356,7 +355,6 @@ describe("OnboardingPlugin — Step 4: Drive folder", () => {
     workspaceDir = mkdtempSync(join(tmpdir(), "onboard-test-"));
     setEnv();
     _mocks.makeGitHubAuth = mock(() => null);
-    _mocks.validateProjectEntry = mock(() => ({ ok: true, errors: [] }));
   });
 
   afterEach(() => {
@@ -436,7 +434,6 @@ describe("OnboardingPlugin — Step 5: projects.yaml write", () => {
     setEnv();
     _mocks.makeGitHubAuth = mock(() => null);
     _mocks.createDriveFolder = mock(() => Promise.resolve(null));
-    _mocks.validateProjectEntry = mock(() => ({ ok: true, errors: [] }));
   });
 
   afterEach(() => {
@@ -524,7 +521,6 @@ describe("OnboardingPlugin — Full pipeline", () => {
     setEnv();
     _mocks.makeGitHubAuth = mock(() => null);
     _mocks.createDriveFolder = mock(() => Promise.resolve(null));
-    _mocks.validateProjectEntry = mock(() => ({ ok: true, errors: [] }));
   });
 
   afterEach(() => {
@@ -583,7 +579,6 @@ describe("OnboardingPlugin — Idempotency (full run twice)", () => {
     setEnv();
     _mocks.makeGitHubAuth = mock(() => null);
     _mocks.createDriveFolder = mock(() => Promise.resolve(null));
-    _mocks.validateProjectEntry = mock(() => ({ ok: true, errors: [] }));
   });
 
   afterEach(() => {
@@ -624,7 +619,6 @@ describe("OnboardingPlugin — Error handling", () => {
     setEnv();
     _mocks.makeGitHubAuth = mock(() => null);
     _mocks.createDriveFolder = mock(() => Promise.resolve(null));
-    _mocks.validateProjectEntry = mock(() => ({ ok: true, errors: [] }));
   });
 
   afterEach(() => {
@@ -633,13 +627,20 @@ describe("OnboardingPlugin — Error handling", () => {
   });
 
   test("fatal step error (projects.yaml schema fail) aborts pipeline", async () => {
-    _mocks.validateProjectEntry = mock(() => ({ ok: false, errors: ["slug is required"] }));
-
+    // Construct a request whose constructed entry will fail the real
+    // ProjectEntrySchema. ProjectDiscordChannelSchema is union(string, object{
+    // channelId, webhook? }); a bare numeric `dev` value satisfies neither
+    // branch, so projects_yaml step rejects with a schema error.
     const plugin = new OnboardingPlugin(workspaceDir);
     const { bus, published } = makeTestBus();
     plugin.install(bus);
 
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "fatal-test", title: "Fatal", github: "o/r" }));
+    bus.publish("message.inbound.onboard", makeBusMsg({
+      slug: "fatal-test",
+      title: "Fatal",
+      github: "o/r",
+      discord: { dev: 12345 as unknown as string },
+    }));
     await new Promise(r => setTimeout(r, 150));
 
     const reply = findReply(published);

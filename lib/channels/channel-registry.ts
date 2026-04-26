@@ -25,6 +25,8 @@ export class ChannelRegistry {
   private bySignalGroup = new Map<string, Channel>();
   // Index: slack channelId → Channel
   private bySlackChannel = new Map<string, Channel>();
+  // Index: gmail label-slug → Channel (slug = lowercase, non-alphanum → "-")
+  private byGoogleGmailLabel = new Map<string, Channel>();
 
   private filePath: string;
   private watching = false;
@@ -45,6 +47,7 @@ export class ChannelRegistry {
    *   message.inbound.github.{owner}.{repo}.*
    *   message.inbound.signal.{groupId}
    *   message.inbound.slack.{channelId}
+   *   message.inbound.google.gmail.{labelSlug}.{threadId}
    */
   findByTopic(topic: string): Channel | undefined {
     const parts = topic.split(".");
@@ -64,7 +67,19 @@ export class ChannelRegistry {
     if (platform === "slack" && parts[3]) {
       return this.bySlackChannel.get(parts[3]);
     }
+    if (platform === "google" && parts[3] === "gmail" && parts[4]) {
+      return this.byGoogleGmailLabel.get(parts[4]);
+    }
     return undefined;
+  }
+
+  /**
+   * Normalize a Gmail label name into the topic-safe slug used as the
+   * channels.yaml lookup key. Lowercase, non-alphanumeric → "-".
+   * Examples: "INBOX" → "inbox", "Personal/Work" → "personal-work".
+   */
+  static gmailLabelSlug(label: string): string {
+    return label.toLowerCase().replace(/[^a-z0-9]/g, "-");
   }
 
   /** All enabled Discord channel entries. */
@@ -180,6 +195,7 @@ export class ChannelRegistry {
     this.byGithubRepo.clear();
     this.bySignalGroup.clear();
     this.bySlackChannel.clear();
+    this.byGoogleGmailLabel.clear();
 
     for (const ch of channels) {
       if (ch.enabled === false) continue;
@@ -195,6 +211,14 @@ export class ChannelRegistry {
           break;
         case "slack":
           if (ch.slackChannelId) this.bySlackChannel.set(ch.slackChannelId, ch);
+          break;
+        case "google":
+          // Gmail entries use channelId as the label name (e.g. "INBOX",
+          // "Personal/Work"). Normalize to a topic-safe slug so the topic
+          // segment matches.
+          if (ch.channelId) {
+            this.byGoogleGmailLabel.set(ChannelRegistry.gmailLabelSlug(ch.channelId), ch);
+          }
           break;
       }
     }
