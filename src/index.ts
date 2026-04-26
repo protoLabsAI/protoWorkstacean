@@ -248,6 +248,23 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Google Workspace — Drive / Docs / Calendar / Gmail outbound + polling.
+    // Gated on the full OAuth2 credential triple. The plugin's own install()
+    // logs and skips wiring when any are missing, so the gate here is mostly
+    // about not paying the import cost on a setup that can't authenticate.
+    name: "google",
+    condition: () =>
+      Boolean(
+        process.env.GOOGLE_CLIENT_ID &&
+        process.env.GOOGLE_CLIENT_SECRET &&
+        process.env.GOOGLE_REFRESH_TOKEN,
+      ),
+    factory: async () => {
+      const { GooglePlugin } = await import("../lib/plugins/google");
+      return new GooglePlugin(workspaceDir);
+    },
+  },
+  {
     name: "onboarding",
     condition: () => true,
     factory: async () => {
