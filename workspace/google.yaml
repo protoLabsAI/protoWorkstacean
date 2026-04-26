@@ -2,16 +2,21 @@ drive:
   orgFolderId: ""       # root org Drive folder — shared across all projects
   templateFolderId: ""  # per-project folder template (optional)
 
+# Gmail + Calendar polling intentionally disabled.
+#
+# Ava is a pull-mode reader/drafter: she reads / summarizes / drafts
+# replies when explicitly asked, via Gmail tools. She does NOT auto-reply
+# to inbound emails or react to calendar events on a schedule.
+#
+# To re-enable polling at some point, set watchLabels / orgCalendarId
+# below — the GooglePlugin will start the relevant pollers on the next
+# 1-second hot-reload of this file.
+
 calendar:
-  orgCalendarId: "primary"      # the authenticated user's primary calendar
-  pollIntervalMinutes: 15       # how often to check for upcoming events
+  orgCalendarId: ""             # empty → calendar polling disabled
+  pollIntervalMinutes: 60
 
 gmail:
-  watchLabels: ["INBOX"]        # poll the entire inbox; Gmail's INBOX label covers everything not archived
-  pollIntervalMinutes: 5        # how often to poll for new messages
-  routingRules: []              # label → skillHint mappings (none yet — every inbound becomes a chat skill)
-  # routingRules example:
-  # - label: "bug-report"
-  #   skillHint: bug_triage
-  # - label: "gtm-request"
-  #   skillHint: content_strategy
+  watchLabels: []               # empty → inbox polling disabled
+  pollIntervalMinutes: 5
+  routingRules: []
