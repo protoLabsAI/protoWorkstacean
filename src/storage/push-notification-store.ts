@@ -102,9 +102,11 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
            expires_at  = excluded.expires_at`,
         [taskId, configId, JSON.stringify(config), now, expiresAt],
       );
-      // Opportunistic GC — keeps the table from growing unboundedly without
-      // a separate sweep job. Bounded by index lookup so it's cheap.
-      this._purgeExpired();
+      // Opportunistic GC — pass the captured `now` so the row we just
+      // inserted (expires_at = now + ttlMs) cannot be purged in the same
+      // call when ttlMs is small enough that Date.now() advances past it
+      // between INSERT and DELETE.
+      this._purgeExpired(now);
     } catch (err) {
       console.error(`[push-store] save() failed for task ${taskId.slice(0, 8)}…:`, err);
     }
@@ -164,12 +166,12 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
     this.db = null;
   }
 
-  private _purgeExpired(): void {
+  private _purgeExpired(cutoff: number = Date.now()): void {
     if (!this.db) return;
     try {
       this.db.run(
         `DELETE FROM push_notifications WHERE expires_at IS NOT NULL AND expires_at <= ?`,
-        [Date.now()],
+        [cutoff],
       );
     } catch {
       // GC failure is non-fatal — table just gets a bit bigger.
