@@ -35,6 +35,34 @@ const PRIORITY_MAP: Record<LinearPriority, number> = {
  */
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
+export interface IssueSummary {
+  id: string;
+  identifier: string;
+  title: string;
+  state: string;
+  priority: string;
+  assignee: string;
+  team: string;
+  url: string;
+  updatedAt: string;
+}
+
+export interface IssueDetail extends IssueSummary {
+  description: string;
+  labels: string[];
+  comments: { author: string; body: string; createdAt: string }[];
+}
+
+export interface ListIssuesFilter {
+  teamKey?: string;
+  state?: string;
+  assignedToMe?: boolean;
+  label?: string;
+  max?: number;
+}
+
+const PRIORITY_NAMES = ["No priority", "Urgent", "High", "Medium", "Low"];
+
 export interface CreateIssueInput {
   teamKey: string;
   title: string;
@@ -104,6 +132,77 @@ export class LinearClient {
       this.stateCache.set(teamId, { value: teamStates, expiresAt: now + CACHE_TTL_MS });
     }
     return teamStates.get(stateName.toLowerCase()) ?? null;
+  }
+
+  async listTeams(): Promise<{ id: string; key: string; name: string }[]> {
+    const teams = await this.sdk.teams({ first: 50 });
+    return teams.nodes.map(t => ({ id: t.id, key: t.key, name: t.name }));
+  }
+
+  /** Hydrate an SDK Issue node into the IssueSummary shape used by the API. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async toSummary(node: any): Promise<IssueSummary> {
+    const [state, assignee, team] = await Promise.all([
+      node.state,
+      node.assignee,
+      node.team,
+    ]);
+    return {
+      id: node.id,
+      identifier: node.identifier,
+      title: node.title,
+      state: state?.name ?? "",
+      priority: PRIORITY_NAMES[node.priority] ?? "Unknown",
+      assignee: assignee?.displayName ?? assignee?.name ?? "",
+      team: team?.key ?? "",
+      url: node.url,
+      updatedAt: node.updatedAt instanceof Date ? node.updatedAt.toISOString() : String(node.updatedAt),
+    };
+  }
+
+  async listIssues(filter: ListIssuesFilter = {}): Promise<IssueSummary[]> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = {};
+    if (filter.teamKey) where.team = { key: { eq: filter.teamKey } };
+    if (filter.state) where.state = { name: { eqIgnoreCase: filter.state } };
+    if (filter.assignedToMe) where.assignee = { isMe: { eq: true } };
+    if (filter.label) where.labels = { name: { eqIgnoreCase: filter.label } };
+    const issues = await this.sdk.issues({
+      filter: where,
+      first: Math.min(filter.max ?? 50, 250),
+      orderBy: "updatedAt" as never,
+    });
+    return Promise.all(issues.nodes.map(n => this.toSummary(n)));
+  }
+
+  async searchIssues(query: string, max = 25): Promise<IssueSummary[]> {
+    const issues = await this.sdk.searchIssues(query, { first: Math.min(max, 100) });
+    return Promise.all(issues.nodes.map(n => this.toSummary(n)));
+  }
+
+  /** Lookup by UUID or identifier (e.g. "ENG-123"). */
+  async getIssue(idOrKey: string): Promise<IssueDetail | null> {
+    const issue = await this.sdk.issue(idOrKey);
+    if (!issue) return null;
+    const summary = await this.toSummary(issue);
+    const [labelsConn, commentsConn] = await Promise.all([
+      issue.labels(),
+      issue.comments({ first: 50 }),
+    ]);
+    const comments = await Promise.all(commentsConn.nodes.map(async c => {
+      const user = await c.user;
+      return {
+        author: user?.displayName ?? user?.name ?? "Unknown",
+        body: c.body,
+        createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
+      };
+    }));
+    return {
+      ...summary,
+      description: issue.description ?? "",
+      labels: labelsConn.nodes.map(l => l.name),
+      comments,
+    };
   }
 
   /** Drop all cached lookups. Useful for tests and after known workspace edits. */

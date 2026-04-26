@@ -457,6 +457,83 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
         }),
       },
     ),
+    // ── Linear (board read + filing write) ───────────────────────────────────
+    linear_list_teams: tool(
+      async () => JSON.stringify(await http.get("/api/linear/teams")),
+      { name: "linear_list_teams", description: "List all Linear teams (id, key, name).", schema: z.object({}) },
+    ),
+    linear_list_issues: tool(
+      async (input) => {
+        const url = new URL("/api/linear/issues", "http://x");
+        if (input.team) url.searchParams.set("team", input.team);
+        if (input.state) url.searchParams.set("state", input.state);
+        if (input.label) url.searchParams.set("label", input.label);
+        if (input.assignee) url.searchParams.set("assignee", input.assignee);
+        if (input.max) url.searchParams.set("max", String(input.max));
+        return JSON.stringify(await http.get(url.pathname + url.search));
+      },
+      {
+        name: "linear_list_issues",
+        description: "List Linear issues with optional filters. Use to answer 'how many open issues?' or 'what's in the ENG backlog?'.",
+        schema: z.object({
+          team: z.string().optional().describe("Team key (e.g. ENG)"),
+          state: z.string().optional().describe("Workflow state name (e.g. 'In Progress', 'Backlog')"),
+          label: z.string().optional().describe("Label name"),
+          assignee: z.string().optional().describe("Set 'me' to filter to issues assigned to the API key holder"),
+          max: z.number().optional().describe("Max results (default 50, max 250)"),
+        }),
+      },
+    ),
+    linear_search_issues: tool(
+      async (input) => {
+        const url = new URL("/api/linear/issues/search", "http://x");
+        url.searchParams.set("q", input.query);
+        if (input.max) url.searchParams.set("max", String(input.max));
+        return JSON.stringify(await http.get(url.pathname + url.search));
+      },
+      {
+        name: "linear_search_issues",
+        description: "Full-text search across Linear issues.",
+        schema: z.object({
+          query: z.string(),
+          max: z.number().optional().describe("Max results (default 25, max 100)"),
+        }),
+      },
+    ),
+    linear_get_issue: tool(
+      async (input) => JSON.stringify(await http.get(`/api/linear/issues/${encodeURIComponent(input.idOrKey)}`)),
+      {
+        name: "linear_get_issue",
+        description: "Read one Linear issue with full description, labels, and comment history. Accepts UUID or identifier (e.g. 'ENG-123').",
+        schema: z.object({ idOrKey: z.string() }),
+      },
+    ),
+    linear_create_issue: tool(
+      async (input) => JSON.stringify(await http.post("/api/linear/issues", input)),
+      {
+        name: "linear_create_issue",
+        description: "File a new Linear issue. Use when the operator asks to create one explicitly.",
+        schema: z.object({
+          teamKey: z.string().describe("Team key (e.g. ENG)"),
+          title: z.string(),
+          description: z.string().optional(),
+          priority: z.enum(["urgent", "high", "medium", "low", "none"]).optional(),
+          labelIds: z.array(z.string()).optional(),
+          stateName: z.string().optional().describe("Workflow state name (default: team's default backlog)"),
+        }),
+      },
+    ),
+    linear_add_comment: tool(
+      async (input) => JSON.stringify(await http.post(`/api/linear/issues/${encodeURIComponent(input.issueId)}/comment`, { body: input.body })),
+      {
+        name: "linear_add_comment",
+        description: "Post a comment to a Linear issue.",
+        schema: z.object({
+          issueId: z.string().describe("Issue UUID (use linear_get_issue to resolve identifier → UUID first if needed)"),
+          body: z.string(),
+        }),
+      },
+    ),
     // ── Conversation feedback tools (require correlationId) ──────────────────
     react: tool(
       async (input) => {
