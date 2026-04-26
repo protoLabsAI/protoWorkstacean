@@ -93,7 +93,11 @@ export class GooglePlugin implements Plugin {
     this.drive.start(bus);
     this.docs.start(bus);
     this.gmail.start(bus);
-    this.gmailOutbound.start(bus);
+    // Gmail outbound (auto-reply on `google.gmail.reply.#`) intentionally
+    // NOT started. Ava is a pull-mode drafter — she reads / summarizes /
+    // drafts replies when asked, via Gmail tools that create DRAFTS for
+    // human review and send. Auto-reply path stays in code so it's ready
+    // when/if a deliberately-opt-in send flow is wired later.
     this.calendar.start(bus);
     this.tokenRefresher.start();
 
@@ -140,7 +144,7 @@ export class GooglePlugin implements Plugin {
     this.drive.stop();
     this.docs.stop();
     this.gmail.stop();
-    this.gmailOutbound.stop();
+    // gmailOutbound was never started in install() — see comment there.
     this.calendar.stop();
     this.tokenRefresher?.stop();
     unwatchFile(join(this.workspaceDir, "google.yaml"));
