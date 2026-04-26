@@ -3,13 +3,13 @@ drive:
   templateFolderId: ""  # per-project folder template (optional)
 
 calendar:
-  orgCalendarId: ""             # shared org calendar for milestones/deadlines
-  pollIntervalMinutes: 60       # how often to check for upcoming events
+  orgCalendarId: "primary"      # the authenticated user's primary calendar
+  pollIntervalMinutes: 15       # how often to check for upcoming events
 
 gmail:
-  watchLabels: []               # Gmail labels to monitor for inbound routing
+  watchLabels: ["INBOX"]        # poll the entire inbox; Gmail's INBOX label covers everything not archived
   pollIntervalMinutes: 5        # how often to poll for new messages
-  routingRules: []              # label → skillHint mappings
+  routingRules: []              # label → skillHint mappings (none yet — every inbound becomes a chat skill)
   # routingRules example:
   # - label: "bug-report"
   #   skillHint: bug_triage
