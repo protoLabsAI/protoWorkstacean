@@ -51,10 +51,15 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
   private db: Database | null = null;
   private readonly dbPath: string;
   private readonly ttlMs: number;
+  private readonly clock: () => number;
 
-  constructor(dbPath: string, options: { ttlMs?: number } = {}) {
+  constructor(
+    dbPath: string,
+    options: { ttlMs?: number; clock?: () => number } = {},
+  ) {
     this.dbPath = resolve(dbPath);
     this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
+    this.clock = options.clock ?? Date.now;
     this._init();
   }
 
@@ -90,7 +95,7 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
   async save(taskId: string, config: PushNotificationConfig): Promise<void> {
     if (!this.db) return;
     const configId = config.id ?? "";
-    const now = Date.now();
+    const now = this.clock();
     const expiresAt = this.ttlMs > 0 ? now + this.ttlMs : null;
     try {
       this.db.run(
@@ -115,7 +120,7 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
   async load(taskId: string): Promise<PushNotificationConfig[]> {
     if (!this.db) return [];
     try {
-      const now = Date.now();
+      const now = this.clock();
       const rows = this.db
         .query<Row, [string, number]>(
           `SELECT task_id, config_id, config_json, created_at, expires_at
@@ -166,7 +171,7 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
     this.db = null;
   }
 
-  private _purgeExpired(cutoff: number = Date.now()): void {
+  private _purgeExpired(cutoff: number = this.clock()): void {
     if (!this.db) return;
     try {
       this.db.run(
