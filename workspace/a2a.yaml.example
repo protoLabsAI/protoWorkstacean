@@ -1,0 +1,23 @@
+# A2A outbound delivery — targets for `payload.channel: "a2a"` schedules.
+#
+# Workstacean acts as the scheduler for one or more remote A2A agents
+# (e.g. protoAgent forks). When a schedule fires with channel: "a2a",
+# A2ADeliveryPlugin looks up `targets[payload.agent_name]` and POSTs a
+# JSON-RPC `message/send` to the configured URL.
+#
+# The protoAgent `WorkstaceanScheduler` adapter already publishes the
+# canonical payload shape (channel, agent_name, scheduler_job_id) — see
+# https://protolabsai.github.io/protoWorkstacean/guides/a2a-scheduler-bridge/
+#
+# Auth: configure either bearer_token, api_key, or both. Env-var
+# expansion is supported via `${VAR_NAME}`.
+
+targets:
+  # gina-personal:
+  #   url: http://gina-personal:7870/a2a
+  #   bearer_token: ${GINA_PERSONAL_BEARER}
+  #   api_key: ${GINA_PERSONAL_API_KEY}
+  #
+  # gina-work:
+  #   url: http://gina-work:7871/a2a
+  #   bearer_token: ${GINA_WORK_BEARER}
