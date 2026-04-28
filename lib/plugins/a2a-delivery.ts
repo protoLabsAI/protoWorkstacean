@@ -47,20 +47,19 @@ export class A2ADeliveryPlugin implements Plugin {
   capabilities: string[] = ["a2a", "outbound", "scheduler-delivery"];
 
   private bus: EventBus | null = null;
+  private subscriptionId: string | null = null;
   private targets: Record<string, A2ATarget> = {};
   private readonly configPath: string;
-  private readonly fetchImpl: typeof fetch;
 
-  constructor(workspaceDir: string, options: { fetch?: typeof fetch } = {}) {
+  constructor(workspaceDir: string) {
     this.configPath = join(resolve(workspaceDir), "a2a.yaml");
-    this.fetchImpl = options.fetch ?? fetch;
   }
 
   install(bus: EventBus): void {
     this.bus = bus;
     this._loadConfig();
 
-    bus.subscribe("cron.#", this.name, (msg: BusMessage) => {
+    this.subscriptionId = bus.subscribe("cron.#", this.name, (msg: BusMessage) => {
       void this._handle(msg);
     });
 
@@ -69,6 +68,10 @@ export class A2ADeliveryPlugin implements Plugin {
   }
 
   uninstall(): void {
+    if (this.bus && this.subscriptionId) {
+      this.bus.unsubscribe(this.subscriptionId);
+    }
+    this.subscriptionId = null;
     this.bus = null;
   }
 
@@ -90,6 +93,13 @@ export class A2ADeliveryPlugin implements Plugin {
   private async _handle(msg: BusMessage): Promise<void> {
     const payload = msg.payload as CronPayloadForA2A | undefined;
     if (!payload || payload.channel !== "a2a") return;
+
+    if (typeof payload.content !== "string" || payload.content.trim() === "") {
+      console.error(
+        `[a2a-delivery] cron "${msg.topic}" channel=a2a but payload.content is missing or not a non-empty string — drop`,
+      );
+      return;
+    }
 
     const agentName = payload.agent_name;
     if (!agentName) {
@@ -134,7 +144,7 @@ export class A2ADeliveryPlugin implements Plugin {
     };
 
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await fetch(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body),

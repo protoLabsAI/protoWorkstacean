@@ -1,15 +1,17 @@
 /**
  * A2ADeliveryPlugin tests — verify channel gating, target lookup,
- * auth header forwarding, and the shape of the dispatched JSON-RPC
- * `message/send` request. The plugin only does HTTP fetch + bus
- * subscription; we inject a fetch mock to assert the outbound shape
- * without standing up an HTTP server.
+ * auth header forwarding, payload validation, and the JSON-RPC
+ * `message/send` shape.
+ *
+ * No mocks: each test stands up a real Bun.serve HTTP sink on an
+ * ephemeral port and asserts against the requests it received.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import type { Server } from "bun";
 import { InMemoryEventBus } from "../../bus.ts";
 import { A2ADeliveryPlugin } from "../a2a-delivery.ts";
 
@@ -19,24 +21,23 @@ interface CapturedRequest {
   body: unknown;
 }
 
-function makeFetchMock(status = 200): {
-  fn: typeof fetch;
-  calls: CapturedRequest[];
-} {
+function startSink(): { server: Server; baseUrl: string; calls: CapturedRequest[] } {
   const calls: CapturedRequest[] = [];
-  const fn = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input.toString();
-    const headers: Record<string, string> = {};
-    const initHeaders = init?.headers as Record<string, string> | undefined;
-    if (initHeaders) for (const k of Object.keys(initHeaders)) headers[k] = initHeaders[k];
-    const body = init?.body ? JSON.parse(init.body as string) : undefined;
-    calls.push({ url, headers, body });
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: "1", result: {} }), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    });
-  }) as typeof fetch;
-  return { fn, calls };
+  const server = Bun.serve({
+    port: 0, // ephemeral
+    async fetch(req) {
+      const headers: Record<string, string> = {};
+      req.headers.forEach((v, k) => { headers[k] = v; });
+      const text = await req.text();
+      const body = text ? JSON.parse(text) : undefined;
+      calls.push({ url: req.url, headers, body });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: "1", result: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+  return { server, baseUrl: `http://localhost:${server.port}`, calls };
 }
 
 function fireCron(
@@ -53,22 +54,25 @@ function fireCron(
   });
 }
 
-// Bus dispatch is synchronous-publish + async-handler — the plugin's
-// handler awaits a fetch, so tests need a microtask flush.
+// Plugin handler awaits a real fetch; tests need a microtask flush plus
+// time for the request to reach the local server.
 async function flush(): Promise<void> {
-  await new Promise(r => setTimeout(r, 5));
+  await new Promise(r => setTimeout(r, 25));
 }
 
 describe("A2ADeliveryPlugin", () => {
   let workspaceDir: string;
   let bus: InMemoryEventBus;
+  let sink: { server: Server; baseUrl: string; calls: CapturedRequest[] };
 
   beforeEach(() => {
     workspaceDir = mkdtempSync(join(tmpdir(), "a2a-delivery-test-"));
     bus = new InMemoryEventBus();
+    sink = startSink();
   });
 
   afterEach(() => {
+    sink.server.stop(true);
     rmSync(workspaceDir, { recursive: true, force: true });
   });
 
@@ -76,12 +80,10 @@ describe("A2ADeliveryPlugin", () => {
     writeFileSync(join(workspaceDir, "a2a.yaml"), `
 targets:
   gina-personal:
-    url: http://gina-personal:7870/a2a
+    url: ${sink.baseUrl}/a2a
     bearer_token: secret-bearer
 `);
-    const { fn, calls } = makeFetchMock();
-    const plugin = new A2ADeliveryPlugin(workspaceDir, { fetch: fn });
-    plugin.install(bus);
+    new A2ADeliveryPlugin(workspaceDir).install(bus);
 
     fireCron(bus, "cron.gina-personal.daily", {
       content: "morning standup",
@@ -91,12 +93,12 @@ targets:
     });
     await flush();
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("http://gina-personal:7870/a2a");
-    expect(calls[0].headers["Authorization"]).toBe("Bearer secret-bearer");
-    expect(calls[0].headers["Content-Type"]).toBe("application/json");
+    expect(sink.calls).toHaveLength(1);
+    expect(sink.calls[0].url).toBe(`${sink.baseUrl}/a2a`);
+    expect(sink.calls[0].headers["authorization"]).toBe("Bearer secret-bearer");
+    expect(sink.calls[0].headers["content-type"]).toBe("application/json");
 
-    const body = calls[0].body as {
+    const body = sink.calls[0].body as {
       jsonrpc: string;
       method: string;
       params: { message: { role: string; parts: Array<{ kind: string; text: string }>; metadata: Record<string, unknown> } };
@@ -116,11 +118,10 @@ targets:
     writeFileSync(join(workspaceDir, "a2a.yaml"), `
 targets:
   gina:
-    url: http://gina:7870/a2a
+    url: ${sink.baseUrl}/a2a
     api_key: my-key
 `);
-    const { fn, calls } = makeFetchMock();
-    new A2ADeliveryPlugin(workspaceDir, { fetch: fn }).install(bus);
+    new A2ADeliveryPlugin(workspaceDir).install(bus);
 
     fireCron(bus, "cron.gina.daily", {
       content: "ping",
@@ -129,75 +130,89 @@ targets:
     });
     await flush();
 
-    expect(calls[0].headers["X-API-Key"]).toBe("my-key");
-    expect(calls[0].headers["Authorization"]).toBeUndefined();
+    expect(sink.calls[0].headers["x-api-key"]).toBe("my-key");
+    expect(sink.calls[0].headers["authorization"]).toBeUndefined();
   });
 
   test("expands ${ENV_VAR} in url and auth fields", async () => {
     process.env.A2A_TEST_BEARER = "env-bearer-value";
-    process.env.A2A_TEST_HOST = "env-host";
-    writeFileSync(join(workspaceDir, "a2a.yaml"), `
+    process.env.A2A_TEST_PORT = String(sink.server.port);
+    try {
+      writeFileSync(join(workspaceDir, "a2a.yaml"), `
 targets:
   agent:
-    url: http://\${A2A_TEST_HOST}:7870/a2a
+    url: http://localhost:\${A2A_TEST_PORT}/a2a
     bearer_token: \${A2A_TEST_BEARER}
 `);
-    const { fn, calls } = makeFetchMock();
-    new A2ADeliveryPlugin(workspaceDir, { fetch: fn }).install(bus);
+      new A2ADeliveryPlugin(workspaceDir).install(bus);
 
-    fireCron(bus, "cron.agent.x", {
-      content: "x",
-      channel: "a2a",
-      agent_name: "agent",
-    });
-    await flush();
+      fireCron(bus, "cron.agent.x", {
+        content: "x",
+        channel: "a2a",
+        agent_name: "agent",
+      });
+      await flush();
 
-    expect(calls[0].url).toBe("http://env-host:7870/a2a");
-    expect(calls[0].headers["Authorization"]).toBe("Bearer env-bearer-value");
-
-    delete process.env.A2A_TEST_BEARER;
-    delete process.env.A2A_TEST_HOST;
+      expect(sink.calls[0].url).toBe(`${sink.baseUrl}/a2a`);
+      expect(sink.calls[0].headers["authorization"]).toBe("Bearer env-bearer-value");
+    } finally {
+      delete process.env.A2A_TEST_BEARER;
+      delete process.env.A2A_TEST_PORT;
+    }
   });
 
   test("ignores cron events without channel=a2a", async () => {
     writeFileSync(join(workspaceDir, "a2a.yaml"), `
 targets:
   gina:
-    url: http://gina:7870/a2a
+    url: ${sink.baseUrl}/a2a
 `);
-    const { fn, calls } = makeFetchMock();
-    new A2ADeliveryPlugin(workspaceDir, { fetch: fn }).install(bus);
+    new A2ADeliveryPlugin(workspaceDir).install(bus);
 
     fireCron(bus, "cron.gina.daily", { content: "x", channel: "signal", agent_name: "gina" });
     fireCron(bus, "cron.gina.other", { content: "x" }); // no channel
     await flush();
 
-    expect(calls).toHaveLength(0);
+    expect(sink.calls).toHaveLength(0);
   });
 
-  test("drops a2a cron with no agent_name (loud error)", async () => {
+  test("drops a2a cron with missing or non-string content", async () => {
     writeFileSync(join(workspaceDir, "a2a.yaml"), `
 targets:
   gina:
-    url: http://gina:7870/a2a
+    url: ${sink.baseUrl}/a2a
 `);
-    const { fn, calls } = makeFetchMock();
-    new A2ADeliveryPlugin(workspaceDir, { fetch: fn }).install(bus);
+    new A2ADeliveryPlugin(workspaceDir).install(bus);
+
+    fireCron(bus, "cron.gina.no-content", { channel: "a2a", agent_name: "gina" });
+    fireCron(bus, "cron.gina.empty-content", { channel: "a2a", agent_name: "gina", content: "   " });
+    fireCron(bus, "cron.gina.numeric", { channel: "a2a", agent_name: "gina", content: 42 });
+    await flush();
+
+    expect(sink.calls).toHaveLength(0);
+  });
+
+  test("drops a2a cron with no agent_name", async () => {
+    writeFileSync(join(workspaceDir, "a2a.yaml"), `
+targets:
+  gina:
+    url: ${sink.baseUrl}/a2a
+`);
+    new A2ADeliveryPlugin(workspaceDir).install(bus);
 
     fireCron(bus, "cron.unknown", { content: "x", channel: "a2a" });
     await flush();
 
-    expect(calls).toHaveLength(0);
+    expect(sink.calls).toHaveLength(0);
   });
 
   test("drops a2a cron when agent_name has no configured target", async () => {
     writeFileSync(join(workspaceDir, "a2a.yaml"), `
 targets:
   configured-agent:
-    url: http://configured:7870/a2a
+    url: ${sink.baseUrl}/a2a
 `);
-    const { fn, calls } = makeFetchMock();
-    new A2ADeliveryPlugin(workspaceDir, { fetch: fn }).install(bus);
+    new A2ADeliveryPlugin(workspaceDir).install(bus);
 
     fireCron(bus, "cron.unconfigured.x", {
       content: "x",
@@ -206,17 +221,36 @@ targets:
     });
     await flush();
 
-    expect(calls).toHaveLength(0);
+    expect(sink.calls).toHaveLength(0);
   });
 
   test("missing a2a.yaml is a no-op (plugin still installs cleanly)", async () => {
-    const { fn, calls } = makeFetchMock();
-    const plugin = new A2ADeliveryPlugin(workspaceDir, { fetch: fn });
+    const plugin = new A2ADeliveryPlugin(workspaceDir);
     plugin.install(bus); // no a2a.yaml in workspaceDir
 
     fireCron(bus, "cron.x", { content: "x", channel: "a2a", agent_name: "anything" });
     await flush();
 
-    expect(calls).toHaveLength(0);
+    expect(sink.calls).toHaveLength(0);
+  });
+
+  test("uninstall unsubscribes — no deliveries fire after teardown", async () => {
+    writeFileSync(join(workspaceDir, "a2a.yaml"), `
+targets:
+  gina:
+    url: ${sink.baseUrl}/a2a
+`);
+    const plugin = new A2ADeliveryPlugin(workspaceDir);
+    plugin.install(bus);
+    plugin.uninstall();
+
+    fireCron(bus, "cron.gina.daily", {
+      content: "x",
+      channel: "a2a",
+      agent_name: "gina",
+    });
+    await flush();
+
+    expect(sink.calls).toHaveLength(0);
   });
 });
