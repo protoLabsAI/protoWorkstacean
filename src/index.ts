@@ -7,6 +7,7 @@ import { LoggerPlugin } from "../lib/plugins/logger";
 import { CLIPlugin } from "../lib/plugins/cli";
 import { SignalPlugin } from "../lib/plugins/signal";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
+import { A2ADeliveryPlugin } from "../lib/plugins/a2a-delivery";
 import { ActionRegistry } from "./planner/action-registry";
 import type { Plugin, } from "../lib/types";
 import type { Action } from "./planner/types/action";
@@ -154,6 +155,7 @@ const corePlugins: Plugin[] = [
   new CLIPlugin(),
   new SignalPlugin(),
   new SchedulerPlugin(dataDir),
+  new A2ADeliveryPlugin(workspaceDir),
 ];
 
 for (const plugin of corePlugins) {

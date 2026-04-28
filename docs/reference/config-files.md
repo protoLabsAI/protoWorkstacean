@@ -89,6 +89,7 @@ Each has a `.example` counterpart — copy it to bootstrap a new deployment:
 | `workspace/projects.yaml` | `workspace/projects.yaml.example` |
 | `workspace/discord.yaml` | `workspace/discord.yaml.example` |
 | `workspace/google.yaml` | `workspace/google.yaml.example` |
+| `workspace/a2a.yaml` | `workspace/a2a.yaml.example` — outbound A2A delivery targets for the scheduler |
 | `workspace/incidents.yaml` | `workspace/incidents.yaml.example` |
 
 Schema/behavior files (`actions.yaml`, `goals.yaml`, `ceremonies/`) are tracked and committed as-is.

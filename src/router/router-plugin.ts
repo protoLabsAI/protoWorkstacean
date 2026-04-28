@@ -279,6 +279,10 @@ export class RouterPlugin implements Plugin {
     const channel = payload.channel ?? "cli";
     const recipient = payload.recipient;
 
+    // a2a is a delivery channel handled by A2ADeliveryPlugin — the router's
+    // skill-resolver path is for local agent dispatch only.
+    if (channel === "a2a") return;
+
     const match = this.resolver.resolve(skillHint, content);
 
     if (!match) {

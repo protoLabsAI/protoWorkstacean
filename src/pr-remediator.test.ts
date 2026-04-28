@@ -490,7 +490,8 @@ describe("PrRemediatorPlugin — world state tracking", () => {
 
     test("exhaustion emits a HITL escalation request (bottlenecks are growth opportunities)", async () => {
       const bus = new InMemoryEventBus();
-      const plugin = new PrRemediatorPlugin();
+      // Inject a deterministic live-CI fetcher: still failing → escalate.
+      const plugin = new PrRemediatorPlugin({ fetchLiveCiStatus: async () => "fail" });
       plugin.install(bus);
 
       const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
@@ -557,6 +558,67 @@ describe("PrRemediatorPlugin — world state tracking", () => {
       dispatch(bus, "pr.remediate.fix_ci");
       await flushMicrotasks();
       expect(hitlCaptured.length).toBe(1);
+
+      plugin.uninstall();
+    });
+
+    test("exhaustion suppresses escalation when live CI status is now passing", async () => {
+      // Reproduces the protoBot stuck-PR alert we hit on PR #509: snapshot
+      // captured a red CI window mid-push; by the time the auto-remediator
+      // exhausted its budget, a follow-up commit had already turned CI green.
+      // The cached snapshot still showed "fail", so the alert fired anyway.
+      // The fix is a live re-check at escalation time.
+      const bus = new InMemoryEventBus();
+      const plugin = new PrRemediatorPlugin({
+        fetchLiveCiStatus: async () => "pass", // CI flipped green between snapshots
+      });
+      plugin.install(bus);
+
+      const hitlCaptured = captureOn(bus, "hitl.request.pr.remediation_stuck.#");
+      const skillCaptured = captureOn(bus, "agent.skill.request");
+
+      pushWorldState(bus, [
+        makePr({ number: 509, ciStatus: "fail", title: "feat: a2a delivery channel", readyToMerge: false }),
+      ]);
+      await flushMicrotasks();
+
+      const completeAndBackdate = async () => {
+        const latest = skillCaptured[skillCaptured.length - 1]!;
+        bus.publish(`agent.skill.response.${latest.correlationId}`, {
+          id: crypto.randomUUID(),
+          correlationId: latest.correlationId,
+          topic: `agent.skill.response.${latest.correlationId}`,
+          timestamp: Date.now(),
+          payload: { text: "done", isError: false, correlationId: latest.correlationId },
+        });
+        await flushMicrotasks();
+        const inFlight = (plugin as unknown as { inFlight: Map<string, { completedAt?: number; startedAt: number }> }).inFlight;
+        for (const entry of inFlight.values()) {
+          if (entry.completedAt) entry.completedAt -= 10 * 60 * 1000;
+          entry.startedAt -= 10 * 60 * 1000;
+        }
+      };
+
+      for (let i = 0; i < 2; i++) {
+        await completeAndBackdate();
+        dispatch(bus, "pr.remediate.fix_ci");
+        await flushMicrotasks();
+      }
+      await completeAndBackdate();
+
+      // Trigger the fourth attempt — this would normally escalate, but the
+      // injected live status returns "pass" so the alert is suppressed.
+      dispatch(bus, "pr.remediate.fix_ci");
+      // The escalation guard awaits the live fetch; one extra microtask flush
+      // before asserting.
+      await flushMicrotasks();
+      await flushMicrotasks();
+
+      expect(hitlCaptured.length).toBe(0);
+      // The exhausted in-flight entry is cleared so the loop can re-decide
+      // on the next world-state tick rather than staying stuck forever.
+      const inFlight = (plugin as unknown as { inFlight: Map<string, unknown> }).inFlight;
+      expect(inFlight.size).toBe(0);
 
       plugin.uninstall();
     });

@@ -112,23 +112,26 @@ describe("SqlitePushNotificationStore — persistence", () => {
 });
 
 describe("SqlitePushNotificationStore — TTL eviction", () => {
+  // TTL behavior is exercised against a virtual clock so the tests are
+  // deterministic — no sleep races, no sub-ms timing assumptions.
+  let now = 1_000_000;
+  const clock = () => now;
+
+  beforeEach(() => { now = 1_000_000; });
+
   test("expired configs are filtered from load() even before GC runs", async () => {
-    // ttl=1ms means everything expires almost immediately. Wait 5ms to
-    // be sure we're past the expiry boundary, then load() should return
-    // empty without any explicit purge call.
-    const store = new SqlitePushNotificationStore(dbPath, { ttlMs: 1 });
+    const store = new SqlitePushNotificationStore(dbPath, { ttlMs: 1000, clock });
     await store.save("task-1", makeConfig({ url: "https://expired.example.com/cb" }));
-    await new Promise(r => setTimeout(r, 5));
-    const loaded = await store.load("task-1");
-    expect(loaded).toEqual([]);
+    now += 5000;
+    expect(await store.load("task-1")).toEqual([]);
     store.close();
   });
 
   test("expired configs are GC'd from the table on the next save() call", async () => {
-    const store = new SqlitePushNotificationStore(dbPath, { ttlMs: 1 });
+    const store = new SqlitePushNotificationStore(dbPath, { ttlMs: 1000, clock });
     await store.save("task-old", makeConfig({ url: "https://expired.example.com/cb" }));
     expect(store.size()).toBe(1);
-    await new Promise(r => setTimeout(r, 5));
+    now += 5000;
     // Saving a fresh entry triggers opportunistic purge of the old row.
     await store.save("task-new", makeConfig({ url: "https://fresh.example.com/cb" }));
     expect(store.size()).toBe(1); // only the fresh row survived
@@ -136,23 +139,22 @@ describe("SqlitePushNotificationStore — TTL eviction", () => {
   });
 
   test("ttlMs=0 means no expiry", async () => {
-    const store = new SqlitePushNotificationStore(dbPath, { ttlMs: 0 });
+    const store = new SqlitePushNotificationStore(dbPath, { ttlMs: 0, clock });
     await store.save("task-1", makeConfig({ url: "https://forever.example.com/cb" }));
-    await new Promise(r => setTimeout(r, 10));
-    const loaded = await store.load("task-1");
-    expect(loaded).toHaveLength(1);
+    now += 1_000_000_000;
+    expect(await store.load("task-1")).toHaveLength(1);
     store.close();
   });
 
   test("cold-start purge clears stale rows before they reach load()", async () => {
-    const first = new SqlitePushNotificationStore(dbPath, { ttlMs: 1 });
+    const first = new SqlitePushNotificationStore(dbPath, { ttlMs: 1000, clock });
     await first.save("task-stale", makeConfig({ url: "https://stale.example.com/cb" }));
     first.close();
-    await new Promise(r => setTimeout(r, 5));
+    now += 5000;
 
     // Reopen — _init() runs the cold-start purge, so the stale row is
     // gone before the first load().
-    const second = new SqlitePushNotificationStore(dbPath, { ttlMs: 1 });
+    const second = new SqlitePushNotificationStore(dbPath, { ttlMs: 1000, clock });
     expect(second.size()).toBe(0);
     second.close();
   });

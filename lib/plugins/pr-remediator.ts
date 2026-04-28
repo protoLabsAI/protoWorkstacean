@@ -241,6 +241,53 @@ interface PrDomainData {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Live CI re-check used right before a stuck-PR HITL escalation fires.
+ * Mirrors the check-runs aggregation that `src/api/github.ts`
+ * `handleGetPrPipeline` does, so the answer is consistent with the
+ * `pr_pipeline` domain — just freshly fetched at decision time so we
+ * don't escalate a PR whose CI flipped green between snapshots.
+ *
+ * Returns `null` on missing creds / network error / malformed response.
+ * Callers must treat null as "unknown" and fall through to the cached
+ * decision rather than assuming the PR is healthy.
+ */
+async function defaultFetchLiveCiStatus(
+  repo: string,
+  headSha: string,
+): Promise<"pass" | "fail" | "pending" | "none" | null> {
+  if (!getGithubToken) return null;
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName || !headSha) return null;
+  try {
+    const token = await getGithubToken(owner, repoName);
+    const resp = await fetch(
+      `https://api.github.com/repos/${repo}/commits/${headSha}/check-runs?per_page=50`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    if (!resp.ok) return null;
+    const runs = await resp.json() as {
+      total_count: number;
+      check_runs: Array<{ status: string; conclusion: string | null }>;
+    };
+    if (runs.total_count === 0) return "none";
+    if (runs.check_runs.some(r => r.status !== "completed")) return "pending";
+    if (runs.check_runs.some(r =>
+      r.conclusion === "failure" || r.conclusion === "timed_out" || r.conclusion === "action_required"
+    )) return "fail";
+    return "pass";
+  } catch {
+    return null;
+  }
+}
+
 async function ghMerge(repo: string, num: number): Promise<{ ok: boolean; status: number; error?: string }> {
   if (!getGithubToken) return { ok: false, status: 0, error: "no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)" };
   const [owner, repoName] = repo.split("/");
@@ -527,10 +574,27 @@ type BranchDriftData = {
   maxDrift: number;
 };
 
+/**
+ * Fetches the live CI status for a PR head SHA. Returns `null` when the
+ * answer is unknown (no GitHub creds, network error, malformed response)
+ * so callers can fall through to their cached-snapshot decision instead
+ * of treating "unknown" as "all clear".
+ */
+type LiveCiStatusFetcher = (
+  repo: string,
+  headSha: string,
+) => Promise<"pass" | "fail" | "pending" | "none" | null>;
+
 export class PrRemediatorPlugin implements Plugin {
   readonly name = "pr-remediator";
   readonly description = "Closes the GOAP loop on stuck PRs — auto-merges eligible titles, escalates others to HITL";
   readonly capabilities = ["pr-merge", "pr-feedback-dispatch", "hitl-emit"];
+
+  private readonly fetchLiveCiStatus: LiveCiStatusFetcher;
+
+  constructor(options: { fetchLiveCiStatus?: LiveCiStatusFetcher } = {}) {
+    this.fetchLiveCiStatus = options.fetchLiveCiStatus ?? defaultFetchLiveCiStatus;
+  }
 
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
@@ -686,7 +750,7 @@ export class PrRemediatorPlugin implements Plugin {
       // human unblock is required. Rate-limited by the `escalated` flag.
       if (!entry.escalated) {
         entry.escalated = true;
-        this._emitStuckHitlEscalation(repo, number, kind, entry);
+        void this._emitStuckHitlEscalation(repo, number, kind, entry);
       }
       return { ok: false, reason: `exhausted after ${entry.attempts} attempts (HITL escalated)` };
     }
@@ -712,7 +776,7 @@ export class PrRemediatorPlugin implements Plugin {
     if (entry.attempts >= MAX_ATTEMPTS_PER_PR) {
       entry.exhausted = true;
       entry.escalated = true;
-      this._emitStuckHitlEscalation(repo, number, kind, entry);
+      void this._emitStuckHitlEscalation(repo, number, kind, entry);
       return { ok: false, reason: `exhausted after ${entry.attempts} attempts (HITL escalated)` };
     }
     return { ok: true };
@@ -730,13 +794,13 @@ export class PrRemediatorPlugin implements Plugin {
    * The request goes to topic `hitl.request.pr.remediation_stuck.{correlationId}`
    * which the HITL plugin routes to its registered renderers (Discord, etc).
    */
-  private _emitStuckHitlEscalation(
+  private async _emitStuckHitlEscalation(
     repo: string,
     number: number,
     kind: RemediationKind,
     entry: InFlightEntry,
     conflictDetails?: string,
-  ): void {
+  ): Promise<void> {
     if (!this.bus) return;
 
     // Suppress escalations for PRs that have left the pipeline (closed /
@@ -752,6 +816,26 @@ export class PrRemediatorPlugin implements Plugin {
       );
       this.inFlight.delete(this._inFlightKey(repo, number, kind));
       return;
+    }
+
+    // Live CI re-check at escalation time. The cached snapshot can lag
+    // behind a recent push (snapshot interval ~2min), so a PR whose CI
+    // was failing at the last poll may have already flipped green —
+    // happens when an author pushes a fix during the dispatch window.
+    // Conflict-driven escalations carry conflictDetails from
+    // diagnose_pr_stuck and are not CI-driven, so we only short-circuit
+    // for fix_ci. Non-fail live status clears the entry and drops the
+    // alert. `null` (unknown — no creds/network error) falls through to
+    // escalate based on the cached snapshot, never silently swallows.
+    if (kind === "fix_ci" && pr.headSha) {
+      const liveStatus = await this.fetchLiveCiStatus(repo, pr.headSha);
+      if (liveStatus === "pass" || liveStatus === "pending" || liveStatus === "none") {
+        console.log(
+          `[pr-remediator] suppressing stuck HITL escalation for ${repo}#${number} — live CI status=${liveStatus} on ${pr.headSha.slice(0, 7)} (cached snapshot showed ${pr.ciStatus})`,
+        );
+        this.inFlight.delete(this._inFlightKey(repo, number, kind));
+        return;
+      }
     }
 
     const correlationId = crypto.randomUUID();
@@ -772,6 +856,7 @@ export class PrRemediatorPlugin implements Plugin {
         `**Kind**: \`${kind}\``,
         `**Attempts**: ${entry.attempts} / ${MAX_ATTEMPTS_PER_PR} over ~${durationMin} min`,
         pr ? `**Current CI**: \`${pr.ciStatus}\` · Review: \`${pr.reviewState}\` · Mergeable: \`${pr.mergeable}\`` : "",
+        pr.headSha ? `**Head SHA**: \`${pr.headSha.slice(0, 7)}\`` : "",
         `**Last correlationId**: \`${entry.correlationId}\``,
         ``,
         `The auto-remediation loop has dispatched ${kind} to Ava ${entry.attempts} times and the PR is still stuck. This is a bottleneck — either a new agent capability is needed, the root cause is outside Ava's reach, or a human merge / manual fix will break the cycle.`,
@@ -1610,7 +1695,7 @@ Do NOT ask for confirmation. Act.`;
             exhausted: true,
             escalated: true,
           };
-          this._emitStuckHitlEscalation(
+          void this._emitStuckHitlEscalation(
             pr.repo,
             pr.number,
             "update_branch",
@@ -1672,7 +1757,7 @@ Do NOT ask for confirmation. Act.`;
           exhausted: true,
           escalated: true,
         };
-        this._emitStuckHitlEscalation(pr.repo, pr.number, "update_branch", effectiveEntry, diagnosis.evidence);
+        void this._emitStuckHitlEscalation(pr.repo, pr.number, "update_branch", effectiveEntry, diagnosis.evidence);
         break;
       }
     }
