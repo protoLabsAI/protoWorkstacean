@@ -37,9 +37,23 @@ interface CronPayloadForA2A {
 const ENV_VAR = /\$\{([A-Z0-9_]+)\}/g;
 const REQUEST_TIMEOUT_MS = 15_000;
 
-function expandEnv(value: string | undefined): string | undefined {
-  if (!value) return value;
+function expandEnv(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
   return value.replace(ENV_VAR, (_, name) => process.env[name] ?? "");
+}
+
+function parseJsonRpcError(text: string): string | null {
+  if (!text) return null;
+  try {
+    const body = JSON.parse(text) as { error?: { code?: number; message?: string } };
+    if (body && typeof body === "object" && body.error) {
+      const { code, message } = body.error;
+      return `${code ?? "?"}: ${message ?? "(no message)"}`;
+    }
+  } catch {
+    // Non-JSON 200 responses aren't errors per se — just skip the check.
+  }
+  return null;
 }
 
 export class A2ADeliveryPlugin implements Plugin {
@@ -157,9 +171,15 @@ export class A2ADeliveryPlugin implements Plugin {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
+      const text = await res.text().catch(() => "");
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
         throw new Error(`HTTP ${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
+      }
+      // JSON-RPC 2.0 servers can return HTTP 200 with an `error` body.
+      // Surface that as a delivery failure rather than logging success.
+      const rpcError = parseJsonRpcError(text);
+      if (rpcError) {
+        throw new Error(`JSON-RPC error: ${rpcError}`);
       }
       console.log(
         `[a2a-delivery] Delivered cron "${msg.topic}" → ${agentName} (${url})`,
