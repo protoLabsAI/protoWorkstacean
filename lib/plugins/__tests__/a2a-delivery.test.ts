@@ -11,7 +11,6 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Server } from "bun";
 import { InMemoryEventBus } from "../../bus.ts";
 import { A2ADeliveryPlugin } from "../a2a-delivery.ts";
 
@@ -21,7 +20,7 @@ interface CapturedRequest {
   body: unknown;
 }
 
-function startSink(): { server: Server; baseUrl: string; calls: CapturedRequest[] } {
+function startSink() {
   const calls: CapturedRequest[] = [];
   const server = Bun.serve({
     port: 0, // ephemeral
@@ -63,7 +62,7 @@ async function flush(): Promise<void> {
 describe("A2ADeliveryPlugin", () => {
   let workspaceDir: string;
   let bus: InMemoryEventBus;
-  let sink: { server: Server; baseUrl: string; calls: CapturedRequest[] };
+  let sink: ReturnType<typeof startSink>;
 
   beforeEach(() => {
     workspaceDir = mkdtempSync(join(tmpdir(), "a2a-delivery-test-"));
@@ -218,6 +217,24 @@ targets:
       content: "x",
       channel: "a2a",
       agent_name: "unconfigured-agent",
+    });
+    await flush();
+
+    expect(sink.calls).toHaveLength(0);
+  });
+
+  test("drops a2a cron when expanded url is empty (e.g. unset env var)", async () => {
+    writeFileSync(join(workspaceDir, "a2a.yaml"), `
+targets:
+  agent:
+    url: \${A2A_TEST_UNSET_VAR}
+`);
+    new A2ADeliveryPlugin(workspaceDir).install(bus);
+
+    fireCron(bus, "cron.agent.x", {
+      content: "x",
+      channel: "a2a",
+      agent_name: "agent",
     });
     await flush();
 

@@ -35,6 +35,7 @@ interface CronPayloadForA2A {
 }
 
 const ENV_VAR = /\$\{([A-Z0-9_]+)\}/g;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 function expandEnv(value: string | undefined): string | undefined {
   if (!value) return value;
@@ -117,7 +118,13 @@ export class A2ADeliveryPlugin implements Plugin {
       return;
     }
 
-    const url = expandEnv(target.url) ?? "";
+    const url = (expandEnv(target.url) ?? "").trim();
+    if (!url) {
+      console.error(
+        `[a2a-delivery] cron "${msg.topic}" agent_name="${agentName}" has empty url after env expansion (raw="${target.url}") — drop`,
+      );
+      return;
+    }
     const bearer = expandEnv(target.bearer_token);
     const apiKey = expandEnv(target.api_key);
 
@@ -148,6 +155,7 @@ export class A2ADeliveryPlugin implements Plugin {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
