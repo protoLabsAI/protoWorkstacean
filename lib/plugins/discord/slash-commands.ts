@@ -12,7 +12,6 @@ import { Events, EmbedBuilder, type ChatInputCommandInteraction, type ButtonInte
 import { channelIdOf, type ProjectDiscordChannel } from "../../project-schema.ts";
 import { makeId, OPTION_TYPE_CODES } from "./core.ts";
 import { pendingReplies } from "./outbound.ts";
-import { handleMemoryCommand } from "./memory.ts";
 import type { DiscordContext, CommandOption } from "./core.ts";
 
 // ── Project types ─────────────────────────────────────────────────────────────
@@ -66,46 +65,6 @@ export function interpolateContent(
     result = result.replaceAll(placeholder, value);
   }
   return result.trim();
-}
-
-// ── HITL button interaction ───────────────────────────────────────────────────
-
-async function handleHITLButton(ctx: DiscordContext, interaction: ButtonInteraction): Promise<void> {
-  try { await interaction.deferUpdate(); } catch (err) {
-    console.warn(`[discord] HITL deferUpdate failed (${err instanceof Error ? err.message : err}) — processing decision anyway`);
-  }
-
-  const [, decision, correlationId] = interaction.customId.split(":");
-  if (!decision || !correlationId) {
-    console.warn(`[discord] HITL button with malformed customId: ${interaction.customId}`);
-    return;
-  }
-
-  const entry = ctx.pendingHITLMessages.get(correlationId);
-  const replyTopic = entry?.replyTopic ?? `hitl.response.pr.remediation_stuck.${correlationId}`;
-
-  try {
-    ctx.bus.publish(replyTopic, {
-      id: crypto.randomUUID(), correlationId, topic: replyTopic, timestamp: Date.now(),
-      payload: { type: "hitl_response", correlationId, decision, decidedBy: interaction.user.id },
-    });
-  } catch (err) {
-    console.error(`[discord] HITL bus publish failed for ${correlationId}:`, err);
-  }
-
-  if (entry) ctx.pendingHITLMessages.delete(correlationId);
-
-  const COLOR_MAP: Record<string, number> = { approve: 0x22c55e, reject: 0xef4444 };
-  const color = COLOR_MAP[decision] ?? 0x6b7280;
-  const label = decision.charAt(0).toUpperCase() + decision.slice(1).replace(/_/g, " ");
-  const decidedEmbed = new EmbedBuilder()
-    .setTitle(interaction.message.embeds[0]?.title ?? "Decision recorded")
-    .setDescription(`**${label}** by <@${interaction.user.id}>`)
-    .setColor(color);
-
-  await interaction.message.edit({ embeds: [decidedEmbed], components: [] }).catch(err => {
-    console.warn(`[discord] HITL message edit failed for ${correlationId}:`, err instanceof Error ? err.message : err);
-  });
 }
 
 // ── Slash command registration ────────────────────────────────────────────────
@@ -163,11 +122,6 @@ export function registerSlashCommandHandlers(ctx: DiscordContext): void {
       return;
     }
 
-    if (interaction.isButton() && interaction.customId.startsWith("hitl:")) {
-      await handleHITLButton(ctx, interaction);
-      return;
-    }
-
     if (!interaction.isChatInputCommand()) return;
     ctx.client.users.createDM(interaction.user.id).catch(() => {});
 
@@ -177,12 +131,6 @@ export function registerSlashCommandHandlers(ctx: DiscordContext): void {
     if (ctx.config.admins?.length && !ctx.config.admins.includes(interaction.user.id)) {
       console.log(`[discord] slash command from ${interaction.user.id} ignored — not in admins list`);
       await interaction.reply({ content: "Not authorised.", ephemeral: true }).catch(() => {});
-      return;
-    }
-
-    if (interaction.commandName === "memory") {
-      await interaction.deferReply({ ephemeral: true });
-      await handleMemoryCommand(ctx, interaction);
       return;
     }
 

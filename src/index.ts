@@ -142,7 +142,6 @@ const pluginRegistry: PluginRegistryEntry[] = [
         workspaceDir,
         dataDir,
         channelRegistry,
-        hitlPlugin,
         mailbox: contextMailbox,
         isExecutionActive: (correlationId: string) => {
           const dispatcher = registeredPlugins.find(p => p.name === "skill-dispatcher");
@@ -302,7 +301,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { SkillDispatcherPlugin } = await import("./executor/skill-dispatcher-plugin.js");
-      return new SkillDispatcherPlugin(executorRegistry, workspaceDir, undefined, contextMailbox, taskTracker);
+      return new SkillDispatcherPlugin(executorRegistry, workspaceDir, contextMailbox, taskTracker);
     },
   },
   {
@@ -344,12 +343,6 @@ const pluginRegistry: PluginRegistryEntry[] = [
 ];
 
 const registeredPlugins: Plugin[] = [];
-
-// ── HITLPlugin — pre-installed so DiscordPlugin can register its renderer ──
-const { HITLPlugin } = await import("../lib/plugins/hitl.js");
-const hitlPlugin = new HITLPlugin(workspaceDir);
-hitlPlugin.install(bus);
-registeredPlugins.push(hitlPlugin);
 
 // ── OperatorRoutingPlugin — abstracts operator messaging across transports ──
 // Agents publish `operator.message.request`; this plugin picks channel(s)

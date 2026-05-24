@@ -8,7 +8,6 @@ import { join, resolve } from "node:path";
 import { Events, type TextChannel } from "discord.js";
 import type { EventBus, Plugin } from "../types.ts";
 import type { ChannelRegistry } from "../channels/channel-registry.ts";
-import type { HITLPlugin } from "./hitl.ts";
 import type { ContextMailbox } from "../dm/context-mailbox.ts";
 import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer } from "../conversation/conversation-tracer.ts";
@@ -31,7 +30,6 @@ export interface DiscordPluginOptions {
   workspaceDir: string;
   dataDir?: string;
   channelRegistry?: ChannelRegistry;
-  hitlPlugin?: HITLPlugin;
   mailbox?: ContextMailbox;
   /** Check if an agent execution is in-flight for a given correlationId. */
   isExecutionActive?: (correlationId: string) => boolean;
@@ -50,7 +48,6 @@ export class DiscordPlugin implements Plugin {
   private workspaceDir: string;
   private dataDir: string | null;
   private channelRegistry?: ChannelRegistry;
-  private hitlPlugin?: HITLPlugin;
   private mailbox?: ContextMailbox;
   private isExecutionActive?: (correlationId: string) => boolean;
 
@@ -62,7 +59,6 @@ export class DiscordPlugin implements Plugin {
     this.workspaceDir = opts.workspaceDir;
     this.dataDir = opts.dataDir ? resolve(opts.dataDir) : null;
     this.channelRegistry = opts.channelRegistry;
-    this.hitlPlugin = opts.hitlPlugin;
     this.mailbox = opts.mailbox;
     this.isExecutionActive = opts.isExecutionActive;
 
@@ -90,7 +86,6 @@ export class DiscordPlugin implements Plugin {
       workspaceDir: this.workspaceDir,
       client: this.client,
       channelRegistry: this.channelRegistry,
-      hitlPlugin: this.hitlPlugin,
       mailbox: this.mailbox,
       isExecutionActive: this.isExecutionActive,
       identityRegistry: new IdentityRegistry(this.workspaceDir),
@@ -173,7 +168,6 @@ export class DiscordPlugin implements Plugin {
     if (ctx) {
       ctx.dmAccumulator?.destroy();
       ctx.pendingTurns.clear();
-      ctx.pendingHITLMessages.clear();
 
       for (const [name, client] of ctx.agentClients) {
         client.destroy();

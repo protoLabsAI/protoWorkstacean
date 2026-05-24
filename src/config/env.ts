@@ -96,9 +96,6 @@ export const EnvSchema = z
     /** Alternative alias for LANGFUSE_HOST (legacy). */
     LANGFUSE_BASE_URL:   z.string().optional(),
 
-    // Graphiti memory
-    GRAPHITI_URL: z.string().optional(),
-
     // Vector memory
     QDRANT_URL:         z.string().optional(),
     QDRANT_VECTOR_SIZE: z.string().optional(),
