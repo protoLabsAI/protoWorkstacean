@@ -13,11 +13,14 @@ That's the spine. Everything else extends it.
 - **Integration plugins**: Discord, GitHub, Linear, Google Workspace, linear-protomaker-bridge, pr-remediator
 - **Scheduling**: SchedulerPlugin (yaml-defined crons), CeremonyPlugin (named, observable, hot-reloadable rituals)
 - **Observability**: AgentFleetHealth (24h rollups → health-weighted dispatch), Langfuse OTEL tracing, cost-v1 / confidence-v1 / blast-v1 / hitl-mode-v1 A2A extensions
-- **HITL**: HITLPlugin + ConfigChangeHITLPlugin gate risky actions; OperatorRoutingPlugin abstracts the transport (Discord DM today)
+- **Operator routing**: OperatorRoutingPlugin abstracts the transport (Discord DM today; SMS / Signal / push future)
+- **Bus surface**: `GET /api/bus/topology` returns the plugin → topics graph; `WS /api/bus/subscribe?topic=<pattern>` lets external processes join the bus
 
 ## What's NOT here (and intentionally so)
 
 - No GOAP world-state engine, goal evaluator, or planner. Earlier versions had one; it was a polling loop dressed up as a planner and was removed.
+- No HITL plugin and no cross-plugin renderer registration. The bus is the contract; approval gates, if needed, get re-added as pure bus pub/sub.
+- No memory layer at the switchboard. Episodic memory belongs elsewhere in the stack.
 - No two parallel cost systems. The runtime `cost-v1` extension is the one source of truth.
 - No ProtoSdk runtime. Replaced entirely by DeepAgent (LangGraph).
 

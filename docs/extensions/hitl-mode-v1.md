@@ -106,10 +106,9 @@ Keys:
 
 ## Consumers
 
-- **`HITLPlugin`** — reads `x-hitl-mode` from the metadata on `input-required` and selects the rendering path: Discord button, resume-prompt, or auto-approve-on-TTL. Without the extension, falls back to legacy HITL config.
-- **`TaskTracker`** — honors `vetoTtlMs` for veto-mode skills; auto-resumes the task on timeout if no cancel arrived.
-- **Planner** — can compose with [blast-v1](blast-v1) to require `gated` only for skills with `radius >= repo`.
-- **Dashboard** — fleet view shows which skills are gated vs. autonomous, how often each mode fires.
+The extension is declared on agent cards and parsed into `defaultHitlModeRegistry` at startup, but **this build does not ship an in-process consumer for `x-hitl-mode`**. The HITL renderer plugin was removed; if you need an approval gate, subscribe to the relevant prompt topic from your own plugin or external service and read the registry to decide which mode to apply.
+
+- **Dashboard** — fleet view shows which skills are declared gated vs. autonomous, useful for auditing agent declarations even when no approval flow is wired.
 
 ---
 

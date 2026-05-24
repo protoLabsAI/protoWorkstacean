@@ -81,14 +81,9 @@ const summary = defaultCostStore.summary("quinn", "pr_review");
 
 ---
 
-## Planner integration
+## Fleet-health integration
 
-`PlannerPluginL0` queries `defaultCostStore` when ranking candidates for effect-based dispatch:
-
-- ≥ 5 samples → warm: sort by `2.0 * successRate + 0.5 * avgConfidenceOnSuccess − 0.3 * clamp(avgWallMs / 60_000, 0, 2)`
-- \< 5 samples → cold: fall back to card-declared confidence
-
-See [`self-improving-loop.md`](../explanation/self-improving-loop) for the full observation → ranking flow.
+`defaultCostStore` is read by `AgentFleetHealthPlugin` to compute per-(agent, skill) success rate, average wall time, and dollar cost. The same data feeds health-weighted dispatch inside `ExecutorRegistry`: when multiple agents serve the same skill, the registry selects probabilistically by `successRate × (1 / (1 + costPerSuccessfulOutcome))`. Cold candidates (< 5 samples) fall back to neutral weight 1.0 so new agents get tried.
 
 ---
 
@@ -98,10 +93,7 @@ See [`self-improving-loop.md`](../explanation/self-improving-loop) for the full 
 autonomous.cost.{systemActor}.{skill}
 ```
 
-Payload is the raw `CostSample` above. Used for:
-
-- Dashboard fleet cost view
-- OutcomeAnalysis alerting (`ops.alert.action_quality` when success rate drops below 50% after 10+ attempts)
+Payload is the raw `CostSample` above. Used for the dashboard fleet-cost view and any external subscriber that wants to project cost data into its own pipeline.
 - External collectors / billing systems that subscribe to `autonomous.cost.#`
 
 ---
