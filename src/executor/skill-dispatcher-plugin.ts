@@ -42,6 +42,15 @@ export class SkillDispatcherPlugin implements Plugin {
   readonly name = "skill-dispatcher";
   readonly description = "Sole agent.skill.request subscriber — resolves executor and dispatches";
   readonly capabilities = ["skill-dispatch"];
+  readonly subscribes = ["agent.skill.request"];
+  readonly publishes = [
+    "agent.skill.response.{correlationId}",
+    "agent.skill.progress.{correlationId}",
+    "autonomous.outcome.{actor}.{skill}",
+    "flow.item.created",
+    "flow.item.updated",
+    "flow.item.completed",
+  ];
 
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];

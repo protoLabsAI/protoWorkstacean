@@ -67,6 +67,12 @@ export class CeremonyPlugin implements Plugin {
   readonly name = "ceremony";
   readonly description = "YAML-defined fleet ceremony scheduler with hot-reload and EventBus integration";
   readonly capabilities = ["ceremony", "schedule", "skill-dispatch"];
+  readonly subscribes = ["ceremony.{id}.execute"];
+  readonly publishes = [
+    "agent.skill.request",
+    "ceremony.{id}.completed",
+    "ceremony.state.snapshot",
+  ];
 
   private bus: EventBus | null = null;
   private subscriptionIds: string[] = [];
