@@ -58,27 +58,11 @@ server.tool(
   async () => text(await api("GET", "/health")),
 );
 
-// ── get_world_state ────────────────────────────────────────────────────────────
-
-server.tool(
-  "get_world_state",
-  "Read the current world state. Optionally scope to a single domain: services | board | ci | security | agent_health | portfolio.",
-  {
-    domain: z.enum(["services", "board", "ci", "security", "agent_health", "portfolio"])
-      .optional()
-      .describe("Domain to retrieve. Omit for the full world state."),
-  },
-  async ({ domain }) => {
-    const path = domain ? `/api/world-state/${domain}` : "/api/world-state";
-    return text(await api("GET", path));
-  },
-);
-
 // ── report_incident ────────────────────────────────────────────────────────────
 
 server.tool(
   "report_incident",
-  "Report a security or operational incident to the bus. Triggers the GOAP security pipeline — world state updates immediately, goal evaluator fires, Discord alert and security-triage ceremony are dispatched.",
+  "Report a security or operational incident to the bus. Publishes the incident on the bus; the security-triage ceremony and Discord alert run as configured.",
   {
     title: z.string().describe("Short description of the incident."),
     severity: z.enum(["critical", "high", "medium", "low"])
@@ -207,15 +191,6 @@ server.tool(
   "List all available ceremonies defined in workspace/ceremonies/.",
   {},
   async () => text(await api("GET", "/api/ceremonies")),
-);
-
-// ── get_goals ─────────────────────────────────────────────────────────────────
-
-server.tool(
-  "get_goals",
-  "List all GOAP goals and their current definitions. Use get_world_state to see which goals are currently violated.",
-  {},
-  async () => text(await api("GET", "/api/goals")),
 );
 
 // ── Start ──────────────────────────────────────────────────────────────────────

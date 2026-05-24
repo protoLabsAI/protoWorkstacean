@@ -2,7 +2,7 @@
 title: Dashboard
 ---
 
-The Workstacean dashboard is a static Astro + Preact site at `dashboard/` that replaces the legacy event viewer. It is the primary operational UI for the GOAP world engine, covering system health, world state, live events, goals, and project CI.
+The Workstacean dashboard is a static Astro + Preact site at `dashboard/` that replaces the legacy event viewer. It is the primary operational UI for the world engine, covering system health, world state, live events, goals, and project CI.
 
 ## Quick facts
 
@@ -25,7 +25,7 @@ All pages live under `dashboard/src/pages/`. Each one renders a `DashboardLayout
 | `/` | `OverviewGrid` | 30 s | Health cards for services, agents, CI, PRs, flow efficiency, security, HITL pending |
 | `/world-state` | `WorldStateViewer` | on demand | Live world-state snapshot with domain cards + JSON tree |
 | `/events` | `EventStream` | WebSocket | Real-time bus event feed with filter, tabs, sticky header |
-| `/goals` | `GoalStatus` + `OutcomesTable` | 30 s | Declarative goal pass/fail + GOAP action dispatch history |
+| `/goals` | `GoalStatus` + `OutcomesTable` | 30 s | Declarative goal pass/fail + action dispatch history |
 | `/projects` | `ProjectsView` | 60 s | Per-project CI health bars + PR pipeline badges |
 
 The sidebar nav is declared in `dashboard/src/layouts/DashboardLayout.astro`. The header WebSocket dot connects to `/ws` for a live/disconnected indicator, independent of the page-level polling.
@@ -44,7 +44,6 @@ Cache TTLs (defined in `api.ts`):
 
 | Endpoint | TTL |
 |---|---|
-| `/api/world-state`, `/api/outcomes` | 15 s |
 | `/api/services`, `/api/agent-health`, `/api/flow-metrics` | 30 s |
 | `/api/security-summary` | 60 s |
 | `/api/pr-pipeline` | 2 min |
@@ -100,5 +99,5 @@ The dashboard itself has no env vars — it's a static build. All runtime config
 ## Related docs
 
 - [HTTP API](./http-api) — every endpoint the dashboard consumes
-- [World Engine](./world-engine) — what the world-state viewer is showing
+- [scheduler + ceremonies](./world-engine) — what the world-state viewer is showing
 - [Bus topics](./bus-topics) — events streamed to `/events`

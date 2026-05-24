@@ -244,6 +244,16 @@ export class GitHubPlugin implements Plugin {
   readonly name = "github";
   readonly description = "GitHub webhook receiver — @mentions → bus → agent replies as comments";
   readonly capabilities = ["github-inbound", "github-outbound"];
+  readonly publishes = [
+    "message.inbound.github.{owner}.{repo}.{event}.{number}",
+    "flow.item.created",
+    "flow.item.updated",
+    "flow.item.completed",
+  ];
+  readonly subscribes = [
+    "message.outbound.github.#",
+    "github.triage.sweep",
+  ];
 
   private server: ReturnType<typeof Bun.serve> | null = null;
   private workspaceDir: string;

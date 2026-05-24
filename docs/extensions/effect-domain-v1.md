@@ -41,7 +41,7 @@ capabilities:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `domain` | `string` | yes | Name of the world-state domain as declared in `workspace/domains.yaml` |
+| `domain` | `string` | yes | Logical domain name the effect mutates (free-form; consumers interpret it) |
 | `path` | `string` | yes | Dot-separated path into the domain's `data` object (e.g. `data.blockedPRs`) |
 | `delta` | `number` | yes | Expected signed change to the value at `path` after successful skill execution (negative = decrease, positive = increase) |
 | `confidence` | `number` | yes | Planner weight for this effect declaration, in the range `[0.0, 1.0]`. Use `1.0` for deterministic effects and lower values for probabilistic ones |

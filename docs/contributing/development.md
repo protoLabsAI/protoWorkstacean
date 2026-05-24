@@ -83,15 +83,17 @@ describe("ExecutorRegistry", () => {
 **Integration tests** — in `test/integration/`, use a real `InMemoryEventBus`:
 
 ```typescript
-// test/integration/planner-dispatcher-flow.test.ts
+// test/integration/router-dispatch-flow.test.ts
 import { describe, test, expect } from "bun:test";
 import { InMemoryEventBus } from "../../lib/bus.ts";
-import { PlannerPluginL0 } from "../../src/plugins/planner-plugin-l0.ts";
+import { RouterPlugin } from "../../src/router/router-plugin.ts";
+import { SkillDispatcherPlugin } from "../../src/executor/skill-dispatcher-plugin.ts";
 
-describe("GOAP loop integration", () => {
-  test("planner dispatches action when preconditions match", async () => {
+describe("router → dispatcher integration", () => {
+  test("inbound message routes to skill request", async () => {
     const bus = new InMemoryEventBus();
-    // install plugins, publish world state, assert action dispatched
+    // install plugins, publish a message.inbound.* event, assert the resolved
+    // agent.skill.request arrives on the bus
   });
 });
 ```
@@ -199,41 +201,43 @@ src/
     __tests__/
   plugins/
     CeremonyPlugin.ts
-    goal_evaluator_plugin.ts
-    planner-plugin-l0.ts
-    action-dispatcher-plugin.ts
+    agent-fleet-health-plugin.ts
+    alert-skill-executor-plugin.ts
+    ceremony-skill-executor-plugin.ts
+    pr-remediator-skill-executor-plugin.ts
     skill-broker-plugin.ts
-    ...
   agent-runtime/
     agent-runtime-plugin.ts    # Registrar for in-process agents
-    agent-executor.ts
     agent-definition-loader.ts
     types.ts
-    tool-registry.ts
   router/
     router-plugin.ts
     skill-resolver.ts
     project-enricher.ts
-  world/
-    domain-discovery.ts
   event-bus/
     topics.ts
-    action-events.ts
+    payloads.ts
+  api/
+    bus-topology.ts            # GET /api/bus/topology
+    ...
 lib/
-  types.ts                     # BusMessage, Plugin, EventBus (shared)
+  types.ts                     # BusMessage, Plugin (with publishes/subscribes), EventBus
   bus.ts                       # InMemoryEventBus
   plugins/
-    world-state-engine.ts
     discord.ts
     github.ts
+    linear.ts
+    google.ts
+    pr-remediator.ts
+    scheduler.ts
+    a2a-delivery.ts
+    operator-routing.ts
     ...
 workspace/
-  goals.yaml
-  actions.yaml
-  agents.yaml
-  agents/
-  ceremonies/
-  domains.yaml
+  agents.yaml                  # A2A remote agents
+  agents/                      # In-process agent YAMLs
+  ceremonies/                  # Scheduled rituals
+  crons/                       # Plain cron entries
   projects.yaml
 test/
   integration/

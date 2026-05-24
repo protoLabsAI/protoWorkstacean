@@ -12,15 +12,11 @@
  * response on the reply topic, just later.
  */
 
-import type { EventBus, BusMessage, HITLRequest, HITLResponse } from "../../lib/types.ts";
+import type { EventBus } from "../../lib/types.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
 import type { AgentSkillResponsePayload } from "../event-bus/payloads.ts";
-import { defaultHitlModeRegistry } from "./extensions/hitl-mode.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled", "rejected"]);
-const HITL_TTL_MS = 30 * 60_000; // 30 min default input-required window
-/** Per-prompt deadline for the dispatching-agent caller-first chain. On timeout, fall back to Discord. */
-const DISPATCHER_REPLY_TIMEOUT_MS = 5 * 60_000; // 5 min
 
 /** Extension URI for worldstate-delta-v1 artifacts. */
 const WORLDSTATE_DELTA_URI = "https://proto-labs.ai/a2a/ext/worldstate-delta-v1";
@@ -29,9 +25,9 @@ export interface TrackedTask {
   correlationId: string;
   taskId: string;
   agentName: string;
-  /** Skill name the sub-agent is running — needed for hitl-mode registry lookup. */
+  /** Skill name the sub-agent is running. */
   skillName?: string;
-  /** Name of the agent that dispatched this task (if any). Enables caller-first HITL routing. */
+  /** Name of the agent that dispatched this task (if any). */
   dispatcherAgent?: string;
   replyTopic: string;
   executor: A2AExecutor;
@@ -41,19 +37,9 @@ export interface TrackedTask {
   pollIntervalMs: number;
   /** Per-task secret for authenticating push-notification callbacks. */
   callbackToken?: string;
-  /** Set when the task has asked for human input — suppresses polling until resumed. */
-  awaitingHuman?: boolean;
-  /**
-   * Compound-gate counter (Arc 7.3). Incremented every time the task enters
-   * input-required. Passed into the raised HITLRequest so renderers can show
-   * "Checkpoint N" for multi-step tasks. Reset is never needed — monotonic.
-   */
-  checkpointCount?: number;
-  /** The Discord/etc interface that originated the request — reused for HITL routing. */
+  /** Source interface (e.g. discord/linear) the request originated from. */
   sourceInterface?: string;
-  /** Source channel ID for HITL rendering. */
   sourceChannelId?: string;
-  /** User ID for HITL rendering. */
   sourceUserId?: string;
   /**
    * Optional callback invoked when the task reaches terminal state.
@@ -91,14 +77,6 @@ export class TaskTracker {
     this.maxTrackingMs = opts.maxTrackingMs ?? 60 * 60_000;
     this.sweepTimer = setInterval(() => { void this._sweep(); }, this.sweepIntervalMs);
     this.sweepTimer.unref?.();
-
-    // Subscribe to HITL responses — when a tracked task was awaiting input
-    // and a human responds, resume the task via sendMessage(taskId, decisionText).
-    this.bus.subscribe("hitl.response.#", "task-tracker", (msg: BusMessage) => {
-      const resp = msg.payload as HITLResponse | undefined;
-      if (!resp || resp.type !== "hitl_response") return;
-      void this._resumeFromHitl(resp);
-    });
   }
 
   /** Register a task for tracking. Dispatcher calls this after executor returns working. */
@@ -170,7 +148,12 @@ export class TaskTracker {
       const statusText = status.message?.parts
         ? status.message.parts.filter(p => p.kind === "text").map(p => p.text ?? "").join("")
         : "";
-      this._raiseHitl(task, statusText);
+      console.warn(
+        `[task-tracker] ${task.agentName} task ${task.taskId.slice(0, 8)}… is input-required ` +
+        `but no approval gate is wired — terminating with failure. Question: ${statusText || "(none)"}`,
+      );
+      this._publishResponse(task, undefined, `Agent asked for human input but no approval gate is wired: ${statusText || "(no question text)"}`, "failed");
+      this.tasks.delete(correlationId);
       return;
     }
 
@@ -235,9 +218,6 @@ export class TaskTracker {
         continue;
       }
 
-      // Awaiting human input — don't poll, just wait for hitl.response.*
-      if (task.awaitingHuman) continue;
-
       // Not yet due
       if (now - task.lastPolledAt < task.pollIntervalMs) continue;
 
@@ -248,7 +228,12 @@ export class TaskTracker {
         const state = result.data?.taskState;
 
         if (state === "input-required") {
-          this._raiseHitl(task, result.text);
+          console.warn(
+            `[task-tracker] ${task.agentName} task ${task.taskId.slice(0, 8)}… is input-required ` +
+            `but no approval gate is wired — terminating with failure. Question: ${result.text || "(none)"}`,
+          );
+          this._publishResponse(task, undefined, `Agent asked for human input but no approval gate is wired: ${result.text || "(no question text)"}`, "failed");
+          this.tasks.delete(task.correlationId);
           continue;
         }
 
@@ -267,208 +252,6 @@ export class TaskTracker {
           err instanceof Error ? err.message : String(err),
         );
       }
-    }
-  }
-
-  /**
-   * Decide who answers an `input-required` prompt and route accordingly.
-   *
-   * Caller-first chain (the default when a dispatching agent is known):
-   *   1. hitl-mode-v1 declaration says `reviewer: "operator"` → skip to step 3
-   *   2. dispatcherAgent present → publish a chat skill-request to the
-   *      dispatcher; on reply within the deadline, resume the sub-agent's
-   *      task with the dispatcher's answer. No Discord prompt is raised
-   *      unless this path fails.
-   *   3. Fallback: emit the traditional `hitl.request.*` event so the
-   *      registered renderer (Discord, Linear) asks a human.
-   */
-  private _raiseHitl(task: TrackedTask, question: string | undefined): void {
-    if (task.awaitingHuman) return; // already raised, avoid duplicate
-    task.awaitingHuman = true;
-    // Arc 7.3: increment checkpoint counter so compound-gated tasks (multi-step
-    // input-required) surface which prompt this is in the sequence. 1-based.
-    task.checkpointCount = (task.checkpointCount ?? 0) + 1;
-
-    const decl = task.skillName
-      ? defaultHitlModeRegistry.get(task.agentName, task.skillName)
-      : undefined;
-    const forceOperator = decl?.reviewer === "operator";
-
-    if (task.dispatcherAgent && !forceOperator) {
-      this._askDispatcher(task, question);
-      return;
-    }
-
-    this._emitHitlRequest(task, question);
-  }
-
-  /**
-   * Ask the dispatching agent to answer an `input-required` prompt from one
-   * of its sub-agents. Publishes a `chat` skill-request to the dispatcher,
-   * waits up to DISPATCHER_REPLY_TIMEOUT_MS for a reply, and resumes the
-   * sub-agent's task with the answer. Falls back to the human renderer path
-   * on timeout, empty reply, or error.
-   */
-  private _askDispatcher(task: TrackedTask, question: string | undefined): void {
-    const dispatcher = task.dispatcherAgent!;
-    const promptCorrelationId = crypto.randomUUID();
-    const promptReplyTopic = `agent.skill.response.${promptCorrelationId}`;
-    const promptText = [
-      `${task.agentName} is asking for input on the "${task.skillName ?? "current"}" task:`,
-      "",
-      question || "(no question text provided)",
-      "",
-      "Reply with the decision or context needed for the task to continue. Keep it concise.",
-    ].join("\n");
-
-    let settled = false;
-    const subId = this.bus.subscribe(promptReplyTopic, "task-tracker-hitl-reply", (msg: BusMessage) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      this.bus.unsubscribe(subId);
-
-      const resp = msg.payload as AgentSkillResponsePayload | undefined;
-      const answer = typeof resp?.content === "string" ? resp.content.trim() : "";
-      if (resp?.error || !answer) {
-        console.log(
-          `[task-tracker] dispatcher ${dispatcher} returned empty/error reply — falling back to renderer chain`,
-        );
-        this._emitHitlRequest(task, question);
-        return;
-      }
-
-      void this._resumeFromDispatcher(task, answer, dispatcher);
-    });
-
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      this.bus.unsubscribe(subId);
-      console.log(
-        `[task-tracker] dispatcher ${dispatcher} did not reply within ${DISPATCHER_REPLY_TIMEOUT_MS}ms — falling back to renderer chain`,
-      );
-      this._emitHitlRequest(task, question);
-    }, DISPATCHER_REPLY_TIMEOUT_MS);
-    (timer as { unref?: () => void }).unref?.();
-
-    this.bus.publish("agent.skill.request", {
-      id: crypto.randomUUID(),
-      correlationId: promptCorrelationId,
-      topic: "agent.skill.request",
-      timestamp: Date.now(),
-      payload: {
-        skill: "chat",
-        content: promptText,
-        targets: [dispatcher],
-        replyTopic: promptReplyTopic,
-      },
-    });
-
-    console.log(
-      `[task-tracker] input-required from ${task.agentName} — routing to dispatcher ${dispatcher} (correlationId: ${task.correlationId.slice(0, 8)}…)`,
-    );
-  }
-
-  /**
-   * Resume the sub-agent's task after the dispatching agent has supplied an
-   * answer to an `input-required` prompt. Mirrors _resumeFromHitl but carries
-   * agent-sourced text instead of a structured human decision.
-   */
-  private async _resumeFromDispatcher(task: TrackedTask, answerText: string, dispatcher: string): Promise<void> {
-    try {
-      await task.executor.resumeTask(
-        task.taskId,
-        task.taskId,
-        `Dispatcher (${dispatcher}) response:\n${answerText}`,
-        task.correlationId,
-        task.parentId,
-      );
-      task.awaitingHuman = false;
-      task.lastPolledAt = Date.now();
-      console.log(
-        `[task-tracker] Resumed ${task.agentName} task ${task.taskId.slice(0, 8)}… with dispatcher answer`,
-      );
-    } catch (err) {
-      console.error(`[task-tracker] resumeTask after dispatcher reply failed:`, err);
-      // Fall back to human path so the task doesn't hang
-      this._emitHitlRequest(task, answerText);
-    }
-  }
-
-  /**
-   * Publish the traditional `hitl.request.{correlationId}` event for the
-   * HITL plugin to render (Discord button, Linear comment, etc.). Used both
-   * as the direct operator-only path and as a fallback from the dispatcher
-   * caller-first chain.
-   */
-  private _emitHitlRequest(task: TrackedTask, question: string | undefined): void {
-    const req: HITLRequest = {
-      type: "hitl_request",
-      correlationId: task.correlationId,
-      title: (task.checkpointCount ?? 1) > 1
-        ? `Input needed from ${task.agentName} (checkpoint ${task.checkpointCount})`
-        : `Input needed from ${task.agentName}`,
-      summary: question || "The agent is requesting input to continue.",
-      options: ["approve", "reject"],
-      expiresAt: new Date(Date.now() + HITL_TTL_MS).toISOString(),
-      checkpoint: { index: task.checkpointCount ?? 1 },
-      replyTopic: `hitl.response.${task.correlationId}`,
-      sourceMeta: {
-        interface: task.sourceInterface ?? "discord",
-        channelId: task.sourceChannelId,
-        userId: task.sourceUserId,
-      },
-    };
-
-    this.bus.publish(`hitl.request.${task.correlationId}`, {
-      id: crypto.randomUUID(),
-      correlationId: task.correlationId,
-      topic: `hitl.request.${task.correlationId}`,
-      timestamp: Date.now(),
-      payload: req,
-    });
-
-    console.log(
-      `[task-tracker] input-required from ${task.agentName} — raised HITL request (correlationId: ${task.correlationId.slice(0, 8)}…)`,
-    );
-  }
-
-  /**
-   * When a HITL response arrives for a tracked task, resume the agent by
-   * sending a new message in the same taskId. Uses executor.execute() with
-   * the original skill context so memory enrichment still applies.
-   */
-  private async _resumeFromHitl(resp: HITLResponse): Promise<void> {
-    const task = this.tasks.get(resp.correlationId);
-    if (!task || !task.awaitingHuman) return;
-
-    const decisionText = [
-      `Human decision: ${resp.decision}`,
-      resp.feedback ? `Feedback: ${resp.feedback}` : "",
-      `Decided by: ${resp.decidedBy}`,
-    ].filter(Boolean).join("\n");
-
-    try {
-      await task.executor.resumeTask(
-        task.taskId,
-        task.correlationId,
-        decisionText,
-        task.correlationId,
-        task.parentId,
-      );
-      task.awaitingHuman = false;
-      task.lastPolledAt = Date.now();
-      console.log(
-        `[task-tracker] Resumed ${task.taskId.slice(0, 8)}… with decision "${resp.decision}" — polling resumes`,
-      );
-    } catch (err) {
-      console.error(
-        `[task-tracker] Failed to resume ${task.taskId.slice(0, 8)}…:`,
-        err instanceof Error ? err.message : String(err),
-      );
-      this._publishResponse(task, undefined, `Resume failed: ${err instanceof Error ? err.message : String(err)}`);
-      this.tasks.delete(task.correlationId);
     }
   }
 

@@ -1,70 +1,36 @@
-# protoWorkstacean — Session Status (Apr 7–8, 2026)
+# protoWorkstacean — Status
 
-Handoff doc for the team. Covers everything done in today's session.
+## What this app is
 
-## What Was Shipped
+A switchboard for the protoLabs agent ecosystem. Triggers (Discord, GitHub, Linear, Google, Cron, Ceremony) feed `message.inbound.*` → RouterPlugin → `agent.skill.request` → SkillDispatcherPlugin → ExecutorRegistry → executor (DeepAgent in-process, A2A remote, or FunctionExecutor for alert/ceremony/pr_* skills).
 
-### Milestone 1 (already on main before today)
-- Per-agent Discord bot identity (multi-bot client pool)
-- MemoryPlugin (mem0 self-hosted API)
-- agents.yaml fixes (port conflicts, endpoint mismatches, chain rules)
+That's the spine. Everything else extends it.
 
-### Milestone 2 + 3 (merged to main today via #27 → then individual PRs)
+## Current architecture
 
-| PR | What |
-|----|------|
-| #29 | OnboardingPlugin docs — reference + how-to (M1/M2/M3) |
-| #30 | World Engine docs — reference + explanation (GOAP-Flow homeostatic system) |
-| #31 | Quinn docs — reference (PR review bot + vector context) |
-| #32 | CeremonyPlugin docs — reference + how-to (YAML-defined recurring fleet rituals) |
-| #33 | Google Workspace Plugin docs — reference + how-to |
-| #34 | OnboardingPlugin unit tests — all 9 pipeline steps + idempotency (timeout fixed: 100ms → 500ms) |
-| #35 | Wire `world.goal.violated` → L0 planner cascade + register CeremonyPlugin + FlowMonitorPlugin in `src/index.ts` |
-| #36 | World Engine extension guide — how to add state, goals, actions, plugins |
-| #37 | project-schema.ts Zod validation tests |
-| #38 | CeremonyPlugin: SQLite outcomes DB opened with WAL mode (was missing, caused concurrency issues) |
-| #39 | Discord autocomplete + GitHub org webhook handler tests (M2) |
-| #40 | Discord rate limiter persistence (was in-process only, state lost on restart) |
-| #41 | Fix: `projects.yaml` file watcher was firing 14+ times per change — added debounce |
-| #42 | Fix: `plane-hitl` showed 0 projects — Discord channel key mismatch vs `projects.yaml` schema |
-| #43 | Fix: no circuit breaker on external API calls — Google/Plane/GitHub would spam retries on outage |
+- **In-process agents** (DeepAgent / LangGraph): Ava, protoBot, Quinn
+- **Remote agents** (A2A): protoMaker, protoPen
+- **Integration plugins**: Discord, GitHub, Linear, Google Workspace, linear-protomaker-bridge, pr-remediator
+- **Scheduling**: SchedulerPlugin (yaml-defined crons), CeremonyPlugin (named, observable, hot-reloadable rituals)
+- **Observability**: AgentFleetHealth (24h rollups → health-weighted dispatch), Langfuse OTEL tracing, cost-v1 / confidence-v1 / blast-v1 / hitl-mode-v1 A2A extensions
+- **Operator routing**: OperatorRoutingPlugin abstracts the transport (Discord DM today; SMS / Signal / push future)
+- **Bus surface**: `GET /api/bus/topology` returns the plugin → topics graph; `WS /api/bus/subscribe?topic=<pattern>` lets external processes join the bus
 
-## Current State
+## What's NOT here (and intentionally so)
 
-- **Branch**: `main` is the active branch for all feature work
-  - `prBaseBranch` changed from `dev` → `main` in `.automaker/settings.json` (fixes squash-merge divergence that was blocking worktrees)
-- **Container**: running from `main`, up ~43 min, all Discord bots connected (ava, quinn, frank, jon)
-- **Board**: 0 backlog, 0 in-progress, 0 in review, 16 done
-- **Bug in progress**: `escalations.json` corrupt JSON crashes EscalationRouter on startup — agent working it now
+- No GOAP world-state engine, goal evaluator, or planner. Earlier versions had one; it was a polling loop dressed up as a planner and was removed.
+- No HITL plugin and no cross-plugin renderer registration. The bus is the contract; approval gates, if needed, get re-added as pure bus pub/sub.
+- No memory layer at the switchboard. Episodic memory belongs elsewhere in the stack.
+- No two parallel cost systems. The runtime `cost-v1` extension is the one source of truth.
+- No ProtoSdk runtime. Replaced entirely by DeepAgent (LangGraph).
 
-## Known Issues
+## Workflow
 
-- `ceremony-loader` warns on startup: `daily-standup.yaml` missing required `schedule` field — not a blocker
-- `escalations.json` at `/data/escalations.json` may be corrupt — EscalationRouter logs a parse error and skips loading escalation state. Bug ticket filed, fix incoming via auto-mode.
-- `plane-hitl` fix (#42) is deployed but needs `projects.yaml` to have Discord channel IDs populated for the Plane HITL flows to route correctly
+`feature → dev → main`. Never push directly to `main`. See [CLAUDE.md](CLAUDE.md) for the principles.
 
-## World Engine Architecture
+## Where to look
 
-The World Engine is a homeostatic infrastructure layer. Data flow:
-
-```
-WorldStateCollector
-  → GoalEvaluator (emits world.goal.violated)
-    → PlannerL0 (deterministic rules — now wired!)
-      → ActionDispatcher
-        → Agent / Tool
-```
-
-**Plugins registered in `src/index.ts`:**
-- `OnboardingPlugin` — project onboarding pipeline
-- `CeremonyPlugin` — recurring fleet rituals (standups, retros) via `workspace/ceremonies/*.yaml`
-- `FlowMonitorPlugin` — monitors LangGraph flow health
-
-**To add new state/goals/actions:** see `docs/world-engine/extension-guide.md`
-
-## Next Steps for the Team
-
-1. **Populate Discord channel IDs** in `workspace/projects.yaml` — needed for plane-hitl routing and ceremony delivery
-2. **Watch the escalations.json bug** — auto-mode is on it, PR incoming
-3. **Google Workspace OAuth** — still needs manual setup: register `http://localhost:8765` redirect URI, run OAuth flow, store `GOOGLE_WORKSPACE_REFRESH_TOKEN` in Infisical (AI project)
-4. **ceremony `schedule` field** — `workspace/ceremonies/daily-standup.yaml` is missing `schedule`, ceremony-loader skips it on startup
+- Read [`README.md`](README.md) for the full architecture map.
+- Read [`CLAUDE.md`](CLAUDE.md) for the development principles.
+- Read [`docs/architecture.md`](docs/architecture.md) for diagrams.
+- For agent-side recipes, see `docs/guides/build-an-a2a-agent.md` and `docs/guides/extend-an-a2a-agent.md`.

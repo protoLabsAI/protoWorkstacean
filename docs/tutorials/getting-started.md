@@ -90,13 +90,6 @@ skills:
     description: Free-form conversation with the user
 ```
 
-Create minimal stubs for the GOAP files (required at startup):
-
-```bash
-echo "goals: []"   > workspace/goals.yaml
-echo "actions: []" > workspace/actions.yaml
-```
-
 ## 4. Start the server
 
 ```bash
@@ -109,7 +102,6 @@ Startup logs should look like:
 [agent-runtime] loaded agent: ava (general, 1 skill)
 [skill-broker] loaded 0 external agents
 [ceremony-plugin] loaded 3 ceremonies
-[world-state] domain discovery: 0 domains registered
 [http] listening on :3000
 [workstacean] ready
 ```
@@ -149,17 +141,8 @@ sqlite3 data/events.db \
   "SELECT payload FROM events WHERE topic LIKE 'agent.skill.response.tutorial-001' ORDER BY ts DESC LIMIT 1;"
 ```
 
-## 6. Inspect world state
-
-```bash
-curl http://localhost:3000/api/world-state
-```
-
-With `AVA_BASE_URL` set and domain collectors configured, this returns live JSON from every registered domain.
-
 ## Next steps
 
-- [Your first GOAP goal](./first-goap-goal) — automate a reaction to a world-state condition
 - [Add an agent](../../guides/add-an-agent) — register in-process or A2A agents
-- [Add a domain](../../guides/add-a-domain) — poll custom HTTP endpoints for world state
+- [Create a ceremony](../../guides/create-a-ceremony) — schedule recurring agent work
 - [Reference: HTTP API](../../reference/http-api) — all endpoints

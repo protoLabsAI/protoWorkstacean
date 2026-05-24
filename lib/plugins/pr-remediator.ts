@@ -44,7 +44,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { Plugin, EventBus, BusMessage, HITLRequest } from "../types.ts";
+import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import type { WorldState } from "../types/world-state.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
 
@@ -587,7 +587,7 @@ type LiveCiStatusFetcher = (
 
 export class PrRemediatorPlugin implements Plugin {
   readonly name = "pr-remediator";
-  readonly description = "Closes the GOAP loop on stuck PRs — auto-merges eligible titles, escalates others to HITL";
+  readonly description = "Auto-remediates stuck PRs — auto-merges eligible titles, escalates others to HITL";
   readonly capabilities = ["pr-merge", "pr-feedback-dispatch", "hitl-emit"];
 
   private readonly fetchLiveCiStatus: LiveCiStatusFetcher;
@@ -600,8 +600,6 @@ export class PrRemediatorPlugin implements Plugin {
   private readonly subscriptionIds: string[] = [];
   private latestPrData: PrDomainData | null = null;
   private latestBranchDrift: BranchDriftData | null = null;
-  /** Map correlationId → PR identity, so HITL response can find the PR to merge. */
-  private readonly pendingApprovals = new Map<string, { repo: string; number: number; title: string }>();
   /** Map `${repo}#${number}:${kind}` → in-flight dispatch metadata. */
   private readonly inFlight = new Map<string, InFlightEntry>();
   /** Repo → timestamp of last backmerge dispatch (cooldown). */
@@ -639,7 +637,7 @@ export class PrRemediatorPlugin implements Plugin {
         );
         // Self-dispatch: drive remediation directly from world state.
         // The pr.remediate.* topics exist for external triggers but are not
-        // published by the GOAP action dispatcher (tier_0 actions dispatch to
+        // published by the dispatcher when the matching skill executor fires (
         // agent.skill.request, not custom topics). Self-driving from the
         // cached snapshot ensures remediation runs on every domain tick
         // regardless of how the action dispatcher routes.
@@ -684,12 +682,6 @@ export class PrRemediatorPlugin implements Plugin {
       void this._handleBackmergeDispatch();
     }));
 
-    // HITL response handler — fires when a human approves/rejects via Discord.
-    // On approve, execute the merge the plugin was waiting on.
-    this.subscriptionIds.push(bus.subscribe("hitl.response.pr.merge.#", this.name, (msg) => {
-      void this._handleHitlResponse(msg);
-    }));
-
     console.log(
       `[pr-remediator] installed — auto-merge ${AUTO_MERGE_ENABLED ? "ENABLED" : "DRY-RUN"}, auth ${getGithubToken ? "configured" : "MISSING"}`,
     );
@@ -702,7 +694,6 @@ export class PrRemediatorPlugin implements Plugin {
     this.subscriptionIds.length = 0;
     this.bus = undefined;
     this.latestPrData = null;
-    this.pendingApprovals.clear();
     this.inFlight.clear();
     this.diagnosisInFlight.clear();
   }
@@ -838,53 +829,17 @@ export class PrRemediatorPlugin implements Plugin {
       }
     }
 
-    const correlationId = crypto.randomUUID();
-    const replyTopic = `hitl.response.pr.remediation_stuck.${correlationId}`;
-    const devChannelId = loadProjectMetaMap().get(repo)?.devChannelId;
-
     const durationMs = Date.now() - entry.startedAt;
     const durationMin = Math.round(durationMs / 60_000);
 
-    const request: HITLRequest = {
-      type: "hitl_request",
-      correlationId,
-      title: `PR remediation stuck: ${repo}#${number} (${kind})`,
-      summary: [
-        `**Remediation exhausted** — auto-retry budget consumed.`,
-        ``,
-        `**PR**: ${repo}#${number}${pr ? ` — ${pr.title}` : ""}`,
-        `**Kind**: \`${kind}\``,
-        `**Attempts**: ${entry.attempts} / ${MAX_ATTEMPTS_PER_PR} over ~${durationMin} min`,
-        pr ? `**Current CI**: \`${pr.ciStatus}\` · Review: \`${pr.reviewState}\` · Mergeable: \`${pr.mergeable}\`` : "",
-        pr.headSha ? `**Head SHA**: \`${pr.headSha.slice(0, 7)}\`` : "",
-        `**Last correlationId**: \`${entry.correlationId}\``,
-        ``,
-        `The auto-remediation loop has dispatched ${kind} to Ava ${entry.attempts} times and the PR is still stuck. This is a bottleneck — either a new agent capability is needed, the root cause is outside Ava's reach, or a human merge / manual fix will break the cycle.`,
-        conflictDetails ? `\n**Conflict diagnosis (genuine)**:\n${conflictDetails}` : "",
-        ``,
-        `**Treat every stuck PR as a feature request**: what would have unblocked this automatically? That's the next thing to build on the board.`,
-        ``,
-        `https://github.com/${repo}/pull/${number}`,
-      ].filter(Boolean).join("\n"),
-      options: ["investigate", "mark_non_remediable", "manual_unblock"],
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      replyTopic,
-      sourceMeta: { interface: "discord", ...(devChannelId ? { channelId: devChannelId } : {}) },
-    };
-
-    const topic = `hitl.request.pr.remediation_stuck.${correlationId}`;
-    this.bus.publish(topic, {
-      id: crypto.randomUUID(),
-      correlationId,
-      topic,
-      timestamp: Date.now(),
-      payload: request,
-    });
-
-    // Also log as a first-class ops signal so it shows up in log aggregation.
-    // "Every escalation is a feature-request signal" — don't bury this.
+    // No approval gate is wired in this build — log loudly and stop trying.
+    // The PR stays in its current state; an operator can re-trigger remediation
+    // by hand or close/merge the PR themselves.
     console.warn(
-      `[pr-remediator] STUCK → HITL escalation: ${repo}#${number} kind=${kind} attempts=${entry.attempts}/${MAX_ATTEMPTS_PER_PR} duration=${durationMin}min correlationId=${correlationId}`,
+      `[pr-remediator] STUCK → giving up: ${repo}#${number} kind=${kind} attempts=${entry.attempts}/${MAX_ATTEMPTS_PER_PR} duration=${durationMin}min. ` +
+      `Auto-remediation budget exhausted, no approval gate wired. ` +
+      (conflictDetails ? `Conflict: ${conflictDetails}. ` : "") +
+      `https://github.com/${repo}/pull/${number}`,
     );
   }
 
@@ -1018,11 +973,6 @@ export class PrRemediatorPlugin implements Plugin {
       return;
     }
 
-    // Extract hitlPolicy forwarded by PrRemediatorSkillExecutorPlugin so the
-    // fallback HITL request honours action.pr_merge_ready.meta.hitlPolicy
-    // (ttlMs: 30min, onTimeout: approve).
-    const hitlPolicy = this._extractHitlPolicy(msg);
-
     for (const pr of ready) {
       const gate = this._shouldDispatch(pr.repo, pr.number, "merge_ready");
       if (!gate.ok) {
@@ -1045,13 +995,13 @@ export class PrRemediatorPlugin implements Plugin {
         console.log(`[pr-remediator] auto-merged ${pr.repo}#${pr.number}`);
         this._publishAlert(`Auto-merged ${pr.repo}#${pr.number}`, pr);
       } else {
-        // Error-path fallback: the PR was ready but the merge API call
-        // failed (rare — e.g. branch protection changed between the
-        // readiness check and the merge, network glitch). Escalate to
-        // HITL so an operator can look. This is the only remaining
-        // _emitHitlApproval call site.
-        console.warn(`[pr-remediator] auto-merge failed ${pr.repo}#${pr.number}: ${result.error}`);
-        this._emitHitlApproval(pr, msg.correlationId, `Auto-merge failed (${result.status}): ${result.error}`, hitlPolicy);
+        // The merge API failed (rare — e.g. branch protection changed between
+        // the readiness check and the merge, or a network glitch). No approval
+        // gate is wired, so we just log loudly and move on.
+        console.warn(
+          `[pr-remediator] auto-merge failed ${pr.repo}#${pr.number}: ${result.error} (status ${result.status}). ` +
+          `No approval gate wired — operator can merge manually.`,
+        );
       }
     }
   }
@@ -1303,84 +1253,6 @@ Critical rules:
     console.warn(`[pr-remediator] ${text}`);
   }
 
-  /**
-   * Pull `meta.hitlPolicy` from the trigger bus message. The shape comes from
-   * actions.yaml and is propagated by PrRemediatorSkillExecutorPlugin into the
-   * pr.remediate.* trigger payload. Returns undefined when not present so
-   * callers fall back to their built-in defaults.
-   */
-  private _extractHitlPolicy(msg: BusMessage): { ttlMs?: number; onTimeout?: "approve" | "reject" | "escalate" } | undefined {
-    const payload = msg.payload as { meta?: Record<string, unknown> } | undefined;
-    const meta = payload?.meta;
-    if (!meta || typeof meta !== "object") return undefined;
-    const policy = (meta as Record<string, unknown>).hitlPolicy;
-    if (!policy || typeof policy !== "object") return undefined;
-    const p = policy as Record<string, unknown>;
-    const out: { ttlMs?: number; onTimeout?: "approve" | "reject" | "escalate" } = {};
-    if (typeof p.ttlMs === "number" && Number.isFinite(p.ttlMs) && p.ttlMs > 0) out.ttlMs = p.ttlMs;
-    if (p.onTimeout === "approve" || p.onTimeout === "reject" || p.onTimeout === "escalate") {
-      out.onTimeout = p.onTimeout;
-    }
-    return Object.keys(out).length > 0 ? out : undefined;
-  }
-
-  private _emitHitlApproval(
-    pr: PrDomainEntry,
-    parentCorrelationId: string,
-    note?: string,
-    hitlPolicy?: { ttlMs?: number; onTimeout?: "approve" | "reject" | "escalate" },
-  ): void {
-    if (!this.bus) return;
-    const correlationId = crypto.randomUUID();
-    const replyTopic = `hitl.response.pr.merge.${correlationId}`;
-    const devChannelId = loadProjectMetaMap().get(pr.repo)?.devChannelId;
-    // Honor action.pr_merge_ready.meta.hitlPolicy when provided (forwarded by
-    // PrRemediatorSkillExecutorPlugin via the trigger msg). Defaults match the
-    // pre-existing 30-min escalation behaviour so non-policy callers (e.g. the
-    // ghMerge fallback path) keep their semantics.
-    const ttlMs = hitlPolicy?.ttlMs ?? 30 * 60 * 1000;
-    const onTimeout = hitlPolicy?.onTimeout;
-    const request: HITLRequest = {
-      type: "hitl_request",
-      correlationId,
-      title: `Merge ${pr.repo}#${pr.number}?`,
-      summary: [
-        `**${pr.title}**`,
-        `Author: ${pr.author}`,
-        `Branch: ${pr.baseRef}`,
-        `CI: ${pr.ciStatus} · Review: ${pr.reviewState} · Mergeable: ${pr.mergeable}`,
-        note ? `\n⚠ ${note}` : "",
-        `\nhttps://github.com/${pr.repo}/pull/${pr.number}`,
-      ].filter(Boolean).join("\n"),
-      options: ["approve", "reject"],
-      expiresAt: new Date(Date.now() + ttlMs).toISOString(),
-      ttlMs,
-      ...(onTimeout ? { onTimeout } : {}),
-      replyTopic,
-      sourceMeta: { interface: "discord", ...(devChannelId ? { channelId: devChannelId } : {}) },
-    };
-    // Record the pending approval so the response handler can act on it
-    this.pendingApprovals.set(correlationId, {
-      repo: pr.repo,
-      number: pr.number,
-      title: pr.title,
-    });
-    this.bus.publish(`hitl.request.pr.merge.${correlationId}`, {
-      id: crypto.randomUUID(),
-      correlationId,
-      parentId: parentCorrelationId,
-      topic: `hitl.request.pr.merge.${correlationId}`,
-      timestamp: Date.now(),
-      payload: request,
-    });
-    console.log(`[pr-remediator] HITL approval requested for ${pr.repo}#${pr.number}`);
-  }
-
-  /**
-   * Handle a human decision from HITL. Expected payload shape:
-   *   { type: "hitl_response", correlationId, decision: "approve" | "reject", ... }
-   * On "approve" we execute the merge; on "reject" we drop the pending entry.
-   */
   // ── backmerge ──────────────────────────────────────────────────────────────
   //
   // Dispatched when branch.drift_low fires. Iterates the current branch_drift
@@ -1434,40 +1306,6 @@ Critical rules:
           `[pr-remediator] backmerge dispatch failed ${project.repo}: ${result.status} ${result.error}`,
         );
       }
-    }
-  }
-
-  private async _handleHitlResponse(msg: BusMessage): Promise<void> {
-    const response = msg.payload as {
-      type?: string;
-      correlationId?: string;
-      decision?: string;
-      decidedBy?: string;
-    };
-    if (response.type !== "hitl_response" || !response.correlationId) return;
-
-    const pending = this.pendingApprovals.get(response.correlationId);
-    if (!pending) {
-      console.log(`[pr-remediator] HITL response ${response.correlationId} — no matching pending PR (expired or duplicate)`);
-      return;
-    }
-    this.pendingApprovals.delete(response.correlationId);
-
-    if (response.decision !== "approve") {
-      console.log(`[pr-remediator] HITL rejected ${pending.repo}#${pending.number} by ${response.decidedBy ?? "unknown"}`);
-      return;
-    }
-
-    if (!AUTO_MERGE_ENABLED) {
-      console.log(`[pr-remediator] DRY-RUN — HITL approved ${pending.repo}#${pending.number}, would merge`);
-      return;
-    }
-
-    const result = await ghMerge(pending.repo, pending.number);
-    if (result.ok) {
-      console.log(`[pr-remediator] HITL-approved merge succeeded ${pending.repo}#${pending.number}`);
-    } else {
-      console.warn(`[pr-remediator] HITL-approved merge FAILED ${pending.repo}#${pending.number}: ${result.error}`);
     }
   }
 

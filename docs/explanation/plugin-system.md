@@ -57,10 +57,6 @@ Loaded on every startup, but some are no-ops if their configuration is missing:
 | `AgentRuntimePlugin` | Registrar: reads `workspace/agents/*.yaml`, registers `DeepAgentExecutor` (LangGraph) instances |
 | `SkillBrokerPlugin` | Registrar: reads `workspace/agents.yaml`, registers `A2AExecutor` instances |
 | `SkillDispatcherPlugin` | Sole `agent.skill.request` subscriber; dispatches via `ExecutorRegistry` |
-| `WorldStateEngine` | Generic domain poller; domains registered via `discoverAndRegister()` |
-| `GoalEvaluatorPlugin` | Subscribes to `world.state.#`; evaluates goals; emits `world.goal.violated` |
-| `PlannerPluginL0` | Subscribes to `world.goal.violated`; selects actions from `ActionRegistry` |
-| `ActionDispatcherPlugin` | Subscribes to `world.action.plan`; fires actions with WIP limit |
 | `CeremonyPlugin` | Subscribes to `ceremony.#.execute`; dispatches skills on schedule |
 
 `AgentRuntimePlugin` and `SkillBrokerPlugin` are registrars — they install with no bus subscriptions. They must run before `SkillDispatcherPlugin` finishes loading if dynamic skill resolution is expected, but since the bus is in-memory and synchronous, early messages are queued until all plugins have installed.

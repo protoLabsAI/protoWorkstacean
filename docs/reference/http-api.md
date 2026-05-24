@@ -20,7 +20,7 @@ Error responses use the same envelope:
 { "success": false, "error": "Reason string" }
 ```
 
-A few endpoints return raw objects without the envelope (`/api/services`, `/api/agent-health`, `/api/ci-health`, `/api/pr-pipeline`, `/api/branch-drift`, `/api/security-summary`, `/api/outcomes`, `/api/world-state/:domain`). The dashboard's API client detects the envelope and unwraps it automatically.
+A few endpoints return raw objects without the envelope (`/api/ci-health`, `/api/pr-pipeline`, `/api/branch-drift`, `/api/security-summary`). The dashboard's API client detects the envelope and unwraps it automatically.
 
 ## Authentication
 
@@ -89,6 +89,60 @@ curl -X POST http://localhost:3000/publish \
 ```
 
 **Response** (`200`): `{ "success": true }`
+
+---
+
+## GET /api/bus/topology
+
+Return the plugin → topics graph: which plugins publish/subscribe to which topics. Built from each plugin's declarative `publishes` and `subscribes` arrays. Useful for spotting orphan topics (declared subscriber with no publisher, or vice versa).
+
+**Auth**: None
+
+**Response** (`200`):
+```json
+{
+  "success": true,
+  "data": {
+    "plugins": [
+      {
+        "name": "router",
+        "description": "Routes message.inbound.# and cron.# to agents via agent.skill.request",
+        "capabilities": ["message-routing", "skill-dispatch"],
+        "publishes": ["agent.skill.request"],
+        "subscribes": ["message.inbound.#", "cron.#"]
+      }
+    ],
+    "topics": {
+      "agent.skill.request": {
+        "publishedBy": ["router", "ceremony"],
+        "subscribedBy": ["skill-dispatcher"]
+      }
+    }
+  }
+}
+```
+
+Plugins that haven't yet declared `publishes` / `subscribes` show up with empty arrays — they're still loaded; they just don't contribute to the topic index.
+
+---
+
+## WS /api/bus/subscribe
+
+External processes can join the bus over a WebSocket to observe topic traffic. See [external-bus-subscribers](../guides/external-bus-subscribers.md) for the full guide.
+
+```
+WS /api/bus/subscribe?topic=<pattern>[&apiKey=<key>]
+```
+
+**Auth**: API key (header `X-API-Key` or `?apiKey=` query param), gated when `WORKSTACEAN_API_KEY` is set.
+
+Each matched bus message is delivered as a JSON frame:
+
+```json
+{ "topic": "<topic>", "correlationId": "<uuid>", "timestamp": 1748137622143, "payload": { ... } }
+```
+
+The channel is read-only. To publish from outside, use `POST /publish`.
 
 ---
 
@@ -169,33 +223,6 @@ List agents loaded from `workspace/agents.yaml`.
   ]
 }
 ```
-
----
-
-## GET /api/goals
-
-Return the raw contents of `workspace/goals.yaml` (the `goals` key). This is the loaded goal definitions, **not** their current evaluation status.
-
-**Auth**: None
-
-**Response** (`200`):
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "ci.success_rate_healthy",
-      "type": "threshold",
-      "severity": "high",
-      "domain": "ci",
-      "path": "successRate",
-      "min": 0.8
-    }
-  ]
-}
-```
-
-For live goal evaluation, the dashboard's Goals page runs `src/lib/goal-evaluator.ts` client-side against `/api/world-state`.
 
 ---
 
@@ -308,54 +335,6 @@ Returns `{ "success": true, "data": [] }` if the HITL plugin is not registered.
 
 ---
 
-## GET /api/world-state
-
-Return the current snapshot of all registered world-state domains. The engine caches collected values; stale data older than `120_000 ms` is evicted.
-
-**Auth**: None
-
-**Response** (`200`):
-```json
-{
-  "success": true,
-  "data": {
-    "domains": {
-      "board": {
-        "name": "board",
-        "data": { "efficiency": 0.47, "totalItems": 23 },
-        "collectedAt": 1712563200000,
-        "metadata": { "failed": false, "httpStatus": 200 }
-      },
-      "ci": {
-        "name": "ci",
-        "data": { "successRate": 0.85 },
-        "collectedAt": 1712563200000,
-        "metadata": { "failed": false, "httpStatus": 200 }
-      }
-    }
-  }
-}
-```
-
-Returns `503` if the `world-state-engine` plugin is unavailable.
-
----
-
-## GET /api/world-state/:domain
-
-Return the current snapshot for a single domain. Bypasses the envelope — returns the raw domain record.
-
-**Auth**: None
-
-**Path params**:
-- `domain` — domain name as registered
-
-**Response** (`200`): same shape as one entry of `data.domains` above.
-
-Returns `503` if the engine is unavailable.
-
----
-
 ## GET /api/services
 
 Service connectivity summary for the Overview dashboard. Checks env-var presence and (for Discord) the live client's `isReady()` state. **No envelope** — returns a raw object.
@@ -395,96 +374,6 @@ Agent executor registry summary. **No envelope.**
   "registrationCount": 6
 }
 ```
-
----
-
-## GET /api/flow-metrics
-
-Return all flow efficiency metrics from the FlowMonitor plugin.
-
-**Auth**: None
-
-**Response** (`200`):
-```json
-{
-  "success": true,
-  "data": {
-    "cycleTimeP50Ms": 86400000,
-    "cycleTimeP90Ms": 259200000,
-    "throughputPerWeek": 4.2,
-    "wipCount": 3,
-    "efficiency": { "ratio": 0.47, "healthy": false }
-  },
-  "collectedAt": 1712563200000
-}
-```
-
-Returns `503` if the `flow-monitor` plugin is not registered.
-
----
-
-## GET /api/flow-metrics/:metric
-
-Return a single flow metric by name.
-
-**Auth**: None
-
-**Path params**:
-- `metric` — metric name (e.g. `cycleTimeP50Ms`, `wipCount`, `efficiency`)
-
-**Response**: same envelope shape as `/api/flow-metrics`, with `data` containing only the requested metric.
-
-Returns `503` if the plugin is not registered.
-
----
-
-## GET /api/outcomes
-
-GOAP action dispatch outcomes tracked by the ActionDispatcher. Feeds the dashboard's Goals & Outcomes page and the plan-learning flywheel. **No envelope.**
-
-**Auth**: None
-
-**Response** (`200`):
-```json
-{
-  "summary": { "success": 428, "failure": 61, "timeout": 12, "total": 501 },
-  "recent": [
-    {
-      "correlationId": "corr-abc",
-      "actionId": "ci.retry_failed_workflows",
-      "goalId": "ci.success_rate_healthy",
-      "status": "success",
-      "startedAt": 1712563200000,
-      "durationMs": 4321
-    }
-  ]
-}
-```
-
-`recent` contains the last 50 outcomes in chronological order. Returns `{ summary: { success: 0, failure: 0, timeout: 0, total: 0 }, recent: [] }` if the ActionDispatcher is not registered.
-
----
-
-## GET /api/memory-health
-
-Two-stage probe of the Graphiti episodic memory backend. Backs the `memory` world-state domain and the `memory.graphiti_healthy` / `memory.search_working` goals. **No envelope.**
-
-**Auth**: None
-
-**Response** (`200`):
-```json
-{
-  "healthy": 1,
-  "searchOk": 1,
-  "error": ""
-}
-```
-
-- `healthy` — `1` if `GET {GRAPHITI_URL}/healthcheck` returned `200`, else `0`
-- `searchOk` — `1` if a trivial `POST /search` succeeded, else `0`. Search probing catches the deeper wiring failures (Neo4j vector functions missing, embedder misconfigured, gateway model aliases missing) that `/healthcheck` alone can't see
-- `error` — empty string on success, otherwise a short failure reason (e.g. `"search 400"` or a connection error message)
-
-Both probes have short timeouts (3s for healthcheck, 5s for search) so the world-state tick isn't blocked by a hung Graphiti container.
 
 ---
 

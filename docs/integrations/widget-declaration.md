@@ -63,7 +63,7 @@ Ensure your plugin instance is included in the `plugins` array passed to `ApiCon
 | `id` | `string` | Yes | Unique across all plugins. Use `kebab-case`. Example: `"world-state-domain-grid"`. |
 | `type` | `WidgetType` | Yes | Controls which renderer is used. See [Widget types](#widget-types). |
 | `title` | `string` | Yes | Human-readable label shown in the dashboard header. |
-| `query` | `string` | No | API endpoint the widget polls for data. Must be a path relative to the server root (e.g. `"/api/world-state"`). |
+| `query` | `string` | No | API endpoint the widget polls for data. Must be a path relative to the server root (e.g. `"/api/ceremonies"`). |
 | `props` | `Record<string, unknown>` | No | Renderer-specific options (chart type, refresh interval, limits, etc.). |
 
 ### Widget types
@@ -137,18 +137,6 @@ getWidgets(): WidgetDescriptor[] {
   ];
 }
 ```
-
----
-
-## Template plugin
-
-A copy-pasteable starting point lives at:
-
-```
-lib/plugins/example-template-plugin.ts
-```
-
-Copy it, rename the class and `name`, and replace the example widgets with your own.
 
 ---
 

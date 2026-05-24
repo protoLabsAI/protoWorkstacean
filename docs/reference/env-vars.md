@@ -50,8 +50,8 @@ _These env vars describe the HTTP server identity of the protoMaker team runtime
 
 | Variable | Default | Plugin | Description |
 |----------|---------|--------|-------------|
-| `AVA_BASE_URL` | _(none)_ | WorldStateEngine, SkillBrokerPlugin | Base URL of the protoMaker team server (e.g. `http://ava:3008`). Used for domain URL interpolation and A2A agent registration. |
-| `AVA_API_KEY` | _(none)_ | A2AExecutor, WorldStateEngine | API key sent as `X-API-Key` when polling protoMaker team domain endpoints or calling its `/a2a` endpoint. |
+| `AVA_BASE_URL` | _(none)_ | , SkillBrokerPlugin | Base URL of the protoMaker team server (e.g. `http://ava:3008`). Used for domain URL interpolation and A2A agent registration. |
+| `AVA_API_KEY` | _(none)_ | A2AExecutor,  | API key sent as `X-API-Key` when polling protoMaker team domain endpoints or calling its `/a2a` endpoint. |
 
 ## Discord
 
@@ -62,7 +62,7 @@ _These env vars describe the HTTP server identity of the protoMaker team runtime
 | `DISCORD_WELCOME_CHANNEL` | _(none)_ | DiscordPlugin | Channel ID for welcome/onboarding messages. |
 | `DISCORD_DIGEST_CHANNEL` | _(none)_ | DiscordPlugin | Channel ID for periodic digest posts. |
 | `DISCORD_OPS_WEBHOOK_URL` | _(none)_ | DiscordPlugin | Webhook URL for operational alerts. |
-| `DISCORD_GOALS_WEBHOOK_URL` | _(none)_ | WorldStateEngine | Webhook URL for goal violation/resolution notifications. |
+| `DISCORD_GOALS_WEBHOOK_URL` | _(none)_ |  | Webhook URL for goal violation/resolution notifications. |
 | `DISCORD_CEREMONY_WEBHOOK_URL` | _(none)_ | CeremonyPlugin | Webhook URL for ceremony run notifications. |
 | `DISCORD_BUDGET_WEBHOOK_URL` | _(none)_ | BudgetPlugin | Webhook URL for budget threshold alerts. |
 | `DISCORD_WEBHOOK_ALERTS` | _(none)_ | Various | General-purpose alert webhook URL (fallback for plugins without a dedicated webhook var). |
@@ -118,14 +118,6 @@ Agents can declare their own Discord bot tokens via `discordBotTokenEnvKey` in e
 | `QDRANT_VECTOR_SIZE` | _(none)_ | Quinn context | Embedding vector dimensions (must match the embed model). |
 | `REDIS_URL` | _(none)_ | Quinn context | Redis URL for caching embeddings or session state. |
 
-## Episodic memory (Graphiti)
-
-| Variable | Default | Plugin | Description |
-|----------|---------|--------|-------------|
-| `GRAPHITI_URL` | `http://graphiti:8000` | SkillDispatcherPlugin, world-state `memory` domain | Base URL of the Graphiti sidecar. If unreachable, memory enrichment is skipped silently (the message is still processed). |
-
-Graphiti itself (running as a sidecar) reads additional env vars — see [User Memory (Graphiti)](../integrations/memory) for the full list, including the required `text-embedding-3-small` and `gpt-4.1-nano` gateway aliases.
-
 ## Signal (optional integration)
 
 | Variable | Default | Plugin | Description |
@@ -139,16 +131,3 @@ Graphiti itself (running as a sidecar) reads additional env vars — see [User M
 |----------|---------|--------|-------------|
 | `ENABLED_PLUGINS` | _(none)_ | Plugin loader | Comma-separated list of optional plugin names to enable. Example: `ENABLED_PLUGINS=echo` |
 
-## Domain URL interpolation
-
-Any environment variable can be interpolated into domain URLs and headers in `workspace/domains.yaml` using the `${VAR_NAME}` syntax:
-
-```yaml
-domains:
-  - name: protomaker_board
-    url: "${AVA_BASE_URL}/api/world/board"
-    headers:
-      X-API-Key: "${AVA_API_KEY}"
-```
-
-This is resolved at poll time, not at startup, so changes to env vars take effect on the next poll cycle.

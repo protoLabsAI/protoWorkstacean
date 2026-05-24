@@ -1,12 +1,12 @@
 /**
- * AlertSkillExecutorPlugin — registers FunctionExecutors for the GOAP-wired
+ * AlertSkillExecutorPlugin — registers FunctionExecutors for the
  * `alert.*` skills that previously had no handler.
  *
  * Six tier_0 fire-and-forget actions in `workspace/actions.yaml` dispatch
  * skills with the same id as the action (no `meta.skillHint`, no
  * `meta.agentId`). Without a registered executor, SkillDispatcherPlugin
  * logged "No executor found … dropping" on every planning cycle and the
- * GOAP loop never produced any visible side-effect.
+ * dispatch loop never produced any visible side-effect.
  *
  * Each executor here translates the dispatch into a structured Discord
  * alert published on `message.outbound.discord.alert` — the same topic
@@ -68,7 +68,7 @@ export const ALERT_SKILLS: ReadonlyArray<{
 
 export class AlertSkillExecutorPlugin implements Plugin {
   readonly name = "alert-skill-executor";
-  readonly description = "Registers Discord-alert FunctionExecutors for the GOAP `alert.*` skills";
+  readonly description = "Registers Discord-alert FunctionExecutors for the `alert.*` skills";
   readonly capabilities = ["alert-dispatch", "executor-registrar"];
 
   private bus?: EventBus;
@@ -91,7 +91,7 @@ export class AlertSkillExecutorPlugin implements Plugin {
   }
 
   /**
-   * Translate a GOAP skill dispatch into a Discord-alert bus event.
+   * Translate a skill dispatch into a Discord-alert bus event.
    *
    * The published payload matches the shape `WorldEngineAlertPlugin`
    * already consumes — actionId, goalId, meta.{severity, agentId, extra}.

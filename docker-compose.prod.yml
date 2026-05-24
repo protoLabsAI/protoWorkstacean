@@ -23,9 +23,13 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 
       # ── Discord ──────────────────────────────────────────────────
-      # Primary inbound bot — Quinn handles DMs and channel messages.
+      # Primary inbound bot — handles DMs and channel messages that
+      # aren't routed to a per-agent pool client. Operator picks which
+      # bot identity to use; default points at the @protoquinn[bot] token
+      # for continuity with existing users.
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN_QUINN:-}
-      # Per-agent pool — each token spins up one connected bot client.
+      # Per-agent pool — each token spins up one connected bot client
+      # for an agent declared in workspace/agents/*.yaml or workspace/agents.yaml.
       - DISCORD_BOT_TOKEN_AVA=${DISCORD_BOT_TOKEN_AVA:-}
       - DISCORD_BOT_TOKEN_QUINN=${DISCORD_BOT_TOKEN_QUINN:-}
       - DISCORD_BOT_TOKEN_FRANK=${DISCORD_BOT_TOKEN_FRANK:-}
@@ -35,8 +39,8 @@ services:
       - DISCORD_WEBHOOK_ALERTS=${DISCORD_WEBHOOK_ALERTS:-}
 
       # ── DM routing ───────────────────────────────────────────────
-      # Route unmatched DMs to Quinn's chat skill for natural conversation.
-      - ROUTER_DM_DEFAULT_AGENT=quinn
+      # Route unmatched DMs to Ava's chat skill for natural conversation.
+      - ROUTER_DM_DEFAULT_AGENT=ava
       - ROUTER_DM_DEFAULT_SKILL=chat
 
       # ── Langfuse tracing ─────────────────────────────────────────

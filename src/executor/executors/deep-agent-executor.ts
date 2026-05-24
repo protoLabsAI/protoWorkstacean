@@ -25,79 +25,6 @@ export interface DeepAgentConfig {
   apiKey?: string;
 }
 
-/**
- * Cached lean world state summary — refreshed every 60s.
- * Injected into the system prompt so the agent has immediate situational
- * awareness without burning a tool call on get_world_state.
- */
-class WorldStateCache {
-  private summary = "";
-  private lastFetch = 0;
-  private fetching = false;
-  private readonly ttlMs = 60_000;
-  private readonly http: HttpClient;
-
-  constructor(http: HttpClient) {
-    this.http = http;
-  }
-
-  async getSummary(): Promise<string> {
-    if (Date.now() - this.lastFetch < this.ttlMs && this.summary) {
-      return this.summary;
-    }
-    if (this.fetching) return this.summary;
-    this.fetching = true;
-    try {
-      const raw = (await this.http.get("/api/world-state")) as {
-        data?: { domains?: Record<string, { data?: unknown }> };
-        domains?: Record<string, { data?: unknown }>;
-      };
-      const domains = raw?.data?.domains ?? raw?.domains ?? {};
-      this.summary = WorldStateCache.distill(domains);
-      this.lastFetch = Date.now();
-    } catch {
-      // Keep stale summary on failure
-    } finally {
-      this.fetching = false;
-    }
-    return this.summary;
-  }
-
-  static distill(domains: Record<string, { data?: unknown }>): string {
-    const lines: string[] = ["<world_state_snapshot>"];
-
-    const ci = domains.ci?.data as { successRate?: number; failingMainCount?: number } | undefined;
-    if (ci) {
-      lines.push(`CI: ${Math.round((ci.successRate ?? 0) * 100)}% success rate, ${ci.failingMainCount ?? 0} repos with failing main`);
-    }
-
-    const pr = domains.pr_pipeline?.data as {
-      totalOpen?: number; conflicting?: number; readyToMerge?: number;
-      failingCi?: number; changesRequested?: number;
-    } | undefined;
-    if (pr) {
-      lines.push(`PRs: ${pr.totalOpen ?? 0} open, ${pr.conflicting ?? 0} conflicts, ${pr.failingCi ?? 0} failing CI, ${pr.readyToMerge ?? 0} ready to merge`);
-    }
-
-    const drift = domains.branch_drift?.data as { maxDrift?: number } | undefined;
-    if (drift) lines.push(`Branch drift: ${drift.maxDrift ?? 0} commits max`);
-
-    const security = domains.security?.data as { openCount?: number } | undefined;
-    if (security) lines.push(`Security: ${security.openCount ?? 0} open incidents`);
-
-    const flow = domains.flow?.data as { efficiency?: { ratio?: number }; distribution?: unknown } | undefined;
-    if (flow?.efficiency) lines.push(`Flow efficiency: ${Math.round((flow.efficiency.ratio ?? 0) * 100)}%`);
-
-    const agents = domains.agent_health?.data as { agentCount?: number } | undefined;
-    if (agents) lines.push(`Agents: ${agents.agentCount ?? 0} registered`);
-
-    lines.push("</world_state_snapshot>");
-    return lines.join("\n");
-  }
-}
-
-const _worldCaches = new Map<string, WorldStateCache>();
-
 // Each tool() call infers a unique DynamicStructuredTool<ZodObject<{specific fields}>, ...>.
 // These are all StructuredToolInterface at runtime, but TS can't unify them into a single
 // Record type because tool()'s zod v3/v4 interop overloads produce SchemaOutputT params
@@ -149,10 +76,6 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
           projectSlug: z.string().optional(),
         }),
       },
-    ),
-    get_world_state: tool(
-      async () => JSON.stringify(await http.get("/api/world-state")),
-      { name: "get_world_state", description: "System health and domain state.", schema: z.object({}) },
     ),
     manage_board: tool(
       async (input) => {
@@ -230,10 +153,6 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
       async () => JSON.stringify(await http.get("/api/branch-drift")),
       { name: "get_branch_drift", description: "Dev vs main divergence.", schema: z.object({}) },
     ),
-    get_outcomes: tool(
-      async () => JSON.stringify(await http.get("/api/world-state")),
-      { name: "get_outcomes", description: "GOAP outcomes and flow.", schema: z.object({}) },
-    ),
     get_incidents: tool(
       async () => JSON.stringify(await http.get("/api/incidents")),
       { name: "get_incidents", description: "Open incidents.", schema: z.object({}) },
@@ -244,6 +163,37 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
         name: "report_incident",
         description: "File an incident.",
         schema: z.object({ title: z.string(), severity: z.enum(["critical", "high", "medium", "low"]), description: z.string().optional() }),
+      },
+    ),
+    pr_inspector: tool(
+      async (input) => JSON.stringify(await http.post("/api/pr/inspect", input)),
+      {
+        name: "pr_inspector",
+        description:
+          "Inspect and review GitHub PRs. The `repo` arg (owner/name) is REQUIRED on every call — there is no default. Actions:\n" +
+          "- list_open: list open PRs in a repo\n" +
+          "- check_ci: CI check states for a PR\n" +
+          "- coderabbit_threads: unresolved review threads on a PR\n" +
+          "- diff_summary: first 200 lines of the PR diff\n" +
+          "- review_comment: post a COMMENTED review (requires body)\n" +
+          "- review_approve: post an APPROVED review (body optional)\n" +
+          "- review_request_changes: post a CHANGES_REQUESTED review (requires body)",
+        schema: z.object({
+          action: z.enum([
+            "list_open",
+            "check_ci",
+            "coderabbit_threads",
+            "diff_summary",
+            "review_comment",
+            "review_approve",
+            "review_request_changes",
+          ]),
+          repo: z.string().describe(
+            "Repository in owner/name format (e.g. protoLabsAI/protoWorkstacean). REQUIRED on every call.",
+          ),
+          pr_number: z.number().int().optional(),
+          body: z.string().optional(),
+        }),
       },
     ),
     publish_event: tool(
@@ -578,8 +528,6 @@ export class DeepAgentExecutor implements IExecutor {
   private readonly model: ChatOpenAI;
   private readonly http: HttpClient;
 
-  private readonly worldCache: WorldStateCache;
-
   constructor(agentDef: AgentDefinition, config: DeepAgentConfig = {}) {
     this.agentDef = agentDef;
     const gatewayUrl = config.gatewayUrl ?? process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL;
@@ -597,14 +545,6 @@ export class DeepAgentExecutor implements IExecutor {
       timeoutMs: 120_000, // 2 min — chat_with_agent calls A2A which can take time
       ...(config.apiKey ? { auth: { type: "api-key" as const, key: config.apiKey } } : {}),
     });
-
-    // Shared cache keyed by API base URL — all agents hitting the same
-    // workstacean instance share one cache + refresh cycle.
-    const cacheKey = config.apiBaseUrl ?? "http://localhost:3000";
-    if (!_worldCaches.has(cacheKey)) {
-      _worldCaches.set(cacheKey, new WorldStateCache(this.http));
-    }
-    this.worldCache = _worldCaches.get(cacheKey)!;
   }
 
   async execute(req: SkillRequest): Promise<SkillResult> {
@@ -621,23 +561,17 @@ export class DeepAgentExecutor implements IExecutor {
 
     try {
       // Resolve skill-level systemPromptOverride if this skill defines one.
-      // Skills like goal_proposal and diagnose_pr_stuck have narrow, structured
-      // output requirements that replace the agent's general-purpose prompt.
+      // Skills like diagnose_pr_stuck have narrow, structured output requirements
+      // that replace the agent's general-purpose prompt.
       const skillDef = req.skill
         ? this.agentDef.skills.find(s => s.name === req.skill)
         : undefined;
       const basePrompt = skillDef?.systemPromptOverride ?? this.agentDef.systemPrompt;
 
-      // Inject cached world state into system prompt for instant situational awareness
-      const worldSummary = await this.worldCache.getSummary();
-      const enrichedPrompt = worldSummary
-        ? `${basePrompt}\n\n## Current system state (auto-refreshed, do not repeat verbatim)\n\n${worldSummary}`
-        : basePrompt;
-
       const agent = createReactAgent({
         llm: this.model,
         tools,
-        messageModifier: new SystemMessage(enrichedPrompt),
+        messageModifier: new SystemMessage(basePrompt),
       });
 
       console.log(`[deep-agent:${this.agentDef.name}] invoke with ${tools.length} tools, prompt length=${prompt.length}, langfuse=${LANGFUSE_ENABLED}`);

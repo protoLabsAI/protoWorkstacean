@@ -1,12 +1,12 @@
 /**
- * CeremonySkillExecutorPlugin — registers FunctionExecutors for the GOAP-wired
+ * CeremonySkillExecutorPlugin — registers FunctionExecutors for the
  * `ceremony.*` actions that previously had no skill-side handler.
  *
  * Background (issue #430): a small set of tier_0 fire-and-forget actions in
  * `workspace/actions.yaml` exist purely to nudge an existing ceremony — they
  * have no skillHint, no agentId, and their action id is the skill name the
  * dispatcher tries to resolve. CeremonyPlugin already accepts external
- * triggers on `ceremony.<id>.execute`, but nothing was bridging the GOAP
+ * triggers on `ceremony.<id>.execute`, but nothing was bridging the
  * action id to that topic, so SkillDispatcherPlugin dropped every dispatch
  * with `No executor found for skill "ceremony.X"`. After PR #427 those drops
  * also fire HIGH `platform.skills_unwired` alerts every planning cycle.
@@ -56,7 +56,7 @@ export const CEREMONY_SKILLS: ReadonlyArray<{
 
 export class CeremonySkillExecutorPlugin implements Plugin {
   readonly name = "ceremony-skill-executor";
-  readonly description = "Registers FunctionExecutors that bridge GOAP `ceremony.*` actions to ceremony.<id>.execute triggers";
+  readonly description = "Registers FunctionExecutors that bridge `ceremony.*` actions to ceremony.<id>.execute triggers";
   readonly capabilities = ["ceremony-trigger", "executor-registrar"];
 
   private bus?: EventBus;
@@ -79,7 +79,7 @@ export class CeremonySkillExecutorPlugin implements Plugin {
   }
 
   /**
-   * Translate a GOAP skill dispatch into a `ceremony.<id>.execute` bus event.
+   * Translate a skill dispatch into a `ceremony.<id>.execute` bus event.
    *
    * The published payload deliberately carries `type: "external.trigger"`
    * (anything other than `"ceremony.execute"`) so CeremonyPlugin's `.execute`

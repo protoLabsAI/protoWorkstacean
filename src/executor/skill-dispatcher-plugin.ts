@@ -13,17 +13,14 @@
  * Outbound: {replyTopic}  (from msg.reply.topic or agent.skill.response.{correlationId})
  */
 
-import type { Plugin, EventBus, BusMessage, ConversationTurn, LoggerTurnQueryRequest, LoggerTurnQueryResponse } from "../../lib/types.ts";
+import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "./executor-registry.ts";
 import type { SkillRequest } from "./types.ts";
 import type { AgentSkillRequestPayload, AutonomousOutcomePayload, FlowItemPayload } from "../event-bus/payloads.ts";
-import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
-import { assembleContext } from "../../lib/conversation/context-assembler.ts";
 import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "./task-tracker.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
-import { SessionStore } from "../agent-runtime/session-context.ts";
 
 const WORKING_STATES = new Set(["submitted", "working"]);
 
@@ -45,90 +42,46 @@ export class SkillDispatcherPlugin implements Plugin {
   readonly name = "skill-dispatcher";
   readonly description = "Sole agent.skill.request subscriber — resolves executor and dispatches";
   readonly capabilities = ["skill-dispatch"];
+  readonly subscribes = ["agent.skill.request"];
+  readonly publishes = [
+    "agent.skill.response.{correlationId}",
+    "agent.skill.progress.{correlationId}",
+    "autonomous.outcome.{actor}.{skill}",
+    "flow.item.created",
+    "flow.item.updated",
+    "flow.item.completed",
+  ];
 
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
-  private readonly graphiti: GraphitiClient;
   private readonly identityRegistry: IdentityRegistry;
   private readonly mailbox: ContextMailbox | undefined;
   private readonly taskTracker: TaskTracker | undefined;
-  private readonly sessionStore: SessionStore;
 
   /**
    * In-flight execution tracking — set at the TOP of _dispatch() (before any
-   * await) so isActive() is accurate even during the async Graphiti enrichment
-   * window. Without this, a DM debounce timer firing during enrichment would
-   * see isActive() === false and double-dispatch.
+   * await) so isActive() is accurate even during async work. Without this,
+   * a DM debounce timer firing during dispatch could see isActive() === false
+   * and dispatch a competing execution.
    */
   private readonly activeExecutions = new Map<string, { startedAt: number; skill: string }>();
 
   constructor(
     private readonly registry: ExecutorRegistry,
     workspaceDir: string,
-    /** Injectable for testing — defaults to a real GraphitiClient. */
-    graphiti?: GraphitiClient,
     /** Optional mailbox for mid-execution DM queuing. */
     mailbox?: ContextMailbox,
     /** Optional tracker for long-running A2A tasks. */
     taskTracker?: TaskTracker,
-    /** Optional session store for SDK session continuation across turns. */
-    sessionStore?: SessionStore,
   ) {
-    this.graphiti = graphiti ?? new GraphitiClient();
     this.identityRegistry = new IdentityRegistry(workspaceDir);
     this.mailbox = mailbox;
     this.taskTracker = taskTracker;
-    this.sessionStore = sessionStore ?? new SessionStore();
   }
 
   /** Check if an execution is currently active for a given correlationId. */
   isActive(correlationId: string): boolean {
     return this.activeExecutions.has(correlationId);
-  }
-
-  /**
-   * Query LoggerPlugin for recent conversation turns via the bus.
-   * Resolves with [] if LoggerPlugin is not installed (timeout) or on any error.
-   */
-  private _queryRecentTurns(userId: string, agentName: string): Promise<ConversationTurn[]> {
-    if (!this.bus) return Promise.resolve([]);
-
-    return new Promise<ConversationTurn[]>((resolve) => {
-      const replyTopic = `logger.turn.query.response.${crypto.randomUUID()}`;
-      let settled = false;
-
-      const subId = this.bus!.subscribe(replyTopic, this.name, (msg: BusMessage) => {
-        if (settled) return;
-        settled = true;
-        this.bus!.unsubscribe(subId);
-        resolve((msg.payload as LoggerTurnQueryResponse).turns);
-      });
-
-      this.bus!.publish("logger.turn.query", {
-        id: crypto.randomUUID(),
-        correlationId: crypto.randomUUID(),
-        topic: "logger.turn.query",
-        timestamp: Date.now(),
-        payload: {
-          type: "logger.turn.query",
-          userId,
-          agentName,
-          limit: 8,
-          maxAgeMs: 24 * 60 * 60 * 1000,
-          replyTopic,
-        } satisfies LoggerTurnQueryRequest,
-      });
-
-      // Fallback: LoggerPlugin responds synchronously, so if not installed
-      // the timeout fires at next tick and we continue without turns.
-      setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          this.bus?.unsubscribe(subId);
-          resolve([]);
-        }
-      }, 0);
-    });
   }
 
   install(bus: EventBus): void {
@@ -202,19 +155,6 @@ export class SkillDispatcherPlugin implements Plugin {
       (targets.length > 0 ? ` (targets: ${targets.join(", ")})` : ""),
     );
 
-    // ── Memory enrichment ──────────────────────────────────────────────────────
-    // Graphiti group id selection (alphanumeric/dash/underscore only — colons
-    // crash graphiti's ingestion worker silently):
-    //   (a) human-originated: user_{canonicalId} via identityRegistry
-    //   (b) bot-initiated with meta.systemActor (pr-remediator / sweep /
-    //       ceremony / cron): system_{actor} — gives the autonomous loop
-    //       its own persistent memory of what it did, grouped by the
-    //       subsystem that triggered it
-    //   (c) fallthrough: no group — no write, no read
-    //
-    // For (a) we also compute an agent-scoped group so each agent
-    // accumulates its own relationship memory with the user on top of
-    // the shared cross-agent baseline.
     const sourceUserId: string | undefined =
       typeof msg.source?.userId === "string" ? msg.source.userId : undefined;
     const sourcePlatform: string | undefined =
@@ -223,12 +163,12 @@ export class SkillDispatcherPlugin implements Plugin {
       typeof msg.source?.channelId === "string" ? msg.source.channelId : undefined;
     const systemActor: string | undefined =
       typeof payload.meta?.systemActor === "string" ? payload.meta.systemActor : undefined;
-    // When GOAP publishes to agent.skill.request, it stamps actionId + goalId
-    // on meta so the autonomous outcome can carry them back to the planner's
-    // loop detector.
-    const goapActionId: string | undefined =
+    // Optional actionId / goalId stamped on meta by the caller — propagated
+    // onto the autonomous-outcome event so downstream telemetry can correlate
+    // dispatches with the trigger (ceremony, cron, alert handler).
+    const actionId: string | undefined =
       typeof payload.meta?.actionId === "string" ? payload.meta.actionId : undefined;
-    const goapGoalId: string | undefined =
+    const goalId: string | undefined =
       typeof payload.meta?.goalId === "string" ? payload.meta.goalId
       : (typeof payload.goalId === "string" ? payload.goalId : undefined);
     // Name of the agent that issued this skill request (via chat_with_agent /
@@ -237,48 +177,9 @@ export class SkillDispatcherPlugin implements Plugin {
     const dispatcherAgent: string | undefined =
       typeof payload.meta?.dispatcherAgent === "string" ? payload.meta.dispatcherAgent : undefined;
 
-    let rawContent = typeof payload.content === "string" ? payload.content : undefined;
-    const originalContent = rawContent; // preserved for episode storage — never includes context prefix
-    let groupId: string | undefined;
-    let agentGroupId: string | undefined;
+    const rawContent = typeof payload.content === "string" ? payload.content : undefined;
 
-    if (sourceUserId && sourcePlatform && sourcePlatform !== "cron") {
-      groupId = this.identityRegistry.groupId(sourcePlatform, sourceUserId);
-      const agentName = targets[0];
-      // agent_{agent}__{user_...} — double underscore separates the two
-      // identity segments unambiguously. Single-underscore would collide
-      // with the user_{platform}_{id} fallback.
-      if (agentName) agentGroupId = `agent_${agentName}__${groupId}`;
-    } else if (systemActor) {
-      // Bot-initiated dispatch — memory goes to a stable system-actor group
-      // so the autonomous loop builds its own episodic history. No
-      // agent-scoped split: it's already one subsystem writing, not a
-      // human talking to a specific agent.
-      groupId = `system_${systemActor}`;
-    }
-
-    if (groupId && rawContent) {
-      const [sharedCtx, agentCtx] = await Promise.all([
-        this.graphiti.getContextBlock(groupId, rawContent).catch(() => ""),
-        agentGroupId ? this.graphiti.getContextBlock(agentGroupId, rawContent).catch(() => "") : Promise.resolve(""),
-      ]);
-      const combined = [sharedCtx, agentCtx].filter(Boolean).join("\n");
-
-      // Retrieve recent turns for human-originated messages only via bus query
-      const recentTurns: ConversationTurn[] = sourceUserId
-        ? await this._queryRecentTurns(sourceUserId, targets[0] ?? "")
-        : [];
-
-      rawContent = assembleContext(combined || undefined, recentTurns, rawContent);
-    }
-    // ── End memory enrichment ─────────────────────────────────────────────────
-
-    // Look up any existing SDK session for this correlationId+agent pair so the
-    // executor can resume conversation context across multiple skill turns.
     const agentName = targets[0] ?? "";
-    const existingSession = agentName
-      ? this.sessionStore.get(correlationId, agentName)
-      : undefined;
 
     const req: SkillRequest = {
       skill,
@@ -288,7 +189,6 @@ export class SkillDispatcherPlugin implements Plugin {
       parentId,
       replyTopic,
       payload,
-      ...(existingSession ? { resume: existingSession.sessionId } : {}),
     };
 
     const flowItemId = `skill-${correlationId}`;
@@ -341,8 +241,8 @@ export class SkillDispatcherPlugin implements Plugin {
               parentId,
               systemActor: systemActor ?? "user",
               skill,
-              actionId: goapActionId,
-              goalId: goapGoalId,
+              actionId: actionId,
+              goalId: goalId,
               success: !isError,
               taskState,
               text: content,
@@ -414,8 +314,8 @@ export class SkillDispatcherPlugin implements Plugin {
           parentId,
           systemActor: systemActor ?? "user",
           skill,
-          actionId: goapActionId,
-          goalId: goapGoalId,
+          actionId: actionId,
+          goalId: goalId,
           success: false,
           taskState: result.data?.taskState ?? "failed",
           text: result.text,
@@ -434,10 +334,6 @@ export class SkillDispatcherPlugin implements Plugin {
           console.warn("[skill-dispatcher] Agent hit maxTurns limit");
         }
 
-        // Persist the SDK session ID so the next turn for this agent can resume it.
-        if (result.data?.sessionId && agentName) {
-          this.sessionStore.set(correlationId, agentName, result.data.sessionId);
-        }
         const completedAt = Date.now();
         const durationMs = completedAt - dispatchedAt;
         this._publishFlowEvent("flow.item.completed", {
@@ -460,44 +356,14 @@ export class SkillDispatcherPlugin implements Plugin {
           parentId,
           systemActor: systemActor ?? "user",
           skill,
-          actionId: goapActionId,
-          goalId: goapGoalId,
+          actionId: actionId,
+          goalId: goalId,
           success: true,
           taskState: result.data?.taskState ?? "completed",
           text: result.text,
           usage: result.data?.usage,
           durationMs,
         });
-      }
-
-      // Store completed turn in Graphiti (fire-and-forget, non-blocking).
-      //
-      // User-originated: written to the shared user group AND the
-      //   agent-scoped group so each agent accumulates its own relationship
-      //   history with the user on top of the cross-agent baseline.
-      //
-      // System-originated (bot-initiated, meta.systemActor set): written
-      //   only to the single system_{actor} group. No agent split —
-      //   systemActor IS the actor, no user involved.
-      if (!result.isError && result.text && groupId && originalContent) {
-        const identity = sourceUserId && sourcePlatform
-          ? this.identityRegistry.resolve(sourcePlatform, sourceUserId)
-          : null;
-        const episodeBase = {
-          userMessage: originalContent,
-          agentMessage: result.text,
-          userRole: identity?.displayName ?? sourceUserId ?? systemActor,
-          agentName: targets[0],
-          channelId: sourceChannelId,
-          platform: sourcePlatform ?? (systemActor ? "system" : undefined),
-          parentTurnId: correlationId,
-        };
-        this.graphiti.addEpisode({ groupId, ...episodeBase })
-          .catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode (shared) error:", err));
-        if (agentGroupId) {
-          this.graphiti.addEpisode({ groupId: agentGroupId, ...episodeBase })
-            .catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode (agent) error:", err));
-        }
       }
 
       this._publishResponse(
@@ -520,8 +386,8 @@ export class SkillDispatcherPlugin implements Plugin {
         parentId,
         systemActor: systemActor ?? "user",
         skill,
-        actionId: goapActionId,
-        goalId: goapGoalId,
+        actionId: actionId,
+        goalId: goalId,
         success: false,
         taskState: "failed",
         text: errorMsg,

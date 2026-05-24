@@ -4,7 +4,7 @@ title: Create a Ceremony
 
 A **ceremony** is a scheduled skill invocation — a recurring fleet ritual defined in YAML, fired by a cron expression, and dispatched through the standard skill routing pipeline.
 
-Ceremonies are distinct from GOAP actions. Actions react to world-state violations. Ceremonies run on a fixed schedule regardless of world state, like a daily standup or a weekly retrospective.
+Ceremonies are distinct from actions. Actions react to world-state violations. Ceremonies run on a fixed schedule regardless of world state, like a daily standup or a weekly retrospective.
 
 ## How ceremonies work
 
@@ -144,7 +144,7 @@ When called with a per-agent key, `createdBy` is stamped server-side. Agents can
 
 ## Example: security triage ceremony
 
-This ceremony runs hourly and is also triggered by a GOAP action (see `workspace/actions.yaml`):
+This ceremony runs hourly:
 
 ```yaml
 # workspace/ceremonies/security-triage.yaml
@@ -158,7 +158,7 @@ notifyChannel: ""
 enabled: true
 ```
 
-When `ActionDispatcherPlugin` fires the `ceremony.security_triage` GOAP action, it publishes `ceremony.security-triage.execute`, which triggers this ceremony immediately — using the same code path as the cron schedule.
+Any caller can fire this ceremony off-schedule by publishing `ceremony.security-triage.execute` on the bus (or by POSTing to `/api/ceremonies/security-triage/run`). The cron path and the on-demand path share the same code, so on-demand runs are observable on `/api/ceremonies` just like scheduled ones.
 
 ## Example: weekly retrospective
 

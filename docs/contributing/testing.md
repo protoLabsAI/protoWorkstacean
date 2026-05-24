@@ -38,22 +38,6 @@ See `lib/plugins/scheduler.test.ts` for a full working example.
 
 ---
 
-## Legacy observational scripts
-
-`src/test-agent.ts` and `src/test-cron.ts` are **not tests of the current production runtime**. They were written for an earlier in-process runtime and are observational — they make real LLM calls and log output to stdout for human inspection. No automated assertions.
-
-These scripts are kept for reference but do **not** represent the current testing approach. The production in-process runtime is `DeepAgentExecutor` (LangGraph), which has no equivalent observational scripts yet.
-
-If you want to run them anyway:
-
-```bash
-# Requires OPENAI_API_KEY
-bun run src/test-agent.ts
-bun run src/test-cron.ts
-```
-
----
-
 ## CI
 
 The CI pipeline runs `bun test` and `bun run tsc --noEmit` on every push/PR. See `.github/workflows/build.yml`.
