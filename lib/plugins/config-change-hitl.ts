@@ -46,9 +46,6 @@ const pendingContent = new Map<string, { targetPath: string; newContent: string 
 
 /** Resolve the workspace-relative path a ConfigChangeRequest writes to. */
 function resolveTargetPath(workspaceDir: string, req: ConfigChangeRequest): string | null {
-  if (req.configFile === "goals.yaml" || req.configFile === "actions.yaml") {
-    return join(workspaceDir, req.configFile);
-  }
   if (typeof req.configFile === "object" && req.configFile.type === "agent") {
     if (!/^[\w\-]+$/.test(req.configFile.agentName)) return null;
     return join(workspaceDir, "agents", `${req.configFile.agentName}.yaml`);
@@ -66,7 +63,7 @@ export function recordPendingContent(correlationId: string, targetPath: string, 
 export class ConfigChangeHITLPlugin implements Plugin {
   readonly name = "config-change-hitl";
   readonly description =
-    "Config-change gate — routes goals.yaml / actions.yaml approval requests to interface plugins";
+    "Config-change gate — routes agent-yaml approval requests to interface plugins";
   readonly capabilities = ["config-change-hitl-routing"];
 
   private expiryTimer: ReturnType<typeof setInterval> | null = null;

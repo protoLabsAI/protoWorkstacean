@@ -44,7 +44,6 @@ Cache TTLs (defined in `api.ts`):
 
 | Endpoint | TTL |
 |---|---|
-| `/api/world-state`, `/api/outcomes` | 15 s |
 | `/api/services`, `/api/agent-health`, `/api/flow-metrics` | 30 s |
 | `/api/security-summary` | 60 s |
 | `/api/pr-pipeline` | 2 min |

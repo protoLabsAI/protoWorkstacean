@@ -181,7 +181,7 @@ The `memory` world-state domain polls `/api/memory-health`, which issues two pro
 - `GET /healthcheck` against Graphiti (catches: service down)
 - `POST /search` with a trivial query (catches: Neo4j vector functions missing, embedder misconfigured, gateway model aliases missing)
 
-Two goals in `workspace/goals.yaml` alert on either probe failing:
+Two goals in `` alert on either probe failing:
 
 - `memory.graphiti_healthy` (critical) — `domains.memory.data.healthy` must be 1
 - `memory.search_working` (high) — `domains.memory.data.searchOk` must be 1

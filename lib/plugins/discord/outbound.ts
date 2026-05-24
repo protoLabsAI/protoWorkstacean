@@ -119,16 +119,6 @@ export function buildConfigChangeEmbeds(request: ConfigChangeRequest): EmbedBuil
   }
 
   const impactLines: string[] = [];
-  if (request.goapImpact) {
-    impactLines.push(`**Dry-run impact:** ${request.goapImpact.summary}`);
-    const imp = request.goapImpact;
-    if (imp.addedGoals?.length)     impactLines.push(`+ Goals added: ${imp.addedGoals.join(", ")}`);
-    if (imp.removedGoals?.length)   impactLines.push(`- Goals removed: ${imp.removedGoals.join(", ")}`);
-    if (imp.modifiedGoals?.length)  impactLines.push(`~ Goals modified: ${imp.modifiedGoals.join(", ")}`);
-    if (imp.addedActions?.length)   impactLines.push(`+ Actions added: ${imp.addedActions.join(", ")}`);
-    if (imp.removedActions?.length) impactLines.push(`- Actions removed: ${imp.removedActions.join(", ")}`);
-    if (imp.modifiedActions?.length)impactLines.push(`~ Actions modified: ${imp.modifiedActions.join(", ")}`);
-  }
   if (request.coverageImpact) {
     impactLines.push(`**Coverage:** ${request.coverageImpact.summary}`);
     if (request.coverageImpact.affectedTestFiles.length) {

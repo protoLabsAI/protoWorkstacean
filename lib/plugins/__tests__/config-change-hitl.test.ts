@@ -121,11 +121,11 @@ describe("ConfigChangeHITLPlugin — applier", () => {
   });
 
   test("publishes config.change.applied.* on successful apply", async () => {
-    const target = join(workspaceDir, "goals.yaml");
-    writeFileSync(target, "goals: []\n");
+    const target = join(workspaceDir, "agents", "demo.yaml");
+    writeFileSync(target, "name: demo\n");
 
     const correlationId = "c4";
-    recordPendingContent(correlationId, target, "goals: [updated]\n");
+    recordPendingContent(correlationId, target, "name: demo\nrole: general\n");
 
     const appliedEvents: unknown[] = [];
     bus.subscribe("config.change.applied.#", "test-sub", msg => {
@@ -135,8 +135,9 @@ describe("ConfigChangeHITLPlugin — applier", () => {
     publishRequest({
       type: "config_change_request",
       correlationId,
-      configFile: "goals.yaml",
+      configFile: { type: "agent", agentName: "demo" },
       title: "t", summary: "s", yamlDiff: "d",
+      evidence: { sampleCount: 100, baselineMetric: "b", proposedDelta: "d", affectedSkills: ["x"] },
       options: ["approve", "reject"],
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       replyTopic: `config.change.response.${correlationId}`,

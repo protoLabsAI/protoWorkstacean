@@ -473,5 +473,5 @@ curl http://localhost:3000/api/hitl/pending
 - The HITL renderer is a pure UI thin client. It shows a prompt, collects a response, publishes to the bus. It has no knowledge of what comes before or after.
 - `HITLPlugin` is a router — it stores state, dispatches to renderers, and routes responses. It has no opinion on format, display, or what to do with the decision.
 - Each interface plugin (Discord, Linear, Signal, Slack, API) owns rendering for its platform.
-- The requester (BudgetPlugin, GoalEvaluator, Ava) owns what to do with the response — HITL doesn't know or care.
+- The requester (BudgetPlugin,  Ava) owns what to do with the response — HITL doesn't know or care.
 - `correlationId` is immutable across the entire lifecycle.

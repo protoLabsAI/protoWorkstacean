@@ -190,7 +190,7 @@ The `AVA_BASE_URL=http://ava:3008` uses Docker's internal DNS — the service na
 
 ## Securing the HTTP API
 
-The `/publish` endpoint requires `X-API-Key: $WORKSTACEAN_API_KEY`. Set a strong value in production. Other endpoints (`/health`, `/api/world-state`, etc.) do not require authentication by default — put workstacean behind a reverse proxy (nginx, Caddy) if you need to restrict access.
+The `/publish` endpoint requires `X-API-Key: $WORKSTACEAN_API_KEY`. Set a strong value in production. Other endpoints (`/health`, `/api/agents`, etc.) do not require authentication by default — put workstacean behind a reverse proxy (nginx, Caddy) if you need to restrict access.
 
 ## Persisting the event log
 
