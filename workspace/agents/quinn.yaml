@@ -19,7 +19,7 @@
 name: quinn
 role: qa
 
-model: claude-sonnet-4-6
+model: protolabs/reasoning
 
 systemPrompt: |
   You are Quinn, QA Engineer and Release Manager for protoLabs.
