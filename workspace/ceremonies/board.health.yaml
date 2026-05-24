@@ -1,6 +1,6 @@
 id: board.health
 name: Board Health Check
-schedule: "*/30 * * * *"
+schedule: "0 */6 * * *"
 skill: board_health
 targets:
   - all
