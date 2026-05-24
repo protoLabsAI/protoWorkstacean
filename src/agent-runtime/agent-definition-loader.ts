@@ -85,13 +85,24 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
           const keywords = Array.isArray(s.keywords)
             ? s.keywords.filter((k): k is string => typeof k === "string")
             : undefined;
-        return {
+          const skillTools = Array.isArray(s.tools)
+            ? s.tools.filter((t): t is string => typeof t === "string")
+            : undefined;
+          // -1 means unlimited; any other non-positive value falls through to
+          // the agent-level default (handled in the executor).
+          const skillMaxTurns =
+            typeof s.maxTurns === "number" && (s.maxTurns === -1 || s.maxTurns > 0)
+              ? s.maxTurns
+              : undefined;
+          return {
             name,
             ...(typeof s.description === "string" ? { description: s.description } : {}),
             ...(keywords?.length ? { keywords } : {}),
             ...(typeof s.systemPromptOverride === "string"
               ? { systemPromptOverride: s.systemPromptOverride }
               : {}),
+            ...(skillTools ? { tools: skillTools } : {}),
+            ...(skillMaxTurns !== undefined ? { maxTurns: skillMaxTurns } : {}),
           };
         })
         .filter((s): s is AgentSkillDefinition => s !== null)
