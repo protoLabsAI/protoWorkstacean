@@ -165,6 +165,37 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
         schema: z.object({ title: z.string(), severity: z.enum(["critical", "high", "medium", "low"]), description: z.string().optional() }),
       },
     ),
+    pr_inspector: tool(
+      async (input) => JSON.stringify(await http.post("/api/pr/inspect", input)),
+      {
+        name: "pr_inspector",
+        description:
+          "Inspect and review GitHub PRs. The `repo` arg (owner/name) is REQUIRED on every call — there is no default. Actions:\n" +
+          "- list_open: list open PRs in a repo\n" +
+          "- check_ci: CI check states for a PR\n" +
+          "- coderabbit_threads: unresolved review threads on a PR\n" +
+          "- diff_summary: first 200 lines of the PR diff\n" +
+          "- review_comment: post a COMMENTED review (requires body)\n" +
+          "- review_approve: post an APPROVED review (body optional)\n" +
+          "- review_request_changes: post a CHANGES_REQUESTED review (requires body)",
+        schema: z.object({
+          action: z.enum([
+            "list_open",
+            "check_ci",
+            "coderabbit_threads",
+            "diff_summary",
+            "review_comment",
+            "review_approve",
+            "review_request_changes",
+          ]),
+          repo: z.string().describe(
+            "Repository in owner/name format (e.g. protoLabsAI/protoWorkstacean). REQUIRED on every call.",
+          ),
+          pr_number: z.number().int().optional(),
+          body: z.string().optional(),
+        }),
+      },
+    ),
     publish_event: tool(
       async (input) => JSON.stringify(await http.post("/publish", input)),
       {
