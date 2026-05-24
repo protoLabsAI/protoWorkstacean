@@ -49,6 +49,9 @@ function parseRepo(repo: string): { owner: string; name: string } | null {
   return { owner: owner!, name: name! };
 }
 
+/** Per-request timeout for GitHub calls. Beyond this, treat as a failed inspection. */
+const GH_FETCH_TIMEOUT_MS = 15_000;
+
 async function ghFetch(
   owner: string,
   name: string,
@@ -59,6 +62,7 @@ async function ghFetch(
   const token = await getGithubToken(owner, name);
   return fetch(url, {
     ...init,
+    signal: init.signal ?? AbortSignal.timeout(GH_FETCH_TIMEOUT_MS),
     headers: {
       ...(init.headers ?? {}),
       Authorization: `Bearer ${token}`,
@@ -75,7 +79,7 @@ async function listOpen(owner: string, name: string): Promise<string> {
     name,
     `https://api.github.com/repos/${owner}/${name}/pulls?state=open&per_page=30`,
   );
-  if (!resp.ok) return `Error listing PRs: ${resp.status} ${await resp.text()}`;
+  if (!resp.ok) throw new Error(`GitHub API error listing PRs: ${resp.status} ${await resp.text()}`);
   const prs = (await resp.json()) as Array<{
     number: number;
     title: string;
@@ -94,7 +98,7 @@ async function listOpen(owner: string, name: string): Promise<string> {
 
 async function checkCi(owner: string, name: string, pr: number): Promise<string> {
   const prResp = await ghFetch(owner, name, `https://api.github.com/repos/${owner}/${name}/pulls/${pr}`);
-  if (!prResp.ok) return `Error fetching PR#${pr}: ${prResp.status} ${await prResp.text()}`;
+  if (!prResp.ok) throw new Error(`GitHub API error fetching PR#${pr}: ${prResp.status} ${await prResp.text()}`);
   const { head } = (await prResp.json()) as { head: { sha: string } };
 
   const checksResp = await ghFetch(
@@ -102,7 +106,7 @@ async function checkCi(owner: string, name: string, pr: number): Promise<string>
     name,
     `https://api.github.com/repos/${owner}/${name}/commits/${head.sha}/check-runs?per_page=50`,
   );
-  if (!checksResp.ok) return `Error fetching check-runs: ${checksResp.status} ${await checksResp.text()}`;
+  if (!checksResp.ok) throw new Error(`GitHub API error fetching check-runs: ${checksResp.status} ${await checksResp.text()}`);
   const { check_runs } = (await checksResp.json()) as {
     check_runs: Array<{ name: string; status: string; conclusion: string | null }>;
   };
@@ -134,8 +138,9 @@ async function coderabbitThreads(owner: string, name: string, pr: number): Promi
     method: "POST",
     body: JSON.stringify({ query, variables: { owner, name, pr } }),
   });
-  if (!resp.ok) return `Error fetching review threads: ${resp.status} ${await resp.text()}`;
+  if (!resp.ok) throw new Error(`GitHub API error fetching review threads: ${resp.status} ${await resp.text()}`);
   const data = (await resp.json()) as {
+    errors?: Array<{ message: string }>;
     data?: {
       repository?: {
         pullRequest?: {
@@ -151,6 +156,9 @@ async function coderabbitThreads(owner: string, name: string, pr: number): Promi
       };
     };
   };
+  if (data.errors?.length) {
+    throw new Error(`GraphQL error fetching review threads: ${data.errors.map((e) => e.message).join("; ")}`);
+  }
   const threads = data?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
   const unresolved = threads.filter((t) => !t.isResolved);
   if (unresolved.length === 0) return `No unresolved review threads on PR#${pr}.`;
@@ -169,16 +177,17 @@ async function coderabbitThreads(owner: string, name: string, pr: number): Promi
 }
 
 async function diffSummary(owner: string, name: string, pr: number): Promise<string> {
-  if (!getGithubToken) return "Error: no GitHub credentials";
+  if (!getGithubToken) throw new Error("no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)");
   const token = await getGithubToken(owner, name);
   const resp = await fetch(`https://api.github.com/repos/${owner}/${name}/pulls/${pr}`, {
+    signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS),
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github.v3.diff",
       "User-Agent": "protoquinn",
     },
   });
-  if (!resp.ok) return `Error fetching diff: ${resp.status} ${await resp.text()}`;
+  if (!resp.ok) throw new Error(`GitHub API error fetching diff: ${resp.status} ${await resp.text()}`);
   const diff = await resp.text();
   const lines = diff.split("\n");
   const truncated = lines.length > 200;
@@ -204,7 +213,7 @@ async function submitReview(
       headers: { "Content-Type": "application/json" },
     },
   );
-  if (!resp.ok) return `Error submitting review: ${resp.status} ${await resp.text()}`;
+  if (!resp.ok) throw new Error(`GitHub API error submitting review: ${resp.status} ${await resp.text()}`);
   const label = event === "APPROVE" ? "Approved" : event === "REQUEST_CHANGES" ? "Requested changes on" : "Commented on";
   return `${label} PR#${pr} in ${owner}/${name}.`;
 }
