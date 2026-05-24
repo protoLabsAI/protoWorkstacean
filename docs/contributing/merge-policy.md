@@ -126,7 +126,7 @@ If you see anything other than `main` or `dev` after "into," it's a stacked PR �
 
 If you're the one stacking PRs, two habits make life easier:
 
-1. **Don't enable auto-merge until the entire stack has stopped moving.** Auto-merge captures the head SHA at the moment you click it. If you then rebase the branch, auto-merge fires against the old SHA and skips your new commits.
+1. **Don't enable auto-merge until the entire stack has stopped moving.** Auto-merge captures the head SHA at the moment you click it. If you then rebase the branch, auto-merge fires against the old SHA and skips your new commits. Auto-merge remains the right default for *isolated* PRs — the rule only applies when a PR is part of a stack. If you must arm auto-merge mid-stack, arm only the bottom PR; merge the dependents manually as each one lands.
 2. **When dev advances, rebase the bottom of your stack first**, then let `rebase.updateRefs` cascade the change to the dependents. If a conflict in the middle of the stack forces a manual rebase, use `git rebase --onto <new-base> <old-base>` rather than relying on git's default upstream-detection — the default gets confused with merged-and-squashed predecessors.
 
 ---
