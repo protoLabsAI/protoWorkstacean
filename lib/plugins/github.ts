@@ -59,6 +59,46 @@ interface GitHubConfig {
 }
 
 /**
+ * Logins we treat as "our own agent bots" — events authored by these
+ * accounts are dropped from auto-triage and @mention paths to prevent
+ * self-cascades (Quinn files an issue → webhook → triage → Quinn files
+ * another issue → ...). See protoWorkstacean#556 for the original 23-
+ * issue cascade that surfaced this.
+ *
+ * The default set covers the App identities + their bare-handle aliases
+ * (GitHub sometimes returns `quinn` vs `quinn[bot]` depending on the
+ * payload path). Override the full set via env:
+ *
+ *   WORKSTACEAN_AGENT_BOT_LOGINS=protoquinn[bot],protoquinn,ava[bot],ava,foo[bot]
+ *
+ * Auto-review (pull_request opened/synchronize → Quinn) is intentionally
+ * NOT filtered — pr-remediator opens PRs as @protoquinn[bot] and those
+ * should still be reviewed; self-approval is already guarded by GitHub
+ * itself.
+ */
+const DEFAULT_AGENT_BOT_LOGINS = [
+  "protoquinn",
+  "protoquinn[bot]",
+  "ava",
+  "ava[bot]",
+  "protobot",
+  "protobot[bot]",
+];
+
+function agentBotLogins(): Set<string> {
+  const raw = process.env["WORKSTACEAN_AGENT_BOT_LOGINS"];
+  const list = raw
+    ? raw.split(",").map((s) => s.trim()).filter(Boolean)
+    : DEFAULT_AGENT_BOT_LOGINS;
+  return new Set(list.map((s) => s.toLowerCase()));
+}
+
+export function isAgentBotActor(login: string | undefined | null): boolean {
+  if (!login) return false;
+  return agentBotLogins().has(login.toLowerCase());
+}
+
+/**
  * Derive monitoredRepos from projects.yaml (all active projects with a github field).
  * Called each time config is loaded so hot-reloads of projects.yaml are reflected.
  */
@@ -480,6 +520,26 @@ export class GitHubPlugin implements Plugin {
 
     const ctx = extractContext(event, payload);
     if (!ctx) return;
+
+    // ── Self-cascade guard ─────────────────────────────────────────────────────
+    // Drop issue + issue_comment + pull_request_review_comment events authored
+    // by our own agent bots before they reach auto-triage or the @mention path.
+    // Without this, Quinn files an issue → GitHub webhook → bug_triage →
+    // Quinn files another issue → infinite cascade (protoWorkstacean#556 ate
+    // protoMaker with 23 duplicate triage issues in 60s). pull_request events
+    // are intentionally NOT filtered here — pr-remediator opens legitimate
+    // bot-authored PRs that should still be reviewed; GitHub's self-approval
+    // check already prevents same-account approvals.
+    if (
+      (event === "issues" || event === "issue_comment" || event === "pull_request_review_comment") &&
+      isAgentBotActor(ctx.author)
+    ) {
+      console.log(
+        `[github] Dropping ${event}.${payload.action} on ${ctx.owner}/${ctx.repo}#${ctx.number} — ` +
+        `authored by agent bot ${ctx.author} (self-cascade guard, see #556)`,
+      );
+      return;
+    }
 
     // ── Auto-triage path: issues.opened/reopened in monitored repos ───────────
     // Fires when autoTriage is enabled and the issue body does NOT contain an
