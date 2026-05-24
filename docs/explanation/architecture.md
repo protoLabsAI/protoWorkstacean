@@ -50,7 +50,7 @@ flowchart TD
     end
 
     subgraph Executors["Executor implementations"]
-        DAE["DeepAgentExecutor\nLangGraph createReactAgent\nin-process (Ava, protoBot, Tuner)"]
+        DAE["DeepAgentExecutor\nLangGraph createReactAgent\nin-process (Ava, protoBot)"]
         A2AE["A2AExecutor\nHTTP JSON-RPC 2.0 + SSE\n(Quinn, protoMaker, Researcher, Jon, protoPen)"]
         FE["FunctionExecutor\ninline function\n(alert.*, ceremony.*, action.pr_*)"]
     end
