@@ -319,6 +319,3 @@ export interface WorldStateDeltaV1Payload {
   sourceAgent: string;
 }
 
-// ── world.goal.violated ──────────────────────────────────────────────────────
-// Defined in src/types/events.ts — re-exported here for convenience.
-export type { GoalViolatedEventPayload } from "../types/events.ts";

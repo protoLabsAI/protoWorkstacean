@@ -77,5 +77,58 @@ docs/                 Documentation source (Diataxis: tutorials, guides, integra
 - It is **not** a GOAP system. There is no world-state engine, no goal evaluator, no planner. Earlier versions had one; it was a baroque polling loop and was removed.
 - It is **not** an agent itself. It hosts agents (DeepAgent in-process, A2A remote) but the routing and scheduling layer has no agency.
 - It is **not** a workflow engine. Ceremonies are scheduled fleet rituals, not orchestrated multi-step workflows.
+- It is **not** a memory layer. Episodic memory belongs elsewhere in the stack. The dispatcher routes; it does not enrich.
 
 If you're tempted to add a "world model" or "planner" or "goal" — stop and ask whether a cron or a webhook would do the same job. It almost always will.
+
+---
+
+## Bus topic naming
+
+`<domain>.<noun>.<verb>[.<scope>]` — lowercase, dot-separated, no slashes or colons.
+
+Examples:
+- `message.inbound.discord.dm.{userId}` — domain=message, noun=inbound, scope=platform/sub-scope
+- `agent.skill.request` — domain=agent, noun=skill, verb=request
+- `ceremony.{id}.execute` — domain=ceremony, noun={id}, verb=execute
+- `autonomous.outcome.{actor}.{skill}` — domain=autonomous, noun=outcome, scope=actor/skill
+
+Rules:
+- Every published topic in production code should appear in `src/event-bus/all-topics.ts`.
+- Request/reply pairs suffix correlationId: `<topic>.request.{correlationId}` → `<topic>.response.{correlationId}`.
+- Use `#` only as a subscription wildcard suffix (matches any continuation).
+- Use `*` only as a single-segment subscription wildcard.
+
+---
+
+## Plugin contract
+
+A plugin implements `Plugin` from `lib/types.ts`:
+
+```ts
+{
+  name: string;
+  description?: string;
+  capabilities?: string[];
+  install(bus: EventBus): void;
+  uninstall(): void;
+}
+```
+
+**The bus is the contract.** Plugins communicate only through bus publish/subscribe. **Do not hold a reference to another plugin** to call methods on it. If two plugins need to talk, define the topic, publish on it, subscribe on the other side. The startup-time `registrar` pattern (e.g. `AgentRuntimePlugin` populating `ExecutorRegistry`) is the one allowed exemption — it operates on a shared registry object, not another plugin's methods.
+
+---
+
+## Multi-node — decided direction
+
+When we eventually need multiple workstacean nodes (cross-machine fan-out, horizontal scale, durable replay), the answer is **`BusBridgePlugin` to NATS or Redis**, not a replacement for `InMemoryEventBus`.
+
+- Keep `InMemoryEventBus` as the default and only local bus implementation.
+- Write a plugin that subscribes to a configured set of topics locally and republishes them to NATS / Redis (or HTTP fan-out to peer nodes), and inversely re-publishes inbound network events onto the local bus.
+- Other instances run the same plugin in mirror config.
+
+This preserves the single-node simplicity while making the bus federate when needed. Don't swap the local bus implementation; bridge it.
+
+Stateful executors (DeepAgent instances are in-process and stateful per agent) are NOT magically distributed by this — multi-node federation needs to think about which node "owns" Ava vs which nodes pass messages through. Solve that when we get there.
+
+If the question of multi-node comes up again before this is implemented, the answer is this paragraph.
