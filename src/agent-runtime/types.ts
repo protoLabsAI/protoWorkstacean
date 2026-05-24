@@ -29,6 +29,21 @@ export interface AgentSkillDefinition {
   keywords?: string[];
   /** Override the system prompt for this specific skill. */
   systemPromptOverride?: string;
+  /**
+   * Restrict tools available when this skill executes. If set, the runtime
+   * intersects with the agent's `tools[]` — a skill cannot add tools the
+   * agent doesn't already declare. If unset, all of agent.tools are
+   * available. Use this to prevent a focused skill (e.g. pr_review) from
+   * fanning out into delegation / web search territory and exhausting
+   * the recursion limit.
+   */
+  tools?: string[];
+  /**
+   * Override the agent's `maxTurns` for this skill. Recursion limit in
+   * LangGraph is `maxTurns * 2 + 1` — bump for skills that need many
+   * tool calls (e.g. board sweeps), keep tight for narrow ones.
+   */
+  maxTurns?: number;
 }
 
 /**

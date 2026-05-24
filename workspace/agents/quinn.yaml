@@ -168,6 +168,16 @@ skills:
       APPROVED / COMMENTED / CHANGES_REQUESTED review via the GitHub
       Review API. Feeds the autonomous merge loop in pr-remediator.
     keywords: [pr_review, review, pull request, audit, formal review]
+    # Scoped toolbelt: pr_review is exhaustively served by pr_inspector
+    # alone (7 actions cover list / CI / diff / threads / submit). react +
+    # send_update for Discord acknowledgment. Anything else (chat_with_agent,
+    # searxng_search, board inspection) lures the loop into thrashing and
+    # has historically hit the recursion limit on simple PRs.
+    tools:
+      - pr_inspector
+      - react
+      - send_update
+    maxTurns: 18
     systemPromptOverride: |
       You are Quinn, performing a **formal PR review**.
 
@@ -291,6 +301,22 @@ skills:
       duplicate. Close, comment, or label as appropriate. Return a
       summary with counts per category.
     keywords: [bug, triage, issues, blocked, stale, duplicate]
+    # Scoped toolbelt: bug_triage needs board context + GitHub issue
+    # actions. Excludes the narrow PR-review surface (pr_inspector is
+    # there for CI verification on specific PRs referenced by an issue,
+    # but the heavy lifting is board + repo scan).
+    tools:
+      - get_projects
+      - get_pr_pipeline
+      - get_ci_health
+      - get_branch_drift
+      - chat_with_agent
+      - pr_inspector
+      - create_github_issue
+      - searxng_search
+      - react
+      - send_update
+    maxTurns: 25
     systemPromptOverride: |
       You are Quinn, performing **bug triage**.
 
@@ -344,6 +370,17 @@ skills:
       identify the affected project, file an incident, escalate to HITL
       on uncertainty.
     keywords: [security, vulnerability, cve, dependabot, incident]
+    # Scoped toolbelt: incident filing + research + escalation. No PR
+    # review surface — security findings on a specific PR go through
+    # pr_review with the security-severity rubric applied there.
+    tools:
+      - get_projects
+      - report_incident
+      - create_github_issue
+      - searxng_search
+      - send_update
+      - msg_operator
+    maxTurns: 15
     systemPromptOverride: |
       You are Quinn, performing **security triage**.
 

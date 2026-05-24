@@ -26,6 +26,23 @@ const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGF
  * The text we want is the concatenation of `text`-typed blocks. Returns the
  * trimmed result, or "" if no usable text was found.
  */
+/**
+ * Resolve which tools a skill invocation gets. When a skill declares its own
+ * `tools` list we intersect with the agent's declared tools — a skill cannot
+ * grant access to tools the agent never advertised. When the skill omits
+ * tools we fall back to the agent's full list. Pure function, easy to unit-
+ * test; the runtime branch in `execute()` is a thin wrapper around this.
+ */
+export function effectiveToolsFor(skillTools: string[] | undefined, agentTools: string[]): string[] {
+  if (!skillTools) return agentTools;
+  return skillTools.filter(t => agentTools.includes(t));
+}
+
+/** Skill's maxTurns wins when set; else inherit from the agent. */
+export function effectiveMaxTurnsFor(skillMaxTurns: number | undefined, agentMaxTurns: number): number {
+  return skillMaxTurns ?? agentMaxTurns;
+}
+
 export function extractAiText(content: unknown): string {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
@@ -574,7 +591,21 @@ export class DeepAgentExecutor implements IExecutor {
 
   async execute(req: SkillRequest): Promise<SkillResult> {
     const prompt = req.content ?? req.prompt ?? this._buildPrompt(req);
-    const tools = createLangChainTools(this.agentDef.tools, this.http, req.correlationId, this.agentDef.name);
+
+    const skillDef = req.skill
+      ? this.agentDef.skills.find(s => s.name === req.skill)
+      : undefined;
+
+    // Skill-level tools override: intersect with agent.tools (a skill can't
+    // grant access to tools the agent doesn't declare). When skill.tools is
+    // unset, all of agent.tools are available. This is the structural way
+    // to keep narrow skills (pr_review) from fanning out into delegation /
+    // web search and exhausting the recursion limit.
+    const agentTools = this.agentDef.tools;
+    const effectiveTools = effectiveToolsFor(skillDef?.tools, agentTools);
+    const tools = createLangChainTools(effectiveTools, this.http, req.correlationId, this.agentDef.name);
+
+    const effectiveMaxTurns = effectiveMaxTurnsFor(skillDef?.maxTurns, this.agentDef.maxTurns);
 
     const callbacks = LANGFUSE_ENABLED
       ? [new LangfuseCallbackHandler({
@@ -588,9 +619,6 @@ export class DeepAgentExecutor implements IExecutor {
       // Resolve skill-level systemPromptOverride if this skill defines one.
       // Skills like diagnose_pr_stuck have narrow, structured output requirements
       // that replace the agent's general-purpose prompt.
-      const skillDef = req.skill
-        ? this.agentDef.skills.find(s => s.name === req.skill)
-        : undefined;
       const basePrompt = skillDef?.systemPromptOverride ?? this.agentDef.systemPrompt;
 
       const agent = createReactAgent({
@@ -599,11 +627,11 @@ export class DeepAgentExecutor implements IExecutor {
         messageModifier: new SystemMessage(basePrompt),
       });
 
-      console.log(`[deep-agent:${this.agentDef.name}] invoke with ${tools.length} tools, prompt length=${prompt.length}, langfuse=${LANGFUSE_ENABLED}`);
+      console.log(`[deep-agent:${this.agentDef.name}] invoke skill="${req.skill ?? "?"}" tools=${tools.length}/${agentTools.length} maxTurns=${effectiveMaxTurns} promptLen=${prompt.length} langfuse=${LANGFUSE_ENABLED}`);
 
       const result = await agent.invoke(
         { messages: [{ role: "user", content: prompt }] },
-        { recursionLimit: this.agentDef.maxTurns * 2 + 1, callbacks },
+        { recursionLimit: effectiveMaxTurns * 2 + 1, callbacks },
       );
 
       const messages = result.messages ?? [];
