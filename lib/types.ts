@@ -137,22 +137,11 @@ export interface ConfigChangeRequest {
    * literals; agent-YAML changes use a structured target so the approver can
    * see which agent is affected without parsing a path.
    */
-  configFile: "goals.yaml" | "actions.yaml" | ConfigChangeAgentTarget;
+  configFile: ConfigChangeAgentTarget;
   title: string;
   summary: string;
   /** Unified diff of the proposed change (before → after). */
   yamlDiff: string;
-  /** Dry-run GOAP impact — which goals/actions are affected. */
-  goapImpact?: {
-    addedGoals?: string[];
-    removedGoals?: string[];
-    modifiedGoals?: string[];
-    addedActions?: string[];
-    removedActions?: string[];
-    modifiedActions?: string[];
-    /** Human-readable GOAP evaluation summary. */
-    summary: string;
-  };
   /** Test coverage impact summary. */
   coverageImpact?: {
     affectedTestFiles: string[];

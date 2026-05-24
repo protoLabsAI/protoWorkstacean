@@ -88,7 +88,7 @@ import { describe, test, expect } from "bun:test";
 import { InMemoryEventBus } from "../../lib/bus.ts";
 import { PlannerPluginL0 } from "../../src/plugins/planner-plugin-l0.ts";
 
-describe("GOAP loop integration", () => {
+describe("scheduled cron / ceremony loop integration", () => {
   test("planner dispatches action when preconditions match", async () => {
     const bus = new InMemoryEventBus();
     // install plugins, publish world state, assert action dispatched

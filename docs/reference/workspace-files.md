@@ -114,7 +114,7 @@ skills:
 
 ## workspace/projects.yaml
 
-Project registry. Read by `RouterPlugin` (GitHub enrichment), `GoalEvaluatorPlugin`, and `WorldStateEngine` (per-project domain discovery).
+Project registry. Read by `RouterPlugin` (GitHub enrichment), ``, and `` (per-project domain discovery).
 
 ```yaml
 projects:
@@ -124,77 +124,6 @@ projects:
     workspace?: string     # Path to per-project config dir (relative to WORKSPACE_DIR)
     discordChannels?:      # Discord channel IDs associated with this project
       - string
-```
-
----
-
-## workspace/goals.yaml
-
-Global GOAP goals. Read by `GoalEvaluatorPlugin`. Per-project goals in `workspace/<project>/goals.yaml` are merged at startup.
-
-### Threshold goal
-
-```yaml
-goals:
-  - id: string             # Unique goal ID — referenced by actions via goalId
-    type: Threshold
-    severity: low | medium | high | critical
-    selector: string       # Dot-path into world state (e.g. "domains.ci.data.successRate")
-    min?: number           # Lower bound (inclusive). At least one of min/max required.
-    max?: number           # Upper bound (inclusive)
-    description?: string
-```
-
-### Invariant goal
-
-```yaml
-  - id: string
-    type: Invariant
-    severity: low | medium | high | critical
-    selector: string
-    operator: truthy | falsy | exists | not_exists
-    description?: string
-```
-
-### Distribution goal
-
-```yaml
-  - id: string
-    type: Distribution
-    severity: low | medium | high | critical
-    description?: string
-    distribution:          # Target proportions (0–1). Keys are category names.
-      <category>: number
-    tolerance?: number     # Allowed deviation. Default: 0.05
-```
-
----
-
-## workspace/actions.yaml
-
-GOAP actions. Read by `ActionRegistry`. Per-project actions in `workspace/<project>/actions.yaml` are merged at startup.
-
-```yaml
-actions:
-  - id: string             # Unique action ID
-    goalId: string         # Goal this action addresses
-    tier: tier_0 | tier_1 | tier_2
-    priority?: number      # Higher priority wins when multiple actions match. Default: 0
-    cost?: number          # A* planning cost. Default: 1
-    name?: string          # Human-readable label
-    preconditions?:        # All must be true for the action to be selected
-      - path: string       # Dot-path into world state
-        operator: eq | neq | gt | gte | lt | lte | exists | not_exists
-        value?: unknown    # Comparison value (not needed for exists/not_exists)
-    effects?:              # World state mutations applied after execution
-      - path: string
-        type: set | increment | decrement | delete
-        value?: unknown
-    meta:
-      topic: string        # Bus topic ActionDispatcherPlugin publishes when firing this action
-      agentId?: string     # Route to a specific agent by name
-      fireAndForget?: boolean  # Do not wait for response. Default: false
-      payload?: object     # Extra fields merged into the published message
 ```
 
 ---
@@ -213,21 +142,6 @@ targets?:                # Agent names for explicit routing. Empty = default rou
   - string
 notifyChannel?: string   # Discord channel ID for delivery. Empty = no Discord post.
 enabled?: boolean        # Default: true
-```
-
----
-
-## workspace/domains.yaml
-
-Global domain definitions for WorldStateEngine. Per-project domains in `workspace/<project>/domains.yaml` are merged at startup.
-
-```yaml
-domains:
-  - name: string           # Unique domain name — accessible as domains.<name> in world state
-    url: string            # HTTP GET endpoint (JSON response). Supports ${ENV_VAR} interpolation.
-    tickMs?: number        # Poll interval in milliseconds. Default: 60000
-    headers?:              # HTTP headers. Values support ${ENV_VAR} interpolation.
-      <header>: string
 ```
 
 ---

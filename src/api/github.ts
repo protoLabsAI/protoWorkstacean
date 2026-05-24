@@ -460,7 +460,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
   }
 
   // ── GitHub Issues domain ────────────────────────────────────────────────────
-  // Aggregate open issue counts per repo for the issue_zero GOAP goal.
+  // Aggregate open issue counts per repo for issue-tracking dashboards.
   // Polls `/repos/{repo}/issues?state=open` and classifies by label priority.
 
   async function handleGetGithubIssues(): Promise<Response> {

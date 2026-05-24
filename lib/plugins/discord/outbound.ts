@@ -92,7 +92,7 @@ export function buildHITLButtons(request: HITLRequest): ActionRowBuilder<ButtonB
 // ── Config-change embed/button builders (Arc 9.3) ─────────────────────────────
 // Purple colour signals "the rules of the system are changing" vs the amber
 // "one-shot operational approval" colour used for regular HITL. Renders up to
-// three embeds: main info, YAML diff, GOAP/coverage impact analysis.
+// three embeds: main info, YAML diff, impact analysis.
 
 export function buildConfigChangeEmbeds(request: ConfigChangeRequest): EmbedBuilder[] {
   const embeds: EmbedBuilder[] = [];
@@ -119,16 +119,6 @@ export function buildConfigChangeEmbeds(request: ConfigChangeRequest): EmbedBuil
   }
 
   const impactLines: string[] = [];
-  if (request.goapImpact) {
-    impactLines.push(`**GOAP dry-run:** ${request.goapImpact.summary}`);
-    const imp = request.goapImpact;
-    if (imp.addedGoals?.length)     impactLines.push(`+ Goals added: ${imp.addedGoals.join(", ")}`);
-    if (imp.removedGoals?.length)   impactLines.push(`- Goals removed: ${imp.removedGoals.join(", ")}`);
-    if (imp.modifiedGoals?.length)  impactLines.push(`~ Goals modified: ${imp.modifiedGoals.join(", ")}`);
-    if (imp.addedActions?.length)   impactLines.push(`+ Actions added: ${imp.addedActions.join(", ")}`);
-    if (imp.removedActions?.length) impactLines.push(`- Actions removed: ${imp.removedActions.join(", ")}`);
-    if (imp.modifiedActions?.length)impactLines.push(`~ Actions modified: ${imp.modifiedActions.join(", ")}`);
-  }
   if (request.coverageImpact) {
     impactLines.push(`**Coverage:** ${request.coverageImpact.summary}`);
     if (request.coverageImpact.affectedTestFiles.length) {

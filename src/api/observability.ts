@@ -84,8 +84,8 @@ export function createRoutes(ctx: ApiContext): Route[] {
    * the applier, publishes `config.change.request.{correlationId}`.
    *
    * Body: { target, title, summary, yamlDiff, newContent?, evidence? }
-   *   - target: "goals.yaml" | "actions.yaml" | { type: "agent", agentName }
-   *   - evidence required when target is an agent; sampleCount >= 50
+   *   - target: { type: "agent", agentName }
+   *   - evidence required; sampleCount >= 50
    *   - newContent required for auto-apply on approve (applier writes it)
    *
    * Response: { success, data: { correlationId, expiresAt } }
@@ -142,14 +142,10 @@ export function createRoutes(ctx: ApiContext): Route[] {
     const expiresAt = new Date(Date.now() + PROPOSAL_TTL_MS).toISOString();
     const replyTopic = `config.change.response.${correlationId}`;
 
-    let targetPath: string;
-    if (target === "goals.yaml" || target === "actions.yaml") {
-      targetPath = join(ctx.workspaceDir, target);
-    } else if (isAgentTarget) {
-      targetPath = join(ctx.workspaceDir, "agents", `${(target as { agentName: string }).agentName}.yaml`);
-    } else {
-      return Response.json({ success: false, error: "Invalid target" }, { status: 400 });
+    if (!isAgentTarget) {
+      return Response.json({ success: false, error: "Invalid target — only agent targets are supported" }, { status: 400 });
     }
+    const targetPath = join(ctx.workspaceDir, "agents", `${(target as { agentName: string }).agentName}.yaml`);
 
     if (newContent) {
       recordPendingContent(correlationId, targetPath, newContent);

@@ -248,7 +248,6 @@ export function createRoutes(ctx: ApiContext): Route[] {
     { method: "POST", path: "/api/onboard",             handler: (req) => handleOnboard(req) },
     { method: "GET",  path: "/api/projects",            handler: () => serveWorkspaceYaml(ctx.workspaceDir, "projects.yaml", "projects") },
     { method: "GET",  path: "/api/agents",              handler: () => serveWorkspaceYaml(ctx.workspaceDir, "agents.yaml", "agents") },
-    { method: "GET",  path: "/api/goals",               handler: () => serveWorkspaceYaml(ctx.workspaceDir, "goals.yaml", "goals") },
     { method: "GET",  path: "/api/ceremonies",          handler: (req) => handleGetCeremonies(req) },
     { method: "POST", path: "/api/ceremonies/create",   handler: (req) => handleCreateCeremony(req) },
     { method: "POST", path: "/api/ceremonies/:id/run",  handler: (req, p) => handleRunCeremony(req, p.id) },

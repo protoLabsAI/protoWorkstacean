@@ -57,8 +57,8 @@ Loaded on every startup, but some are no-ops if their configuration is missing:
 | `AgentRuntimePlugin` | Registrar: reads `workspace/agents/*.yaml`, registers `DeepAgentExecutor` (LangGraph) instances |
 | `SkillBrokerPlugin` | Registrar: reads `workspace/agents.yaml`, registers `A2AExecutor` instances |
 | `SkillDispatcherPlugin` | Sole `agent.skill.request` subscriber; dispatches via `ExecutorRegistry` |
-| `WorldStateEngine` | Generic domain poller; domains registered via `discoverAndRegister()` |
-| `GoalEvaluatorPlugin` | Subscribes to `world.state.#`; evaluates goals; emits `world.goal.violated` |
+| `` | Generic domain poller; domains registered via `discoverAndRegister()` |
+| `` | Subscribes to `world.state.#`; evaluates goals; emits `world.goal.violated` |
 | `PlannerPluginL0` | Subscribes to `world.goal.violated`; selects actions from `ActionRegistry` |
 | `ActionDispatcherPlugin` | Subscribes to `world.action.plan`; fires actions with WIP limit |
 | `CeremonyPlugin` | Subscribes to `ceremony.#.execute`; dispatches skills on schedule |

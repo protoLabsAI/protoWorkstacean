@@ -218,12 +218,12 @@ export class SkillDispatcherPlugin implements Plugin {
       typeof msg.source?.channelId === "string" ? msg.source.channelId : undefined;
     const systemActor: string | undefined =
       typeof payload.meta?.systemActor === "string" ? payload.meta.systemActor : undefined;
-    // When GOAP publishes to agent.skill.request, it stamps actionId + goalId
-    // on meta so the autonomous outcome can carry them back to the planner's
-    // loop detector.
-    const goapActionId: string | undefined =
+    // Optional actionId / goalId stamped on meta by the caller — propagated
+    // onto the autonomous-outcome event so downstream telemetry can correlate
+    // dispatches with the trigger (ceremony, cron, alert handler).
+    const actionId: string | undefined =
       typeof payload.meta?.actionId === "string" ? payload.meta.actionId : undefined;
-    const goapGoalId: string | undefined =
+    const goalId: string | undefined =
       typeof payload.meta?.goalId === "string" ? payload.meta.goalId
       : (typeof payload.goalId === "string" ? payload.goalId : undefined);
     // Name of the agent that issued this skill request (via chat_with_agent /
@@ -330,8 +330,8 @@ export class SkillDispatcherPlugin implements Plugin {
               parentId,
               systemActor: systemActor ?? "user",
               skill,
-              actionId: goapActionId,
-              goalId: goapGoalId,
+              actionId: actionId,
+              goalId: goalId,
               success: !isError,
               taskState,
               text: content,
@@ -403,8 +403,8 @@ export class SkillDispatcherPlugin implements Plugin {
           parentId,
           systemActor: systemActor ?? "user",
           skill,
-          actionId: goapActionId,
-          goalId: goapGoalId,
+          actionId: actionId,
+          goalId: goalId,
           success: false,
           taskState: result.data?.taskState ?? "failed",
           text: result.text,
@@ -445,8 +445,8 @@ export class SkillDispatcherPlugin implements Plugin {
           parentId,
           systemActor: systemActor ?? "user",
           skill,
-          actionId: goapActionId,
-          goalId: goapGoalId,
+          actionId: actionId,
+          goalId: goalId,
           success: true,
           taskState: result.data?.taskState ?? "completed",
           text: result.text,
@@ -505,8 +505,8 @@ export class SkillDispatcherPlugin implements Plugin {
         parentId,
         systemActor: systemActor ?? "user",
         skill,
-        actionId: goapActionId,
-        goalId: goapGoalId,
+        actionId: actionId,
+        goalId: goalId,
         success: false,
         taskState: "failed",
         text: errorMsg,

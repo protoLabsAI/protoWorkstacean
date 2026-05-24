@@ -91,7 +91,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | `config.reload` | ✅ `CONFIG_RELOAD` (`WORLD_TOPICS`) | `ConfigReloadPayload` | _(none)_ | `src/index.ts:702`<br>`src/plugins/goal_evaluator_plugin.ts:91` |
 | `config.updated` | — | — | `lib/plugins/google.ts:125` | _(none)_ |
 
-**`config.reload`** — Published to trigger a hot reload of goals.yaml and actions.yaml from disk. Subscribers (actions loader in src/index.ts, GoalEvaluatorPlugin) re-read, re-validate, and atomically swap their loaded config. Arc 9.4.
+**`config.reload`** — Published to trigger a hot reload of agent / ceremony / channel configs from disk. Subscribers re-read, re-validate, and atomically swap their loaded config.
 
 ## `cron.*`
 

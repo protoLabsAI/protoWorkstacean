@@ -9,26 +9,26 @@ Contributions to protoWorkstacean are welcome. This section covers how to get st
 | File / Directory | What it is |
 |-----------------|------------|
 | `src/index.ts` | Application bootstrap — wires all plugins, starts the HTTP server |
-| `src/executor/` | Executor layer: `IExecutor`, `ExecutorRegistry`, `SkillDispatcherPlugin`, four executor implementations |
-| `src/plugins/` | All plugin implementations (GOAP, ceremonies, skill broker, agent runtime, etc.) |
+| `src/executor/` | Executor layer: `IExecutor`, `ExecutorRegistry`, `SkillDispatcherPlugin`, executor implementations |
+| `src/plugins/` | Built-in plugins (CeremonyPlugin, AgentFleetHealth, alert/ceremony/pr-remediator skill executors) |
 | `src/router/` | `RouterPlugin` + `SkillResolver` + `ProjectEnricher` |
 | `src/agent-runtime/` | `AgentRuntimePlugin`, `AgentDefinitionLoader` (registers `DeepAgentExecutor` instances) |
-| `src/world/` | Domain discovery |
-| `src/engines/` | `WorldStateEngine` |
-| `src/lib/` | Shared types (`BusMessage`, `Plugin`, `EventBus`) and utilities |
+| `src/api/` | HTTP route modules (one per concern) |
+| `lib/plugins/` | Integration plugins (Discord, GitHub, Linear, Google, scheduler, HITL, etc.) |
+| `lib/` | Shared types (`BusMessage`, `Plugin`, `EventBus`) and utilities |
 | `workspace/` | Runtime configuration (YAML files, not TypeScript) |
 | `test/` | Integration tests |
-| `__tests__/` | Unit tests co-located with source (some plugins have `__tests__/` directories) |
+| `__tests__/` | Unit tests co-located with source |
 
 ## Where to start for common tasks
 
-**Add a new plugin**: create `src/plugins/my-plugin.ts`, implement `Plugin`, wire it into `src/index.ts`. See [explanation/plugin-system.md](../explanation/plugin-system) for the interface.
+**Add a new plugin**: create the file under `src/plugins/` or `lib/plugins/`, implement `Plugin`, wire it into `src/index.ts`. See [explanation/plugin-system.md](../explanation/plugin-system) for the interface.
 
-**Add a new executor type**: implement `IExecutor` in `src/executor/executors/`, export it, register it in the appropriate plugin's `install()`.
+**Add a new executor type**: implement `IExecutor` in `src/executor/executors/`, export it, register it in the appropriate registrar plugin's `install()`.
 
-**Change the HTTP API**: routes are defined in `src/services/` or directly in `src/index.ts`. Follow the existing pattern: define request/response types, add auth middleware for write endpoints.
+**Change the HTTP API**: routes are defined in `src/api/`. Each module exports `createRoutes(ctx)`. Add the new module to `src/api/index.ts`.
 
-**Add a new goal type**: implement a new evaluator in `src/evaluators/`, register it in `GoalEvaluatorPlugin`. Evaluators are small pure functions.
+**Add a scheduled task**: drop a yaml in `workspace/crons/` (generic time-based trigger) or `workspace/ceremonies/` (named, observable, can also be on-demand).
 
 ## Development setup
 

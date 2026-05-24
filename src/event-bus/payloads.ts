@@ -33,7 +33,7 @@ export interface AgentSkillRequestPayload {
   skillHint?: string;
   /** Whether this message originated from a direct message conversation. */
   isDM?: boolean;
-  /** GOAP action metadata forwarded from ActionDispatcherPlugin. */
+  /** Optional action metadata stamped by the caller (cron, ceremony, alert handler). */
   meta?: {
     agentId?: string;
     skillHint?: string;
@@ -267,12 +267,12 @@ export interface AutonomousOutcomePayload {
   systemActor: string;
   /** Skill name that was executed. */
   skill: string;
-  /** GOAP action id when the outcome came from a planned action — optional,
+  /** action id forwarded from the caller (cron / ceremony / alert handler) — optional,
    *  unset for ad-hoc or ceremony dispatches. Kept distinct from `skill` so
    *  the planner's loop-detector can reason about action identity even when
    *  the skill name is shared across actions. */
   actionId?: string;
-  /** Goal id that triggered this outcome (when originating from GOAP). */
+  /** Goal id forwarded by the caller, if any. */
   goalId?: string;
   /** True if the task completed without error. */
   success: boolean;

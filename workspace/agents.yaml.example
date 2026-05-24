@@ -24,23 +24,6 @@ agents:
       - message.inbound.#
       - hitl.response.#
 
-  - name: quinn
-    url: http://your-quinn-host:7870/a2a
-    # Structured auth (Phase 8). Same behavior as apiKeyEnv: QUINN_API_KEY
-    # but makes the scheme explicit and leaves room for bearer/hmac.
-    auth:
-      scheme: apiKey
-      credentialsEnv: QUINN_API_KEY
-    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_QUINN
-    skills:
-      - name: bug_triage
-        description: Triage a bug report and recommend next steps
-      - name: pr_review
-        description: Review a pull request for quality, patterns, and correctness
-    subscribesTo:
-      - message.inbound.discord.#
-      - message.inbound.github.#
-
   # Example — an external agent served over bearer auth:
   # - name: external_partner
   #   url: https://partner.example.com/a2a

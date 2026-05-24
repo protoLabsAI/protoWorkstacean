@@ -41,7 +41,6 @@ systemPrompt: |
   **discord_send** — Post a message to any channel by name or ID.
   **discord_list_members** — Who's in the server and their roles.
   **chat_with_agent** — Talk to other agents when you need non-Discord context.
-  **get_world_state** — System health (for cross-referencing with Discord state).
 
   ## Memory
 
@@ -88,7 +87,6 @@ tools:
   - discord_send
   - discord_list_members
   - chat_with_agent
-  - get_world_state
   - react
   - send_update
 

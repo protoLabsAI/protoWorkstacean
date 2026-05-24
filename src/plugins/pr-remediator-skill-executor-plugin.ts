@@ -1,6 +1,6 @@
 /**
  * PrRemediatorSkillExecutorPlugin — registers FunctionExecutors for the five
- * GOAP-wired `action.pr_*` and `action.dispatch_backmerge` skills whose
+ * cron- and ceremony-wired `action.pr_*` and `action.dispatch_backmerge` skills whose
  * handlers already live in `lib/plugins/pr-remediator.ts`.
  *
  * Without these registrations the SkillDispatcherPlugin logs
@@ -11,7 +11,7 @@
  * The pr-remediator plugin already subscribes to its own internal trigger
  * topics (`pr.remediate.*`, `pr.backmerge.dispatch`) — see
  * `PrRemediatorPlugin.install()`. Each executor in this file translates a
- * GOAP skill dispatch into a publish on the matching trigger topic and
+ * skill dispatch into a publish on the matching trigger topic and
  * returns a successful SkillResult immediately (fire-and-forget semantics
  * declared in actions.yaml).
  *
@@ -29,7 +29,7 @@ import type { SkillRequest, SkillResult } from "../executor/types.ts";
 import { FunctionExecutor } from "../executor/executors/function-executor.ts";
 
 /**
- * Maps each GOAP action id to the bus topic that PrRemediatorPlugin already
+ * Maps each action id to the bus topic that PrRemediatorPlugin already
  * subscribes to. Adding a new action is one line here plus the corresponding
  * `bus.subscribe()` in pr-remediator.ts.
  */
@@ -46,7 +46,7 @@ export const PR_REMEDIATOR_SKILL_TOPICS: ReadonlyArray<{
 
 export class PrRemediatorSkillExecutorPlugin implements Plugin {
   readonly name = "pr-remediator-skill-executor";
-  readonly description = "Registers FunctionExecutors that route GOAP `action.pr_*` skills to PrRemediatorPlugin's bus topics";
+  readonly description = "Registers FunctionExecutors that route `action.pr_*` skills to PrRemediatorPlugin's bus topics";
   readonly capabilities = ["pr-remediator-dispatch", "executor-registrar"];
 
   private bus?: EventBus;
@@ -69,7 +69,7 @@ export class PrRemediatorSkillExecutorPlugin implements Plugin {
   }
 
   /**
-   * Translate a GOAP skill dispatch into the pr-remediator trigger event.
+   * Translate a skill dispatch into the pr-remediator trigger event.
    *
    * The published payload mirrors the meta forwarded by ActionDispatcherPlugin
    * (actionId, goalId, hitlPolicy, systemActor) so downstream handlers can

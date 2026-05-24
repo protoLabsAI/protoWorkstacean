@@ -18,45 +18,6 @@
 # needs per-environment wiring without editing this file.
 
 agents:
-  # Quinn — QA engineer (code review, bug triage, PR auditing).
-  # NOTE: Quinn's internal container port is 7870 (host-mapped to 7873).
-  # Inside the docker-ai network we must use the internal port.
-  - name: quinn
-    url: http://quinn:7870/a2a
-    auth:
-      scheme: apiKey
-      credentialsEnv: QUINN_API_KEY
-    streaming: true
-    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_QUINN
-    subscribesTo:
-      - message.inbound.discord.#
-      - message.inbound.github.#
-
-  # Jon — content + communications (protoContent pipeline)
-  - name: jon
-    url: http://protocontent:18791/a2a
-    auth:
-      scheme: apiKey
-      credentialsEnv: PROTOCONTENT_API_KEY
-    streaming: true
-    discordBotTokenEnvKey: DISCORD_BOT_TOKEN_JON
-    subscribesTo:
-      - message.inbound.discord.#
-
-  # Researcher — rabbit-hole.io deep research agent.
-  # Container `researcher` lives in homelab-iac/stacks/rabbit-hole and
-  # attaches to ai_default so workstacean can reach it by hostname.
-  # Internal listen 7870 (matches Quinn's pattern); host 7874 exposed
-  # for Tailscale-internal clients like agent-rollcall.sh.
-  - name: researcher
-    url: http://researcher:7870/a2a
-    auth:
-      scheme: apiKey
-      credentialsEnv: RESEARCHER_API_KEY
-    streaming: true
-    subscribesTo:
-      - message.inbound.discord.#
-
   # Frank — CI/CD + infrastructure. NOT YET DEPLOYED. Leaving the entry
   # commented out until Frank's agent card + A2A endpoint are live so
   # workstacean doesn't register a dead executor or spam card-discovery

@@ -6,7 +6,7 @@ How to add Server-Sent Events (SSE) streaming to an A2A agent so consumers get i
 
 ## Where streaming fits in the dispatch pipeline
 
-All skill requests — whether triggered by a Discord DM, a Linear webhook, or an autonomous GOAP action — travel the same unified dispatch path:
+All skill requests — whether triggered by a Discord DM, a Linear webhook, or an autonomous action — travel the same unified dispatch path:
 
 ```
 inbound event
@@ -17,7 +17,7 @@ inbound event
           → A2AExecutor
 ```
 
-Streaming is a transport detail at the `A2AExecutor` layer. If the agent's card declares `streaming: true`, the executor sends `message/stream` instead of `message/send` and reads the SSE response as it arrives. The caller — `SkillDispatcherPlugin`, the GOAP loop, Ava — does not know or care whether the underlying call was streaming or blocking. The result arrives on `replyTopic` either way.
+Streaming is a transport detail at the `A2AExecutor` layer. If the agent's card declares `streaming: true`, the executor sends `message/stream` instead of `message/send` and reads the SSE response as it arrives. The caller — `SkillDispatcherPlugin`, the scheduled cron / ceremony loop, Ava — does not know or care whether the underlying call was streaming or blocking. The result arrives on `replyTopic` either way.
 
 ## Overview
 
@@ -180,7 +180,7 @@ The caller receives the same `SkillResult` it would have received from a blockin
 
 If a streaming agent returns `input-required`, the task does not complete. `TaskTracker` detects the state, raises an `HITLRequest` on the bus, and the HITL renderer surfaces the pause point to a human on the originating interface. When the human responds, `TaskTracker` resumes the task via `message/send` with the same `taskId`. The agent picks up where it left off.
 
-This is the same flow whether the request came from a human message or an autonomous GOAP action. See [HITL guide](./hitl) for the full flow.
+This is the same flow whether the request came from a human message or an autonomous action. See [HITL guide](./hitl) for the full flow.
 
 ## Fallback behavior
 

@@ -80,7 +80,7 @@ export interface AgentFleetMetrics {
 
 /**
  * Outcome attribution for a systemActor that is NOT a registered A2A or
- * DeepAgent executor. Tracked separately so dashboards + GOAP selectors can
+ * DeepAgent executor. Tracked separately so dashboards and downstream consumers can
  * see that traffic without treating it as agent health signal.
  *
  * Examples: `goap`, `pr-remediator`, `auto-triage-sweep`, `outcome-analysis`,
@@ -99,7 +99,7 @@ export interface FleetHealthSnapshot {
   windowHours: 24;
   /**
    * Max failureRate1h across all agents. 0 when no agents have 1h outcomes.
-   * Used as the GOAP goal selector for fleet.no_agent_stuck (Arc 8.2).
+   * Exposed via /api/agent-fleet-health for dashboards and downstream alerting.
    */
   maxFailureRate1h: number;
   /** Sum of all LLM costs across all agents over the 24h window (USD). Used by fleet.cost_under_budget (Arc 8.3). */

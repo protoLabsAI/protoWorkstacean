@@ -50,8 +50,8 @@ _These env vars describe the HTTP server identity of the protoMaker team runtime
 
 | Variable | Default | Plugin | Description |
 |----------|---------|--------|-------------|
-| `AVA_BASE_URL` | _(none)_ | WorldStateEngine, SkillBrokerPlugin | Base URL of the protoMaker team server (e.g. `http://ava:3008`). Used for domain URL interpolation and A2A agent registration. |
-| `AVA_API_KEY` | _(none)_ | A2AExecutor, WorldStateEngine | API key sent as `X-API-Key` when polling protoMaker team domain endpoints or calling its `/a2a` endpoint. |
+| `AVA_BASE_URL` | _(none)_ | , SkillBrokerPlugin | Base URL of the protoMaker team server (e.g. `http://ava:3008`). Used for domain URL interpolation and A2A agent registration. |
+| `AVA_API_KEY` | _(none)_ | A2AExecutor,  | API key sent as `X-API-Key` when polling protoMaker team domain endpoints or calling its `/a2a` endpoint. |
 
 ## Discord
 
@@ -62,7 +62,7 @@ _These env vars describe the HTTP server identity of the protoMaker team runtime
 | `DISCORD_WELCOME_CHANNEL` | _(none)_ | DiscordPlugin | Channel ID for welcome/onboarding messages. |
 | `DISCORD_DIGEST_CHANNEL` | _(none)_ | DiscordPlugin | Channel ID for periodic digest posts. |
 | `DISCORD_OPS_WEBHOOK_URL` | _(none)_ | DiscordPlugin | Webhook URL for operational alerts. |
-| `DISCORD_GOALS_WEBHOOK_URL` | _(none)_ | WorldStateEngine | Webhook URL for goal violation/resolution notifications. |
+| `DISCORD_GOALS_WEBHOOK_URL` | _(none)_ |  | Webhook URL for goal violation/resolution notifications. |
 | `DISCORD_CEREMONY_WEBHOOK_URL` | _(none)_ | CeremonyPlugin | Webhook URL for ceremony run notifications. |
 | `DISCORD_BUDGET_WEBHOOK_URL` | _(none)_ | BudgetPlugin | Webhook URL for budget threshold alerts. |
 | `DISCORD_WEBHOOK_ALERTS` | _(none)_ | Various | General-purpose alert webhook URL (fallback for plugins without a dedicated webhook var). |
@@ -141,7 +141,7 @@ Graphiti itself (running as a sidecar) reads additional env vars — see [User M
 
 ## Domain URL interpolation
 
-Any environment variable can be interpolated into domain URLs and headers in `workspace/domains.yaml` using the `${VAR_NAME}` syntax:
+Any environment variable can be interpolated into domain URLs and headers in `` using the `${VAR_NAME}` syntax:
 
 ```yaml
 domains:

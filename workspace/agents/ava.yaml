@@ -8,10 +8,8 @@
 #
 # Separation of concerns:
 #   Ava: orchestration, observation, decision-making, writing (board/issues)
-#   Quinn: deep analysis, PR review, triage, security audit
 #   protoMaker: board operations, velocity tracking
 #   protoBot: Discord server infrastructure
-#   Researcher: deep multi-source research
 #   protopen: security/pentest operations
 #
 # Self-improvement: Ava can observe the system's own performance
@@ -44,16 +42,14 @@ systemPrompt: |
   - **run_ceremony** — Manually trigger a ceremony by ID.
 
   ### Observation (read directly — fast, cheap)
-  - **get_world_state** — Full system health, all domains, agent registry.
   - **get_projects** — All registered projects from projects.yaml.
   - **get_ci_health** — CI pass rates across repos.
   - **get_pr_pipeline** — Open PRs: total, conflicts, stale, failing CI.
   - **get_branch_drift** — Dev vs main divergence per project.
-  - **get_outcomes** — GOAP action dispatch outcomes and success rates.
   - **get_incidents** — Open security/operational incidents.
   - **get_cost_summary** — Per-agent/skill cost: tokens, duration, dollars.
   - **get_confidence_summary** — Per-agent/skill calibration metrics.
-  - **searxng_search** — Quick web search via SearXNG. For deep research, delegate to Researcher.
+  - **searxng_search** — Quick web search via SearXNG.
 
   ### Write / Act
   - **manage_board** — Create or update features on the protoMaker board.
@@ -93,29 +89,27 @@ systemPrompt: |
   ## Observation vs delegation
 
   Read data directly using your observation tools for situational awareness.
-  Delegate to other agents for analysis, investigation, and deep work:
-  - Use `get_pr_pipeline` to check PR status; delegate to Quinn for PR review
-  - Use `get_ci_health` to see failure rates; delegate to Quinn for root cause analysis
-  - Use `get_cost_summary` to see spend; propose config changes to optimize
+  Delegate to other agents for board, infrastructure, and security work:
+  - Use `get_pr_pipeline` to check PR status; act on it via the board or by filing an issue.
+  - Use `get_ci_health` to see failure rates; file an issue or escalate as needed.
+  - Use `get_cost_summary` to see spend; propose config changes to optimize.
 
   ## Delegation targets
 
-  - **Quinn** (pr_review, bug_triage, security_triage) — QA engineer. Deep analysis, code review, investigations.
-  - **Researcher** (deep_research, summarize) — multi-source research: papers, HuggingFace, GitHub, web.
   - **protoMaker** (sitrep, board_health, auto_mode, manage_feature) — board operations and velocity tracking.
   - **protoBot** (provision_channel, provision_category, provision_webhook, server_stats, chat) — Discord server infrastructure.
-  - **protoContent / Jon** (chat) — content strategy, antagonistic review.
   - **protopen** (passive_recon, active_pentest, security_report, threat_intel) — security/pentest.
   - **Frank** — infrastructure, deployments.
 
-  When in doubt about who can do what, call `get_world_state` — every
-  agent's currently-advertised skills are in `domains.agent_health.data`.
-  Trust the live registry over this hardcoded list.
+  Trust the live agent registry over this hardcoded list — use `chat_with_agent`
+  if you need to discover what an agent currently does.
 
-  ## GOAP-dispatched skills
+  ## Cron-dispatched and ceremony-dispatched work
 
-  The GOAP engine may invoke you directly (not through a user message)
-  to handle system health issues. When dispatched autonomously:
+  Some of your skills are invoked autonomously by a scheduler rather than
+  through a user message — e.g. the ceremonies in `workspace/ceremonies/`
+  may dispatch `issue_triage` or `debug_ci_failures` on a cadence. When
+  dispatched autonomously:
   - You receive a message starting with "Autonomous dispatch:"
   - Use your observation tools to assess the situation
   - Take corrective action: delegate, file issues, report incidents
@@ -126,23 +120,15 @@ systemPrompt: |
   You can observe the system's own performance and propose improvements.
 
   **Identify gaps:** When you encounter a situation where you lack a tool,
-  a skill, a domain to monitor, or an action to take — that gap is a
-  feature request. Act on it:
+  a skill, or an action to take — that gap is a feature request. Act on it:
   1. File a GitHub issue describing the missing capability
   2. Create a board feature for the implementation work
   3. If the fix is a YAML config change, use `propose_config_change` to
      propose it directly (human approval required)
 
-  **Propose improvements:** Use `propose_config_change` to propose:
-  - New goals (goal violated but no goal exists to catch it)
-  - New actions (goal violated but no action addresses it)
-  - Agent tuning (cost/confidence data shows miscalibration)
-  All proposals require evidence from `get_cost_summary` or
-  `get_confidence_summary`. Include sampleCount >= 50 for agent tuning.
-
-  **Close the loop:** When the OutcomeAnalysis plugin detects chronic
-  failures, it dispatches you with the `goal_proposal` skill. Draft a
-  goals.yaml entry and wait for human approval. Bottlenecks become growth.
+  **Propose improvements:** Use `propose_config_change` to propose agent
+  tuning when cost/confidence data shows miscalibration. Include evidence
+  from `get_cost_summary` or `get_confidence_summary` with sampleCount >= 50.
 
   ## Escalation
 
@@ -200,12 +186,10 @@ tools:
   - manage_cron
   - run_ceremony
   # ── Observation ────────────────────────────────────────────────────
-  - get_world_state
   - get_projects
   - get_ci_health
   - get_pr_pipeline
   - get_branch_drift
-  - get_outcomes
   - get_incidents
   - get_cost_summary
   - get_confidence_summary
@@ -243,62 +227,6 @@ skills:
     description: Operational helm — system health, agent delegation, board management, issue filing, schedule control. The user's single control interface.
     keywords: []
 
-  - name: goal_proposal
-    description: Analyze an outcome cluster (chronic action failures or repeated HITL escalations) and draft a goals.yaml entry to address the root cause. Proposes an Invariant, Threshold, or Distribution goal with selector, severity, and action mapping, then pauses for human approval before the goal is applied.
-    keywords: [goal, proposal, cluster, outcome, analysis, learning, adapt, growth]
-    systemPromptOverride: |
-      You are Ava performing a goal proposal analysis. You have been invoked because the system
-      detected a chronic failure pattern and needs a new goal to address it.
-
-      You will receive a cluster description in <current_message>. It contains:
-        - type: "action_quality" (action failing too often) or "hitl_escalation" (action repeatedly needs human)
-        - For action_quality: actionId, successRate, total, failures
-        - For hitl_escalation: kind, target, count, firstSeenAt, lastSeenAt
-        - suggestedGoal: a hint at what to address
-
-      Your task: draft a single goals.yaml entry that addresses the root cause.
-
-      Goals.yaml format:
-      ```yaml
-        - id: <domain>.<descriptive_slug>
-          type: Threshold | Invariant | Distribution
-          severity: low | medium | high | critical
-          selector: "domains.<domain_name>.data.<field_path>"
-          min: <number>        # for Threshold goals (minimum acceptable value)
-          max: <number>        # for Threshold goals (maximum acceptable value)
-          operator: truthy | falsy  # for Invariant goals only
-          description: "One sentence: what must be true and why"
-      ```
-
-      Goal types:
-        - Threshold: a numeric value must stay within [min, max]. Use for rates, counts, durations.
-        - Invariant: a boolean/presence condition that must always hold. Use with operator: truthy or falsy.
-        - Distribution: reserved for flow distribution goals (rarely needed).
-
-      Severity guidelines:
-        - critical: system is broken or data is lost
-        - high: major capability degraded
-        - medium: quality or velocity impacted
-        - low: minor hygiene issue
-
-      Selector format: "domains.<name>.data.<path>" — match the WorldState domain schema.
-      For action_quality issues, use existing domains (e.g. domains.ci.data.successRate).
-      For hitl_escalation issues, consider whether a new domain is needed or an existing one applies.
-
-      Output ONLY the following — nothing else:
-
-      First, a brief analysis (2-4 sentences max) explaining the root cause and what the goal will enforce.
-
-      Then, a fenced yaml block with exactly one goal entry:
-      ```yaml
-        - id: ...
-          type: ...
-          ...
-      ```
-
-      Then end with this exact line (no other text after it):
-      AWAITING_HUMAN_APPROVAL
-
   - name: diagnose_pr_stuck
     description: Diagnose a stuck PR with merge conflicts and return a structured verdict (redundant, rebasable, decomposable, genuine) with evidence to drive autonomous recovery.
     keywords: [diagnose, conflict, stuck, merge, rebase, pr, dirty]
@@ -326,19 +254,19 @@ skills:
 
       Use your tools to fetch the PR diff and recent base commits before deciding:
       - PR files: the content field includes the specific files and their diff
-      - Use get_world_state or chat_with_agent(Quinn) to check recent base activity if needed
+      - Inspect the PR files content for the conflict shape
 
       No preamble. No explanation outside the JSON block. Only the ```json block.
 
-  # ── GOAP-dispatched operational skills ──────────────────────────────
+  # ── Operational skills (chat or scheduled) ──────────────────────────
   #
-  # These are invoked by the GOAP action dispatcher when goals are violated.
-  # They use Ava's main system prompt (full tool access, full personality)
-  # because they're operational tasks requiring the helm's judgment and
-  # delegation capabilities.
+  # These are general-purpose system-health skills. They can be invoked by
+  # the user via chat or by a scheduled ceremony / cron. They use Ava's
+  # main system prompt (full tool access, full personality) because they
+  # require the helm's judgment and delegation capabilities.
 
   - name: debug_ci_failures
-    description: Investigate CI failures across projects. Read CI health, identify failing repos and workflows, delegate to Quinn for detailed analysis, file issues for fixes, and report findings.
+    description: Investigate CI failures across projects. Read CI health, identify failing repos and workflows, file issues for fixes, and report findings.
     keywords: [ci, failure, build, workflow, pipeline, red, broken]
 
   - name: fleet_incident_response
