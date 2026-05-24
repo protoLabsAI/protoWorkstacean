@@ -38,6 +38,55 @@ function classifyFlowType(skill: string): "feature" | "defect" | "risk" | "debt"
   return "feature";
 }
 
+// ── Per-skill-per-repo cooldown ────────────────────────────────────────────────
+//
+// When a webhook fires bug_triage on every issue Quinn herself just filed, the
+// resulting cascade can spawn 23 near-duplicate issues in 60s (see
+// protoWorkstacean#556 + #558 for the surface fix at the github plugin). This
+// is a defense-in-depth chokepoint at the dispatcher: even if some other
+// trigger source bypasses the github filter, the same `(skill, repo)` pair
+// can only dispatch once per cooldown window.
+//
+// Defaults: bug_triage 30s, pr_review 30s, security_triage 60s. Everything
+// else: 0 (no cooldown). Override per skill with
+// WORKSTACEAN_COOLDOWN_MS_<SKILL>=<ms> (case-insensitive — env var matches
+// against UPPER_SNAKE of the skill name).
+const DEFAULT_SKILL_COOLDOWN_MS: Record<string, number> = {
+  bug_triage: 30_000,
+  pr_review: 30_000,
+  security_triage: 60_000,
+};
+
+/**
+ * Resolve cooldown window for a skill. Env override
+ * `WORKSTACEAN_COOLDOWN_MS_BUG_TRIAGE=15000` would shorten bug_triage to 15s.
+ * Returns 0 for skills with no default + no env override → no cooldown.
+ */
+export function cooldownMsFor(skill: string): number {
+  const envKey = `WORKSTACEAN_COOLDOWN_MS_${skill.toUpperCase()}`;
+  const raw = process.env[envKey];
+  if (raw !== undefined) {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : (DEFAULT_SKILL_COOLDOWN_MS[skill] ?? 0);
+  }
+  return DEFAULT_SKILL_COOLDOWN_MS[skill] ?? 0;
+}
+
+/**
+ * Build the cooldown bucket key for a dispatch. Bucketed by (skill, repo) so
+ * `bug_triage` on protoMaker has its own cooldown bucket separate from
+ * `bug_triage` on protoWorkstacean — different repos don't share back-pressure.
+ * Falls back to `<skill>:_` (no repo) when the payload doesn't carry a github
+ * context (chat dispatches, manual /publish calls, etc.).
+ */
+export function cooldownKeyFor(skill: string, payload: Record<string, unknown> | undefined): string {
+  const github = (payload?.["github"] as Record<string, unknown> | undefined);
+  const owner = typeof github?.["owner"] === "string" ? github["owner"] : undefined;
+  const repo = typeof github?.["repo"] === "string" ? github["repo"] : undefined;
+  const repoKey = owner && repo ? `${owner}/${repo}` : "_";
+  return `${skill}:${repoKey}`;
+}
+
 export class SkillDispatcherPlugin implements Plugin {
   readonly name = "skill-dispatcher";
   readonly description = "Sole agent.skill.request subscriber — resolves executor and dispatches";
@@ -65,6 +114,14 @@ export class SkillDispatcherPlugin implements Plugin {
    * and dispatch a competing execution.
    */
   private readonly activeExecutions = new Map<string, { startedAt: number; skill: string }>();
+
+  /**
+   * Per-skill-per-repo cooldown bucket — see DEFAULT_SKILL_COOLDOWN_MS +
+   * cooldownKeyFor() at top of file. Last dispatch time per key; consulted
+   * before dispatch, updated on accept. Drops are logged loudly so they're
+   * visible in the same place as the dispatch log line.
+   */
+  private readonly lastDispatchAt = new Map<string, number>();
 
   constructor(
     private readonly registry: ExecutorRegistry,
@@ -148,6 +205,28 @@ export class SkillDispatcherPlugin implements Plugin {
       console.warn(`[skill-dispatcher] No executor found for ${searched} — dropping`);
       this._publishResponse(replyTopic, correlationId, undefined, `No executor registered for ${searched}`);
       return;
+    }
+
+    // ── Per-skill-per-repo cooldown ────────────────────────────────────────
+    // Defense-in-depth against cascades (protoWorkstacean#556). Same
+    // (skill, repo) pair can only dispatch once per cooldown window; bucketed
+    // per repo so e.g. bug_triage on protoMaker doesn't gate bug_triage on
+    // protoWorkstacean. Defaults in DEFAULT_SKILL_COOLDOWN_MS; override per
+    // skill via WORKSTACEAN_COOLDOWN_MS_<SKILL>.
+    const cooldownMs = cooldownMsFor(skill);
+    if (cooldownMs > 0) {
+      const key = cooldownKeyFor(skill, payload as Record<string, unknown>);
+      const last = this.lastDispatchAt.get(key);
+      if (last !== undefined && Date.now() - last < cooldownMs) {
+        const remaining = cooldownMs - (Date.now() - last);
+        this.activeExecutions.delete(correlationId);
+        console.warn(
+          `[skill-dispatcher] Cooldown drop: "${key}" dispatched ${Date.now() - last}ms ago (window=${cooldownMs}ms, ${remaining}ms remaining)`,
+        );
+        this._publishResponse(replyTopic, correlationId, undefined, `Cooldown: ${key} (${remaining}ms remaining)`);
+        return;
+      }
+      this.lastDispatchAt.set(key, Date.now());
     }
 
     console.log(
