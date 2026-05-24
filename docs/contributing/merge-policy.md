@@ -57,13 +57,30 @@ Do this on every active repo where stacking happens.
 
 ## Step 3 — Branch protection check (admin, per repo)
 
-Verify on the `main` and `dev` branches:
+The rule differs by branch:
+
+### `dev` — linear history must be OFF
 
 1. Go to `https://github.com/protoLabsAI/<repo>/settings/branches`
-2. Open the rule for `main` (and `dev` if separate)
+2. Open the rule for `dev`
 3. **Verify "Require linear history" is OFF**
-   - If it's ON, merge commits are forbidden regardless of the merge-button settings above — uncheck it.
-4. Everything else (required status checks, required reviews) stays as-is
+   - If it's ON, merge commits are forbidden on dev regardless of the merge-button settings — uncheck it.
+
+This is what makes the merge-commit-for-stacks workflow actually work. Stacked PRs target `dev`; if dev forbids merge commits, the policy can't be applied.
+
+### `main` — linear history stays ON (intentional)
+
+`main` is the release branch. Each commit on `main` should be one release.
+
+1. **Leave "Require linear history" ON** for `main`
+2. Promotion PRs (`dev → main`) get squashed or rebased into a single release commit, which is what we want
+3. The detailed per-PR history stays on `dev` where it's useful for debugging; main stays a clean tagged log
+
+**Do not flip this OFF thinking it's required by the merge-commit policy.** The policy only applies to PRs targeting `dev`. Promotion PRs are inherently single-unit work and benefit from being squashed.
+
+### Everything else
+
+Required status checks, required reviews — leave as-is. Both `dev` and `main` keep the same check requirements.
 
 ---
 
