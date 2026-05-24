@@ -23,8 +23,28 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { Route, ApiContext } from "./types.ts";
+
+/**
+ * Where clawpatch persists `.clawpatch/` (features, findings, runs, reports,
+ * etc.). Repo mounts in the workstacean container are read-only, so we put
+ * state in the workstacean-data volume — one subdirectory per owner/repo.
+ *
+ * Override with CLAWPATCH_STATE_ROOT for testing or when DATA_DIR isn't set.
+ */
+const CLAWPATCH_STATE_ROOT =
+  process.env["CLAWPATCH_STATE_ROOT"]
+  ?? join(process.env["DATA_DIR"] ?? "/data", "clawpatch");
+
+function stateDirFor(repo: string): string {
+  // owner/repo → owner-repo so the path stays one level deep.
+  const slug = repo.replace("/", "-");
+  const dir = join(CLAWPATCH_STATE_ROOT, slug);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 interface ReviewRequest {
   repo: string;
@@ -131,7 +151,11 @@ export function createRoutes(_ctx: ApiContext): Route[] {
           );
         }
 
-        const args = ["ci", "--provider", "gateway", "--json"];
+        // Workstacean mounts repo source read-only, so push clawpatch state
+        // into the writable data volume — one dir per owner/repo so we don't
+        // re-map features for every PR review.
+        const stateDir = stateDirFor(repo);
+        const args = ["ci", "--provider", "gateway", "--json", "--state-dir", stateDir];
         if (since) args.push("--since", since);
         if (typeof limit === "number" && limit > 0) args.push("--limit", String(limit));
         if (model) args.push("--model", model);
