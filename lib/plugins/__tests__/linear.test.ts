@@ -55,8 +55,18 @@ function collectBus(bus: InMemoryEventBus, pattern: string): BusMessage[] {
 }
 
 // Wrap a payload as a Linear webhook envelope (post-Zod-parse shape).
-function envelope(action: "create" | "update" | "remove", type: string, data: Record<string, unknown>) {
+function envelope(action: string, type: string, data: Record<string, unknown>) {
   return { action, type, data };
+}
+
+// AppUserNotification envelope — body in `notification`, action is camelCase verb.
+function notificationEnvelope(action: string, notification: Record<string, unknown>) {
+  return { action, type: "AppUserNotification", notification };
+}
+
+// AgentSessionEvent envelope — body in `agentSession`, optional `agentActivity`.
+function agentSessionEnvelope(action: string, agentSession: Record<string, unknown>, agentActivity?: Record<string, unknown>) {
+  return { action, type: "AgentSessionEvent", agentSession, agentActivity };
 }
 
 describe("LinearPlugin — inbound webhooks", () => {
@@ -171,6 +181,100 @@ describe("LinearPlugin — inbound webhooks", () => {
   test("unknown envelope type is dropped (no publish, logged as a warning)", async () => {
     const collected = collectBus(bus, "message.inbound.linear.#");
     await priv(plugin)._handleWebhook(envelope("create", "Reaction", { id: "r-1" }), bus);
+    expect(collected).toHaveLength(0);
+  });
+
+  test("past-tense action ('created') normalizes to the same topic suffix as 'create'", async () => {
+    const collected = collectBus(bus, "message.inbound.linear.issue.#");
+    await priv(plugin)._handleWebhook(envelope("created", "Issue", {
+      id: "issue-uuid-past-tense",
+      title: "Past-tense action",
+      team: { id: "team-1", key: "ENG", name: "Engineering" },
+    }), bus);
+    await priv(plugin)._handleWebhook(envelope("updated", "Issue", {
+      id: "issue-uuid-updated",
+      title: "Updated",
+      team: { id: "team-1", key: "ENG", name: "Engineering" },
+    }), bus);
+    await priv(plugin)._handleWebhook(envelope("removed", "Issue", {
+      id: "issue-uuid-removed",
+      title: "Removed",
+    }), bus);
+    expect(collected).toHaveLength(3);
+    expect(collected[0].topic).toBe("message.inbound.linear.issue.created");
+    expect(collected[1].topic).toBe("message.inbound.linear.issue.updated");
+    expect(collected[2].topic).toBe("message.inbound.linear.issue.removed");
+  });
+
+  test("AppUserNotification → publishes message.inbound.linear.agent.{action}", async () => {
+    const collected = collectBus(bus, "message.inbound.linear.agent.#");
+    await priv(plugin)._handleWebhook(notificationEnvelope("issueCommentMention", {
+      id: "notif-1",
+      issueId: "issue-abc",
+      commentId: "comment-xyz",
+      actor: { id: "user-1", name: "Josh" },
+      issue: { id: "issue-abc", identifier: "JOSH-386", title: "Test" },
+      comment: { id: "comment-xyz", body: "@ava take a look" },
+    }), bus);
+
+    expect(collected).toHaveLength(1);
+    const msg = collected[0];
+    expect(msg.topic).toBe("message.inbound.linear.agent.issueCommentMention");
+    expect(msg.correlationId).toBe("linear-issue-abc");
+    const p = msg.payload as Record<string, unknown>;
+    expect(p.action).toBe("issueCommentMention");
+    expect(p.issueId).toBe("issue-abc");
+    expect(p.commentId).toBe("comment-xyz");
+    expect((p.notification as Record<string, unknown>).id).toBe("notif-1");
+  });
+
+  test("AppUserNotification with nested issue/comment objects (no top-level issueId)", async () => {
+    const collected = collectBus(bus, "message.inbound.linear.agent.#");
+    // Some Linear envelopes carry only nested issue.id, not a top-level issueId.
+    await priv(plugin)._handleWebhook(notificationEnvelope("issueMention", {
+      id: "notif-2",
+      issue: { id: "issue-nested", identifier: "ENG-1", title: "Nested" },
+    }), bus);
+    expect(collected).toHaveLength(1);
+    expect(collected[0].correlationId).toBe("linear-issue-nested");
+    expect((collected[0].payload as Record<string, unknown>).issueId).toBe("issue-nested");
+  });
+
+  test("AgentSessionEvent.created → publishes message.inbound.linear.agent_session.created", async () => {
+    const collected = collectBus(bus, "message.inbound.linear.agent_session.#");
+    await priv(plugin)._handleWebhook(agentSessionEnvelope("created", {
+      id: "session-1",
+      issueId: "issue-abc",
+      issue: { id: "issue-abc", title: "Onboarding" },
+    }), bus);
+
+    expect(collected).toHaveLength(1);
+    const msg = collected[0];
+    expect(msg.topic).toBe("message.inbound.linear.agent_session.created");
+    expect(msg.correlationId).toBe("session-1");
+    const p = msg.payload as Record<string, unknown>;
+    expect(p.action).toBe("created");
+    expect(p.sessionId).toBe("session-1");
+    expect(p.issueId).toBe("issue-abc");
+  });
+
+  test("AgentSessionEvent.prompted carries agentActivity through to the payload", async () => {
+    const collected = collectBus(bus, "message.inbound.linear.agent_session.#");
+    await priv(plugin)._handleWebhook(agentSessionEnvelope(
+      "prompted",
+      { id: "session-2", issueId: "issue-zzz" },
+      { type: "userMessage", content: "fix the bug pls" },
+    ), bus);
+    expect(collected).toHaveLength(1);
+    const p = collected[0].payload as Record<string, unknown>;
+    expect((p.agentActivity as Record<string, unknown>).content).toBe("fix the bug pls");
+  });
+
+  test("Issue / Comment / Project webhook missing data field → dropped, no crash", async () => {
+    const collected = collectBus(bus, "message.inbound.linear.#");
+    await priv(plugin)._handleWebhook({ action: "created", type: "Issue" } as unknown, bus);
+    await priv(plugin)._handleWebhook({ action: "created", type: "Comment" } as unknown, bus);
+    await priv(plugin)._handleWebhook({ action: "created", type: "Project" } as unknown, bus);
     expect(collected).toHaveLength(0);
   });
 

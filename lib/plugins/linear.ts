@@ -7,6 +7,8 @@
  *     message.inbound.linear.issue.{created|updated|removed}
  *     message.inbound.linear.comment.{created|updated|removed}
  *     message.inbound.linear.project.{created|updated|removed}
+ *     message.inbound.linear.agent.{issueMention|issueCommentMention|...}
+ *     message.inbound.linear.agent_session.{created|prompted}
  *
  *   The HTTP 200 is returned AFTER the bus publish completes, so a publish
  *   failure surfaces as a 5xx that Linear will retry on.
@@ -97,13 +99,24 @@ const LinearProjectDataSchema = z.object({
   url: z.string().optional(),
 });
 
-/** Action verbs Linear emits across all resource types. */
-const LINEAR_ACTIONS = ["create", "update", "remove"] as const;
+// Linear sends three distinct envelope shapes:
+//   1. Standard webhooks (Issue/Comment/Project) — action is create/update/remove
+//      or past-tense created/updated/removed. Body in `data`.
+//   2. AppUserNotification (Agent app @mentions, assignments, etc.) — action is
+//      a camelCase notification verb like issueMention, issueCommentMention,
+//      issueAssignedToYou, issueNewComment. Body in `notification`.
+//   3. AgentSessionEvent (Agent Session API — newer SDK) — action is created
+//      or prompted. Body in `agentSession`.
+// We use a permissive envelope (action as string) and branch on `type` in the
+// handler. Strict per-shape validation happens after the branch.
 
 const LinearWebhookEnvelopeSchema = z.object({
-  action: z.enum(LINEAR_ACTIONS),
-  type: z.string(),
-  data: z.record(z.string(), z.unknown()),
+  action: z.string().min(1),
+  type: z.string().min(1),
+  data: z.record(z.string(), z.unknown()).optional(),
+  notification: z.record(z.string(), z.unknown()).optional(),
+  agentSession: z.record(z.string(), z.unknown()).optional(),
+  agentActivity: z.record(z.string(), z.unknown()).optional(),
   createdAt: z.string().optional(),
   organizationId: z.string().optional(),
   webhookTimestamp: z.number().optional(),
@@ -111,6 +124,16 @@ const LinearWebhookEnvelopeSchema = z.object({
 });
 
 type LinearWebhookEnvelope = z.infer<typeof LinearWebhookEnvelopeSchema>;
+
+/** Normalize action verb tense. `create` / `created` both → `created`, etc. */
+function normalizeAction(action: string): string {
+  switch (action) {
+    case "create": return "created";
+    case "update": return "updated";
+    case "remove": return "removed";
+    default: return action;
+  }
+}
 type LinearIssueData = z.infer<typeof LinearIssueDataSchema>;
 type LinearCommentData = z.infer<typeof LinearCommentDataSchema>;
 type LinearProjectData = z.infer<typeof LinearProjectDataSchema>;
@@ -266,10 +289,13 @@ export class LinearPlugin implements Plugin {
             }
           }
 
-          // Dedup key — prefer webhookId; fall back to (type, data.id, webhookTimestamp).
-          const dataId = typeof payload.data.id === "string" ? payload.data.id : "?";
+          // Dedup key — prefer webhookId; fall back to (type, body.id, webhookTimestamp).
+          // Each envelope shape (standard / AppUserNotification / AgentSessionEvent)
+          // carries its body in a different field; check all three.
+          const body = payload.data ?? payload.notification ?? payload.agentSession;
+          const dataId = typeof body?.id === "string" ? body.id : "?";
           const dedupKey = payload.webhookId
-            ?? `${payload.type}:${dataId}:${payload.webhookTimestamp ?? 0}`;
+            ?? `${payload.type}:${payload.action}:${dataId}:${payload.webhookTimestamp ?? 0}`;
           if (dedup.isDuplicate(dedupKey)) {
             return new Response("Already processed", { status: 200 });
           }
@@ -308,14 +334,13 @@ export class LinearPlugin implements Plugin {
   }
 
   private async _handleWebhook(payload: LinearWebhookEnvelope, bus: EventBus): Promise<void> {
-    const actionMap: Record<typeof LINEAR_ACTIONS[number], string> = {
-      create: "created",
-      update: "updated",
-      remove: "removed",
-    };
-    const action = actionMap[payload.action];
+    const action = normalizeAction(payload.action);
 
     if (payload.type === "Issue") {
+      if (!payload.data) {
+        console.warn(`[linear] Issue webhook missing data field — dropping`);
+        return;
+      }
       const issueParsed = LinearIssueDataSchema.safeParse(payload.data);
       if (!issueParsed.success) {
         console.warn(`[linear] Issue payload failed schema — dropping. ${issueParsed.error.issues.map(i => i.message).join("; ")}`);
@@ -325,6 +350,10 @@ export class LinearPlugin implements Plugin {
       return;
     }
     if (payload.type === "Comment") {
+      if (!payload.data) {
+        console.warn(`[linear] Comment webhook missing data field — dropping`);
+        return;
+      }
       const commentParsed = LinearCommentDataSchema.safeParse(payload.data);
       if (!commentParsed.success) {
         console.warn(`[linear] Comment payload failed schema — dropping. ${commentParsed.error.issues.map(i => i.message).join("; ")}`);
@@ -334,6 +363,10 @@ export class LinearPlugin implements Plugin {
       return;
     }
     if (payload.type === "Project") {
+      if (!payload.data) {
+        console.warn(`[linear] Project webhook missing data field — dropping`);
+        return;
+      }
       const projectParsed = LinearProjectDataSchema.safeParse(payload.data);
       if (!projectParsed.success) {
         console.warn(`[linear] Project payload failed schema — dropping. ${projectParsed.error.issues.map(i => i.message).join("; ")}`);
@@ -342,9 +375,71 @@ export class LinearPlugin implements Plugin {
       this._publishProject(projectParsed.data, action, bus);
       return;
     }
+    if (payload.type === "AppUserNotification") {
+      // Agent app events: @mentions, assignments, comments on assigned issues, etc.
+      // Body is in `notification`. Pass the raw object through — downstream
+      // routing decides what to do with each notification kind.
+      this._publishAgentNotification(payload.action, payload.notification ?? {}, bus);
+      return;
+    }
+    if (payload.type === "AgentSessionEvent") {
+      // Linear's newer Agent Session API. Body is in `agentSession` plus
+      // optionally `agentActivity` (for prompted events).
+      this._publishAgentSession(payload.action, payload.agentSession ?? {}, payload.agentActivity, bus);
+      return;
+    }
     // Unknown envelope type — log loudly + drop. Linear adds new resource
     // types over time; fail visibly so we know to extend the plugin.
-    console.warn(`[linear] Unhandled webhook type "${payload.type}" — dropping (extend LinearPlugin to support)`);
+    console.warn(`[linear] Unhandled webhook type "${payload.type}" action="${payload.action}" — dropping (extend LinearPlugin to support)`);
+  }
+
+  private _publishAgentNotification(action: string, notification: Record<string, unknown>, bus: EventBus): void {
+    const topic = `message.inbound.linear.agent.${action}`;
+    const issueId = (notification.issueId as string | undefined)
+      ?? ((notification.issue as { id?: string } | undefined)?.id);
+    const commentId = (notification.commentId as string | undefined)
+      ?? ((notification.comment as { id?: string } | undefined)?.id);
+    const correlationId = issueId ? `linear-${issueId}` : crypto.randomUUID();
+    bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic,
+      timestamp: Date.now(),
+      payload: {
+        action,
+        notification,
+        issueId,
+        commentId,
+      },
+    });
+    console.log(`[linear] agent.${action}${issueId ? ` on issue ${issueId}` : ""}`);
+  }
+
+  private _publishAgentSession(
+    action: string,
+    agentSession: Record<string, unknown>,
+    agentActivity: Record<string, unknown> | undefined,
+    bus: EventBus,
+  ): void {
+    const topic = `message.inbound.linear.agent_session.${action}`;
+    const sessionId = agentSession.id as string | undefined;
+    const issueId = (agentSession.issueId as string | undefined)
+      ?? ((agentSession.issue as { id?: string } | undefined)?.id);
+    const correlationId = sessionId ?? (issueId ? `linear-${issueId}` : crypto.randomUUID());
+    bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic,
+      timestamp: Date.now(),
+      payload: {
+        action,
+        sessionId,
+        issueId,
+        agentSession,
+        agentActivity,
+      },
+    });
+    console.log(`[linear] agent_session.${action}${sessionId ? ` session=${sessionId}` : ""}`);
   }
 
   private _publishIssue(issue: LinearIssueData, action: string, bus: EventBus): void {
