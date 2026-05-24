@@ -199,7 +199,11 @@ function extractContext(event: string, payload: Record<string, unknown>): GitHub
     };
   }
 
-  if (event === "pull_request" && (payload.action === "opened" || payload.action === "synchronize")) {
+  if (event === "pull_request" && (
+    payload.action === "opened" ||
+    payload.action === "synchronize" ||
+    payload.action === "review_requested"
+  )) {
     const pr = payload.pull_request as Record<string, unknown>;
     return {
       owner, repo: repoName,
@@ -500,7 +504,20 @@ export class GitHubPlugin implements Plugin {
     // verdict. Dedup'd via recentDispatches so a fast-updating branch doesn't
     // flood the bus.
     if (event === "pull_request" && (payload.action === "opened" || payload.action === "synchronize")) {
-      this._handleAutoReview(event, payload, ctx, bus);
+      this._handleAutoReview(event, payload, ctx, bus, { skipDedup: false });
+      return;
+    }
+
+    // ── Re-review path: pull_request review_requested for @protoquinn[bot] ────
+    // Native GitHub "Re-request review" button → Quinn re-reviews. Bypasses
+    // dedup because the human is explicitly asking. Other review_requested
+    // events (for human reviewers) are ignored.
+    if (event === "pull_request" && payload.action === "review_requested") {
+      const reviewer = payload.requested_reviewer as Record<string, unknown> | undefined;
+      const login = (reviewer?.login as string | undefined)?.toLowerCase();
+      if (login === "protoquinn" || login === "protoquinn[bot]") {
+        this._handleAutoReview(event, payload, ctx, bus, { skipDedup: true });
+      }
       return;
     }
 
@@ -583,13 +600,16 @@ export class GitHubPlugin implements Plugin {
     payload: Record<string, unknown>,
     ctx: GitHubEventContext,
     bus: EventBus,
+    opts: { skipDedup: boolean } = { skipDedup: false },
   ): void {
     const action = payload.action as string;
     const dedupKey = `pr-review:${ctx.owner}/${ctx.repo}#${ctx.number}`;
-    const lastDispatched = this.recentDispatches.get(dedupKey);
-    if (lastDispatched && Date.now() - lastDispatched < GitHubPlugin.DEDUP_WINDOW_MS) {
-      console.log(`[github] Auto-review: skipping duplicate ${dedupKey} (dispatched ${Date.now() - lastDispatched}ms ago)`);
-      return;
+    if (!opts.skipDedup) {
+      const lastDispatched = this.recentDispatches.get(dedupKey);
+      if (lastDispatched && Date.now() - lastDispatched < GitHubPlugin.DEDUP_WINDOW_MS) {
+        console.log(`[github] Auto-review: skipping duplicate ${dedupKey} (dispatched ${Date.now() - lastDispatched}ms ago)`);
+        return;
+      }
     }
     this.recentDispatches.set(dedupKey, Date.now());
 
