@@ -178,9 +178,7 @@ The caller receives the same `SkillResult` it would have received from a blockin
 
 ## input-required and HITL
 
-If a streaming agent returns `input-required`, the task does not complete. `TaskTracker` detects the state, raises an `HITLRequest` on the bus, and the HITL renderer surfaces the pause point to a human on the originating interface. When the human responds, `TaskTracker` resumes the task via `message/send` with the same `taskId`. The agent picks up where it left off.
-
-This is the same flow whether the request came from a human message or an autonomous action. See [HITL guide](./hitl) for the full flow.
+If a streaming agent returns `input-required`, the task does not complete. `TaskTracker` detects the state and terminates the task as failed with a "no approval gate is wired" message — this build doesn't ship an in-process HITL plugin. If your deployment needs human approval mid-flow, register a bus subscriber for the relevant prompt topic and publish the response back yourself.
 
 ## Fallback behavior
 

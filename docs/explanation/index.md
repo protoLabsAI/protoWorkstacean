@@ -8,19 +8,18 @@ These docs explain the *why* behind protoWorkstacean's architecture. Read them w
 
 | Document | What it explains |
 |----------|-----------------|
-| [Executor layer](../integrations/runtimes/) | Why the executor layer exists, how resolution works, the registrar pattern, health-weighted multi-agent selection (Arc 8.4), and why `SkillDispatcherPlugin` is the sole `agent.skill.request` subscriber |
-| [World engine](./world-engine) | Why `WorldState` is a generic record, the scheduled cron / ceremony loop design, domain discovery rationale |
-| [Self-improving loop](./self-improving-loop) | How A2A extensions feed observations into `PlannerPluginL0`'s candidate ranking, how episodic memory writes to Graphiti, and why the convergence loops don't diverge |
-| [Distributed tracing](./distributed-tracing) | How `correlationId` (trace-id) and `parentId` (span-id) flow from the bus through RouterPlugin, A2AExecutor, external agents (protoMaker team, Quinn), and back |
+| [Architecture](./architecture) | The switchboard shape: trigger → router → dispatcher → executor. Why this is the whole product. |
+| [Executor layer](../integrations/runtimes/) | Why the executor layer exists, how resolution works, the registrar pattern, health-weighted multi-agent selection, and why `SkillDispatcherPlugin` is the sole `agent.skill.request` subscriber |
+| [Distributed tracing](./distributed-tracing) | How `correlationId` (trace-id) and `parentId` (span-id) flow from the bus through RouterPlugin, A2AExecutor, external agents, and back |
 | [Plugin system](./plugin-system) | The plugin lifecycle, core vs integration vs workspace plugins, ordering guarantees |
-| [Cross-channel conversations](../integrations/channels) | How `ChannelRegistry` maps channels → agents, how `ConversationManager` maintains stable `conversationId` across DM and guild turns, and how memory enrichment now applies to all channels |
+| [Agent identity](./agent-identity) | How agents identify themselves across Discord, GitHub, A2A, and the bus |
 
 ## Design philosophy
 
 protoWorkstacean is built around three ideas:
 
-1. **The bus is the contract.** Plugins communicate only through typed bus messages. No plugin holds a direct reference to another plugin. This makes it safe to add, remove, or replace plugins without touching existing code.
+1. **The bus is the contract.** Plugins communicate only through typed bus messages. No plugin holds a direct reference to another plugin. This makes it safe to add, remove, or replace plugins without touching existing code. Plugins declare their `publishes` and `subscribes` topic patterns so the dependency graph is inspectable via `GET /api/bus/topology`.
 
-2. **World state is ground truth.** The scheduled cron / ceremony loop does not make decisions based on ephemeral signals. It polls durable HTTP domains, computes a world state snapshot, and evaluates goals against that snapshot. Goals are declarative invariants — the system continuously works to satisfy them.
+2. **The switchboard has no agency.** Triggers come in, the router resolves them to a skill, the dispatcher routes the skill to an executor. Decisions about *what to do* live in the agents, schedules, and integrations — not in the routing layer.
 
 3. **Executors are interchangeable.** Whether a skill runs in-process via LangGraph (`DeepAgentExecutor`) or over HTTP via A2A JSON-RPC (`A2AExecutor`), the bus sees no difference. The executor layer is an internal seam, not an external protocol boundary.

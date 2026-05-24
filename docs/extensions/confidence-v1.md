@@ -92,19 +92,11 @@ Agents that don't implement the extension return normal A2A responses — the in
 
 ---
 
-## Planner integration
+## Dashboard + fleet-health integration
 
-`PlannerPluginL0` reads `defaultConfidenceStore` alongside `defaultCostStore` when ranking effect-based candidates:
+`defaultConfidenceStore` is read by `AgentFleetHealthPlugin` to surface per-(agent, skill) calibration metrics in the fleet view: `highConfFailures`, `avgConfidenceOnSuccess`, calibration-inversion detection. External consumers can pull `GET /api/confidence-summaries` for the same data.
 
-```
-score (warm) = 2.0 * cost.successRate
-             + 0.5 * confidence.avgConfidenceOnSuccess
-             - 0.3 * clamp(cost.avgWallMs / 60_000, 0, 2)
-```
-
-`avgConfidenceOnSuccess` specifically (not overall average) is used — it answers "when this agent succeeds at this skill, how sure is it?" which is the right question for ranking future candidates.
-
-See [`self-improving-loop.md`](../explanation/self-improving-loop) for the full flow.
+`avgConfidenceOnSuccess` (not the overall average) is the more informative metric — it answers "when this agent succeeds at this skill, how sure is it?" which is what you want for ranking.
 
 ---
 

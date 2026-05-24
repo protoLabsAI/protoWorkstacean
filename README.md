@@ -110,8 +110,6 @@ Plugins are loaded in `src/index.ts`. Each implements `install(bus) / uninstall(
 | `LinearPlugin` | `LINEAR_API_KEY` or `LINEAR_WEBHOOK_SECRET` | Linear webhook + outbound API |
 | `LinearProtoMakerBridgePlugin` | always | Labels Linear issues → protoMaker board features |
 | `GooglePlugin` | OAuth triple set | Drive / Docs / Calendar / Gmail outbound + Gmail polling |
-| `HITLPlugin` | always (pre-installed) | Human-in-the-loop approval gates |
-| `ConfigChangeHITLPlugin` | always (pre-installed) | HITL for config mutations (tuning reviews, etc.) |
 | `OperatorRoutingPlugin` | always (pre-installed) | Abstracts operator messaging across transports (Discord DM today) |
 | `EventViewerPlugin` | unless `DISABLE_EVENT_VIEWER` | Serves the dashboard event-stream |
 | `EchoPlugin` | `ENABLED_PLUGINS=echo` | Test echo |
