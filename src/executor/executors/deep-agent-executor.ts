@@ -18,6 +18,31 @@ import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
 
 const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
 
+/**
+ * Extract the assistant's text output from a LangChain AIMessage's `content`.
+ * Reasoning-style models (e.g. protolabs/reasoning, o3, claude with extended
+ * thinking) emit `content` as an array of typed blocks rather than a string:
+ *   [{type: "thinking", thinking: "..."}, {type: "text", text: "..."}]
+ * The text we want is the concatenation of `text`-typed blocks. Returns the
+ * trimmed result, or "" if no usable text was found.
+ */
+export function extractAiText(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (typeof block === "string") {
+      parts.push(block);
+      continue;
+    }
+    if (block && typeof block === "object") {
+      const b = block as Record<string, unknown>;
+      if (b.type === "text" && typeof b.text === "string") parts.push(b.text);
+    }
+  }
+  return parts.join("").trim();
+}
+
 export interface DeepAgentConfig {
   gatewayUrl?: string;
   gatewayApiKey?: string;
@@ -598,13 +623,12 @@ export class DeepAgentExecutor implements IExecutor {
       let text = "";
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
-        const content = msg.content;
-        if (typeof content === "string" && content.trim()) {
-          const type = msg._getType?.() ?? msg.constructor?.name ?? "";
-          if (type === "ai" || type === "AIMessage") {
-            text = content.trim();
-            break;
-          }
+        const type = msg._getType?.() ?? msg.constructor?.name ?? "";
+        if (type !== "ai" && type !== "AIMessage") continue;
+        const extracted = extractAiText(msg.content);
+        if (extracted) {
+          text = extracted;
+          break;
         }
       }
 
