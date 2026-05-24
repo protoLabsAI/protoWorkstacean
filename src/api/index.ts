@@ -7,7 +7,6 @@
 
 import type { Route, ApiContext } from "./types.ts";
 
-import { createRoutes as worldStateRoutes } from "./world-state.ts";
 import { createRoutes as githubRoutes } from "./github.ts";
 import { createRoutes as incidentRoutes } from "./incidents.ts";
 import { createRoutes as operationRoutes } from "./operations.ts";
@@ -31,7 +30,6 @@ export type { Route, ApiContext } from "./types.ts";
 export function createAllRoutes(ctx: ApiContext): Route[] {
   return [
     ...operationRoutes(ctx),
-    ...worldStateRoutes(ctx),
     ...githubRoutes(ctx),
     ...incidentRoutes(ctx),
     ...avaToolRoutes(ctx),

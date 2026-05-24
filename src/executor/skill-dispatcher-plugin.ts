@@ -23,7 +23,6 @@ import { assembleContext } from "../../lib/conversation/context-assembler.ts";
 import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "./task-tracker.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
-import { SessionStore } from "../agent-runtime/session-context.ts";
 
 const WORKING_STATES = new Set(["submitted", "working"]);
 
@@ -52,7 +51,6 @@ export class SkillDispatcherPlugin implements Plugin {
   private readonly identityRegistry: IdentityRegistry;
   private readonly mailbox: ContextMailbox | undefined;
   private readonly taskTracker: TaskTracker | undefined;
-  private readonly sessionStore: SessionStore;
 
   /**
    * In-flight execution tracking — set at the TOP of _dispatch() (before any
@@ -71,14 +69,11 @@ export class SkillDispatcherPlugin implements Plugin {
     mailbox?: ContextMailbox,
     /** Optional tracker for long-running A2A tasks. */
     taskTracker?: TaskTracker,
-    /** Optional session store for SDK session continuation across turns. */
-    sessionStore?: SessionStore,
   ) {
     this.graphiti = graphiti ?? new GraphitiClient();
     this.identityRegistry = new IdentityRegistry(workspaceDir);
     this.mailbox = mailbox;
     this.taskTracker = taskTracker;
-    this.sessionStore = sessionStore ?? new SessionStore();
   }
 
   /** Check if an execution is currently active for a given correlationId. */
@@ -273,12 +268,7 @@ export class SkillDispatcherPlugin implements Plugin {
     }
     // ── End memory enrichment ─────────────────────────────────────────────────
 
-    // Look up any existing SDK session for this correlationId+agent pair so the
-    // executor can resume conversation context across multiple skill turns.
     const agentName = targets[0] ?? "";
-    const existingSession = agentName
-      ? this.sessionStore.get(correlationId, agentName)
-      : undefined;
 
     const req: SkillRequest = {
       skill,
@@ -288,7 +278,6 @@ export class SkillDispatcherPlugin implements Plugin {
       parentId,
       replyTopic,
       payload,
-      ...(existingSession ? { resume: existingSession.sessionId } : {}),
     };
 
     const flowItemId = `skill-${correlationId}`;
@@ -434,10 +423,6 @@ export class SkillDispatcherPlugin implements Plugin {
           console.warn("[skill-dispatcher] Agent hit maxTurns limit");
         }
 
-        // Persist the SDK session ID so the next turn for this agent can resume it.
-        if (result.data?.sessionId && agentName) {
-          this.sessionStore.set(correlationId, agentName, result.data.sessionId);
-        }
         const completedAt = Date.now();
         const durationMs = completedAt - dispatchedAt;
         this._publishFlowEvent("flow.item.completed", {
