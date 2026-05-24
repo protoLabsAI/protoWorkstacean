@@ -34,6 +34,30 @@ async function ghApi(path: string): Promise<unknown> {
   return ghHttp.get(path, { auth: { type: "bearer", token: GITHUB_TOKEN } });
 }
 
+/**
+ * Title normalization used by create-issue dedup. Strips leading prefixes
+ * agents like to add ("[Triage] ", "Triage: ", "Action: ", etc.), removes
+ * punctuation noise (but keeps `#` so issue refs still discriminate),
+ * collapses whitespace, lowercases. Two titles that normalize to the same
+ * string are treated as duplicates.
+ *
+ * Designed against the #556 cascade where the same triage decision came
+ * back as ~7 different titles within 60s:
+ *   "[Triage] #3689 and #3684 — Resolved by PR #3671 (needs manual close)"
+ *   "Triage: #3689 and #3684 are already fixed by PR #3671"
+ *   "Action: Close #3689 and #3684 (Already Fixed by PR #3671)"
+ *   ...
+ * → all normalize to "#3689 and #3684 are already fixed by pr #3671"-ish.
+ */
+export function normalizeIssueTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/^\s*(\[?(?:triage|action|todo|note|chore|fix|wip)\]?\s*[:\-—]?\s*)+/i, "")
+    .replace(/[^a-z0-9#\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function createRoutes(ctx: ApiContext): Route[] {
   const repos = () => loadProjectRepos(ctx.workspaceDir);
 
@@ -428,6 +452,59 @@ export function createRoutes(ctx: ApiContext): Route[] {
       );
     }
 
+    // ── Dedup guard ─────────────────────────────────────────────────────────
+    // Belt to the self-cascade-filter suspenders (lib/plugins/github.ts).
+    // Even with the webhook-side filter, an agent that fires create_github_issue
+    // 23 times in 60s before any webhook returns will still get 23 issues. Look
+    // for a recent issue with an equivalent title and return it instead of
+    // filing a duplicate. Search the last 50 issues (open OR recently closed)
+    // sorted by recency; the 6h window only matters for closed ones because
+    // an old closed dup probably has new signal worth a fresh issue.
+    //
+    // Override the dedup window via CREATE_ISSUE_DEDUP_WINDOW_MS (default 6h),
+    // or disable entirely with CREATE_ISSUE_DEDUP_DISABLED=1 for tests.
+    const dedupWindowMs = Number(process.env["CREATE_ISSUE_DEDUP_WINDOW_MS"] ?? 6 * 60 * 60 * 1000);
+    const dedupDisabled = process.env["CREATE_ISSUE_DEDUP_DISABLED"] === "1";
+    if (!dedupDisabled) {
+      try {
+        const recent = await ghApi(
+          `/repos/${repo}/issues?state=all&per_page=50&sort=created&direction=desc`,
+        ) as Array<{
+          number: number;
+          title: string;
+          html_url: string;
+          state: string;
+          pull_request?: unknown;
+          created_at: string;
+        }>;
+        const wantTitle = normalizeIssueTitle(title);
+        const now = Date.now();
+        const match = recent.find((i) => {
+          if (i.pull_request) return false; // exclude PRs from /issues
+          if (normalizeIssueTitle(i.title) !== wantTitle) return false;
+          if (i.state === "open") return true;
+          // Closed dup: only block if it's recent enough that the underlying
+          // condition probably hasn't drifted yet.
+          const age = now - new Date(i.created_at).getTime();
+          return age < dedupWindowMs;
+        });
+        if (match) {
+          console.log(
+            `[github] create_github_issue dedup: skipping new "${title}" — ${match.state} ${repo}#${match.number} matches`,
+          );
+          return Response.json({
+            success: true,
+            deduped: true,
+            data: { number: match.number, html_url: match.html_url, title: match.title, existingState: match.state },
+          });
+        }
+      } catch (e) {
+        // Dedup is best-effort. Failing to query the listing shouldn't block
+        // the create — log and proceed.
+        console.warn(`[github] create_github_issue dedup lookup failed (proceeding with create): ${String(e).slice(0, 200)}`);
+      }
+    }
+
     try {
       const data = await ghHttp.fetch(`https://api.github.com/repos/${repo}/issues`, {
         method: "POST",
@@ -458,6 +535,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
       return Response.json({ success: false, error: String(e) }, { status: 502 });
     }
   }
+
 
   // ── GitHub Issues domain ────────────────────────────────────────────────────
   // Aggregate open issue counts per repo for issue-tracking dashboards.
