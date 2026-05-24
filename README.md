@@ -19,6 +19,7 @@ This process hosts a couple of in-process agents and routes to remote ones over 
 |---|---|---|
 | **Ava** | Chief-of-staff orchestrator | In-process (LangGraph) |
 | **protoBot** | Discord server operations | In-process (LangGraph) |
+| **Quinn** | QA — PR review, bug triage, security triage | In-process (LangGraph) |
 | **protoMaker** | Board operations / Automaker | External (A2A) |
 | **protoPen** | Security / pentest (Tailscale) | External (A2A) |
 
@@ -36,7 +37,7 @@ External surfaces (Discord, GitHub, Linear, Google) + Cron / Ceremony schedules
          → SkillDispatcherPlugin (chokepoint for cooldown, target guard,
                                   actor filter, destructive-verdict guard)
            → ExecutorRegistry.resolve(skill, targets)
-             ├── DeepAgentExecutor   (Ava, protoBot)
+             ├── DeepAgentExecutor   (Ava, protoBot, Quinn)
              ├── A2AExecutor         (Quinn, protoMaker, Researcher, Jon, protoPen)
              └── FunctionExecutor    (alert.*, ceremony.*, action.pr_*)
 
@@ -157,7 +158,7 @@ Every bus message carries `correlationId` (trace-id, never changes) and `parentI
 
 | File | Purpose | Tracked |
 |---|---|---|
-| `workspace/agents/*.yaml` | In-process agent definitions (Ava, protoBot) | yes |
+| `workspace/agents/*.yaml` | In-process agent definitions (Ava, protoBot, Quinn) | yes |
 | `workspace/agents.yaml` | External A2A agent registry (Quinn, Researcher, Jon, protoMaker, protoPen) | yes |
 | `workspace/ceremonies/*.yaml` | Ceremony schedules + skill routing | yes |
 | `workspace/crons/*.yaml` | Plain cron entries (one-off or recurring) | yes |

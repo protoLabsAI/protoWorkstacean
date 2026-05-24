@@ -31,6 +31,7 @@ services:
       # Per-agent pool — each token spins up one connected bot client
       # for an agent declared in workspace/agents/*.yaml or workspace/agents.yaml.
       - DISCORD_BOT_TOKEN_AVA=${DISCORD_BOT_TOKEN_AVA:-}
+      - DISCORD_BOT_TOKEN_QUINN=${DISCORD_BOT_TOKEN_QUINN:-}
       - DISCORD_BOT_TOKEN_FRANK=${DISCORD_BOT_TOKEN_FRANK:-}
       - DISCORD_GUILD_ID=${DISCORD_GUILD_ID:-1070606339363049492}
       - DISCORD_DIGEST_CHANNEL=${DISCORD_DIGEST_CHANNEL:-1469080556720623699}
