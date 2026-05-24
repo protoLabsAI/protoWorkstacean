@@ -44,6 +44,16 @@ ENV PATH="/opt/clawpatch/bin:${PATH}"
 # allowlisted. protoPatch needs to compile TS via its prepack, so allow it.
 RUN pnpm add -g --allow-build=@protolabsai/protopatch github:protoLabsAI/protoPatch && \
     ls /opt/clawpatch/bin
+# protoCLI (@protolabsai/proto) speaks the Agent Client Protocol via
+# `proto --acp`, and acpx is the generic ACP-agent driver. Together they give
+# us a path to drive clawpatch's `acpx` provider with protoCLI as the
+# underlying agent — phase 2 of the Quinn-clawpatch integration, when we
+# want interactive tool-use review on top of the gateway provider's
+# stateless LLM path. Installed in the same stage so they share the
+# self-contained /opt/clawpatch install root.
+RUN pnpm add -g @protolabsai/proto@latest acpx@latest && \
+    proto --version && \
+    acpx --version
 
 # build the dashboard Astro static site
 FROM oven/bun:1 AS dashboard-build
