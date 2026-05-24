@@ -16,7 +16,6 @@ import type { Plugin, EventBus } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import { DeepAgentExecutor } from "../executor/executors/deep-agent-executor.ts";
 import { loadAgentDefinitions } from "./agent-definition-loader.ts";
-import { BUS_TOOL_NAMES } from "./tools/bus-tools.ts";
 
 export interface AgentRuntimeConfig {
   workspaceDir: string;
@@ -44,16 +43,8 @@ export class AgentRuntimePlugin implements Plugin {
   install(bus: EventBus): void {
     this.bus = bus;
     const definitions = loadAgentDefinitions(this.config.workspaceDir);
-    const knownTools = new Set(BUS_TOOL_NAMES as readonly string[]);
 
     for (const def of definitions) {
-      const unknownTools = (def.tools ?? []).filter(t => !knownTools.has(t));
-      if (unknownTools.length > 0) {
-        console.warn(
-          `[agent-runtime] WARNING: agent ${def.name} declares unknown tools: ${unknownTools.join(", ")}`,
-        );
-      }
-
       const executor = new DeepAgentExecutor(def, {
         gatewayUrl: this.config.gatewayUrl,
         gatewayApiKey: this.config.gatewayApiKey,

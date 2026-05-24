@@ -3,18 +3,7 @@
  *
  * These replace `Record<string, unknown>` casts at publish/subscribe sites.
  * Every BusMessage.payload should be one of these types, narrowed by topic.
- *
- * Existing action-event payloads live in ./action-events.ts and are re-exported
- * here for a single import point.
  */
-
-// Re-export action event payloads (already defined)
-export type {
-  ActionDispatchPayload,
-  ActionOscillationPayload,
-  ActionQueueFullPayload,
-  PlannerEscalatePayload,
-} from "./action-events.ts";
 
 // ── agent.skill.request ───────────────────────────────────────────────────────
 
