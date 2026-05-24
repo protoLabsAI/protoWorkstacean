@@ -20,10 +20,7 @@ This process hosts a couple of in-process agents and routes to remote ones over 
 | **Ava** | Chief-of-staff orchestrator | In-process (LangGraph) |
 | **protoBot** | Discord server operations | In-process (LangGraph) |
 | **Tuner** | Fleet self-tuning / cost & confidence review | In-process (LangGraph) |
-| **Quinn** | QA: PR review, bug triage | External (A2A) |
 | **protoMaker** | Board operations / Automaker | External (A2A) |
-| **Researcher** | Deep multi-source research | External (A2A) |
-| **Jon** | Content strategy / antagonistic review | External (A2A) |
 | **protoPen** | Security / pentest (Tailscale) | External (A2A) |
 
 In-process agents live in `workspace/agents/*.yaml`. Remote agents live in `workspace/agents.yaml`. Cards advertise capabilities and the dispatcher registers them at startup (and refreshes every 10 minutes).
