@@ -89,6 +89,56 @@ describe("parseAgentYaml", () => {
     expect(def.skills[0].name).toBe("plan");
   });
 
+  test("skill tools[] propagates from yaml to AgentSkillDefinition", () => {
+    const def = parseAgentYaml(
+      { ...validRaw, skills: [{ name: "pr_review", tools: ["pr_inspector", "react", "send_update"] }] },
+      "x.yaml",
+    );
+    expect(def.skills[0].tools).toEqual(["pr_inspector", "react", "send_update"]);
+  });
+
+  test("skill tools filters out non-strings", () => {
+    const def = parseAgentYaml(
+      { ...validRaw, skills: [{ name: "pr_review", tools: ["pr_inspector", 42, null, "react"] }] },
+      "x.yaml",
+    );
+    expect(def.skills[0].tools).toEqual(["pr_inspector", "react"]);
+  });
+
+  test("skill tools is undefined when yaml omits the field (inherits agent tools)", () => {
+    const def = parseAgentYaml(
+      { ...validRaw, skills: [{ name: "pr_review" }] },
+      "x.yaml",
+    );
+    expect(def.skills[0].tools).toBeUndefined();
+  });
+
+  test("skill maxTurns propagates positive integers", () => {
+    const def = parseAgentYaml(
+      { ...validRaw, skills: [{ name: "pr_review", maxTurns: 18 }] },
+      "x.yaml",
+    );
+    expect(def.skills[0].maxTurns).toBe(18);
+  });
+
+  test("skill maxTurns accepts -1 sentinel for unlimited", () => {
+    const def = parseAgentYaml(
+      { ...validRaw, skills: [{ name: "deep_audit", maxTurns: -1 }] },
+      "x.yaml",
+    );
+    expect(def.skills[0].maxTurns).toBe(-1);
+  });
+
+  test("skill maxTurns rejects zero / negative-non-sentinel / non-numeric (inherits)", () => {
+    for (const bad of [0, -5, "twelve", null, true]) {
+      const def = parseAgentYaml(
+        { ...validRaw, skills: [{ name: "pr_review", maxTurns: bad as unknown }] },
+        "x.yaml",
+      );
+      expect(def.skills[0].maxTurns).toBeUndefined();
+    }
+  });
+
   test("canDelegate is undefined when not provided", () => {
     const def = parseAgentYaml({ ...validRaw, canDelegate: undefined }, "x.yaml");
     expect(def.canDelegate).toBeUndefined();
