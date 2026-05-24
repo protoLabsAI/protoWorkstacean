@@ -114,7 +114,7 @@ skills:
 
 ## workspace/projects.yaml
 
-Project registry. Read by `RouterPlugin` (GitHub enrichment), ``, and `` (per-project domain discovery).
+Project registry. Read by `RouterPlugin` for GitHub-message enrichment (resolving an inbound `owner/repo` to a project slug + Discord channel set).
 
 ```yaml
 projects:

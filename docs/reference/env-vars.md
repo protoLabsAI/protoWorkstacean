@@ -139,16 +139,3 @@ Graphiti itself (running as a sidecar) reads additional env vars — see [User M
 |----------|---------|--------|-------------|
 | `ENABLED_PLUGINS` | _(none)_ | Plugin loader | Comma-separated list of optional plugin names to enable. Example: `ENABLED_PLUGINS=echo` |
 
-## Domain URL interpolation
-
-Any environment variable can be interpolated into domain URLs and headers in `` using the `${VAR_NAME}` syntax:
-
-```yaml
-domains:
-  - name: protomaker_board
-    url: "${AVA_BASE_URL}/api/world/board"
-    headers:
-      X-API-Key: "${AVA_API_KEY}"
-```
-
-This is resolved at poll time, not at startup, so changes to env vars take effect on the next poll cycle.
