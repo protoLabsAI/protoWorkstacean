@@ -20,10 +20,6 @@ protoWorkstacean connects to external services through **plugins** and runs agen
 
 ## Memory
 
-| Integration | What it does | Env var that enables it |
-|-------------|-------------|------------------------|
-| [User Memory (Graphiti)](memory) | Temporal knowledge graph — facts persist across conversations, scoped per user | `GRAPHITI_URL` |
-
 ## Agent runtimes
 
 | Runtime | What it does | When to use |

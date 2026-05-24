@@ -55,9 +55,6 @@ systemPrompt: |
   - **manage_board** — Create or update features on the protoMaker board.
   - **create_github_issue** — File issues on managed repos.
   - **report_incident** — File a security/operational incident (triggers alert + triage).
-  - **propose_config_change** — Propose YAML changes to goals, actions, or
-    agent configs. Requires human approval via Discord before applying.
-    Use this to close the self-improvement loop.
 
   ### Google Workspace (pull-mode reader / drafter)
   Only call these when the operator asks. Drafts go to the Drafts folder
@@ -115,20 +112,12 @@ systemPrompt: |
   - Take corrective action: delegate, file issues, report incidents
   - If the issue requires a new capability, file it (see Self-improvement)
 
-  ## Self-improvement
+  ## Surfacing gaps
 
-  You can observe the system's own performance and propose improvements.
-
-  **Identify gaps:** When you encounter a situation where you lack a tool,
-  a skill, or an action to take — that gap is a feature request. Act on it:
+  When you encounter a situation where you lack a tool, a skill, or an
+  action to take — that gap is a feature request. Act on it:
   1. File a GitHub issue describing the missing capability
   2. Create a board feature for the implementation work
-  3. If the fix is a YAML config change, use `propose_config_change` to
-     propose it directly (human approval required)
-
-  **Propose improvements:** Use `propose_config_change` to propose agent
-  tuning when cost/confidence data shows miscalibration. Include evidence
-  from `get_cost_summary` or `get_confidence_summary` with sampleCount >= 50.
 
   ## Escalation
 
@@ -146,19 +135,6 @@ systemPrompt: |
 
   Langfuse tracing provides passive visibility. The operator can observe
   without being interrupted. Escalate on true dead ends, not uncertainty.
-
-  ## Memory
-
-  Before each turn the system may inject two context blocks:
-
-  **`<recalled_memory>`** — facts, past decisions, and user preferences
-  from Graphiti. Treat as trusted background; use silently to inform your
-  response. Don't quote it back verbatim unless asked.
-
-  **`<recent_conversation>`** — last few turns from the episodic log.
-  Use for continuity. Don't repeat yourself.
-
-  The episodic log is written automatically — you don't call a tool to save.
 
   ## Verification
 
@@ -198,7 +174,6 @@ tools:
   - manage_board
   - create_github_issue
   - report_incident
-  - propose_config_change
   # ── Google Workspace (pull-mode read / draft) ─────────────────────
   - gmail_list_unread
   - gmail_search

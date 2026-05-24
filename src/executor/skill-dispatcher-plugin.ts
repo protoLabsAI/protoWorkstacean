@@ -13,13 +13,11 @@
  * Outbound: {replyTopic}  (from msg.reply.topic or agent.skill.response.{correlationId})
  */
 
-import type { Plugin, EventBus, BusMessage, ConversationTurn, LoggerTurnQueryRequest, LoggerTurnQueryResponse } from "../../lib/types.ts";
+import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "./executor-registry.ts";
 import type { SkillRequest } from "./types.ts";
 import type { AgentSkillRequestPayload, AutonomousOutcomePayload, FlowItemPayload } from "../event-bus/payloads.ts";
-import { GraphitiClient } from "../../lib/memory/graphiti-client.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
-import { assembleContext } from "../../lib/conversation/context-assembler.ts";
 import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "./task-tracker.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
@@ -47,30 +45,26 @@ export class SkillDispatcherPlugin implements Plugin {
 
   private bus?: EventBus;
   private readonly subscriptionIds: string[] = [];
-  private readonly graphiti: GraphitiClient;
   private readonly identityRegistry: IdentityRegistry;
   private readonly mailbox: ContextMailbox | undefined;
   private readonly taskTracker: TaskTracker | undefined;
 
   /**
    * In-flight execution tracking — set at the TOP of _dispatch() (before any
-   * await) so isActive() is accurate even during the async Graphiti enrichment
-   * window. Without this, a DM debounce timer firing during enrichment would
-   * see isActive() === false and double-dispatch.
+   * await) so isActive() is accurate even during async work. Without this,
+   * a DM debounce timer firing during dispatch could see isActive() === false
+   * and dispatch a competing execution.
    */
   private readonly activeExecutions = new Map<string, { startedAt: number; skill: string }>();
 
   constructor(
     private readonly registry: ExecutorRegistry,
     workspaceDir: string,
-    /** Injectable for testing — defaults to a real GraphitiClient. */
-    graphiti?: GraphitiClient,
     /** Optional mailbox for mid-execution DM queuing. */
     mailbox?: ContextMailbox,
     /** Optional tracker for long-running A2A tasks. */
     taskTracker?: TaskTracker,
   ) {
-    this.graphiti = graphiti ?? new GraphitiClient();
     this.identityRegistry = new IdentityRegistry(workspaceDir);
     this.mailbox = mailbox;
     this.taskTracker = taskTracker;
@@ -79,51 +73,6 @@ export class SkillDispatcherPlugin implements Plugin {
   /** Check if an execution is currently active for a given correlationId. */
   isActive(correlationId: string): boolean {
     return this.activeExecutions.has(correlationId);
-  }
-
-  /**
-   * Query LoggerPlugin for recent conversation turns via the bus.
-   * Resolves with [] if LoggerPlugin is not installed (timeout) or on any error.
-   */
-  private _queryRecentTurns(userId: string, agentName: string): Promise<ConversationTurn[]> {
-    if (!this.bus) return Promise.resolve([]);
-
-    return new Promise<ConversationTurn[]>((resolve) => {
-      const replyTopic = `logger.turn.query.response.${crypto.randomUUID()}`;
-      let settled = false;
-
-      const subId = this.bus!.subscribe(replyTopic, this.name, (msg: BusMessage) => {
-        if (settled) return;
-        settled = true;
-        this.bus!.unsubscribe(subId);
-        resolve((msg.payload as LoggerTurnQueryResponse).turns);
-      });
-
-      this.bus!.publish("logger.turn.query", {
-        id: crypto.randomUUID(),
-        correlationId: crypto.randomUUID(),
-        topic: "logger.turn.query",
-        timestamp: Date.now(),
-        payload: {
-          type: "logger.turn.query",
-          userId,
-          agentName,
-          limit: 8,
-          maxAgeMs: 24 * 60 * 60 * 1000,
-          replyTopic,
-        } satisfies LoggerTurnQueryRequest,
-      });
-
-      // Fallback: LoggerPlugin responds synchronously, so if not installed
-      // the timeout fires at next tick and we continue without turns.
-      setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          this.bus?.unsubscribe(subId);
-          resolve([]);
-        }
-      }, 0);
-    });
   }
 
   install(bus: EventBus): void {
@@ -197,19 +146,6 @@ export class SkillDispatcherPlugin implements Plugin {
       (targets.length > 0 ? ` (targets: ${targets.join(", ")})` : ""),
     );
 
-    // ── Memory enrichment ──────────────────────────────────────────────────────
-    // Graphiti group id selection (alphanumeric/dash/underscore only — colons
-    // crash graphiti's ingestion worker silently):
-    //   (a) human-originated: user_{canonicalId} via identityRegistry
-    //   (b) bot-initiated with meta.systemActor (pr-remediator / sweep /
-    //       ceremony / cron): system_{actor} — gives the autonomous loop
-    //       its own persistent memory of what it did, grouped by the
-    //       subsystem that triggered it
-    //   (c) fallthrough: no group — no write, no read
-    //
-    // For (a) we also compute an agent-scoped group so each agent
-    // accumulates its own relationship memory with the user on top of
-    // the shared cross-agent baseline.
     const sourceUserId: string | undefined =
       typeof msg.source?.userId === "string" ? msg.source.userId : undefined;
     const sourcePlatform: string | undefined =
@@ -232,41 +168,7 @@ export class SkillDispatcherPlugin implements Plugin {
     const dispatcherAgent: string | undefined =
       typeof payload.meta?.dispatcherAgent === "string" ? payload.meta.dispatcherAgent : undefined;
 
-    let rawContent = typeof payload.content === "string" ? payload.content : undefined;
-    const originalContent = rawContent; // preserved for episode storage — never includes context prefix
-    let groupId: string | undefined;
-    let agentGroupId: string | undefined;
-
-    if (sourceUserId && sourcePlatform && sourcePlatform !== "cron") {
-      groupId = this.identityRegistry.groupId(sourcePlatform, sourceUserId);
-      const agentName = targets[0];
-      // agent_{agent}__{user_...} — double underscore separates the two
-      // identity segments unambiguously. Single-underscore would collide
-      // with the user_{platform}_{id} fallback.
-      if (agentName) agentGroupId = `agent_${agentName}__${groupId}`;
-    } else if (systemActor) {
-      // Bot-initiated dispatch — memory goes to a stable system-actor group
-      // so the autonomous loop builds its own episodic history. No
-      // agent-scoped split: it's already one subsystem writing, not a
-      // human talking to a specific agent.
-      groupId = `system_${systemActor}`;
-    }
-
-    if (groupId && rawContent) {
-      const [sharedCtx, agentCtx] = await Promise.all([
-        this.graphiti.getContextBlock(groupId, rawContent).catch(() => ""),
-        agentGroupId ? this.graphiti.getContextBlock(agentGroupId, rawContent).catch(() => "") : Promise.resolve(""),
-      ]);
-      const combined = [sharedCtx, agentCtx].filter(Boolean).join("\n");
-
-      // Retrieve recent turns for human-originated messages only via bus query
-      const recentTurns: ConversationTurn[] = sourceUserId
-        ? await this._queryRecentTurns(sourceUserId, targets[0] ?? "")
-        : [];
-
-      rawContent = assembleContext(combined || undefined, recentTurns, rawContent);
-    }
-    // ── End memory enrichment ─────────────────────────────────────────────────
+    const rawContent = typeof payload.content === "string" ? payload.content : undefined;
 
     const agentName = targets[0] ?? "";
 
@@ -453,36 +355,6 @@ export class SkillDispatcherPlugin implements Plugin {
           usage: result.data?.usage,
           durationMs,
         });
-      }
-
-      // Store completed turn in Graphiti (fire-and-forget, non-blocking).
-      //
-      // User-originated: written to the shared user group AND the
-      //   agent-scoped group so each agent accumulates its own relationship
-      //   history with the user on top of the cross-agent baseline.
-      //
-      // System-originated (bot-initiated, meta.systemActor set): written
-      //   only to the single system_{actor} group. No agent split —
-      //   systemActor IS the actor, no user involved.
-      if (!result.isError && result.text && groupId && originalContent) {
-        const identity = sourceUserId && sourcePlatform
-          ? this.identityRegistry.resolve(sourcePlatform, sourceUserId)
-          : null;
-        const episodeBase = {
-          userMessage: originalContent,
-          agentMessage: result.text,
-          userRole: identity?.displayName ?? sourceUserId ?? systemActor,
-          agentName: targets[0],
-          channelId: sourceChannelId,
-          platform: sourcePlatform ?? (systemActor ? "system" : undefined),
-          parentTurnId: correlationId,
-        };
-        this.graphiti.addEpisode({ groupId, ...episodeBase })
-          .catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode (shared) error:", err));
-        if (agentGroupId) {
-          this.graphiti.addEpisode({ groupId: agentGroupId, ...episodeBase })
-            .catch(err => console.debug("[skill-dispatcher] Graphiti addEpisode (agent) error:", err));
-        }
       }
 
       this._publishResponse(

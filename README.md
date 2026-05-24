@@ -19,7 +19,6 @@ This process hosts a couple of in-process agents and routes to remote ones over 
 |---|---|---|
 | **Ava** | Chief-of-staff orchestrator | In-process (LangGraph) |
 | **protoBot** | Discord server operations | In-process (LangGraph) |
-| **Tuner** | Fleet self-tuning / cost & confidence review | In-process (LangGraph) |
 | **protoMaker** | Board operations / Automaker | External (A2A) |
 | **protoPen** | Security / pentest (Tailscale) | External (A2A) |
 
@@ -37,7 +36,7 @@ External surfaces (Discord, GitHub, Linear, Google) + Cron / Ceremony schedules
          → SkillDispatcherPlugin (chokepoint for cooldown, target guard,
                                   actor filter, destructive-verdict guard)
            → ExecutorRegistry.resolve(skill, targets)
-             ├── DeepAgentExecutor   (Ava, protoBot, Tuner)
+             ├── DeepAgentExecutor   (Ava, protoBot)
              ├── A2AExecutor         (Quinn, protoMaker, Researcher, Jon, protoPen)
              └── FunctionExecutor    (alert.*, ceremony.*, action.pr_*)
 
@@ -72,7 +71,6 @@ bun run src/index.ts
 | `WORKSTACEAN_BASE_URL` | For A2A push notifications | Externally-reachable URL of the workstacean API (e.g. `http://workstacean:3000`). Stamped into push-notification callback URLs registered with remote A2A agents that advertise `capabilities.pushNotifications: true`. Unset → silently falls back to task polling. |
 | `WORKSTACEAN_PUBLIC_BASE_URL` | For external A2A discovery | Canonical externally-reachable base URL advertised in `/.well-known/agent-card.json`. Sets the card's `url` to `${WORKSTACEAN_PUBLIC_BASE_URL}/a2a`. Unset → card falls back to the internal docker-network URL (see `WORKSTACEAN_INTERNAL_HOST`). |
 | `WORKSTACEAN_INTERNAL_HOST` | No | Hostname used in the agent-card fallback URL when `WORKSTACEAN_PUBLIC_BASE_URL` is unset (default: `workstacean`). |
-| `GRAPHITI_URL` | For memory enrichment | Base URL of the Graphiti knowledge-graph service (default: `http://graphiti:8000`). The dispatcher pulls `<recalled_memory>` context before every user-originated skill call and writes episodic memory on success. |
 | `ROUTER_DM_DEFAULT_AGENT` | For DM conversations | Agent to route Discord DMs to when no keyword matches (e.g. `quinn`). |
 | `ROUTER_DM_DEFAULT_SKILL` | For DM conversations | Skill used for default-routed DMs (default: `chat`). |
 | `DM_CONVERSATION_TIMEOUT_MS` | For DM conversations | Idle timeout before a DM session expires (default: `900000` = 15 min). |
@@ -161,7 +159,7 @@ Every bus message carries `correlationId` (trace-id, never changes) and `parentI
 
 | File | Purpose | Tracked |
 |---|---|---|
-| `workspace/agents/*.yaml` | In-process agent definitions (Ava, protoBot, Tuner) | yes |
+| `workspace/agents/*.yaml` | In-process agent definitions (Ava, protoBot) | yes |
 | `workspace/agents.yaml` | External A2A agent registry (Quinn, Researcher, Jon, protoMaker, protoPen) | yes |
 | `workspace/ceremonies/*.yaml` | Ceremony schedules + skill routing | yes |
 | `workspace/crons/*.yaml` | Plain cron entries (one-off or recurring) | yes |

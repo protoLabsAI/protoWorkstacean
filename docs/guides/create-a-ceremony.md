@@ -144,7 +144,7 @@ When called with a per-agent key, `createdBy` is stamped server-side. Agents can
 
 ## Example: security triage ceremony
 
-This ceremony runs hourly and is also triggered by a action (see ``):
+This ceremony runs hourly:
 
 ```yaml
 # workspace/ceremonies/security-triage.yaml
