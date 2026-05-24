@@ -45,6 +45,8 @@ export class SchedulerPlugin implements Plugin {
   name = "scheduler";
   description = "Cron-style scheduled bus events with YAML persistence";
   capabilities: string[] = ["schedule", "timer", "cron"];
+  publishes = ["cron.{id}"];
+  subscribes: string[] = [];
 
   private bus: EventBus | null = null;
   private cronsDir = "";

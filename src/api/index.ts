@@ -23,6 +23,7 @@ import { createRoutes as operatorRoutes } from "./operator.ts";
 import { createRoutes as openaiCompatRoutes } from "./openai-compat.ts";
 import { createRoutes as googleRoutes } from "./google.ts";
 import { createRoutes as linearRoutes } from "./linear.ts";
+import { createRoutes as busTopologyRoutes } from "./bus-topology.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
@@ -45,5 +46,6 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...openaiCompatRoutes(ctx),
     ...googleRoutes(ctx),
     ...linearRoutes(ctx),
+    ...busTopologyRoutes(ctx),
   ];
 }

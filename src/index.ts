@@ -464,16 +464,75 @@ const apiContext: ApiContext = {
 
 const routes = createAllRoutes(apiContext);
 
-Bun.serve({
+// WS /api/bus/subscribe?topic=<pattern>[&apiKey=...]
+//   External processes can join the in-process event bus over a WebSocket.
+//   Each message that matches the pattern is delivered as a JSON frame
+//   { topic, correlationId, timestamp, payload }. The pattern supports the
+//   same `#` / `*` wildcards as bus.subscribe(). Authenticated by API key
+//   when WORKSTACEAN_API_KEY is set (header X-API-Key or ?apiKey= param).
+interface BusSubscribeWsData {
+  topic: string;
+  subscriberId?: string;
+}
+
+Bun.serve<BusSubscribeWsData>({
   port: HTTP_PORT,
-  fetch: async (req) => {
-    const { pathname } = new URL(req.url);
+  fetch: async (req, server) => {
+    const url = new URL(req.url);
+    const { pathname } = url;
+
+    if (pathname === "/api/bus/subscribe") {
+      if (API_KEY) {
+        const headerKey = req.headers.get("X-API-Key");
+        const queryKey = url.searchParams.get("apiKey");
+        const provided = headerKey ?? queryKey;
+        if (provided !== API_KEY) {
+          return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+        }
+      }
+      const topic = url.searchParams.get("topic");
+      if (!topic) {
+        return Response.json({ success: false, error: "Missing ?topic= query param" }, { status: 400 });
+      }
+      const upgraded = server.upgrade(req, { data: { topic } });
+      if (upgraded) return undefined as unknown as Response;
+      return Response.json({ success: false, error: "WebSocket upgrade failed" }, { status: 426 });
+    }
+
     for (const route of routes) {
       if (route.method !== req.method) continue;
       const params = matchPath(route.path, pathname);
       if (params) return route.handler(req, params);
     }
     return Response.json({ success: false, error: "Not found" }, { status: 404 });
+  },
+  websocket: {
+    open(ws) {
+      const { topic } = ws.data;
+      const subscriberId = bus.subscribe(topic, `ws-${crypto.randomUUID()}`, (msg) => {
+        try {
+          ws.send(JSON.stringify({
+            topic: msg.topic,
+            correlationId: msg.correlationId,
+            timestamp: msg.timestamp,
+            payload: msg.payload,
+          }));
+        } catch {
+          // Client disconnected mid-send; cleanup will happen in close()
+        }
+      });
+      ws.data.subscriberId = subscriberId;
+      console.log(`[bus-ws] subscribed to "${topic}" (sub ${subscriberId})`);
+    },
+    close(ws) {
+      const { topic, subscriberId } = ws.data;
+      if (subscriberId) bus.unsubscribe(subscriberId);
+      console.log(`[bus-ws] unsubscribed from "${topic}"`);
+    },
+    message() {
+      // Read-only: external subscribers receive bus events; to publish,
+      // use POST /publish (already authenticated, idempotent).
+    },
   },
 });
 

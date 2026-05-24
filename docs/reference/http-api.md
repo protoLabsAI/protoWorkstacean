@@ -92,6 +92,60 @@ curl -X POST http://localhost:3000/publish \
 
 ---
 
+## GET /api/bus/topology
+
+Return the plugin → topics graph: which plugins publish/subscribe to which topics. Built from each plugin's declarative `publishes` and `subscribes` arrays. Useful for spotting orphan topics (declared subscriber with no publisher, or vice versa).
+
+**Auth**: None
+
+**Response** (`200`):
+```json
+{
+  "success": true,
+  "data": {
+    "plugins": [
+      {
+        "name": "router",
+        "description": "Routes message.inbound.# and cron.# to agents via agent.skill.request",
+        "capabilities": ["message-routing", "skill-dispatch"],
+        "publishes": ["agent.skill.request"],
+        "subscribes": ["message.inbound.#", "cron.#"]
+      }
+    ],
+    "topics": {
+      "agent.skill.request": {
+        "publishedBy": ["router", "ceremony"],
+        "subscribedBy": ["skill-dispatcher"]
+      }
+    }
+  }
+}
+```
+
+Plugins that haven't yet declared `publishes` / `subscribes` show up with empty arrays — they're still loaded; they just don't contribute to the topic index.
+
+---
+
+## WS /api/bus/subscribe
+
+External processes can join the bus over a WebSocket to observe topic traffic. See [external-bus-subscribers](../guides/external-bus-subscribers.md) for the full guide.
+
+```
+WS /api/bus/subscribe?topic=<pattern>[&apiKey=<key>]
+```
+
+**Auth**: API key (header `X-API-Key` or `?apiKey=` query param), gated when `WORKSTACEAN_API_KEY` is set.
+
+Each matched bus message is delivered as a JSON frame:
+
+```json
+{ "topic": "<topic>", "correlationId": "<uuid>", "timestamp": 1748137622143, "payload": { ... } }
+```
+
+The channel is read-only. To publish from outside, use `POST /publish`.
+
+---
+
 ## POST /api/onboard
 
 Publish an onboarding request for a new project. The OnboardingPlugin subscribes to `message.inbound.onboard` and runs the pipeline asynchronously.
