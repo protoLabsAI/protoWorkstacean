@@ -140,18 +140,6 @@ getWidgets(): WidgetDescriptor[] {
 
 ---
 
-## Template plugin
-
-A copy-pasteable starting point lives at:
-
-```
-lib/plugins/example-template-plugin.ts
-```
-
-Copy it, rename the class and `name`, and replace the example widgets with your own.
-
----
-
 ## Testing your widgets
 
 Write a unit test that calls `getWidgets()` directly and asserts the returned descriptors:
