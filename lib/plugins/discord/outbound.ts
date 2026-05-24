@@ -13,7 +13,7 @@ import {
   type ChatInputCommandInteraction,
   type TextChannel,
 } from "discord.js";
-import type { BusMessage, HITLRequest } from "../../types.ts";
+import type { BusMessage } from "../../types.ts";
 import type { DiscordContext } from "./core.ts";
 
 // ── Pending reply handles ─────────────────────────────────────────────────────
@@ -34,59 +34,6 @@ export function canSendProgress(correlationId: string): boolean {
   if (Date.now() - last < PROGRESS_MIN_INTERVAL_MS) return false;
   progressLastSent.set(correlationId, Date.now());
   return true;
-}
-
-// ── HITL embed/button builders ────────────────────────────────────────────────
-
-export function buildHITLEmbed(request: HITLRequest): EmbedBuilder {
-  const embed = new EmbedBuilder()
-    .setTitle(request.title)
-    .setDescription(request.summary.slice(0, 4096))
-    .setColor(0xf59e0b);
-
-  if (request.avaVerdict) {
-    embed.addFields({
-      name: `Ava verdict (score: ${request.avaVerdict.score})`,
-      value: request.avaVerdict.verdict.slice(0, 1024),
-      inline: false,
-    });
-  }
-  if (request.jonVerdict) {
-    embed.addFields({
-      name: `Jon verdict (score: ${request.jonVerdict.score})`,
-      value: request.jonVerdict.verdict.slice(0, 1024),
-      inline: false,
-    });
-  }
-  if (request.escalationContext) {
-    const ctx = request.escalationContext;
-    embed.addFields({
-      name: "Cost",
-      value: `Est: **$${ctx.estimatedCost.toFixed(4)}** | Max: $${ctx.maxCost.toFixed(4)} | Tier: ${ctx.tier}`,
-      inline: false,
-    });
-  }
-
-  embed.setFooter({ text: `Expires ${new Date(request.expiresAt).toLocaleString()}` });
-  return embed;
-}
-
-export function buildHITLButtons(request: HITLRequest): ActionRowBuilder<ButtonBuilder> {
-  const row = new ActionRowBuilder<ButtonBuilder>();
-  const STYLE_BY_OPTION: Record<string, ButtonStyle> = {
-    approve: ButtonStyle.Success,
-    reject: ButtonStyle.Danger,
-  };
-  for (const option of request.options) {
-    const style = STYLE_BY_OPTION[option] ?? ButtonStyle.Secondary;
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`hitl:${option}:${request.correlationId}`)
-        .setLabel(option.charAt(0).toUpperCase() + option.slice(1))
-        .setStyle(style),
-    );
-  }
-  return row;
 }
 
 // ── Register outbound handlers ────────────────────────────────────────────────
@@ -205,42 +152,5 @@ export function registerOutboundHandlers(ctx: DiscordContext): void {
       console.error(`[discord] DM to user ${userId} failed:`, err);
     }
   });
-
-  // ── HITL renderer registration ────────────────────────────────────────────
-  if (ctx.hitlPlugin) {
-    ctx.hitlPlugin.registerRenderer("discord", {
-      render: async (request, _busRef) => {
-        const channelId = request.sourceMeta?.channelId;
-        if (!channelId) {
-          console.warn(`[discord] HITL ${request.correlationId} missing channelId — cannot render`);
-          return;
-        }
-        const ch = ctx.client.channels.cache.get(channelId) as TextChannel | undefined;
-        if (!ch) {
-          console.warn(`[discord] HITL channel ${channelId} not in cache — cannot render`);
-          return;
-        }
-        const embed = buildHITLEmbed(request);
-        const row = buildHITLButtons(request);
-        const msg = await ch.send({ embeds: [embed], components: [row] });
-        ctx.pendingHITLMessages.set(request.correlationId, {
-          message: msg,
-          replyTopic: request.replyTopic,
-        });
-        console.log(`[discord] HITL ${request.correlationId} rendered in channel ${channelId}`);
-      },
-      onExpired: async (request, _busRef) => {
-        const entry = ctx.pendingHITLMessages.get(request.correlationId);
-        if (!entry) return;
-        ctx.pendingHITLMessages.delete(request.correlationId);
-        const expiredEmbed = new EmbedBuilder()
-          .setTitle(request.title)
-          .setDescription("**Approval expired** — re-trigger if still needed.")
-          .setColor(0x6b7280);
-        await entry.message.edit({ embeds: [expiredEmbed], components: [] }).catch(console.error);
-        console.log(`[discord] HITL ${request.correlationId} marked expired`);
-      },
-    });
-  }
 
 }
