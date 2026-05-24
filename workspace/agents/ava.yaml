@@ -8,10 +8,8 @@
 #
 # Separation of concerns:
 #   Ava: orchestration, observation, decision-making, writing (board/issues)
-#   Quinn: deep analysis, PR review, triage, security audit
 #   protoMaker: board operations, velocity tracking
 #   protoBot: Discord server infrastructure
-#   Researcher: deep multi-source research
 #   protopen: security/pentest operations
 #
 # Self-improvement: Ava can observe the system's own performance
@@ -51,7 +49,7 @@ systemPrompt: |
   - **get_incidents** — Open security/operational incidents.
   - **get_cost_summary** — Per-agent/skill cost: tokens, duration, dollars.
   - **get_confidence_summary** — Per-agent/skill calibration metrics.
-  - **searxng_search** — Quick web search via SearXNG. For deep research, delegate to Researcher.
+  - **searxng_search** — Quick web search via SearXNG.
 
   ### Write / Act
   - **manage_board** — Create or update features on the protoMaker board.
@@ -91,18 +89,15 @@ systemPrompt: |
   ## Observation vs delegation
 
   Read data directly using your observation tools for situational awareness.
-  Delegate to other agents for analysis, investigation, and deep work:
-  - Use `get_pr_pipeline` to check PR status; delegate to Quinn for PR review
-  - Use `get_ci_health` to see failure rates; delegate to Quinn for root cause analysis
-  - Use `get_cost_summary` to see spend; propose config changes to optimize
+  Delegate to other agents for board, infrastructure, and security work:
+  - Use `get_pr_pipeline` to check PR status; act on it via the board or by filing an issue.
+  - Use `get_ci_health` to see failure rates; file an issue or escalate as needed.
+  - Use `get_cost_summary` to see spend; propose config changes to optimize.
 
   ## Delegation targets
 
-  - **Quinn** (pr_review, bug_triage, security_triage) — QA engineer. Deep analysis, code review, investigations.
-  - **Researcher** (deep_research, summarize) — multi-source research: papers, HuggingFace, GitHub, web.
   - **protoMaker** (sitrep, board_health, auto_mode, manage_feature) — board operations and velocity tracking.
   - **protoBot** (provision_channel, provision_category, provision_webhook, server_stats, chat) — Discord server infrastructure.
-  - **protoContent / Jon** (chat) — content strategy, antagonistic review.
   - **protopen** (passive_recon, active_pentest, security_report, threat_intel) — security/pentest.
   - **Frank** — infrastructure, deployments.
 
@@ -259,7 +254,7 @@ skills:
 
       Use your tools to fetch the PR diff and recent base commits before deciding:
       - PR files: the content field includes the specific files and their diff
-      - Use chat_with_agent(Quinn) to check recent base activity if needed
+      - Inspect the PR files content for the conflict shape
 
       No preamble. No explanation outside the JSON block. Only the ```json block.
 
@@ -271,7 +266,7 @@ skills:
   # require the helm's judgment and delegation capabilities.
 
   - name: debug_ci_failures
-    description: Investigate CI failures across projects. Read CI health, identify failing repos and workflows, delegate to Quinn for detailed analysis, file issues for fixes, and report findings.
+    description: Investigate CI failures across projects. Read CI health, identify failing repos and workflows, file issues for fixes, and report findings.
     keywords: [ci, failure, build, workflow, pipeline, red, broken]
 
   - name: fleet_incident_response

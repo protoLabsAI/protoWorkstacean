@@ -9,7 +9,7 @@ That's the spine. Everything else extends it.
 ## Current architecture
 
 - **In-process agents** (DeepAgent / LangGraph): Ava, protoBot, Tuner
-- **Remote agents** (A2A): Quinn, protoMaker, Researcher, Jon, protoPen
+- **Remote agents** (A2A): protoMaker, protoPen
 - **Integration plugins**: Discord, GitHub, Linear, Google Workspace, linear-protomaker-bridge, pr-remediator
 - **Scheduling**: SchedulerPlugin (yaml-defined crons), CeremonyPlugin (named, observable, hot-reloadable rituals)
 - **Observability**: AgentFleetHealth (24h rollups → health-weighted dispatch), Langfuse OTEL tracing, cost-v1 / confidence-v1 / blast-v1 / hitl-mode-v1 A2A extensions
