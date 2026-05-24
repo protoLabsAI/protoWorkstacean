@@ -30,6 +30,9 @@ if (!existsSync(workspaceDir)) {
 const dataDir = resolve(
   process.env.DATA_DIR || join(process.cwd(), "data")
 );
+if (!existsSync(dataDir)) {
+  mkdirSync(dataDir, { recursive: true });
+}
 
 const bus = new InMemoryEventBus();
 
