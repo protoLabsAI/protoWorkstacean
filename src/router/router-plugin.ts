@@ -64,6 +64,8 @@ export class RouterPlugin implements Plugin {
   readonly description =
     "Routes message.inbound.# and cron.# to agents via agent.skill.request";
   readonly capabilities = ["message-routing", "skill-dispatch", "github-enrichment"];
+  readonly subscribes = ["message.inbound.#", "cron.#"];
+  readonly publishes = ["agent.skill.request"];
 
   private bus?: EventBus;
   private readonly resolver: SkillResolver;

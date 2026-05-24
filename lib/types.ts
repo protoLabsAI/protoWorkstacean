@@ -74,6 +74,22 @@ export interface Plugin {
   install(bus: EventBus): void;
   uninstall(): void;
   getWidgets?(): WidgetDescriptor[];
+
+  /**
+   * Bus topics this plugin publishes to. Used by `GET /api/bus/topology`
+   * to render the plugin graph and by future startup-validation checks.
+   * Topics may include `#` (multi-segment) or `*` (single-segment) wildcards
+   * — they describe the publish pattern, not literal strings only.
+   * Optional during the rollout — plugins without declarations are still
+   * loaded; they just don't show up in the topology graph.
+   */
+  publishes?: string[];
+
+  /**
+   * Bus topics this plugin subscribes to (including wildcard patterns).
+   * Same purpose as `publishes` — observability, future validation.
+   */
+  subscribes?: string[];
 }
 
 export interface TopicInfo {
