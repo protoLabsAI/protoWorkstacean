@@ -142,7 +142,7 @@ export interface ConfigChangeRequest {
   summary: string;
   /** Unified diff of the proposed change (before → after). */
   yamlDiff: string;
-  /** Dry-run GOAP impact — which goals/actions are affected. */
+  /** Dry-run impact summary (which downstream rules are affected by this proposed change). */
   goapImpact?: {
     addedGoals?: string[];
     removedGoals?: string[];
@@ -150,7 +150,7 @@ export interface ConfigChangeRequest {
     addedActions?: string[];
     removedActions?: string[];
     modifiedActions?: string[];
-    /** Human-readable GOAP evaluation summary. */
+    /** Human-readable evaluation summary. */
     summary: string;
   };
   /** Test coverage impact summary. */

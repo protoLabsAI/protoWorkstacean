@@ -92,7 +92,7 @@ export function buildHITLButtons(request: HITLRequest): ActionRowBuilder<ButtonB
 // ── Config-change embed/button builders (Arc 9.3) ─────────────────────────────
 // Purple colour signals "the rules of the system are changing" vs the amber
 // "one-shot operational approval" colour used for regular HITL. Renders up to
-// three embeds: main info, YAML diff, GOAP/coverage impact analysis.
+// three embeds: main info, YAML diff, impact analysis.
 
 export function buildConfigChangeEmbeds(request: ConfigChangeRequest): EmbedBuilder[] {
   const embeds: EmbedBuilder[] = [];
@@ -120,7 +120,7 @@ export function buildConfigChangeEmbeds(request: ConfigChangeRequest): EmbedBuil
 
   const impactLines: string[] = [];
   if (request.goapImpact) {
-    impactLines.push(`**GOAP dry-run:** ${request.goapImpact.summary}`);
+    impactLines.push(`**Dry-run impact:** ${request.goapImpact.summary}`);
     const imp = request.goapImpact;
     if (imp.addedGoals?.length)     impactLines.push(`+ Goals added: ${imp.addedGoals.join(", ")}`);
     if (imp.removedGoals?.length)   impactLines.push(`- Goals removed: ${imp.removedGoals.join(", ")}`);

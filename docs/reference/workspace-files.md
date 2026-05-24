@@ -130,7 +130,7 @@ projects:
 
 ## workspace/goals.yaml
 
-Global GOAP goals. Read by `GoalEvaluatorPlugin`. Per-project goals in `workspace/<project>/goals.yaml` are merged at startup.
+Global skill-routing rules. Read by `GoalEvaluatorPlugin`. Per-project goals in `workspace/<project>/goals.yaml` are merged at startup.
 
 ### Threshold goal
 
@@ -172,7 +172,7 @@ goals:
 
 ## workspace/actions.yaml
 
-GOAP actions. Read by `ActionRegistry`. Per-project actions in `workspace/<project>/actions.yaml` are merged at startup.
+actions. Read by `ActionRegistry`. Per-project actions in `workspace/<project>/actions.yaml` are merged at startup.
 
 ```yaml
 actions:

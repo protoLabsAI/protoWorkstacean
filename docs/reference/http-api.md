@@ -440,7 +440,7 @@ Returns `503` if the plugin is not registered.
 
 ## GET /api/outcomes
 
-GOAP action dispatch outcomes tracked by the ActionDispatcher. Feeds the dashboard's Goals & Outcomes page and the plan-learning flywheel. **No envelope.**
+action dispatch outcomes tracked by the ActionDispatcher. Feeds the dashboard's Goals & Outcomes page and the plan-learning flywheel. **No envelope.**
 
 **Auth**: None
 

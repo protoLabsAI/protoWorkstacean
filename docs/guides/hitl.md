@@ -10,7 +10,7 @@ HITL is what happens when an executor returns `input-required` — or when any p
 
 ## The unified pipeline
 
-Every skill request — whether triggered by a Discord DM, a Linear webhook, or an autonomous GOAP action — travels the same path:
+Every skill request — whether triggered by a Discord DM, a Linear webhook, or an autonomous action — travels the same path:
 
 ```
 inbound event

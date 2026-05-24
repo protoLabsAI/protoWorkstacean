@@ -2,7 +2,7 @@
 title: Integrate an External App
 ---
 
-Connect any external service to the GOAP world engine as a reactive actor. The engine polls the app's health endpoints, evaluates goals against the data, and dispatches actions (alerts or A2A skill calls) when something is wrong.
+Connect any external service to the world engine as a reactive actor. The engine polls the app's health endpoints, evaluates goals against the data, and dispatches actions (alerts or A2A skill calls) when something is wrong.
 
 **Zero code changes per integration.** Everything is declarative YAML + environment variables.
 
@@ -17,7 +17,7 @@ An external app integration has four layers:
 | **Act** | `workspace/actions.yaml` | Define what to do when unhealthy |
 | **Dispatch** | `workspace/agents.yaml` | Register the app's A2A skills for action execution |
 
-The GOAP loop connects them automatically:
+The scheduled cron / ceremony loop connects them automatically:
 
 ```
 domains.yaml (poll) → goals.yaml (evaluate) → actions.yaml (match) → agents.yaml (dispatch)
@@ -235,4 +235,4 @@ If the action fails 3 times within 5 minutes, the `LoopDetector` triggers oscill
 - [Add a domain](./add-a-domain) — domain schema reference
 - [Add an agent](./add-an-agent) — agent YAML and A2A protocol details
 - [Add goals and actions](./add-goals-and-actions) — goal types, operators, precondition syntax
-- [World Engine concepts](../../explanation/world-engine-concepts) — architecture and design rationale
+- [scheduler + ceremonies concepts](../../explanation/world-engine-concepts) — architecture and design rationale

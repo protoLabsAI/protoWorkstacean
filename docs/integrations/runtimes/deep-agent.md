@@ -108,7 +108,7 @@ Tools are defined as LangChain tools with zod schemas in `DeepAgentExecutor`. Ea
 | `get_ci_health` | `GET /api/ci-health` | CI pass rates across repos |
 | `get_pr_pipeline` | `GET /api/pr-pipeline` | Open PRs: total, conflicts, stale, failing CI |
 | `get_branch_drift` | `GET /api/branch-drift` | Dev vs main divergence per project |
-| `get_outcomes` | `GET /api/world-state` | GOAP action dispatch outcomes |
+| `get_outcomes` | `GET /api/world-state` | action dispatch outcomes |
 | `get_incidents` | `GET /api/incidents` | Open security/operational incidents |
 | `get_ceremonies` | `GET /api/ceremonies` | List ceremony definitions |
 | `get_cost_summary` | `GET /api/cost-summaries` | Per-agent/skill cost: tokens, duration, dollars |

@@ -587,7 +587,7 @@ type LiveCiStatusFetcher = (
 
 export class PrRemediatorPlugin implements Plugin {
   readonly name = "pr-remediator";
-  readonly description = "Closes the GOAP loop on stuck PRs — auto-merges eligible titles, escalates others to HITL";
+  readonly description = "Auto-remediates stuck PRs — auto-merges eligible titles, escalates others to HITL";
   readonly capabilities = ["pr-merge", "pr-feedback-dispatch", "hitl-emit"];
 
   private readonly fetchLiveCiStatus: LiveCiStatusFetcher;
@@ -639,7 +639,7 @@ export class PrRemediatorPlugin implements Plugin {
         );
         // Self-dispatch: drive remediation directly from world state.
         // The pr.remediate.* topics exist for external triggers but are not
-        // published by the GOAP action dispatcher (tier_0 actions dispatch to
+        // published by the dispatcher when the matching skill executor fires (
         // agent.skill.request, not custom topics). Self-driving from the
         // cached snapshot ensures remediation runs on every domain tick
         // regardless of how the action dispatcher routes.

@@ -7,9 +7,8 @@
 # gets touched.
 #
 # The tuner never modifies its own YAML (enforced server-side in the
-# propose endpoint). It never proposes goals.yaml changes (that's Ava's
-# job via goal_proposal). It only proposes agent-YAML prompt tweaks and
-# actions.yaml edits when strongly motivated by data.
+# propose endpoint). It only proposes agent-YAML prompt tweaks when
+# strongly motivated by data.
 
 name: tuner
 role: general
@@ -34,11 +33,10 @@ systemPrompt: |
   2. Call `get_confidence_summary()` — per-(agent, skill) calibration. Focus on
      `highConfFailures` (agent said >=0.8 but failed) and cases where
      `avgConfidenceOnFailure > avgConfidenceOnSuccess` (calibration inverted).
-  3. Call `get_outcomes()` — GOAP-level action success/failure rates.
-  4. Identify concrete outliers. Rank by severity + data confidence.
-  5. For each top 1–3 outliers, propose ONE specific change via
+  3. Identify concrete outliers. Rank by severity + data confidence.
+  4. For each top 1–3 outliers, propose ONE specific change via
      `propose_config_change`. Include an `evidence` block with the real numbers.
-  6. Publish a brief summary to the bus or chat so the operator knows you ran.
+  5. Publish a brief summary to the bus or chat so the operator knows you ran.
 
   ## Rules
 
@@ -49,8 +47,6 @@ systemPrompt: |
     Not rewrites.
   - NEVER propose changes to `tuner.yaml`. The server blocks it anyway — but
     don't even try. Self-tuning creates loops.
-  - NEVER propose changes to `goals.yaml`. That's a higher-order concern
-    (Ava's goal_proposal skill handles it, triggered by OutcomeAnalysis).
   - When you propose a change, the `evidence` block is mandatory. Include:
     - `sampleCount` (integer, >=50)
     - `baselineMetric` — the actual observed number, e.g.
@@ -81,8 +77,8 @@ systemPrompt: |
   - Add a missing tool to an agent's whitelist when the outcomes show
     repeated failures that the tool would prevent.
 
-  Do NOT propose: architectural changes, new agents, new extensions, goals
-  edits, model changes. Those are Ava's or operator's decisions.
+  Do NOT propose: architectural changes, new agents, new extensions, or
+  model changes. Those are the operator's decisions.
 
   ## Output format
 
@@ -99,7 +95,6 @@ systemPrompt: |
 tools:
   - get_cost_summary
   - get_confidence_summary
-  - get_outcomes
   - propose_config_change
   - publish_event
   - send_update

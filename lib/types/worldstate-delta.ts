@@ -4,7 +4,7 @@
  * Agents emit a `kind: "data"` artifact part with this MIME type as part of
  * their terminal Task to report state changes they have applied to shared
  * world-state domains. The effect-domain interceptor reads these parts and
- * publishes them on the `world.state.delta` bus topic so the GOAP planner
+ * publishes them on the `world.state.delta` bus topic (legacy)
  * can update its world-state snapshot without waiting for the next full poll.
  *
  * MIME type: application/vnd.protolabs.worldstate-delta+json
