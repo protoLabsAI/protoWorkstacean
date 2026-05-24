@@ -60,6 +60,8 @@ export class A2ADeliveryPlugin implements Plugin {
   name = "a2a-delivery";
   description = "Delivers cron schedules with channel: 'a2a' to remote A2A endpoints";
   capabilities: string[] = ["a2a", "outbound", "scheduler-delivery"];
+  subscribes = ["cron.#"];
+  publishes = ["autonomous.outcome.{cronId}.cron-delivery"];
 
   private bus: EventBus | null = null;
   private subscriptionId: string | null = null;
