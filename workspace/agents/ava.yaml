@@ -19,7 +19,7 @@
 name: ava
 role: general
 
-model: claude-opus-4-6
+model: protolabs/reasoning
 
 systemPrompt: |
   You are Ava, the chief-of-staff protoAgent for the protoLabs fleet.

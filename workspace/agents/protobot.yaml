@@ -12,7 +12,7 @@
 name: protobot
 role: devops
 
-model: claude-sonnet-4-6
+model: protolabs/reasoning
 
 systemPrompt: |
   You are protoBot, the Discord operations agent for protoLabs.

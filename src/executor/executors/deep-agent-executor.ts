@@ -18,6 +18,48 @@ import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
 
 const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
 
+/**
+ * Extract the assistant's text output from a LangChain AIMessage's `content`.
+ * Reasoning-style models (e.g. protolabs/reasoning, o3, claude with extended
+ * thinking) emit `content` as an array of typed blocks rather than a string:
+ *   [{type: "thinking", thinking: "..."}, {type: "text", text: "..."}]
+ * The text we want is the concatenation of `text`-typed blocks. Returns the
+ * trimmed result, or "" if no usable text was found.
+ */
+/**
+ * Resolve which tools a skill invocation gets. When a skill declares its own
+ * `tools` list we intersect with the agent's declared tools — a skill cannot
+ * grant access to tools the agent never advertised. When the skill omits
+ * tools we fall back to the agent's full list. Pure function, easy to unit-
+ * test; the runtime branch in `execute()` is a thin wrapper around this.
+ */
+export function effectiveToolsFor(skillTools: string[] | undefined, agentTools: string[]): string[] {
+  if (!skillTools) return agentTools;
+  return skillTools.filter(t => agentTools.includes(t));
+}
+
+/** Skill's maxTurns wins when set; else inherit from the agent. */
+export function effectiveMaxTurnsFor(skillMaxTurns: number | undefined, agentMaxTurns: number): number {
+  return skillMaxTurns ?? agentMaxTurns;
+}
+
+export function extractAiText(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (typeof block === "string") {
+      parts.push(block);
+      continue;
+    }
+    if (block && typeof block === "object") {
+      const b = block as Record<string, unknown>;
+      if (b.type === "text" && typeof b.text === "string") parts.push(b.text);
+    }
+  }
+  return parts.join("").trim();
+}
+
 export interface DeepAgentConfig {
   gatewayUrl?: string;
   gatewayApiKey?: string;
@@ -163,6 +205,20 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
         name: "report_incident",
         description: "File an incident.",
         schema: z.object({ title: z.string(), severity: z.enum(["critical", "high", "medium", "low"]), description: z.string().optional() }),
+      },
+    ),
+    clawpatch_review: tool(
+      async (input) => JSON.stringify(await http.post("/api/clawpatch/review", input)),
+      {
+        name: "clawpatch_review",
+        description:
+          "Run structural code review via clawpatch (protoLabs fork). Maps the repo into semantic feature slices, reviews each via the gateway LLM provider, and returns structured findings (correctness bugs, security issues, race/concurrency bugs, data-loss, resource leaks, error-handling gaps, API contract mismatches, missing tests, build hazards, maintainability risks). Use this DURING pr_review to get a structural read on the changed surface before forming a verdict — fold findings into the QA Audit body's Observations section with severity + file:line cites. Today v1 only works for repos already mounted in the container (protoWorkstacean, protoCLI, mythxengine); other repos return a clear error. The `since` arg scopes the review to features touched since that git ref (typically the PR base) — pass it whenever you have the PR base SHA or branch.",
+        schema: z.object({
+          repo: z.string().describe("Repository in owner/name format (e.g. protoLabsAI/protoWorkstacean)."),
+          since: z.string().optional().describe("Git ref (branch or SHA) to diff against. Limits the review to features touched since that ref. Use the PR base (typically 'main' or 'dev')."),
+          limit: z.number().int().optional().describe("Maximum number of features to review. Useful for spot-checks on large repos."),
+          model: z.string().optional().describe("Gateway model override (e.g. protolabs/fast for cheap, protolabs/reasoning for deeper). Default protolabs/smart."),
+        }),
       },
     ),
     pr_inspector: tool(
@@ -549,7 +605,21 @@ export class DeepAgentExecutor implements IExecutor {
 
   async execute(req: SkillRequest): Promise<SkillResult> {
     const prompt = req.content ?? req.prompt ?? this._buildPrompt(req);
-    const tools = createLangChainTools(this.agentDef.tools, this.http, req.correlationId, this.agentDef.name);
+
+    const skillDef = req.skill
+      ? this.agentDef.skills.find(s => s.name === req.skill)
+      : undefined;
+
+    // Skill-level tools override: intersect with agent.tools (a skill can't
+    // grant access to tools the agent doesn't declare). When skill.tools is
+    // unset, all of agent.tools are available. This is the structural way
+    // to keep narrow skills (pr_review) from fanning out into delegation /
+    // web search and exhausting the recursion limit.
+    const agentTools = this.agentDef.tools;
+    const effectiveTools = effectiveToolsFor(skillDef?.tools, agentTools);
+    const tools = createLangChainTools(effectiveTools, this.http, req.correlationId, this.agentDef.name);
+
+    const effectiveMaxTurns = effectiveMaxTurnsFor(skillDef?.maxTurns, this.agentDef.maxTurns);
 
     const callbacks = LANGFUSE_ENABLED
       ? [new LangfuseCallbackHandler({
@@ -563,9 +633,6 @@ export class DeepAgentExecutor implements IExecutor {
       // Resolve skill-level systemPromptOverride if this skill defines one.
       // Skills like diagnose_pr_stuck have narrow, structured output requirements
       // that replace the agent's general-purpose prompt.
-      const skillDef = req.skill
-        ? this.agentDef.skills.find(s => s.name === req.skill)
-        : undefined;
       const basePrompt = skillDef?.systemPromptOverride ?? this.agentDef.systemPrompt;
 
       const agent = createReactAgent({
@@ -574,11 +641,11 @@ export class DeepAgentExecutor implements IExecutor {
         messageModifier: new SystemMessage(basePrompt),
       });
 
-      console.log(`[deep-agent:${this.agentDef.name}] invoke with ${tools.length} tools, prompt length=${prompt.length}, langfuse=${LANGFUSE_ENABLED}`);
+      console.log(`[deep-agent:${this.agentDef.name}] invoke skill="${req.skill ?? "?"}" tools=${tools.length}/${agentTools.length} maxTurns=${effectiveMaxTurns} promptLen=${prompt.length} langfuse=${LANGFUSE_ENABLED}`);
 
       const result = await agent.invoke(
         { messages: [{ role: "user", content: prompt }] },
-        { recursionLimit: this.agentDef.maxTurns * 2 + 1, callbacks },
+        { recursionLimit: effectiveMaxTurns * 2 + 1, callbacks },
       );
 
       const messages = result.messages ?? [];
@@ -598,13 +665,12 @@ export class DeepAgentExecutor implements IExecutor {
       let text = "";
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
-        const content = msg.content;
-        if (typeof content === "string" && content.trim()) {
-          const type = msg._getType?.() ?? msg.constructor?.name ?? "";
-          if (type === "ai" || type === "AIMessage") {
-            text = content.trim();
-            break;
-          }
+        const type = msg._getType?.() ?? msg.constructor?.name ?? "";
+        if (type !== "ai" && type !== "AIMessage") continue;
+        const extracted = extractAiText(msg.content);
+        if (extracted) {
+          text = extracted;
+          break;
         }
       }
 

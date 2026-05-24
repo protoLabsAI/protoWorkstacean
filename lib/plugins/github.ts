@@ -199,7 +199,11 @@ function extractContext(event: string, payload: Record<string, unknown>): GitHub
     };
   }
 
-  if (event === "pull_request" && (payload.action === "opened" || payload.action === "synchronize")) {
+  if (event === "pull_request" && (
+    payload.action === "opened" ||
+    payload.action === "synchronize" ||
+    payload.action === "review_requested"
+  )) {
     const pr = payload.pull_request as Record<string, unknown>;
     return {
       owner, repo: repoName,
@@ -493,6 +497,30 @@ export class GitHubPlugin implements Plugin {
       }
     }
 
+    // ── Auto-review path: pull_request opened/synchronize ─────────────────────
+    // Every opened/synchronized PR triggers Quinn's pr_review skill — no
+    // @mention required. PRs are trusted by virtue of being in our repo;
+    // Quinn's pr_inspector + system prompt do the gating on what to actually
+    // verdict. Dedup'd via recentDispatches so a fast-updating branch doesn't
+    // flood the bus.
+    if (event === "pull_request" && (payload.action === "opened" || payload.action === "synchronize")) {
+      this._handleAutoReview(event, payload, ctx, bus, { skipDedup: false });
+      return;
+    }
+
+    // ── Re-review path: pull_request review_requested for @protoquinn[bot] ────
+    // Native GitHub "Re-request review" button → Quinn re-reviews. Bypasses
+    // dedup because the human is explicitly asking. Other review_requested
+    // events (for human reviewers) are ignored.
+    if (event === "pull_request" && payload.action === "review_requested") {
+      const reviewer = payload.requested_reviewer as Record<string, unknown> | undefined;
+      const login = (reviewer?.login as string | undefined)?.toLowerCase();
+      if (login === "protoquinn" || login === "protoquinn[bot]") {
+        this._handleAutoReview(event, payload, ctx, bus, { skipDedup: true });
+      }
+      return;
+    }
+
     // ── @mention path (existing, unchanged) ──────────────────────────────────
     if (!ctx.body.toLowerCase().includes(config.mentionHandle.toLowerCase())) return;
 
@@ -566,6 +594,75 @@ export class GitHubPlugin implements Plugin {
   /** Tracks recently-dispatched (owner/repo#number) to suppress duplicate webhook deliveries. */
   private recentDispatches = new Map<string, number>();
   private static readonly DEDUP_WINDOW_MS = 60_000;
+
+  private _handleAutoReview(
+    event: string,
+    payload: Record<string, unknown>,
+    ctx: GitHubEventContext,
+    bus: EventBus,
+    opts: { skipDedup: boolean } = { skipDedup: false },
+  ): void {
+    const action = payload.action as string;
+    const dedupKey = `pr-review:${ctx.owner}/${ctx.repo}#${ctx.number}`;
+    if (!opts.skipDedup) {
+      const lastDispatched = this.recentDispatches.get(dedupKey);
+      if (lastDispatched && Date.now() - lastDispatched < GitHubPlugin.DEDUP_WINDOW_MS) {
+        console.log(`[github] Auto-review: skipping duplicate ${dedupKey} (dispatched ${Date.now() - lastDispatched}ms ago)`);
+        return;
+      }
+    }
+    this.recentDispatches.set(dedupKey, Date.now());
+
+    const pr = payload.pull_request as Record<string, unknown>;
+    const isDraft = pr?.draft as boolean;
+    if (isDraft) {
+      console.log(`[github] Auto-review: skipping draft PR ${ctx.owner}/${ctx.repo}#${ctx.number}`);
+      return;
+    }
+
+    const correlationId = crypto.randomUUID();
+    pendingComments.set(correlationId, { owner: ctx.owner, repo: ctx.repo, number: ctx.number });
+
+    const content = [
+      `Auto-review — pull_request.${action} on ${ctx.owner}/${ctx.repo}#${ctx.number}`,
+      `Title: ${ctx.title}`,
+      `Author: @${ctx.author}`,
+      `URL: ${ctx.url}`,
+      ``,
+      `Use pr_inspector with repo="${ctx.owner}/${ctx.repo}" and pr_number=${ctx.number} to pull CI status, the diff, and any unresolved review threads. Issue your verdict (PASS / WARN / FAIL) via review_approve / review_comment / review_request_changes.`,
+      ``,
+      ctx.body,
+    ].join("\n");
+
+    const topic = `message.inbound.github.${ctx.owner}.${ctx.repo}.${event}.${ctx.number}`;
+    const replyTopic = `message.outbound.github.${ctx.owner}.${ctx.repo}.${ctx.number}`;
+
+    bus.publish(topic, {
+      id: `${event}-${action}-${ctx.owner}-${ctx.repo}-${ctx.number}-${correlationId.slice(0, 8)}`,
+      correlationId,
+      topic,
+      timestamp: Date.now(),
+      payload: {
+        sender: ctx.author,
+        channel: `${ctx.owner}/${ctx.repo}#${ctx.number}`,
+        content,
+        skillHint: "pr_review",
+        github: {
+          event,
+          action,
+          owner: ctx.owner,
+          repo: ctx.repo,
+          number: ctx.number,
+          title: ctx.title,
+          url: ctx.url,
+        },
+      },
+      source: { interface: "github" as const },
+      reply: { topic: replyTopic },
+    });
+
+    console.log(`[github] Auto-review: ${ctx.owner}/${ctx.repo}#${ctx.number} (${action}) → pr_review`);
+  }
 
   private _handleAutoTriage(
     event: string,

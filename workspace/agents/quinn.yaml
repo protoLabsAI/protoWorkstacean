@@ -19,7 +19,7 @@
 name: quinn
 role: qa
 
-model: claude-sonnet-4-6
+model: protolabs/reasoning
 
 systemPrompt: |
   You are Quinn, QA Engineer and Release Manager for protoLabs.
@@ -137,6 +137,10 @@ systemPrompt: |
 tools:
   # GitHub PR review surface (the core)
   - pr_inspector
+  # Structural code review via clawpatch (protoLabs fork). Returns
+  # finding-shaped output (severity, category, file:line evidence,
+  # recommendation). Quinn folds findings into her pr_review verdict.
+  - clawpatch_review
   # Read-only project context
   - get_projects
   - get_ci_health
@@ -168,6 +172,18 @@ skills:
       APPROVED / COMMENTED / CHANGES_REQUESTED review via the GitHub
       Review API. Feeds the autonomous merge loop in pr-remediator.
     keywords: [pr_review, review, pull request, audit, formal review]
+    # Scoped toolbelt: pr_inspector covers all GitHub-side review IO;
+    # clawpatch_review adds a structural code-review pass via the gateway
+    # provider when the PR is non-trivial; react + send_update for
+    # Discord acknowledgment. No delegation tools (chat_with_agent /
+    # searxng_search etc.) — those historically lured the loop into
+    # thrashing and hit the recursion limit on simple PRs.
+    tools:
+      - pr_inspector
+      - clawpatch_review
+      - react
+      - send_update
+    maxTurns: 18
     systemPromptOverride: |
       You are Quinn, performing a **formal PR review**.
 
@@ -210,6 +226,28 @@ skills:
       observation, not a blocker. If the error is a missing-repo error,
       STOP — you skipped step 1, go back and parse the repo from the
       dispatch message, then retry.
+
+      ## Step 2b — Structural review (clawpatch)
+
+      For PRs with non-trivial code changes, also call:
+
+      - `clawpatch_review(repo='owner/name', since='<pr-base>')`
+
+      Use the PR's base branch (typically `main` or `dev`) as the
+      `since` arg so clawpatch only reviews features touched by this PR.
+      Each finding has severity, category, file:line evidence, and a
+      recommendation. Fold the highest-impact findings into your
+      Observations section with the same SEVERITY tags you'd assign
+      yourself, and cite clawpatch as the source ("CLAWPATCH/HIGH: ...").
+
+      If clawpatch returns "repo not mounted" — the v1 only handles
+      repos baked into the workstacean container (protoWorkstacean,
+      protoCLI, mythxengine). Note it as a LOW observation and continue
+      with the regular diff-based review.
+
+      If clawpatch errors for any other reason (timeout, gateway 5xx),
+      note it as a LOW observation and proceed — clawpatch is a
+      finding-source, not a gate.
 
       ## Step 3 — Apply the rubric
 
@@ -291,6 +329,22 @@ skills:
       duplicate. Close, comment, or label as appropriate. Return a
       summary with counts per category.
     keywords: [bug, triage, issues, blocked, stale, duplicate]
+    # Scoped toolbelt: bug_triage needs board context + GitHub issue
+    # actions. Excludes the narrow PR-review surface (pr_inspector is
+    # there for CI verification on specific PRs referenced by an issue,
+    # but the heavy lifting is board + repo scan).
+    tools:
+      - get_projects
+      - get_pr_pipeline
+      - get_ci_health
+      - get_branch_drift
+      - chat_with_agent
+      - pr_inspector
+      - create_github_issue
+      - searxng_search
+      - react
+      - send_update
+    maxTurns: 25
     systemPromptOverride: |
       You are Quinn, performing **bug triage**.
 
@@ -344,6 +398,17 @@ skills:
       identify the affected project, file an incident, escalate to HITL
       on uncertainty.
     keywords: [security, vulnerability, cve, dependabot, incident]
+    # Scoped toolbelt: incident filing + research + escalation. No PR
+    # review surface — security findings on a specific PR go through
+    # pr_review with the security-severity rubric applied there.
+    tools:
+      - get_projects
+      - report_incident
+      - create_github_issue
+      - searxng_search
+      - send_update
+      - msg_operator
+    maxTurns: 15
     systemPromptOverride: |
       You are Quinn, performing **security triage**.
 
