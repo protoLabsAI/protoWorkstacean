@@ -47,6 +47,16 @@ Branch naming: `feature/<short-description>` (auto-mode uses Automaker's naming 
 
 The Automaker `gitWorkflow.prBaseBranch` is set to `dev`. Auto-mode agents target `dev` automatically.
 
+### Merge mode
+
+- **One-off PR targeting `main` / `dev`** → squash-merge (the default).
+- **Stacked PR (base is another PR's branch)** → **merge commit**, not squash. Squash rewrites SHAs and breaks subsequent stack rebases. See [`docs/contributing/merge-policy.md`](docs/contributing/merge-policy.md) for the full rationale + rollout steps.
+- Local git: `git config --global rebase.updateRefs true` (auto-updates dependent branch refs during rebase).
+
+### Don't enable auto-merge on a moving stack
+
+Auto-merge captures the head SHA when you enable it. If you force-push afterwards (a rebase, an addressed comment), auto-merge fires against the **old** SHA and silently skips your new commits — content gets orphaned. Wait until the stack has stopped moving before clicking auto-merge.
+
 ## Stack
 
 - Runtime: Bun
