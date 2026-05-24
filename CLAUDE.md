@@ -142,3 +142,5 @@ This preserves the single-node simplicity while making the bus federate when nee
 Stateful executors (DeepAgent instances are in-process and stateful per agent) are NOT magically distributed by this — multi-node federation needs to think about which node "owns" Ava vs which nodes pass messages through. Solve that when we get there.
 
 If the question of multi-node comes up again before this is implemented, the answer is this paragraph.
+
+<!-- 2026-05-24: marker commit to trigger Quinn pr_review with clawpatch_review against protoWorkstacean for task #26 e2e verification -->
