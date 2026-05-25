@@ -23,8 +23,12 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { CheckoutCache } from "../../lib/checkout-cache.ts";
+import { makeGitHubAuth } from "../../lib/github-auth.ts";
+import { parseProjectsYaml } from "../../lib/project-schema.ts";
 import type { Route, ApiContext } from "./types.ts";
 
 /**
@@ -83,7 +87,7 @@ const BUILT_IN_REPO_PATHS: Record<string, string> = {
   "protoLabsAI/contentMachine": "/home/josh/dev/labs/contentMachine",
 };
 
-function resolveRepoPath(repo: string): string | null {
+function resolveBuiltInPath(repo: string): string | null {
   let overrides: Record<string, string> = {};
   const raw = process.env["CLAWPATCH_REPO_PATH_MAP"];
   if (raw) {
@@ -97,6 +101,93 @@ function resolveRepoPath(repo: string): string | null {
   if (!path) return null;
   if (!existsSync(path)) return null;
   return path;
+}
+
+/**
+ * Lazy singleton — first review request after process start initializes it.
+ * Test override via the `setCheckoutCacheForTesting` helper below.
+ */
+let _cache: CheckoutCache | null = null;
+function getCheckoutCache(): CheckoutCache {
+  if (_cache) return _cache;
+  const auth = makeGitHubAuth();
+  _cache = new CheckoutCache({
+    getToken: auth ?? undefined,
+  });
+  return _cache;
+}
+
+export function setCheckoutCacheForTesting(cache: CheckoutCache | null): void {
+  _cache = cache;
+}
+
+/**
+ * Load the set of repos allowed for clawpatch review from workspace/projects.yaml.
+ * Same allowlist boundary that `create_github_issue` enforces — agents can't
+ * point clawpatch at arbitrary GitHub repos.
+ */
+function loadProjectAllowlist(workspaceDir: string): Set<string> {
+  const path = join(workspaceDir, "projects.yaml");
+  if (!existsSync(path)) return new Set();
+  try {
+    const raw = parseYaml(readFileSync(path, "utf8")) as unknown;
+    const parsed = parseProjectsYaml(raw);
+    return new Set(parsed.projects.map(p => p.github));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[clawpatch] projects.yaml load failed: ${msg} — allowlist empty`);
+    return new Set();
+  }
+}
+
+/**
+ * Resolve a local filesystem path for clawpatch to operate on.
+ *
+ *   1. Built-in mount / CLAWPATCH_REPO_PATH_MAP override — zero-latency fast
+ *      path for repos already bind-mounted into the container.
+ *   2. On-demand checkout via `CheckoutCache` for any repo in the
+ *      projects.yaml allowlist. Requires `since` (PR head SHA) since the
+ *      cache is content-addressed by ref.
+ *
+ * Returns `{ ok: false, error }` instead of throwing so the route handler
+ * can shape a 400 response without a try/catch.
+ */
+async function resolveRepoPath(
+  repo: string,
+  since: string | undefined,
+  workspaceDir: string,
+): Promise<{ ok: true; path: string } | { ok: false; error: string; status: number }> {
+  const fastPath = resolveBuiltInPath(repo);
+  if (fastPath) return { ok: true, path: fastPath };
+
+  const allow = loadProjectAllowlist(workspaceDir);
+  if (!allow.has(repo)) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        `repo '${repo}' is not in workspace/projects.yaml — clawpatch only reviews ` +
+        `managed projects. Add it to projects.yaml first (or set CLAWPATCH_REPO_PATH_MAP).`,
+    };
+  }
+
+  if (!since) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        `repo '${repo}' is not bind-mounted — on-demand checkout needs 'since' ` +
+        `(the PR head SHA) so the cache can address the right ref.`,
+    };
+  }
+
+  try {
+    const path = await getCheckoutCache().resolve(repo, since);
+    return { ok: true, path };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, status: 502, error: `checkout cache failed: ${msg}` };
+  }
 }
 
 interface ClawpatchExecResult {
@@ -153,7 +244,7 @@ interface CiJsonOutput {
   items?: unknown[];
 }
 
-export function createRoutes(_ctx: ApiContext): Route[] {
+export function createRoutes(ctx: ApiContext): Route[] {
   return [
     {
       method: "POST",
@@ -175,17 +266,14 @@ export function createRoutes(_ctx: ApiContext): Route[] {
             { status: 400 },
           );
         }
-        const repoPath = resolveRepoPath(repo);
-        if (!repoPath) {
-          const known = Object.keys(BUILT_IN_REPO_PATHS).join(", ");
+        const resolution = await resolveRepoPath(repo, since, ctx.workspaceDir);
+        if (!resolution.ok) {
           return Response.json(
-            {
-              success: false,
-              error: `repo '${repo}' is not mounted in this container — only mapped+mounted repos work today (${known}, plus any CLAWPATCH_REPO_PATH_MAP overrides). On-demand PR checkouts are not implemented.`,
-            },
-            { status: 400 },
+            { success: false, error: resolution.error },
+            { status: resolution.status },
           );
         }
+        const repoPath = resolution.path;
 
         // Workstacean mounts repo source read-only, so push clawpatch state
         // into the writable data volume — one dir per owner/repo so we don't
