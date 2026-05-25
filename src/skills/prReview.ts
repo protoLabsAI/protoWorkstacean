@@ -15,7 +15,7 @@
 import { review } from "../llm/reviewOrchestrator.ts";
 import { GitHubReviewSubmitter } from "../github/reviewSubmitter.ts";
 import { PullRequestTracker } from "../state/prTracker.ts";
-import { makeGitHubAuth, makeQuinnReviewAuth } from "../../lib/github-auth.ts";
+import { makeGitHubAuth } from "../../lib/github-auth.ts";
 
 export interface PRReviewInput {
   owner: string;
@@ -70,19 +70,12 @@ export async function runPRReview(
     throw new Error("[prReview] No GitHub auth configured (QUINN_APP_ID or GITHUB_TOKEN required)");
   }
 
-  // Run review pipeline using App / PAT identity — reads only, no
-  // identity-sensitive writes.
+  // Run review pipeline
   const result = await review(owner, repo, prNumber, getToken);
 
-  // Submit the review using the review-specific identity. When
-  // QUINN_USER_TOKEN is set, the formal review lands as the protoquinn
-  // machine user — required for the review to satisfy a required-
-  // reviewer gate. Falls back to the App / PAT path otherwise.
-  const getReviewToken = makeQuinnReviewAuth();
-  if (!getReviewToken) {
-    throw new Error("[prReview] No GitHub review auth configured (QUINN_USER_TOKEN or QUINN_APP_* or GITHUB_TOKEN required)");
-  }
-  const submitter = new GitHubReviewSubmitter(getReviewToken);
+  // Get fresh head SHA from result (it was fetched inside review())
+  // Submit the review
+  const submitter = new GitHubReviewSubmitter(getToken);
   const submitResult = await submitter.submitReview(
     owner,
     repo,

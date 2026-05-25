@@ -6,18 +6,9 @@
  * plugins stay self-contained.
  *
  * Env vars:
- *   QUINN_APP_ID          GitHub App ID (quinn[bot])
+ *   QUINN_APP_ID          GitHub App ID
  *   QUINN_APP_PRIVATE_KEY PEM private key (newlines as \n in env)
- *   QUINN_USER_TOKEN      Optional. PAT of a dedicated machine-user
- *                         account (e.g. `protoquinn`). When set, formal
- *                         PR reviews submit under this identity instead
- *                         of the App's quinn[bot] — required because
- *                         GitHub App approvals don't count toward
- *                         required-review gates (same constraint as
- *                         Copilot reviews). See #585 for the rationale.
- *                         Stage 1 of the Quinn-in-the-loop rollout.
- *   GITHUB_TOKEN          Legacy PAT fallback when App credentials are
- *                         absent. Operator's own token in dev.
+ *   GITHUB_TOKEN          PAT fallback when App credentials are absent
  */
 
 import { createSign } from "node:crypto";
@@ -90,8 +81,7 @@ export class GitHubAppAuth {
  * secret pair on a container restart. PAT fallback only fires when *both*
  * App vars are absent, which is the legitimate "this deployment doesn't
  * have a GitHub App, just a PAT" mode.
- */
-/**
+ *
  * `env` defaults to `process.env`; tests pass a literal so they don't have
  * to mutate the live env (which `bun test` runs test files in parallel
  * over, causing race conditions on shared `process.env`).
@@ -126,44 +116,4 @@ export function makeGitHubAuth(
   const pat = env.GITHUB_TOKEN;
   if (pat) return () => Promise.resolve(pat);
   return null;
-}
-
-/**
- * Token getter specifically for **formal PR reviews** (APPROVE /
- * REQUEST_CHANGES). Resolution order:
- *
- *   1. `QUINN_USER_TOKEN` — PAT belonging to a dedicated machine-user
- *      account (e.g. `protoquinn`). GitHub does NOT count GitHub App
- *      approvals toward required-review gates — only real user accounts
- *      with write access do. So once you stand up that account + PAT
- *      and set this env var, Quinn's APPROVE actually starts being
- *      gate-satisfying. Without it, the App path (#2) still works for
- *      advisory reviews but can't satisfy a required-reviewer rule.
- *   2. Whatever `makeGitHubAuth()` returns — App, then PAT fallback.
- *      Lets the rollout be incremental: deploy this code today, the
- *      review path keeps working as quinn[bot] (advisory) until the
- *      protoquinn account + token are created and `QUINN_USER_TOKEN`
- *      is set in infisical.
- *
- * The returned getter logs once on construction so it's visible in
- * startup output which identity reviews are landing under.
- */
-export function makeQuinnReviewAuth(
-  env: Record<string, string | undefined> = process.env,
-): ((owner: string, repo: string) => Promise<string>) | null {
-  const userToken = (env.QUINN_USER_TOKEN ?? "").trim();
-  if (userToken) {
-    console.log("[review-auth] Quinn reviews → machine user (QUINN_USER_TOKEN). Gate-satisfying when the user has write access on the target repo.");
-    return () => Promise.resolve(userToken);
-  }
-
-  const fallback = makeGitHubAuth(env);
-  if (!fallback) return null;
-
-  const fallbackKind =
-    env.QUINN_APP_ID && env.QUINN_APP_PRIVATE_KEY ? "GitHub App (quinn[bot]) — advisory only, not gate-satisfying"
-    : env.GITHUB_TOKEN                            ? "GITHUB_TOKEN PAT (operator identity — self-review block possible)"
-    :                                               "unknown";
-  console.log(`[review-auth] Quinn reviews → ${fallbackKind}. Set QUINN_USER_TOKEN with a protoquinn PAT to upgrade.`);
-  return fallback;
 }
