@@ -13,9 +13,11 @@
     "@astrojs/preact": "^4.0.0",
     "@xyflow/react": "^12.10.2",
     "astro": "^6.0.1",
+    "dagre": "^0.8.5",
     "preact": "^10.25.0"
   },
   "devDependencies": {
+    "@types/dagre": "^0.7.54",
     "typescript": "^5.7.0"
   }
 }

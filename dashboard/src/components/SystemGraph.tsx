@@ -26,6 +26,7 @@ import "@xyflow/react/dist/style.css";
 import AgentNode, { type AgentActivityState } from "./AgentNode.tsx";
 import ServiceNode from "./ServiceNode.tsx";
 import MessageDrawer, { type DrawerMessage } from "./MessageDrawer.tsx";
+import { dagreLayout } from "../lib/layout.ts";
 
 /** Ring-buffer cap for per-topic history shown in the edge drawer. */
 const TOPIC_HISTORY_CAP = 20;
@@ -100,13 +101,16 @@ function topicMatches(pattern: string, topic: string): boolean {
 }
 
 // ── Layout ───────────────────────────────────────────────────────────────────
-// Three concentric rings. Agents at center (smallest radius — they're the
-// focal point); plugins in the middle; services on the outside.
-
-function ringPos(idx: number, count: number, radius: number, cx = 500, cy = 380) {
-  const angle = (idx / Math.max(count, 1)) * Math.PI * 2 - Math.PI / 2; // start at top
-  return { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
-}
+// Dagre-based force-directed layout (see ../lib/layout.ts). Replaces the
+// three-concentric-ring positioning that broke down past ~30 nodes — labels
+// stacked, edges crossed, and the visual hierarchy turned into spaghetti.
+// Now: agents cluster near the dispatcher they route through, services
+// settle on the perimeter naturally, message flow reads left-to-right.
+//
+// `PLACEHOLDER_POS` is what buildGraph stamps on every node before dagre
+// runs — dagre overwrites all positions in a single pass at the end, so
+// the placeholder values never reach React Flow.
+const PLACEHOLDER_POS = { x: 0, y: 0 };
 
 interface BuildArgs {
   plugins: PluginTopologyEntry[];
@@ -124,7 +128,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
     nodes.push({
       id: `agent-${a.name}`,
       type: "agent",
-      position: ringPos(idx, agents.length, 180),
+      position: PLACEHOLDER_POS,
       data: { label: a.name, type: a.type, activity: agentActivity.get(a.name) },
     });
   });
@@ -133,7 +137,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
   plugins.forEach((p, idx) => {
     nodes.push({
       id: `plugin-${p.name}`,
-      position: ringPos(idx, plugins.length, 380),
+      position: PLACEHOLDER_POS,
       data: { label: p.name },
       style: {
         background: "#161b22",
@@ -152,7 +156,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
     nodes.push({
       id: s.id,
       type: "service",
-      position: ringPos(idx, SERVICES.length, 580),
+      position: PLACEHOLDER_POS,
       data: { label: s.label, icon: s.icon, description: s.description },
     });
   });
@@ -211,7 +215,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
     });
   }
 
-  return { nodes, edges };
+  return dagreLayout(nodes, edges);
 }
 
 // ── Activity event → agent state machine ─────────────────────────────────────
