@@ -10,6 +10,9 @@
  *   - Live edge animation on bus traffic via WS /api/bus/subscribe?topic=#
  *   - Agent state subscription on agent.runtime.activity.# so each agent's
  *     node pulses + shows real-time skill + tool-call history
+ * Phase 3 (D3): clicking an edge opens MessageDrawer with the last
+ *   TOPIC_HISTORY_CAP messages observed on that topic + jump-to-trace
+ *   links into /trace?correlationId=… (D1).
  *
  * Layout: three concentric zones.
  *   center  — agents (the action)
@@ -17,11 +20,15 @@
  *   outer   — external services (where work eventually lands)
  */
 
-import { useEffect, useMemo, useState } from "preact/compat";
+import { useEffect, useMemo, useRef, useState } from "preact/compat";
 import { ReactFlow, Background, Controls, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import AgentNode, { type AgentActivityState } from "./AgentNode.tsx";
 import ServiceNode from "./ServiceNode.tsx";
+import MessageDrawer, { type DrawerMessage } from "./MessageDrawer.tsx";
+
+/** Ring-buffer cap for per-topic history shown in the edge drawer. */
+const TOPIC_HISTORY_CAP = 20;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -259,6 +266,23 @@ export default function SystemGraph() {
   const [agentActivity, setAgentActivity] = useState<Map<string, AgentActivityState>>(new Map());
   const [activeEdges, setActiveEdges] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  // Per-topic ring buffer of recent WS-observed messages. Lives in a ref
+  // (not state) because every WS frame would otherwise re-trigger the
+  // whole graph rebuild — we only need to re-render when the operator
+  // actually opens the drawer for a specific topic.
+  const topicHistoryRef = useRef<Map<string, DrawerMessage[]>>(new Map());
+  const openTopicRef = useRef<string | null>(null);
+  const [openTopic, _setOpenTopic] = useState<string | null>(null);
+  // Wrapper keeps the ref + state in sync so the WS handler — which closes
+  // over its initial state via the once-mount useEffect — can see the
+  // latest open-drawer topic without re-subscribing on every change.
+  const setOpenTopic = (t: string | null) => {
+    openTopicRef.current = t;
+    _setOpenTopic(t);
+  };
+  // Bumps when the open drawer's topic gets a new message — keeps the
+  // drawer's view in sync without re-rendering the whole graph.
+  const [drawerTick, setDrawerTick] = useState(0);
 
   // Initial fetch — topology + agents
   useEffect(() => {
@@ -300,12 +324,32 @@ export default function SystemGraph() {
       ws = new WebSocket(url);
       ws.onmessage = (e) => {
         try {
-          const msg = JSON.parse(e.data) as { topic?: string; payload?: unknown };
+          const msg = JSON.parse(e.data) as {
+            topic?: string;
+            payload?: unknown;
+            correlationId?: string;
+            timestamp?: number;
+          };
           if (!msg.topic) return;
           // Agent activity → state machine
           if (msg.topic.startsWith("agent.runtime.activity.")) {
             const ev = msg.payload as AgentActivityEvent;
             setAgentActivity((cur) => applyActivity(cur, ev));
+          }
+          // Per-topic ring buffer for D3's edge drawer. Cap at TOPIC_HISTORY_CAP.
+          const buf = topicHistoryRef.current.get(msg.topic) ?? [];
+          buf.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            topic: msg.topic,
+            correlationId: msg.correlationId,
+            timestamp: msg.timestamp ?? Date.now(),
+            payload: msg.payload,
+          });
+          if (buf.length > TOPIC_HISTORY_CAP) buf.splice(0, buf.length - TOPIC_HISTORY_CAP);
+          topicHistoryRef.current.set(msg.topic, buf);
+          // If the drawer is open on this topic, force a re-render.
+          if (msg.topic === openTopicRef.current) {
+            setDrawerTick((t) => t + 1);
           }
           // Pulse the edge for any topic — phase 1 just animated each match for 1.5s
           setActiveEdges((cur) => new Set(cur).add(msg.topic!));
@@ -356,12 +400,39 @@ export default function SystemGraph() {
     return <div style={{ padding: 24, color: "#8b949e" }}>loading topology…</div>;
   }
 
+  const drawerMessages = useMemo(
+    () => (openTopic ? topicHistoryRef.current.get(openTopic) ?? [] : []),
+    // drawerTick is the WS-driven invalidation signal; openTopic re-runs when
+    // the drawer switches topics.
+    [openTopic, drawerTick],
+  );
+
   return (
     <div style={{ width: "100%", height: "calc(100vh - 64px)", background: "#0d1117" }}>
-      <ReactFlow nodes={nodes} edges={edges} nodeTypes={NODE_TYPES} fitView minZoom={0.2}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={NODE_TYPES}
+        fitView
+        minZoom={0.2}
+        onEdgeClick={(_evt: unknown, edge: Edge) => {
+          // Edges built from publisher → subscriber carry their topic as the
+          // edge label. Static plugin → service edges have no topic — those
+          // skip the drawer.
+          const topic = typeof edge.label === "string" ? edge.label : null;
+          if (topic) setOpenTopic(topic);
+        }}
+      >
         <Background color="#21262d" gap={16} />
         <Controls position="bottom-right" />
       </ReactFlow>
+      {openTopic && (
+        <MessageDrawer
+          topic={openTopic}
+          messages={drawerMessages}
+          onClose={() => setOpenTopic(null)}
+        />
+      )}
     </div>
   );
 }
