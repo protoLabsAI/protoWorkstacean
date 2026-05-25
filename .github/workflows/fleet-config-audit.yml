@@ -1,0 +1,104 @@
+# Fleet workspace-config drift audit.
+#
+# Runs the release-tools `verify-workspace-config` standard against every
+# active repo in workspace/projects.yaml and reports drift. This is the
+# central "flag it" mechanism — each repo can also gate its own PRs by
+# running verify-workspace-config in its CI, but this catches the whole fleet
+# from one place with zero per-repo setup.
+#
+# Job fails (red) when any watched repo has error-severity drift, so the
+# scheduled run's status is a live conformance signal. Posts a summary to
+# Discord #alerts when DISCORD_WEBHOOK_ALERTS is configured.
+#
+# See: protoLabsAI/release-tools docs/workspace-config-standard.md
+
+name: Fleet Config Audit
+
+on:
+  schedule:
+    - cron: '0 13 * * *' # 13:00 UTC daily
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: namespace-profile-protolabs-linux
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Audit every active project against the workspace-config standard
+        id: audit
+        env:
+          # gh CLI auth for the remote (--repo) audits.
+          GH_TOKEN: ${{ secrets.FLEET_AUDIT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+
+          # Extract `github:` for active (non-archived/suspended) projects.
+          repos=$(python3 - <<'PY'
+          import re
+          doc = open('workspace/projects.yaml').read()
+          # naive block split on "- slug:"; good enough for this flat registry.
+          blocks = re.split(r'(?m)^\s*-\s*slug:', doc)[1:]
+          for b in blocks:
+              gh = re.search(r'github:\s*(\S+)', b)
+              st = re.search(r'status:\s*(\S+)', b)
+              status = st.group(1) if st else 'active'
+              if gh and status == 'active':
+                  print(gh.group(1))
+          PY
+          )
+
+          echo "Auditing repos:"; echo "$repos"
+          echo ""
+
+          drift=0
+          {
+            echo "## Fleet workspace-config audit"
+            echo ""
+            echo "| Repo | Errors | Warnings | Status |"
+            echo "|------|-------:|---------:|--------|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for repo in $repos; do
+            json=$(npx -y github:protoLabsAI/release-tools verify-workspace-config \
+                     --repo "$repo" --json --warn-only 2>/dev/null || echo '{}')
+            errs=$(echo "$json"  | python3 -c "import json,sys;d=json.load(sys.stdin);print(d.get('errorCount',-1))" 2>/dev/null || echo -1)
+            warns=$(echo "$json" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d.get('warnCount',0))" 2>/dev/null || echo 0)
+            if [ "$errs" = "-1" ]; then
+              mark="⚠️ audit-failed"
+            elif [ "$errs" = "0" ]; then
+              mark="✅"
+            else
+              mark="❌"
+              drift=$((drift + 1))
+            fi
+            echo "| $repo | $errs | $warns | $mark |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          echo "drift_count=$drift" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Discord on drift
+        if: ${{ always() && steps.audit.outputs.drift_count != '0' && env.WEBHOOK != '' }}
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+          DRIFT: ${{ steps.audit.outputs.drift_count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -sS -X POST "$WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -d "{\"content\":\"⚠️ Fleet config audit: ${DRIFT} repo(s) drifting from the workspace-config standard. ${RUN_URL}\"}" \
+            >/dev/null || true
+
+      - name: Fail if any repo drifts
+        if: ${{ steps.audit.outputs.drift_count != '0' }}
+        run: |
+          echo "::error::${{ steps.audit.outputs.drift_count }} repo(s) drifting from the workspace-config standard — see job summary."
+          exit 1
