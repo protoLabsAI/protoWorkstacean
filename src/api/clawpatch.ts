@@ -35,8 +35,8 @@ import type { Route, ApiContext } from "./types.ts";
  * Override with CLAWPATCH_STATE_ROOT for testing or when DATA_DIR isn't set.
  */
 const CLAWPATCH_STATE_ROOT =
-  process.env["CLAWPATCH_STATE_ROOT"]
-  ?? join(process.env["DATA_DIR"] ?? "/data", "clawpatch");
+  process.env["CLAWPATCH_STATE_ROOT"] ??
+  join(process.env["DATA_DIR"] ?? "/data", "clawpatch");
 
 function stateDirFor(repo: string): string {
   // owner/repo → owner-repo so the path stays one level deep.
@@ -66,11 +66,21 @@ interface ReviewRequest {
 }
 
 const BUILT_IN_REPO_PATHS: Record<string, string> = {
-  // Repos mounted read-only into the workstacean container today (see
-  // homelab-iac/stacks/ai/docker-compose.yml workstacean.volumes).
+  // Repos clawpatch can review. Paths follow the deploy-host convention
+  // (~/dev/labs/{repo}, protoWorkstacean at ~/dev/protoWorkstacean). Each
+  // must ALSO be mounted read-only into the container for the path to exist —
+  // see homelab-iac/stacks/ai/docker-compose.yml workstacean.volumes. An entry
+  // here without a mount resolves to a missing path and clawpatch reports it.
+  // Keep in sync with the active repos in workspace/projects.yaml.
   "protoLabsAI/protoWorkstacean": "/home/josh/dev/protoWorkstacean",
+  "protoLabsAI/protoMaker": "/home/josh/dev/labs/protoMaker",
   "protoLabsAI/protoCLI": "/home/josh/dev/labs/protoCLI",
   "protoLabsAI/mythxengine": "/home/josh/dev/labs/mythxengine",
+  "protoLabsAI/escape-from-qud": "/home/josh/dev/labs/escape-from-qud",
+  "protoLabsAI/release-tools": "/home/josh/dev/labs/release-tools",
+  "protoLabsAI/protoPatch": "/home/josh/dev/labs/protoPatch",
+  "protoLabsAI/pwnDeck": "/home/josh/dev/labs/pwnDeck",
+  "protoLabsAI/contentMachine": "/home/josh/dev/labs/contentMachine",
 };
 
 function resolveRepoPath(repo: string): string | null {
@@ -98,7 +108,11 @@ interface ClawpatchExecResult {
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
-function runClawpatch(args: string[], cwd: string, timeoutMs: number): Promise<ClawpatchExecResult> {
+function runClawpatch(
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+): Promise<ClawpatchExecResult> {
   return new Promise((resolve) => {
     const child = spawn("clawpatch", args, {
       cwd,
@@ -112,8 +126,12 @@ function runClawpatch(args: string[], cwd: string, timeoutMs: number): Promise<C
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs);
-    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf-8"); });
-    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf-8"); });
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf-8");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf-8");
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
       resolve({ stdout, stderr, exitCode: code ?? -1, timedOut });
@@ -145,18 +163,25 @@ export function createRoutes(_ctx: ApiContext): Route[] {
         try {
           payload = (await req.json()) as ReviewRequest;
         } catch {
-          return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 });
+          return Response.json(
+            { success: false, error: "Invalid JSON" },
+            { status: 400 },
+          );
         }
         const { repo, since, limit, model, provider } = payload;
         if (!repo) {
-          return Response.json({ success: false, error: "repo is required" }, { status: 400 });
+          return Response.json(
+            { success: false, error: "repo is required" },
+            { status: 400 },
+          );
         }
         const repoPath = resolveRepoPath(repo);
         if (!repoPath) {
+          const known = Object.keys(BUILT_IN_REPO_PATHS).join(", ");
           return Response.json(
             {
               success: false,
-              error: `repo '${repo}' is not mounted in this container — only repos in CLAWPATCH_REPO_PATH_MAP / the built-in mounts (protoWorkstacean, protoCLI, mythxengine) work today. On-demand PR checkouts are not implemented.`,
+              error: `repo '${repo}' is not mounted in this container — only mapped+mounted repos work today (${known}, plus any CLAWPATCH_REPO_PATH_MAP overrides). On-demand PR checkouts are not implemented.`,
             },
             { status: 400 },
           );
@@ -167,15 +192,26 @@ export function createRoutes(_ctx: ApiContext): Route[] {
         // re-map features for every PR review.
         const stateDir = stateDirFor(repo);
         const effectiveProvider = provider ?? "gateway";
-        const args = ["ci", "--provider", effectiveProvider, "--json", "--state-dir", stateDir];
+        const args = [
+          "ci",
+          "--provider",
+          effectiveProvider,
+          "--json",
+          "--state-dir",
+          stateDir,
+        ];
         if (since) args.push("--since", since);
-        if (typeof limit === "number" && limit > 0) args.push("--limit", String(limit));
+        if (typeof limit === "number" && limit > 0)
+          args.push("--limit", String(limit));
         if (model) args.push("--model", model);
 
         const result = await runClawpatch(args, repoPath, DEFAULT_TIMEOUT_MS);
         if (result.timedOut) {
           return Response.json(
-            { success: false, error: `clawpatch timed out after ${DEFAULT_TIMEOUT_MS}ms` },
+            {
+              success: false,
+              error: `clawpatch timed out after ${DEFAULT_TIMEOUT_MS}ms`,
+            },
             { status: 504 },
           );
         }
@@ -205,7 +241,10 @@ export function createRoutes(_ctx: ApiContext): Route[] {
           );
         }
 
-        return Response.json({ success: true, data: { repo, repoPath, ...parsed } });
+        return Response.json({
+          success: true,
+          data: { repo, repoPath, ...parsed },
+        });
       },
     },
   ];
