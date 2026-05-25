@@ -65,6 +65,17 @@ export interface DeepAgentConfig {
   gatewayApiKey?: string;
   apiBaseUrl?: string;
   apiKey?: string;
+  /**
+   * Best-effort telemetry hook fired for each tool-call turn made during
+   * a skill invocation. Wired by `AgentRuntimePlugin` to publish on
+   * `agent.runtime.activity.tool.call` so the /system dashboard can show
+   * live per-tool-call detail inside each agent's node. Errors thrown
+   * inside the callback are swallowed — telemetry never breaks a skill.
+   *
+   * Skill-level lifecycle (start / complete / error) is emitted by the
+   * SkillDispatcher across ALL executor types and does not need this hook.
+   */
+  onToolCall?: (event: { agentName: string; correlationId: string; skill?: string; toolNames: string[] }) => void;
 }
 
 // Each tool() call infers a unique DynamicStructuredTool<ZodObject<{specific fields}>, ...>.
@@ -588,9 +599,11 @@ export class DeepAgentExecutor implements IExecutor {
   private readonly agentDef: AgentDefinition;
   private readonly model: ChatOpenAI;
   private readonly http: HttpClient;
+  private readonly onToolCall: DeepAgentConfig["onToolCall"];
 
   constructor(agentDef: AgentDefinition, config: DeepAgentConfig = {}) {
     this.agentDef = agentDef;
+    this.onToolCall = config.onToolCall;
     const gatewayUrl = config.gatewayUrl ?? process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL;
     const apiKey = config.gatewayApiKey ?? process.env.OPENAI_API_KEY ?? "unused";
 
@@ -656,13 +669,27 @@ export class DeepAgentExecutor implements IExecutor {
       const messages = result.messages ?? [];
       console.log(`[deep-agent:${this.agentDef.name}] ${messages.length} messages returned`);
 
-      // Log tool calls made
+      // Log tool calls made + emit telemetry for the /system dashboard.
       for (const msg of messages) {
         const type = msg._getType?.() ?? msg.constructor?.name ?? "";
         if (type === "ai" || type === "AIMessage") {
           const tc = (msg as unknown as Record<string, unknown>).tool_calls;
           if (Array.isArray(tc) && tc.length > 0) {
-            console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${tc.map((t: { name?: string }) => t.name).join(", ")}`);
+            const toolNames = tc.map((t: { name?: string }) => t.name).filter((n): n is string => !!n);
+            console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${toolNames.join(", ")}`);
+            if (this.onToolCall && toolNames.length > 0) {
+              try {
+                this.onToolCall({
+                  agentName: this.agentDef.name,
+                  correlationId: req.correlationId,
+                  skill: req.skill,
+                  toolNames,
+                });
+              } catch (cbErr) {
+                // Telemetry must never break a running skill.
+                console.warn(`[deep-agent:${this.agentDef.name}] onToolCall callback threw:`, cbErr);
+              }
+            }
           }
         }
       }

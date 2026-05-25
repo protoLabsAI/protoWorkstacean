@@ -16,7 +16,13 @@
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "./executor-registry.ts";
 import type { SkillRequest } from "./types.ts";
-import type { AgentSkillRequestPayload, AutonomousOutcomePayload, FlowItemPayload } from "../event-bus/payloads.ts";
+import type {
+  AgentSkillRequestPayload,
+  AutonomousOutcomePayload,
+  FlowItemPayload,
+  AgentActivityPayload,
+  AgentActivityType,
+} from "../event-bus/payloads.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "./task-tracker.ts";
@@ -99,6 +105,9 @@ export class SkillDispatcherPlugin implements Plugin {
     "flow.item.created",
     "flow.item.updated",
     "flow.item.completed",
+    "agent.runtime.activity.skill.start",
+    "agent.runtime.activity.skill.complete",
+    "agent.runtime.activity.skill.error",
   ];
 
   private bus?: EventBus;
@@ -282,6 +291,17 @@ export class SkillDispatcherPlugin implements Plugin {
       meta: { skill, executorType: executor.type },
     });
 
+    // Live agent telemetry — the /system dashboard subscribes to
+    // agent.runtime.activity.# to render live agent state. Covers ALL
+    // executor types uniformly because we emit at the dispatcher (the
+    // chokepoint), not inside each executor.
+    const targetAgent = targets[0] ?? "(no-target)";
+    this._publishActivity("skill.start", {
+      agentName: targetAgent,
+      correlationId,
+      skill,
+    });
+
     try {
       const result = await executor.execute(req);
 
@@ -382,6 +402,13 @@ export class SkillDispatcherPlugin implements Plugin {
         console.error(
           `[skill-dispatcher] Executor "${executor.type}" error for skill "${skill}": ${(result.text ?? "").slice(0, 500)}`,
         );
+        this._publishActivity("skill.error", {
+          agentName: targetAgent,
+          correlationId,
+          skill,
+          errorMessage: (result.text ?? "").slice(0, 500),
+          durationMs: Date.now() - dispatchedAt,
+        });
         this._publishFlowEvent("flow.item.updated", {
           id: flowItemId,
           status: "blocked",
@@ -409,6 +436,13 @@ export class SkillDispatcherPlugin implements Plugin {
         console.log(
           `[skill-dispatcher] Skill "${skill}" completed via ${executor.type} — ${(result.text ?? "").length} chars: ${preview}${(result.text ?? "").length > 300 ? "…" : ""}`,
         );
+        this._publishActivity("skill.complete", {
+          agentName: targetAgent,
+          correlationId,
+          skill,
+          resultPreview: preview.slice(0, 120),
+          durationMs: Date.now() - dispatchedAt,
+        });
         if (result.data?.stopReason === "max_turns") {
           console.warn("[skill-dispatcher] Agent hit maxTurns limit");
         }
@@ -454,6 +488,13 @@ export class SkillDispatcherPlugin implements Plugin {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(`[skill-dispatcher] Unhandled error dispatching "${skill}": ${errorMsg}`);
+      this._publishActivity("skill.error", {
+        agentName: targetAgent,
+        correlationId,
+        skill,
+        errorMessage: errorMsg,
+        durationMs: Date.now() - dispatchedAt,
+      });
       this._publishFlowEvent("flow.item.updated", {
         id: flowItemId,
         status: "blocked",
@@ -632,6 +673,33 @@ export class SkillDispatcherPlugin implements Plugin {
       timestamp: Date.now(),
       payload: item,
     });
+  }
+
+  /**
+   * Publish a live agent activity event. Best-effort: any failure to publish
+   * is swallowed — telemetry must never break a running skill. The /system
+   * dashboard subscribes to `agent.runtime.activity.#` to render live agent
+   * state, but any other consumer is welcome.
+   */
+  private _publishActivity(type: AgentActivityType, fields: Omit<AgentActivityPayload, "type" | "timestamp">): void {
+    if (!this.bus) return;
+    const topic = `agent.runtime.activity.${type}`;
+    const payload: AgentActivityPayload = {
+      type,
+      timestamp: Date.now(),
+      ...fields,
+    };
+    try {
+      this.bus.publish(topic, {
+        id: crypto.randomUUID(),
+        correlationId: fields.correlationId,
+        topic,
+        timestamp: payload.timestamp,
+        payload,
+      });
+    } catch (err) {
+      console.warn(`[skill-dispatcher] activity-publish failed (${type}):`, err);
+    }
   }
 
   private _publishResponse(

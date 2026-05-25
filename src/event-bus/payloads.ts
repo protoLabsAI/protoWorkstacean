@@ -319,3 +319,45 @@ export interface WorldStateDeltaV1Payload {
   sourceAgent: string;
 }
 
+
+// ── agent.runtime.activity ────────────────────────────────────────────────────
+
+/**
+ * Live agent telemetry events. Published at meaningful points in a skill
+ * invocation by the SkillDispatcher (lifecycle) and by DeepAgentExecutor
+ * (per-tool detail). Drives the /system dashboard's agent activity panels
+ * and any future observability surface that needs "what is Quinn doing
+ * RIGHT NOW".
+ *
+ * Topic pattern:
+ *   agent.runtime.activity.skill.{start|complete|error}
+ *   agent.runtime.activity.tool.call
+ *
+ * Designed for spectator consumption — does NOT replace
+ * `agent.skill.response` (which carries the actual reply for callers).
+ * Best-effort: publish failures are swallowed inside the producer.
+ */
+export type AgentActivityType =
+  | "skill.start"
+  | "tool.call"
+  | "skill.complete"
+  | "skill.error";
+
+export interface AgentActivityPayload {
+  type: AgentActivityType;
+  /** Agent name as registered in workspace/agents/*.yaml. */
+  agentName: string;
+  /** Correlation id of the underlying skill request — pairs start/complete/error and the tool.call events between them. */
+  correlationId: string;
+  /** ms timestamp at publish time. */
+  timestamp: number;
+  skill?: string;
+  /** For tool.call events: tool names invoked in this turn. */
+  toolNames?: string[];
+  /** For skill.complete: first ~120 chars of the assistant's final text, for UI preview. */
+  resultPreview?: string;
+  /** For skill.error: message from the thrown error. */
+  errorMessage?: string;
+  /** For skill.complete / skill.error: ms between start and terminal event. */
+  durationMs?: number;
+}

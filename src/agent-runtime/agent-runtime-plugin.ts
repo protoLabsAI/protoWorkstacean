@@ -50,6 +50,31 @@ export class AgentRuntimePlugin implements Plugin {
         gatewayApiKey: this.config.gatewayApiKey,
         apiBaseUrl: this.config.apiBaseUrl ?? "http://localhost:3000",
         apiKey: this.config.apiKey ?? process.env.WORKSTACEAN_API_KEY,
+        // Live tool-call telemetry → bus → /system dashboard. Best-effort:
+        // any publish failure is swallowed inside the executor so a flaky
+        // bus never breaks Quinn mid-review.
+        onToolCall: (event) => {
+          if (!this.bus) return;
+          const topic = "agent.runtime.activity.tool.call";
+          try {
+            this.bus.publish(topic, {
+              id: crypto.randomUUID(),
+              correlationId: event.correlationId,
+              topic,
+              timestamp: Date.now(),
+              payload: {
+                type: "tool.call",
+                agentName: event.agentName,
+                correlationId: event.correlationId,
+                skill: event.skill,
+                toolNames: event.toolNames,
+                timestamp: Date.now(),
+              },
+            });
+          } catch (err) {
+            console.warn(`[agent-runtime] tool.call publish failed for ${event.agentName}:`, err);
+          }
+        },
       });
 
       for (const skill of def.skills) {
