@@ -253,14 +253,12 @@ skills:
             can actually run typecheck + tests to verify)
         Skip `proto` on trivial diffs — the extra tokens aren't worth it.
 
-      If clawpatch returns "repo not mounted" — the v1 only handles
-      repos baked into the workstacean container (protoWorkstacean,
-      protoCLI, mythxengine). Note it as a LOW observation and continue
-      with the regular diff-based review.
-
-      If clawpatch errors for any other reason (timeout, gateway 5xx),
-      note it as a LOW observation and proceed — clawpatch is a
-      finding-source, not a gate.
+      Clawpatch works against any repo declared in
+      workspace/projects.yaml — the checkout cache fetches the source
+      tree on demand. If it errors (timeout, gateway 5xx, or the repo
+      is not in the projects.yaml allowlist), note it as a LOW
+      observation and proceed with the regular diff-based review.
+      Clawpatch is a finding-source, not a gate.
 
       ## Step 3 — Apply the rubric
 
@@ -350,9 +348,10 @@ skills:
     # clawpatch_review is available here too (not just in pr_review): when an
     # issue points at a repo region, a structural scan confirms whether the
     # bug is real and where it lives — grounding the actionable/stale call in
-    # findings instead of guesswork. Same gateway-backed tool, same
-    # already-mounted-repo limitation (v1). protoPatch (the clawpatch fork) is
-    # installed in the runtime at /opt/clawpatch/bin.
+    # findings instead of guesswork. Same gateway-backed tool; the checkout
+    # cache now fetches source on demand for any repo in projects.yaml.
+    # protoPatch (the clawpatch fork) is installed in the runtime at
+    # /opt/clawpatch/bin.
     tools:
       - get_projects
       - get_pr_pipeline
@@ -400,10 +399,10 @@ skills:
         clawpatch returns nothing relevant, that supports a stale/duplicate
         call.
 
-      clawpatch only handles repos already mounted in the runtime (v1); if it
-      returns "repo not mounted" or errors (timeout, gateway 5xx), note it as
-      a LOW observation and classify from the board + commit evidence alone.
-      Do not block triage on clawpatch.
+      clawpatch handles any repo declared in workspace/projects.yaml; if it
+      errors (timeout, gateway 5xx, or the repo is not in the allowlist),
+      note it as a LOW observation and classify from the board + commit
+      evidence alone. Do not block triage on clawpatch.
 
       ## Step 4 — Classify
 

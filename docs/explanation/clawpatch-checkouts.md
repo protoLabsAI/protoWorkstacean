@@ -152,15 +152,20 @@ Note: the function gets a new `sha` parameter, so the route handler now requires
 * **C1** (this doc, 2 pts) — RFC, sign-off.
 * **C2** — `lib/checkout-cache.ts` + resolver wire-up + unit tests (LRU eviction, traversal rejection, oversize refusal, concurrency). 5 pts.
 * **C3** — `workspace/ceremonies/clawpatch-cache-cleanup.yaml` calling `checkoutCache.prune()` daily at 03:00 UTC via a function executor. 3 pts.
-* **C4** — Drop the "v1 only handles three repos" caveat from Quinn's `pr_review` prompt; drop `BUILT_IN_REPO_PATHS` (turns into a documented fast-path comment, or moves into the cache as a never-evict pinning). 3 pts.
+* **C4** — Drop the "v1 only handles three repos" caveat from Quinn's `pr_review` prompt; drop `BUILT_IN_REPO_PATHS` entirely so every repo routes through the cache. 3 pts.
 
 Total: 13 pts.
 
-After C4 the only place hard-coded repo paths live is whatever short list we pin as never-evict in the cache (likely the three currently mounted repos that already have host filesystem paths). Everything else routes through GitHub-tarball + extract on first hit.
+After C4, hard-coded repo paths are gone from production. Every repo — including the ones that used to be bind-mounted — routes through GitHub-tarball + extract. The only escape hatch is `CLAWPATCH_REPO_PATH_MAP` for local dev (pointing at a working tree on disk), never set in the deployed container.
+
+## Resolved decisions (sign-off on #578)
+
+Per "better way over fast way":
+
+1. **No bind-mount fast path. No cache pinning.** Drop `BUILT_IN_REPO_PATHS` entirely. Every repo, including `protoWorkstacean` / `protoCLI` / `mythxengine`, routes through the checkout cache. The fast path was buying us "skip extract IO for three repos" at the cost of a real correctness ambiguity — "did Quinn review the host's checkout or the PR's actual ref?" — and a dual-code-path operator model. Consistency wins.
+2. **TTL: 1h, not 24h.** SHA-keyed content-addressing means correctness is fine at any TTL — this is purely a "freshness over warm-cache hit-rate" choice. An hour amortizes the review-comment burst case (same PR head re-reviewed several times in quick succession) without holding stale source long enough to risk base-branch drift hiding review-relevant changes.
 
 ## Open questions
 
-1. **Pinning vs. eviction for the legacy mounted repos**: do `protoWorkstacean` / `protoCLI` / `mythxengine` get treated as never-evict cache entries (occupying a slot but immune to LRU), or do we keep the host bind-mount fast path and bypass the cache entirely for them? Bias toward the latter — host bind-mount is zero-latency, the cache adds extract IO. **Decision needed before C2.**
-2. **What constitutes "fresh"**? 24h TTL feels right for branch drift but is arbitrary. Worth instrumenting in C2 — log the age-on-hit so we can tune later.
-3. **GitHub tarball rate limits**: App credentials get 15k req/hr, and a tarball is 1 req. We'd need to be reviewing >4 PRs/sec to feel it. Not a real constraint at fleet size. Note but don't gate on it.
+* **GitHub tarball rate limits**: App credentials get 15k req/hr, and a tarball is 1 req. We'd need to be reviewing >4 PRs/sec to feel it. Not a real constraint at fleet size. Note but don't gate on it.
 
