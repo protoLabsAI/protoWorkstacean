@@ -14,6 +14,7 @@ import type { TelemetryService } from "../telemetry/telemetry-service.ts";
 import type { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "../executor/task-tracker.ts";
 import type { AgentKeyRegistry } from "../../lib/auth/agent-keys.ts";
+import type { BusHistoryRecorder } from "../event-bus/history-recorder.ts";
 
 export type Params = Record<string, string>;
 export type RouteHandler = (req: Request, params: Params) => Response | Promise<Response>;
@@ -45,6 +46,12 @@ export interface ApiContext {
   agentKeys?: AgentKeyRegistry;
   mailbox?: ContextMailbox;
   taskTracker?: TaskTracker;
+  /**
+   * Optional in-memory ring buffer of recent bus messages. Backs
+   * /api/bus/history (D1 skill-trace view). Wired in src/index.ts only
+   * when the bus-history-recorder plugin is installed.
+   */
+  busHistory?: BusHistoryRecorder;
 }
 
 /** Match a path against a pattern like "/api/foo/:id/run". Returns params or null. */

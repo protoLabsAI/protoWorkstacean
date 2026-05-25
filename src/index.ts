@@ -36,6 +36,15 @@ if (!existsSync(dataDir)) {
 
 const bus = new InMemoryEventBus();
 
+// --- Bus history recorder — in-memory ring buffer that captures every bus
+//     message for /api/bus/history. Installed BEFORE any other plugin so we
+//     don't miss early startup traffic. See src/event-bus/history-recorder.ts
+//     for ring + TTL semantics.
+import { BusHistoryRecorder, BusHistoryRecorderPlugin } from "./event-bus/history-recorder.ts";
+const busHistoryRecorder = new BusHistoryRecorder();
+const busHistoryRecorderPlugin = new BusHistoryRecorderPlugin(busHistoryRecorder);
+busHistoryRecorderPlugin.install(bus);
+
 // --- Context mailbox — mid-execution DM queue for debounced message injection ---
 import { ContextMailbox } from "../lib/dm/context-mailbox.ts";
 const contextMailbox = new ContextMailbox();
@@ -474,6 +483,7 @@ const apiContext: ApiContext = {
   agentKeys,
   mailbox: contextMailbox,
   taskTracker,
+  busHistory: busHistoryRecorder,
 };
 
 const routes = createAllRoutes(apiContext);
