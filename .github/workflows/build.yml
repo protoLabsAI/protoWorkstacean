@@ -12,7 +12,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-protolabs-linux
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +38,7 @@ jobs:
     # because every PR CI went green while dashboard build would have blown
     # up. See task #82 in the board. Keep this job fast (astro build is ~1s)
     # and independent so the full CI cost is negligible.
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-protolabs-linux
     steps:
       - uses: actions/checkout@v4
 
@@ -67,6 +67,7 @@ jobs:
   build-and-push:
     needs: [test, dashboard]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # workspace-config: allow-hosted-runner docker buildx multi-arch build + registry push
     runs-on: ubuntu-latest
     permissions:
       contents: read
