@@ -212,12 +212,17 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
       {
         name: "clawpatch_review",
         description:
-          "Run structural code review via clawpatch (protoLabs fork). Maps the repo into semantic feature slices, reviews each via the gateway LLM provider, and returns structured findings (correctness bugs, security issues, race/concurrency bugs, data-loss, resource leaks, error-handling gaps, API contract mismatches, missing tests, build hazards, maintainability risks). Use this DURING pr_review to get a structural read on the changed surface before forming a verdict — fold findings into the QA Audit body's Observations section with severity + file:line cites. Today v1 only works for repos already mounted in the container (protoWorkstacean, protoCLI, mythxengine); other repos return a clear error. The `since` arg scopes the review to features touched since that git ref (typically the PR base) — pass it whenever you have the PR base SHA or branch.",
+          "Run structural code review via clawpatch. Maps the repo into semantic feature slices, reviews each, and returns structured findings (correctness bugs, security issues, race/concurrency, data-loss, resource leaks, bad error handling, API contract mismatches, missing tests, build hazards, maintainability risks). Use DURING pr_review to fold findings into the QA Audit body's Observations section with severity + file:line cites.\n\n" +
+          "**Provider choice:**\n" +
+          "- `gateway` (default) — stateless LLM call to the LiteLLM endpoint. Prompt has file contents pre-inlined. Fast, cheap, good for nearly every PR.\n" +
+          "- `proto` — spawns protoCLI as a live ACP agent during review. Agent has tool access: read additional files, run LSP queries, run typecheck/lint. Slower + more tokens but deeper structural read. Use on non-trivial PRs that warrant active investigation (large diffs, suspicious test coverage, novel patterns).\n\n" +
+          "Today v1 only works for repos already mounted in the container (protoWorkstacean, protoCLI, mythxengine); other repos return a clear error. The `since` arg scopes the review to features touched since that git ref — pass the PR base.",
         schema: z.object({
           repo: z.string().describe("Repository in owner/name format (e.g. protoLabsAI/protoWorkstacean)."),
           since: z.string().optional().describe("Git ref (branch or SHA) to diff against. Limits the review to features touched since that ref. Use the PR base (typically 'main' or 'dev')."),
           limit: z.number().int().optional().describe("Maximum number of features to review. Useful for spot-checks on large repos."),
-          model: z.string().optional().describe("Gateway model override (e.g. protolabs/fast for cheap, protolabs/reasoning for deeper). Default protolabs/smart."),
+          model: z.string().optional().describe("Model override. Defaults vary per provider (gateway: protolabs/smart; proto: protolabs/reasoning)."),
+          provider: z.enum(["gateway", "proto"]).optional().describe("Review path. 'gateway' (default) for fast stateless LLM review; 'proto' for live tool-using ACP agent review on non-trivial changes."),
         }),
       },
     ),

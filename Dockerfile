@@ -40,9 +40,15 @@ RUN pnpm config set global-bin-dir /opt/clawpatch/bin && \
 # pnpm refuses to install globally unless its bin dir is in PATH at the
 # time of install. Add it ahead of the global add.
 ENV PATH="/opt/clawpatch/bin:${PATH}"
-# pnpm 11 refuses to run prepack on git deps unless the package is
-# allowlisted. protoPatch needs to compile TS via its prepack, so allow it.
-RUN pnpm add -g --allow-build=@protolabsai/protopatch github:protoLabsAI/protoPatch && \
+# protoPatch is now published on npm. Version-pinning (^0.6.1) gets us:
+# 1. Reproducible builds — the same image build resolves the same minor/patch
+#    pair, no surprise upstream main shift between builds.
+# 2. Automatic cache-bust on version bump — bumping this line (or letting
+#    Renovate do it) invalidates the layer cleanly; with `github:`
+#    the Docker layer cached forever even after a protoPatch update
+#    because the install command stayed byte-identical.
+# 3. No --allow-build needed — published tarballs don't run prepack.
+RUN pnpm add -g @protolabsai/protopatch@^0.6.1 && \
     ls /opt/clawpatch/bin
 # protoCLI (@protolabsai/proto) speaks the Agent Client Protocol via
 # `proto --acp`, and acpx is the generic ACP-agent driver. Together they give

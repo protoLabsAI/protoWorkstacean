@@ -23,15 +23,46 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { Route, ApiContext } from "./types.ts";
+
+/**
+ * Where clawpatch persists `.clawpatch/` (features, findings, runs, reports,
+ * etc.). Repo mounts in the workstacean container are read-only, so we put
+ * state in the workstacean-data volume — one subdirectory per owner/repo.
+ *
+ * Override with CLAWPATCH_STATE_ROOT for testing or when DATA_DIR isn't set.
+ */
+const CLAWPATCH_STATE_ROOT =
+  process.env["CLAWPATCH_STATE_ROOT"]
+  ?? join(process.env["DATA_DIR"] ?? "/data", "clawpatch");
+
+function stateDirFor(repo: string): string {
+  // owner/repo → owner-repo so the path stays one level deep.
+  const slug = repo.replace("/", "-");
+  const dir = join(CLAWPATCH_STATE_ROOT, slug);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 interface ReviewRequest {
   repo: string;
   since?: string;
   limit?: number;
-  /** Override the model for this invocation. Defaults to the gateway provider's default. */
+  /** Override the model for this invocation. Defaults to the provider's default. */
   model?: string;
+  /**
+   * Which protoPatch provider to use. `gateway` (default) sends an
+   * already-assembled prompt to the LiteLLM endpoint — fast/cheap/stateless,
+   * good for nearly every PR. `proto` spawns protoCLI as a live ACP agent
+   * so it can read additional files, run LSP queries, and shell out during
+   * review — slower + more tokens but deeper structural read on non-trivial
+   * changes. Other valid values: claude, codex, acpx — these need the
+   * respective CLI installed and OAuth'd inside the container, which we
+   * don't bootstrap today.
+   */
+  provider?: "gateway" | "proto" | "claude" | "codex" | "acpx";
 }
 
 const BUILT_IN_REPO_PATHS: Record<string, string> = {
@@ -116,7 +147,7 @@ export function createRoutes(_ctx: ApiContext): Route[] {
         } catch {
           return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 });
         }
-        const { repo, since, limit, model } = payload;
+        const { repo, since, limit, model, provider } = payload;
         if (!repo) {
           return Response.json({ success: false, error: "repo is required" }, { status: 400 });
         }
@@ -131,7 +162,12 @@ export function createRoutes(_ctx: ApiContext): Route[] {
           );
         }
 
-        const args = ["ci", "--provider", "gateway", "--json"];
+        // Workstacean mounts repo source read-only, so push clawpatch state
+        // into the writable data volume — one dir per owner/repo so we don't
+        // re-map features for every PR review.
+        const stateDir = stateDirFor(repo);
+        const effectiveProvider = provider ?? "gateway";
+        const args = ["ci", "--provider", effectiveProvider, "--json", "--state-dir", stateDir];
         if (since) args.push("--since", since);
         if (typeof limit === "number" && limit > 0) args.push("--limit", String(limit));
         if (model) args.push("--model", model);
