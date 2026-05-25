@@ -346,6 +346,13 @@ skills:
     # actions. Excludes the narrow PR-review surface (pr_inspector is
     # there for CI verification on specific PRs referenced by an issue,
     # but the heavy lifting is board + repo scan).
+    #
+    # clawpatch_review is available here too (not just in pr_review): when an
+    # issue points at a repo region, a structural scan confirms whether the
+    # bug is real and where it lives — grounding the actionable/stale call in
+    # findings instead of guesswork. Same gateway-backed tool, same
+    # already-mounted-repo limitation (v1). protoPatch (the clawpatch fork) is
+    # installed in the runtime at /opt/clawpatch/bin.
     tools:
       - get_projects
       - get_pr_pipeline
@@ -353,6 +360,7 @@ skills:
       - get_branch_drift
       - chat_with_agent
       - pr_inspector
+      - clawpatch_review
       - create_github_issue
       - searxng_search
       - react
@@ -377,6 +385,25 @@ skills:
       For each open bug or blocked feature, check whether the root cause
       has already been fixed in recent commits. Search relevant keywords
       in the last 2 weeks of commit history.
+
+      ## Step 3b — Structural scan for actionable candidates (clawpatch)
+
+      For a bug that survives Step 3 (not already fixed) and names a repo
+      protoLabs manages, run `clawpatch_review(repo='owner/name')` to scan
+      that repo's code for structural findings. Use it to:
+
+      - **Confirm actionable** — a matching CLAWPATCH finding in the affected
+        area corroborates the bug is real and shows where it lives; cite it
+        ("CLAWPATCH/HIGH: ...") in the classification.
+      - **Inform severity** — finding severity feeds the label in Step 5.
+      - **Demote to stale** — if the affected code no longer exists or
+        clawpatch returns nothing relevant, that supports a stale/duplicate
+        call.
+
+      clawpatch only handles repos already mounted in the runtime (v1); if it
+      returns "repo not mounted" or errors (timeout, gateway 5xx), note it as
+      a LOW observation and classify from the board + commit evidence alone.
+      Do not block triage on clawpatch.
 
       ## Step 4 — Classify
 
