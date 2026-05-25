@@ -242,14 +242,18 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
       {
         name: "pr_inspector",
         description:
-          "Inspect and review GitHub PRs. The `repo` arg (owner/name) is REQUIRED on every call — there is no default. Actions:\n" +
+          "Inspect AND act on GitHub PRs. The `repo` arg (owner/name) is REQUIRED on every call. Actions:\n" +
           "- list_open: list open PRs in a repo\n" +
           "- check_ci: CI check states for a PR\n" +
           "- coderabbit_threads: unresolved review threads on a PR\n" +
           "- diff_summary: first 200 lines of the PR diff\n" +
           "- review_comment: post a COMMENTED review (requires body)\n" +
           "- review_approve: post an APPROVED review (body optional)\n" +
-          "- review_request_changes: post a CHANGES_REQUESTED review (requires body)",
+          "- review_request_changes: post a CHANGES_REQUESTED review (requires body)\n" +
+          "- close_pr: close a PR (optionally with a leading comment explaining why)\n" +
+          "- close_pr_as_not_planned: close + mark state_reason=not_planned (use when the PR is stale, superseded, or the underlying request was resolved differently)\n" +
+          "- reopen_pr: reopen a closed (non-merged) PR\n\n" +
+          "Prefer closing a stale/resolved PR directly to filing a 'please close #X' issue — that's the cascade pattern from #556. Always include `comment` on close_pr / close_pr_as_not_planned so the close has audit context.",
         schema: z.object({
           action: z.enum([
             "list_open",
@@ -259,12 +263,16 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
             "review_comment",
             "review_approve",
             "review_request_changes",
+            "close_pr",
+            "close_pr_as_not_planned",
+            "reopen_pr",
           ]),
           repo: z.string().describe(
             "Repository in owner/name format (e.g. protoLabsAI/protoWorkstacean). REQUIRED on every call.",
           ),
           pr_number: z.number().int().optional(),
-          body: z.string().optional(),
+          body: z.string().optional().describe("Review body for review_* actions."),
+          comment: z.string().optional().describe("Optional leading comment posted before close_pr / close_pr_as_not_planned. Recommended for audit trail."),
         }),
       },
     ),
