@@ -26,7 +26,7 @@ import "@xyflow/react/dist/style.css";
 import AgentNode, { type AgentActivityState } from "./AgentNode.tsx";
 import ServiceNode from "./ServiceNode.tsx";
 import MessageDrawer, { type DrawerMessage } from "./MessageDrawer.tsx";
-import { dagreLayout } from "../lib/layout.ts";
+import { architecturalLayout } from "../lib/layout.ts";
 
 /** Ring-buffer cap for per-topic history shown in the edge drawer. */
 const TOPIC_HISTORY_CAP = 20;
@@ -101,15 +101,15 @@ function topicMatches(pattern: string, topic: string): boolean {
 }
 
 // ── Layout ───────────────────────────────────────────────────────────────────
-// Dagre-based force-directed layout (see ../lib/layout.ts). Replaces the
-// three-concentric-ring positioning that broke down past ~30 nodes — labels
-// stacked, edges crossed, and the visual hierarchy turned into spaghetti.
-// Now: agents cluster near the dispatcher they route through, services
-// settle on the perimeter naturally, message flow reads left-to-right.
+// Architectural-column layout (see ../lib/layout.ts). The protoWorkstacean
+// spine is trigger → router → dispatcher → executor → agent → external, so
+// the graph reads strictly left-to-right along that spine. Concentric rings
+// (#555) and generic force-directed dagre both technically worked but neither
+// surfaced the architecture — this one hand-classifies every plugin into a
+// named column and stacks vertically within the column.
 //
-// `PLACEHOLDER_POS` is what buildGraph stamps on every node before dagre
-// runs — dagre overwrites all positions in a single pass at the end, so
-// the placeholder values never reach React Flow.
+// `PLACEHOLDER_POS` is what buildGraph stamps on every node; architecturalLayout
+// overwrites all positions at the end so the placeholders never reach React Flow.
 const PLACEHOLDER_POS = { x: 0, y: 0 };
 
 interface BuildArgs {
@@ -215,7 +215,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
     });
   }
 
-  return dagreLayout(nodes, edges);
+  return architecturalLayout(nodes, edges);
 }
 
 // ── Activity event → agent state machine ─────────────────────────────────────

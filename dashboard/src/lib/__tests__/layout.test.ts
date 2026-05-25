@@ -1,66 +1,87 @@
 import { describe, test, expect } from "bun:test";
 import type { Edge, Node } from "@xyflow/react";
-import { dagreLayout } from "../layout.ts";
+import { architecturalLayout, COLUMNS } from "../layout.ts";
 
-describe("dagreLayout", () => {
-  test("assigns non-placeholder positions to every node", () => {
+function pluginNode(name: string): Node {
+  return { id: `plugin-${name}`, position: { x: 0, y: 0 }, data: { label: name } };
+}
+
+function agentNode(name: string): Node {
+  return { id: `agent-${name}`, type: "agent", position: { x: 0, y: 0 }, data: { label: name } };
+}
+
+function serviceNode(id: string): Node {
+  return { id, type: "service", position: { x: 0, y: 0 }, data: { label: id } };
+}
+
+describe("architecturalLayout", () => {
+  test("assigns column-based x coordinates left-to-right along the spine", () => {
     const nodes: Node[] = [
-      { id: "a", position: { x: 0, y: 0 }, data: { label: "a" } },
-      { id: "b", position: { x: 0, y: 0 }, data: { label: "b" } },
-      { id: "c", position: { x: 0, y: 0 }, data: { label: "c" } },
+      pluginNode("debug"),       // system    — leftmost
+      pluginNode("github"),      // surface
+      pluginNode("router"),      // router
+      pluginNode("skill-dispatcher"), // dispatcher
+      pluginNode("agent-runtime"),    // executor
+      agentNode("quinn"),        // agent
+      serviceNode("svc-litellm"),     // service   — rightmost
     ];
-    const edges: Edge[] = [
-      { id: "a-b", source: "a", target: "b" },
-      { id: "b-c", source: "b", target: "c" },
-    ];
+    const { nodes: out } = architecturalLayout(nodes, []);
+    const x = (id: string) => out.find(n => n.id === id)!.position.x;
 
-    const { nodes: out, edges: outEdges } = dagreLayout(nodes, edges);
-    expect(out).toHaveLength(3);
-    expect(outEdges).toBe(edges);
-    // Default LR direction: x grows along the chain a → b → c.
-    const byId = Object.fromEntries(out.map(n => [n.id, n.position]));
-    expect(byId.a!.x).toBeLessThan(byId.b!.x);
-    expect(byId.b!.x).toBeLessThan(byId.c!.x);
+    expect(x("plugin-debug")).toBeLessThan(x("plugin-github"));
+    expect(x("plugin-github")).toBeLessThan(x("plugin-router"));
+    expect(x("plugin-router")).toBeLessThan(x("plugin-skill-dispatcher"));
+    expect(x("plugin-skill-dispatcher")).toBeLessThan(x("plugin-agent-runtime"));
+    expect(x("plugin-agent-runtime")).toBeLessThan(x("agent-quinn"));
+    expect(x("agent-quinn")).toBeLessThan(x("svc-litellm"));
   });
 
-  test("respects node `type` for sizing — agent nodes are wider", () => {
+  test("nodes in the same column share an x and stack vertically", () => {
     const nodes: Node[] = [
-      { id: "x", type: "agent", position: { x: 0, y: 0 }, data: {} },
-      { id: "y", position: { x: 0, y: 0 }, data: {} },
+      pluginNode("github"),
+      pluginNode("linear"),
+      pluginNode("discord"),
     ];
-    const edges: Edge[] = [{ id: "x-y", source: "x", target: "y" }];
+    const { nodes: out } = architecturalLayout(nodes, []);
+    const xs = new Set(out.map(n => n.position.x));
+    expect(xs.size).toBe(1); // all surface column
 
-    const { nodes: out } = dagreLayout(nodes, edges);
-    const xPos = out.find(n => n.id === "x")!.position;
-    const yPos = out.find(n => n.id === "y")!.position;
-    // Agent node (wider) sits to the left of the plugin pill; in LR layout
-    // its right edge sets where the next column starts, so the gap between
-    // x.x and y.x should exceed the smaller-node width (160) by the
-    // rankSep amount.
-    expect(yPos.x - xPos.x).toBeGreaterThan(160);
+    const ys = out.map(n => n.position.y).sort((a, b) => a - b);
+    expect(ys[0]).not.toBe(ys[1]);
+    expect(ys[1]).not.toBe(ys[2]);
   });
 
-  test("handles disconnected components", () => {
+  test("api-routes pseudo-node lands in the surface column", () => {
     const nodes: Node[] = [
-      { id: "lone1", position: { x: 0, y: 0 }, data: {} },
-      { id: "lone2", position: { x: 0, y: 0 }, data: {} },
+      { id: "api-routes", position: { x: 0, y: 0 }, data: { label: "api-routes" } },
+      pluginNode("github"),
     ];
-    const { nodes: out } = dagreLayout(nodes, []);
-    expect(out).toHaveLength(2);
-    // Both nodes get real positions even with no edges to constrain them.
-    expect(out.every(n => Number.isFinite(n.position.x))).toBe(true);
-    expect(out.every(n => Number.isFinite(n.position.y))).toBe(true);
+    const { nodes: out } = architecturalLayout(nodes, []);
+    const api = out.find(n => n.id === "api-routes")!;
+    const gh  = out.find(n => n.id === "plugin-github")!;
+    expect(api.position.x).toBe(gh.position.x);
   });
 
-  test("TB direction grows downward, not rightward", () => {
+  test("unknown plugin name falls into misc column (rightmost)", () => {
     const nodes: Node[] = [
-      { id: "top", position: { x: 0, y: 0 }, data: {} },
-      { id: "bot", position: { x: 0, y: 0 }, data: {} },
+      pluginNode("brand-new-plugin-no-classification"),
+      pluginNode("router"),
     ];
-    const edges: Edge[] = [{ id: "t-b", source: "top", target: "bot" }];
-    const { nodes: out } = dagreLayout(nodes, edges, { direction: "TB" });
-    const t = out.find(n => n.id === "top")!.position;
-    const b = out.find(n => n.id === "bot")!.position;
-    expect(b.y).toBeGreaterThan(t.y);
+    const { nodes: out } = architecturalLayout(nodes, []);
+    const unknown = out.find(n => n.id === "plugin-brand-new-plugin-no-classification")!;
+    const router  = out.find(n => n.id === "plugin-router")!;
+    expect(unknown.position.x).toBeGreaterThan(router.position.x);
+  });
+
+  test("columns array exposes the ordered spine", () => {
+    expect(COLUMNS[0]).toBe("system");
+    expect(COLUMNS[COLUMNS.length - 1]).toBe("misc");
+    expect(COLUMNS.includes("agent")).toBe(true);
+  });
+
+  test("preserves edges array unchanged", () => {
+    const edges: Edge[] = [{ id: "a-b", source: "x", target: "y" }];
+    const out = architecturalLayout([pluginNode("router")], edges);
+    expect(out.edges).toBe(edges);
   });
 });

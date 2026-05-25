@@ -1,90 +1,143 @@
 /**
- * Dagre-based force-directed layout for the SystemGraph.
+ * Architectural-column layout for the SystemGraph.
  *
- * Concentric rings broke down past ~30 nodes — labels stacked, edges
- * crossed, the focal-point hierarchy turned into spaghetti. Dagre gives us
- * a directed layered layout: agents end up clustered near the dispatcher
- * they route through, services drift to the perimeter naturally, and the
- * "where does this message flow" question is answered by following edges
- * left-to-right instead of squinting at angular positions.
+ * The protoWorkstacean spine (per CLAUDE.md) is
  *
- * The graph is sparse enough (~50 nodes / ~150 edges in worst case today)
- * that dagre's O(V*E) ranking algorithm finishes in single-digit ms — safe
- * to re-run on every WS topology refresh.
+ *   trigger → router → dispatcher → executor → agent → external
+ *
+ * The concentric-ring layout that #555 shipped didn't surface that
+ * shape, and a generic force-directed algorithm (dagre, elk) wouldn't
+ * either — both produce technically-correct-but-noisy placements that
+ * obscure the architecture.
+ *
+ * This layout hand-classifies each node into one of eight columns and
+ * stacks vertically within the column. The result reads strictly
+ * left-to-right along the spine: system internals on the far left,
+ * external services on the far right, agents one column inside that.
+ *
+ * Plugins are matched by name (per-name override table). Anything
+ * unrecognized falls into the `misc` column so it's visible without a
+ * code change — adding a real classification is then a one-line append
+ * to PLUGIN_COLUMN_OVERRIDES.
  */
 
-import dagre from "dagre";
 import type { Node, Edge } from "@xyflow/react";
 
-const DEFAULT_NODE_WIDTH = 160;
-const DEFAULT_NODE_HEIGHT = 60;
-const AGENT_NODE_WIDTH = 200;
-const AGENT_NODE_HEIGHT = 100;
-const SERVICE_NODE_WIDTH = 140;
-const SERVICE_NODE_HEIGHT = 70;
+export const COLUMNS = [
+  "system",     // debug, logger, recorders
+  "surface",    // inbound surface plugins + the api-routes pseudo-node
+  "bridge",     // cross-surface translators (linear→protomaker, etc.)
+  "router",     // the unique router
+  "dispatcher", // skill-dispatcher + sibling intercept layer
+  "executor",   // skill-executor registrars + skill-side plugins
+  "agent",      // agents from /api/agents/runtime
+  "service",    // external services on the perimeter
+  "misc",       // unclassified — visible but not laid out architecturally
+] as const;
 
-export type LayoutDirection = "LR" | "TB";
+export type Column = (typeof COLUMNS)[number];
 
-export interface LayoutOptions {
-  direction?: LayoutDirection;
-  /** Pixel separation between sibling nodes in the same rank. Lower = denser. */
-  nodeSep?: number;
-  /** Pixel separation between ranks. Lower = shorter graph. */
-  rankSep?: number;
+/** Hard overrides for plugin names to architectural column. */
+const PLUGIN_COLUMN_OVERRIDES: Record<string, Column> = {
+  "router":                                  "router",
+  "skill-dispatcher":                        "dispatcher",
+  "skill-ab-test":                           "dispatcher",
+  "agent-runtime":                           "executor",
+  "skill-broker":                            "executor",
+  "alert-skill-executor":                    "executor",
+  "ceremony-skill-executor":                 "executor",
+  "pr-remediator-skill-executor":            "executor",
+  "clawpatch-cache-cleanup-skill-executor":  "executor",
+  "quinn-review-notifier":                   "executor",
+  "feature-notifier":                        "executor",
+  "ceremony":                                "executor",
+  "pr-remediator":                           "executor",
+  "agent-fleet-health":                      "executor",
+  "operator-routing":                        "executor",
+  "google":                                  "executor",
+  "a2a-delivery":                            "executor",
+  "linear-protomaker-bridge":                "bridge",
+  "debug":                                   "system",
+  "logger":                                  "system",
+  "bus-history-recorder":                    "system",
+  "event-viewer":                            "system",
+  "cli":                                     "system",
+  "signal":                                  "system",
+  "scheduler":                               "surface",
+  "onboarding":                              "surface",
+  "discord":                                 "surface",
+  "github":                                  "surface",
+  "linear":                                  "surface",
+};
+
+function pluginColumn(name: string): Column {
+  return PLUGIN_COLUMN_OVERRIDES[name] ?? "misc";
+}
+
+function nodeColumn(n: Node): Column {
+  // Surface pseudo-publisher synthesized by SystemGraph (O-4).
+  if (n.id === "api-routes") return "surface";
+  if (n.type === "agent")    return "agent";
+  if (n.type === "service")  return "service";
+  if (n.id.startsWith("plugin-")) return pluginColumn(n.id.slice("plugin-".length));
+  return "misc";
 }
 
 /**
- * Lay out a node + edge set with dagre. Mutates positions on a fresh copy
- * — input nodes are not modified. Node `type` is used to pick a sensible
- * width/height (agent + service nodes are larger than plain plugin pills).
+ * Per-column x offset. Wider gaps between columns where edges cross
+ * heavily (executor → agent) keep the label space breathable.
  */
-export function dagreLayout(
+const COLUMN_X: Record<Column, number> = {
+  system:       80,
+  surface:     320,
+  bridge:      560,
+  router:      800,
+  dispatcher: 1040,
+  executor:   1340,
+  agent:      1700,
+  service:    2000,
+  misc:       2280,
+};
+
+const ROW_HEIGHT_BY_TYPE: Record<string, number> = {
+  agent:   120,
+  service: 90,
+};
+const DEFAULT_ROW_HEIGHT = 64;
+
+function rowHeightFor(n: Node): number {
+  return ROW_HEIGHT_BY_TYPE[n.type ?? ""] ?? DEFAULT_ROW_HEIGHT;
+}
+
+/**
+ * Lay out every node into its architectural column. Within a column,
+ * nodes stack vertically in input order with the column centered around
+ * y = 0. React Flow's `fitView` pans the result into view regardless
+ * of where it lands.
+ */
+export function architecturalLayout(
   nodes: Node[],
   edges: Edge[],
-  opts: LayoutOptions = {},
 ): { nodes: Node[]; edges: Edge[] } {
-  const direction: LayoutDirection = opts.direction ?? "LR";
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({
-    rankdir: direction,
-    nodesep: opts.nodeSep ?? 40,
-    ranksep: opts.rankSep ?? 120,
-    marginx: 40,
-    marginy: 40,
-  });
+  const buckets = new Map<Column, Node[]>();
+  for (const col of COLUMNS) buckets.set(col, []);
+  for (const n of nodes) buckets.get(nodeColumn(n))!.push(n);
 
-  for (const n of nodes) {
-    const { width, height } = sizeFor(n);
-    g.setNode(n.id, { width, height });
+  const laidOut: Node[] = [];
+  for (const col of COLUMNS) {
+    const stack = buckets.get(col)!;
+    if (stack.length === 0) continue;
+
+    const totalHeight = stack.reduce((acc, n) => acc + rowHeightFor(n), 0);
+    let y = -totalHeight / 2;
+    const x = COLUMN_X[col];
+
+    for (const n of stack) {
+      laidOut.push({ ...n, position: { x, y } });
+      y += rowHeightFor(n);
+    }
   }
-  for (const e of edges) {
-    g.setEdge(e.source, e.target);
-  }
-
-  dagre.layout(g);
-
-  const laidOut: Node[] = nodes.map(n => {
-    const { x, y } = g.node(n.id);
-    const { width, height } = sizeFor(n);
-    return {
-      ...n,
-      // dagre's coordinates are centered on the node; React Flow expects
-      // top-left, so shift by half the dimensions.
-      position: { x: x - width / 2, y: y - height / 2 },
-    };
-  });
 
   return { nodes: laidOut, edges };
 }
 
-function sizeFor(n: Node): { width: number; height: number } {
-  switch (n.type) {
-    case "agent":
-      return { width: AGENT_NODE_WIDTH, height: AGENT_NODE_HEIGHT };
-    case "service":
-      return { width: SERVICE_NODE_WIDTH, height: SERVICE_NODE_HEIGHT };
-    default:
-      return { width: DEFAULT_NODE_WIDTH, height: DEFAULT_NODE_HEIGHT };
-  }
-}

@@ -60,6 +60,14 @@ jobs:
         working-directory: dashboard
         run: bun install --frozen-lockfile
 
+      - name: Run dashboard tests
+        # Dashboard owns its own deps (preact/compat, @xyflow/react, dagre,
+        # …) — root `bun test` is scoped via root bunfig.toml to lib/ + src/
+        # only, so tests under dashboard/src/**/__tests__/ have to run here
+        # where the dashboard node_modules is resolvable.
+        working-directory: dashboard
+        run: bun test
+
       - name: Build dashboard (astro build)
         working-directory: dashboard
         run: bun run build
