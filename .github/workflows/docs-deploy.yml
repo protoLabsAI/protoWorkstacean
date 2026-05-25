@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-protolabs-linux
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,6 +51,7 @@ jobs:
 
   deploy:
     needs: build
+    # workspace-config: allow-hosted-runner GitHub Pages deploy requires the hosted Pages environment
     runs-on: ubuntu-latest
     environment:
       name: github-pages
