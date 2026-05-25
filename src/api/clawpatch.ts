@@ -50,8 +50,19 @@ interface ReviewRequest {
   repo: string;
   since?: string;
   limit?: number;
-  /** Override the model for this invocation. Defaults to the gateway provider's default. */
+  /** Override the model for this invocation. Defaults to the provider's default. */
   model?: string;
+  /**
+   * Which protoPatch provider to use. `gateway` (default) sends an
+   * already-assembled prompt to the LiteLLM endpoint — fast/cheap/stateless,
+   * good for nearly every PR. `proto` spawns protoCLI as a live ACP agent
+   * so it can read additional files, run LSP queries, and shell out during
+   * review — slower + more tokens but deeper structural read on non-trivial
+   * changes. Other valid values: claude, codex, acpx — these need the
+   * respective CLI installed and OAuth'd inside the container, which we
+   * don't bootstrap today.
+   */
+  provider?: "gateway" | "proto" | "claude" | "codex" | "acpx";
 }
 
 const BUILT_IN_REPO_PATHS: Record<string, string> = {
@@ -136,7 +147,7 @@ export function createRoutes(_ctx: ApiContext): Route[] {
         } catch {
           return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 });
         }
-        const { repo, since, limit, model } = payload;
+        const { repo, since, limit, model, provider } = payload;
         if (!repo) {
           return Response.json({ success: false, error: "repo is required" }, { status: 400 });
         }
@@ -155,7 +166,8 @@ export function createRoutes(_ctx: ApiContext): Route[] {
         // into the writable data volume — one dir per owner/repo so we don't
         // re-map features for every PR review.
         const stateDir = stateDirFor(repo);
-        const args = ["ci", "--provider", "gateway", "--json", "--state-dir", stateDir];
+        const effectiveProvider = provider ?? "gateway";
+        const args = ["ci", "--provider", effectiveProvider, "--json", "--state-dir", stateDir];
         if (since) args.push("--since", since);
         if (typeof limit === "number" && limit > 0) args.push("--limit", String(limit));
         if (model) args.push("--model", model);

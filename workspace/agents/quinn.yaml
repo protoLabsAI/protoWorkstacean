@@ -240,6 +240,19 @@ skills:
       Observations section with the same SEVERITY tags you'd assign
       yourself, and cite clawpatch as the source ("CLAWPATCH/HIGH: ...").
 
+      **Provider choice:**
+
+      - Default to `provider: gateway` — fast, cheap, good for ~every PR.
+      - Use `provider: proto` for PRs where structural depth matters
+        more than turnaround:
+          - Large diffs (>10 files)
+          - Code paths involving auth, payments, data-loss-risk
+          - Novel patterns the gateway provider keeps producing
+            low-confidence findings on
+          - Refactor PRs claiming behavior-preserving changes (proto
+            can actually run typecheck + tests to verify)
+        Skip `proto` on trivial diffs — the extra tokens aren't worth it.
+
       If clawpatch returns "repo not mounted" — the v1 only handles
       repos baked into the workstacean container (protoWorkstacean,
       protoCLI, mythxengine). Note it as a LOW observation and continue
