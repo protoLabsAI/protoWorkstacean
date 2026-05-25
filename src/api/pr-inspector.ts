@@ -26,9 +26,15 @@
  */
 
 import type { Route, ApiContext } from "./types.ts";
-import { makeGitHubAuth } from "../../lib/github-auth.ts";
+import { makeGitHubAuth, makeQuinnReviewAuth } from "../../lib/github-auth.ts";
 
 const getGithubToken = makeGitHubAuth();
+// Separate identity specifically for formal review submission (APPROVE /
+// REQUEST_CHANGES / COMMENT). When QUINN_USER_TOKEN is set, reviews ship
+// under the machine-user identity that can actually satisfy required-
+// reviewer gates — see makeQuinnReviewAuth + issue #585. Falls back to the
+// App / PAT chain otherwise.
+const getReviewToken = makeQuinnReviewAuth();
 
 type Action =
   | "list_open"
@@ -81,6 +87,34 @@ async function ghFetch(
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "protoquinn",
+    },
+  });
+}
+
+/**
+ * Like ghFetch but uses the review-specific identity (QUINN_USER_TOKEN
+ * machine-user PAT when present, else falls back to App / PAT auth).
+ * Used only for POSTing formal reviews — every other GitHub call routes
+ * through ghFetch with the App identity, which is correct for reads /
+ * webhook ops and intentionally distinct from the reviewer identity.
+ */
+async function reviewFetch(
+  owner: string,
+  name: string,
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  if (!getReviewToken) throw new Error("no GitHub review credentials (QUINN_USER_TOKEN or QUINN_APP_* or GITHUB_TOKEN)");
+  const token = await getReviewToken(owner, name);
+  return fetch(url, {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(GH_FETCH_TIMEOUT_MS),
+    headers: {
+      ...(init.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "protoquinn-review",
     },
   });
 }
@@ -215,7 +249,9 @@ async function submitReview(
   event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES",
   body: string,
 ): Promise<string> {
-  const resp = await ghFetch(
+  // Uses reviewFetch (review-specific identity, QUINN_USER_TOKEN-first)
+  // rather than the App-auth ghFetch — see makeQuinnReviewAuth.
+  const resp = await reviewFetch(
     owner,
     name,
     `https://api.github.com/repos/${owner}/${name}/pulls/${pr}/reviews`,
