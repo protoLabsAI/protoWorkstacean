@@ -10,13 +10,16 @@
  * The tool accepts `repo` in owner/name format. Resolution tries, in order:
  *
  *   1. `CLAWPATCH_REPO_PATH_MAP` env override (JSON owner/name → abs path)
- *   2. `BUILT_IN_REPO_PATHS` — bind mounts already in the container, kept
- *      as a zero-latency fast path
- *   3. `workspace/projects.yaml` allowlist gate, then `CheckoutCache` —
- *      on-demand fetch from GitHub tarball + extract into /data/checkouts/
+ *      — dev-only escape hatch for pointing at a local working tree.
+ *   2. `workspace/projects.yaml` allowlist gate, then `CheckoutCache` —
+ *      every other repo (including the ones that used to be bind-mounted)
+ *      goes through the cache so Quinn always reviews the exact PR ref.
  *
- * See docs/explanation/clawpatch-checkouts.md (C1 design doc) for the
- * cache's eviction, TTL, and security model.
+ * No bind-mount fast path. Per C1 sign-off (#578): "better way over fast
+ * way" — a single resolution code path means no "did Quinn review the
+ * host's checkout or the PR head" ambiguity. See
+ * docs/explanation/clawpatch-checkouts.md for the cache's eviction, TTL,
+ * and security model.
  *
  * Env
  * ---
@@ -74,38 +77,27 @@ interface ReviewRequest {
   provider?: "gateway" | "proto" | "claude" | "codex" | "acpx";
 }
 
-const BUILT_IN_REPO_PATHS: Record<string, string> = {
-  // Fast path: repos with a bind-mount already configured in the container.
-  // Resolution falls back to the on-demand CheckoutCache for any repo not
-  // listed here, so these are now an OPTIMIZATION rather than a hard
-  // requirement — clawpatch works against any repo in projects.yaml even
-  // without an entry. Paths follow the deploy-host convention
-  // (~/dev/labs/{repo}, protoWorkstacean at ~/dev/protoWorkstacean) and need
-  // a matching read-only mount in homelab-iac/stacks/ai/docker-compose.yml.
-  "protoLabsAI/protoWorkstacean": "/home/josh/dev/protoWorkstacean",
-  "protoLabsAI/protoMaker": "/home/josh/dev/labs/protoMaker",
-  "protoLabsAI/protoCLI": "/home/josh/dev/labs/protoCLI",
-  "protoLabsAI/mythxengine": "/home/josh/dev/labs/mythxengine",
-  "protoLabsAI/escape-from-qud": "/home/josh/dev/labs/escape-from-qud",
-  "protoLabsAI/release-tools": "/home/josh/dev/labs/release-tools",
-  "protoLabsAI/protoPatch": "/home/josh/dev/labs/protoPatch",
-  "protoLabsAI/pwnDeck": "/home/josh/dev/labs/pwnDeck",
-  "protoLabsAI/contentMachine": "/home/josh/dev/labs/contentMachine",
-};
-
-function resolveBuiltInPath(repo: string): string | null {
-  let overrides: Record<string, string> = {};
+/**
+ * Read the dev-only `CLAWPATCH_REPO_PATH_MAP` override, if set. Lets a
+ * developer point clawpatch at a working tree on disk instead of going
+ * through the GitHub-tarball cache — handy when iterating on protoPatch
+ * itself, or when reviewing a local-only branch that GitHub doesn't have
+ * a ref for. Production never sets this; everything routes through the
+ * cache so Quinn reviews the exact ref the PR is on.
+ */
+function resolveDevOverridePath(repo: string): string | null {
   const raw = process.env["CLAWPATCH_REPO_PATH_MAP"];
-  if (raw) {
-    try {
-      overrides = JSON.parse(raw) as Record<string, string>;
-    } catch {
-      // Fall through with empty overrides — bad JSON shouldn't break the route.
-    }
+  if (!raw) return null;
+  let overrides: Record<string, string>;
+  try {
+    overrides = JSON.parse(raw) as Record<string, string>;
+  } catch {
+    // Bad JSON shouldn't break the route — log once and fall through to cache.
+    console.warn("[clawpatch] CLAWPATCH_REPO_PATH_MAP is not valid JSON — ignoring");
+    return null;
   }
-  const path = overrides[repo] ?? BUILT_IN_REPO_PATHS[repo];
-  if (!path) return null;
-  if (!existsSync(path)) return null;
+  const path = overrides[repo];
+  if (!path || !existsSync(path)) return null;
   return path;
 }
 
@@ -147,13 +139,20 @@ function loadProjectAllowlist(workspaceDir: string): Set<string> {
 }
 
 /**
- * Resolve a local filesystem path for clawpatch to operate on.
+ * Resolve a local filesystem path for clawpatch to operate on. One code
+ * path, no bind-mount fast path: every repo (including protoWorkstacean
+ * itself) routes through the GitHub-tarball cache so Quinn always reviews
+ * the exact ref the PR is on, not whatever happens to be checked out on
+ * the host. Per the C1 sign-off — "better way over fast way".
  *
- *   1. Built-in mount / CLAWPATCH_REPO_PATH_MAP override — zero-latency fast
- *      path for repos already bind-mounted into the container.
- *   2. On-demand checkout via `CheckoutCache` for any repo in the
- *      projects.yaml allowlist. Requires `since` (PR head SHA) since the
- *      cache is content-addressed by ref.
+ *   1. `CLAWPATCH_REPO_PATH_MAP` env override — dev-only escape hatch,
+ *      lets a developer point clawpatch at a working tree.
+ *   2. `projects.yaml` allowlist gate — same security boundary as
+ *      `create_github_issue`. Agents can't aim clawpatch at arbitrary
+ *      GitHub repos.
+ *   3. `CheckoutCache.resolve(repo, since)` — fetches the tarball at the
+ *      given SHA, extracts under /data/checkouts/<owner>-<repo>/<sha>/,
+ *      and returns the path. Content-addressed; 1h TTL.
  *
  * Returns `{ ok: false, error }` instead of throwing so the route handler
  * can shape a 400 response without a try/catch.
@@ -163,8 +162,8 @@ async function resolveRepoPath(
   since: string | undefined,
   workspaceDir: string,
 ): Promise<{ ok: true; path: string } | { ok: false; error: string; status: number }> {
-  const fastPath = resolveBuiltInPath(repo);
-  if (fastPath) return { ok: true, path: fastPath };
+  const devOverride = resolveDevOverridePath(repo);
+  if (devOverride) return { ok: true, path: devOverride };
 
   const allow = loadProjectAllowlist(workspaceDir);
   if (!allow.has(repo)) {
@@ -173,7 +172,7 @@ async function resolveRepoPath(
       status: 400,
       error:
         `repo '${repo}' is not in workspace/projects.yaml — clawpatch only reviews ` +
-        `managed projects. Add it to projects.yaml first (or set CLAWPATCH_REPO_PATH_MAP).`,
+        `managed projects. Add it to projects.yaml first (or set CLAWPATCH_REPO_PATH_MAP for local dev).`,
     };
   }
 
@@ -182,8 +181,8 @@ async function resolveRepoPath(
       ok: false,
       status: 400,
       error:
-        `repo '${repo}' is not bind-mounted — on-demand checkout needs 'since' ` +
-        `(the PR head SHA) so the cache can address the right ref.`,
+        `clawpatch review needs 'since' (the PR head SHA) so the checkout ` +
+        `cache can fetch the right ref from GitHub.`,
     };
   }
 

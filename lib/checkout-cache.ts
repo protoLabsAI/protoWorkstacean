@@ -1,18 +1,18 @@
 /**
  * CheckoutCache — content-addressed source-tree cache for clawpatch.
  *
- * Backs `src/api/clawpatch.ts` so structural review works against any repo
- * in workspace/projects.yaml, not just the three currently bind-mounted into
- * the workstacean container. Source of truth is GitHub's tarball endpoint
- * (`GET /repos/{owner}/{repo}/tarball/{ref}`); a successful fetch lands at
- * `${CHECKOUT_ROOT}/<owner>-<repo>/<sha>/`.
+ * Backs `src/api/clawpatch.ts` so structural review works against every
+ * repo in workspace/projects.yaml — including the ones that used to be
+ * bind-mounted into the container. Source of truth is GitHub's tarball
+ * endpoint (`GET /repos/{owner}/{repo}/tarball/{ref}`); a successful fetch
+ * lands at `${CHECKOUT_ROOT}/<owner>-<repo>/<sha>/`.
  *
  * Design notes live in docs/explanation/clawpatch-checkouts.md (C1) — the
  * short version:
  *
  *   - LRU eviction at 5 GB OR 50 entries, whichever first.
- *   - 24h TTL refresh: a cached SHA older than this gets re-fetched so the
- *     diff base doesn't lie about what changed after a rebase.
+ *   - 1h TTL refresh: per the C1 sign-off — "better way over fast way" —
+ *     over the 24h heuristic the doc originally biased toward.
  *   - Per-(repo, sha) extraction mutex: simultaneous reviews on the same PR
  *     head queue rather than racing.
  *   - Security: projects.yaml allowlist (enforced by the caller) plus
@@ -43,7 +43,12 @@ const DEFAULT_CHECKOUT_ROOT =
 
 const DEFAULT_SIZE_LIMIT_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 const DEFAULT_ENTRY_LIMIT = 50;
-const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+// 1h TTL. SHA-keyed content-addressing makes correctness fine at any TTL;
+// this picks "fresh" over "warm-cache hit-rate". An hour amortizes the
+// review-comment burst case (same PR head re-reviewed several times in
+// quick succession) without holding stale source long enough to risk
+// base-branch drift hiding review-relevant changes. Per C1 sign-off (#578).
+const DEFAULT_TTL_MS = 60 * 60 * 1000;
 const MAX_COMPRESSED_BYTES = 1 * 1024 * 1024 * 1024; // 1 GB
 
 export interface CheckoutCacheConfig {

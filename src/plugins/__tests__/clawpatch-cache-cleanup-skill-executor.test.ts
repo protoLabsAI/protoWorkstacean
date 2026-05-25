@@ -30,8 +30,9 @@ describe("ClawpatchCacheCleanupSkillExecutorPlugin", () => {
     const result = await executor!.execute({
       skill: "ceremony.clawpatch_cache_cleanup",
       content: "",
-      targets: [],
       correlationId: "test-corr",
+      replyTopic: "test.reply",
+      payload: { skill: "ceremony.clawpatch_cache_cleanup", content: "" } as never,
     });
     expect(result.isError).toBe(false);
     expect(result.text).toContain("evicted=7");
@@ -51,8 +52,9 @@ describe("ClawpatchCacheCleanupSkillExecutorPlugin", () => {
     const result = await executor!.execute({
       skill: "ceremony.clawpatch_cache_cleanup",
       content: "",
-      targets: [],
       correlationId: "test-err",
+      replyTopic: "test.reply",
+      payload: { skill: "ceremony.clawpatch_cache_cleanup", content: "" } as never,
     });
     expect(result.isError).toBe(true);
     expect(result.text).toContain("disk full");
