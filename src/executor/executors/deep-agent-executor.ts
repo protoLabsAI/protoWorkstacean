@@ -252,8 +252,13 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
           "- review_request_changes: post a CHANGES_REQUESTED review (requires body)\n" +
           "- close_pr: close a PR (optionally with a leading comment explaining why)\n" +
           "- close_pr_as_not_planned: close + mark state_reason=not_planned (use when the PR is stale, superseded, or the underlying request was resolved differently)\n" +
-          "- reopen_pr: reopen a closed (non-merged) PR\n\n" +
-          "Prefer closing a stale/resolved PR directly to filing a 'please close #X' issue — that's the cascade pattern from #556. Always include `comment` on close_pr / close_pr_as_not_planned so the close has audit context.",
+          "- reopen_pr: reopen a closed (non-merged) PR\n" +
+          "- close_issue: close an issue (state_reason=completed; for resolved/done issues)\n" +
+          "- close_issue_as_not_planned: close + state_reason=not_planned (stale / duplicate / wont-fix / wrong-premise)\n" +
+          "- reopen_issue: reopen a closed issue\n" +
+          "- comment_on_issue: post a comment on an issue without closing\n\n" +
+          "PR-targeted actions use `pr_number`. Issue-targeted actions use `issue_number`. Use `comment` for audit context.\n\n" +
+          "**Prefer direct action to filing meta-issues.** A stale PR you can close → close it. An already-fixed issue → close_issue with a comment linking the fix commit. The cascade pattern from #556 came from filing 'please close #X' issues instead of doing it directly — don't repeat it.",
         schema: z.object({
           action: z.enum([
             "list_open",
@@ -266,13 +271,18 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
             "close_pr",
             "close_pr_as_not_planned",
             "reopen_pr",
+            "close_issue",
+            "close_issue_as_not_planned",
+            "reopen_issue",
+            "comment_on_issue",
           ]),
           repo: z.string().describe(
             "Repository in owner/name format (e.g. protoLabsAI/protoWorkstacean). REQUIRED on every call.",
           ),
-          pr_number: z.number().int().optional(),
+          pr_number: z.number().int().optional().describe("Required for PR-targeted actions."),
+          issue_number: z.number().int().optional().describe("Required for issue-targeted actions (close_issue, reopen_issue, comment_on_issue)."),
           body: z.string().optional().describe("Review body for review_* actions."),
-          comment: z.string().optional().describe("Optional leading comment posted before close_pr / close_pr_as_not_planned. Recommended for audit trail."),
+          comment: z.string().optional().describe("Leading comment posted before a close, OR the body of comment_on_issue. Recommended on every close for audit context."),
         }),
       },
     ),

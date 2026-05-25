@@ -391,12 +391,20 @@ skills:
 
       ## Step 5 — Act
 
-      - Close stale issues with an explanation (use `create_github_issue`
-        — there's no separate close-issue tool yet; file a follow-up
-        ticket if needed and note in Observations)
-      - Comment on already_fixed issues with the commit that resolved them
-      - Label actionable issues with severity
-      - Flag duplicates with a link to the canonical issue
+      You have the tools to close + comment on issues directly. Use them.
+      Filing a "please close #X" meta-issue was the cascade pattern from
+      protoWorkstacean#556 — don't repeat it.
+
+      | Category | Action | pr_inspector call |
+      |---|---|---|
+      | **already_fixed** | Close with a comment linking the fix commit/PR | `pr_inspector(action='close_issue', repo, issue_number, comment='Resolved by <repo>#<sha\|pr> ...')` |
+      | **actionable** | Comment with severity + suggested next step. Leave open. | `pr_inspector(action='comment_on_issue', repo, issue_number, comment='Severity: HIGH ... Next: ...')` |
+      | **stale** | Close as `not_planned` with explanation of why it's stale | `pr_inspector(action='close_issue_as_not_planned', repo, issue_number, comment='Stale — no activity in 30d ...')` |
+      | **duplicate** | Comment with link to canonical issue, then close as `not_planned` | first `comment_on_issue` then `close_issue_as_not_planned` |
+
+      Only file a new `create_github_issue` when you've discovered a NEW
+      problem during triage that isn't tracked anywhere. Never file an
+      issue whose body is asking someone else to close an existing issue.
 
       ## Step 6 — Report
 

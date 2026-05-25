@@ -23,6 +23,10 @@
  *   close_pr               → PATCH state=closed (optionally with a leading comment)
  *   close_pr_as_not_planned → PATCH state=closed + state_reason=not_planned
  *   reopen_pr              → PATCH state=open
+ *   close_issue            → PATCH /issues/{n} state=closed (state_reason=completed)
+ *   close_issue_as_not_planned → PATCH state=closed + state_reason=not_planned
+ *   reopen_issue           → PATCH state=open
+ *   comment_on_issue       → POST a comment without closing (audit-trail / status update)
  */
 
 import type { Route, ApiContext } from "./types.ts";
@@ -40,17 +44,24 @@ type Action =
   | "review_request_changes"
   | "close_pr"
   | "close_pr_as_not_planned"
-  | "reopen_pr";
+  | "reopen_pr"
+  | "close_issue"
+  | "close_issue_as_not_planned"
+  | "reopen_issue"
+  | "comment_on_issue";
 
 interface InspectRequest {
   action: Action;
   repo: string;
   pr_number?: number;
+  /** For issue-targeted actions. Same role as pr_number for PR-targeted ones. */
+  issue_number?: number;
   body?: string;
   /**
-   * When closing a PR via close_pr / close_pr_as_not_planned, optionally
-   * post a comment explaining why before flipping the state. Quinn uses
-   * this to link the close back to a verdict / fix-PR / triage decision.
+   * When closing a PR/issue, optionally post a comment explaining why
+   * before flipping state. Quinn uses this to link the close back to a
+   * verdict / fix-PR / triage decision. Also used as the body for
+   * `comment_on_issue` directly.
    */
   comment?: string;
 }
@@ -295,6 +306,60 @@ async function setPrState(
   return `${verb} PR#${pr} in ${owner}/${name}.`;
 }
 
+/**
+ * Flip an issue's state. Mirrors setPrState but routes through the /issues/{n}
+ * endpoint (PRs and issues are separate REST surfaces even though they share
+ * a number space). GitHub accepts `state_reason` on issues: "completed" (the
+ * default close motive — issue resolved) and "not_planned" (closed without
+ * doing the work because it's a duplicate, stale, or wrong premise).
+ *
+ * Quinn's bug_triage skill closes already_fixed issues with `completed` and
+ * stale / duplicate / wont-fix with `not_planned`.
+ */
+async function setIssueState(
+  owner: string,
+  name: string,
+  n: number,
+  state: "open" | "closed",
+  comment: string | undefined,
+  notPlanned = false,
+): Promise<string> {
+  if (comment && comment.trim()) {
+    try {
+      await postIssueComment(owner, name, n, comment);
+    } catch (e) {
+      console.warn(`[pr-inspector] comment-then-close issue: comment failed (proceeding): ${String(e).slice(0, 300)}`);
+    }
+  }
+
+  const body: Record<string, unknown> = { state };
+  if (state === "closed") body.state_reason = notPlanned ? "not_planned" : "completed";
+
+  const resp = await ghFetch(
+    owner,
+    name,
+    `https://api.github.com/repos/${owner}/${name}/issues/${n}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+  if (!resp.ok) {
+    throw new Error(`GitHub API error setting issue#${n} state=${state}: ${resp.status} ${await resp.text()}`);
+  }
+  const verb = state === "open" ? "Reopened" : notPlanned ? "Closed (not planned)" : "Closed";
+  return `${verb} issue#${n} in ${owner}/${name}.`;
+}
+
+async function commentOnIssue(owner: string, name: string, n: number, body: string): Promise<string> {
+  if (!body || !body.trim()) {
+    throw new Error("comment_on_issue requires a non-empty `comment` field");
+  }
+  await postIssueComment(owner, name, n, body);
+  return `Commented on issue#${n} in ${owner}/${name}.`;
+}
+
 export function createRoutes(_ctx: ApiContext): Route[] {
   return [
     {
@@ -308,7 +373,7 @@ export function createRoutes(_ctx: ApiContext): Route[] {
           return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 });
         }
 
-        const { action, repo, pr_number, body, comment } = payload;
+        const { action, repo, pr_number, issue_number, body, comment } = payload;
         if (!action || !repo) {
           return Response.json(
             { success: false, error: "action and repo are required" },
@@ -338,6 +403,19 @@ export function createRoutes(_ctx: ApiContext): Route[] {
         if (needsPr.includes(action) && (typeof pr_number !== "number" || !Number.isInteger(pr_number))) {
           return Response.json(
             { success: false, error: `pr_number is required (integer) for action='${action}'` },
+            { status: 400 },
+          );
+        }
+
+        const needsIssue: Action[] = [
+          "close_issue",
+          "close_issue_as_not_planned",
+          "reopen_issue",
+          "comment_on_issue",
+        ];
+        if (needsIssue.includes(action) && (typeof issue_number !== "number" || !Number.isInteger(issue_number))) {
+          return Response.json(
+            { success: false, error: `issue_number is required (integer) for action='${action}'` },
             { status: 400 },
           );
         }
@@ -380,6 +458,21 @@ export function createRoutes(_ctx: ApiContext): Route[] {
               break;
             case "reopen_pr":
               result = await setPrState(owner, name, pr_number!, "open", comment, false);
+              break;
+            case "close_issue":
+              result = await setIssueState(owner, name, issue_number!, "closed", comment, false);
+              break;
+            case "close_issue_as_not_planned":
+              result = await setIssueState(owner, name, issue_number!, "closed", comment, true);
+              break;
+            case "reopen_issue":
+              result = await setIssueState(owner, name, issue_number!, "open", comment, false);
+              break;
+            case "comment_on_issue":
+              if (!comment) {
+                return Response.json({ success: false, error: "comment is required for comment_on_issue" }, { status: 400 });
+              }
+              result = await commentOnIssue(owner, name, issue_number!, comment);
               break;
             default:
               return Response.json({ success: false, error: `unknown action '${action}'` }, { status: 400 });
