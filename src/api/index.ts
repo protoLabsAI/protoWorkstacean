@@ -27,6 +27,7 @@ import { createRoutes as busTopologyRoutes } from "./bus-topology.ts";
 import { createRoutes as prInspectorRoutes } from "./pr-inspector.ts";
 import { createRoutes as clawpatchRoutes } from "./clawpatch.ts";
 import { createRoutes as agentsRuntimeRoutes } from "./agents-runtime.ts";
+import { createRoutes as busHistoryRoutes } from "./bus-history.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
@@ -53,5 +54,6 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...prInspectorRoutes(ctx),
     ...clawpatchRoutes(ctx),
     ...agentsRuntimeRoutes(ctx),
+    ...busHistoryRoutes(ctx),
   ];
 }
