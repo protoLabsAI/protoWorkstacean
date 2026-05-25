@@ -1,5 +1,4 @@
 projects:
-
   - slug: protoworkstacean
     title: protoWorkstacean
     team: dev
@@ -75,7 +74,10 @@ projects:
     repoUrl: "https://github.com/protoLabsAI/rabbit-hole.io"
     projectPath: /home/josh/dev/labs/rabbit-hole-io
     defaultBranch: main
-    status: active
+    # Archived 2026-05-25 — project is dead. Archived (not deleted) so the
+    # A2APlugin index drops it from active scope while history/routing
+    # remains resolvable. Quinn no longer reviews or triages this repo.
+    status: archived
     agents: [quinn]
     discord:
       dev:
@@ -94,6 +96,96 @@ projects:
     defaultBranch: main
     status: active
     onboardedAt: "2026-04-17T20:15:40.845Z"
+    agents: [quinn]
+    discord:
+      dev:
+        channelId: ""
+        webhook: ""
+      release:
+        channelId: ""
+        webhook: ""
+
+  - slug: escape-from-qud
+    title: escape-from-qud
+    team: dev
+    github: protoLabsAI/escape-from-qud
+    repoUrl: "https://github.com/protoLabsAI/escape-from-qud"
+    projectPath: /home/josh/dev/labs/escape-from-qud
+    defaultBranch: main
+    status: active
+    onboardedAt: "2026-05-25T06:05:23.000Z"
+    agents: [quinn]
+    discord:
+      dev:
+        channelId: ""
+        webhook: ""
+      release:
+        channelId: ""
+        webhook: ""
+
+  - slug: release-tools
+    title: release-tools
+    team: dev
+    github: protoLabsAI/release-tools
+    repoUrl: "https://github.com/protoLabsAI/release-tools"
+    projectPath: /home/josh/dev/labs/release-tools
+    defaultBranch: main
+    status: active
+    onboardedAt: "2026-05-25T06:05:23.000Z"
+    agents: [quinn]
+    discord:
+      dev:
+        channelId: ""
+        webhook: ""
+      release:
+        channelId: ""
+        webhook: ""
+
+  - slug: protopatch
+    title: protoPatch
+    team: dev
+    github: protoLabsAI/protoPatch
+    repoUrl: "https://github.com/protoLabsAI/protoPatch"
+    projectPath: /home/josh/dev/labs/protoPatch
+    defaultBranch: main
+    status: active
+    onboardedAt: "2026-05-25T06:05:23.000Z"
+    agents: [quinn]
+    discord:
+      dev:
+        channelId: ""
+        webhook: ""
+      release:
+        channelId: ""
+        webhook: ""
+
+  - slug: pwndeck
+    title: pwnDeck
+    team: dev
+    github: protoLabsAI/pwnDeck
+    repoUrl: "https://github.com/protoLabsAI/pwnDeck"
+    projectPath: /home/josh/dev/labs/pwnDeck
+    defaultBranch: main
+    status: active
+    onboardedAt: "2026-05-25T06:05:23.000Z"
+    agents: [quinn]
+    discord:
+      dev:
+        channelId: ""
+        webhook: ""
+      release:
+        channelId: ""
+        webhook: ""
+
+  - slug: contentmachine
+    title: contentMachine
+    team: dev
+    github: protoLabsAI/contentMachine
+    repoUrl: "https://github.com/protoLabsAI/contentMachine"
+    projectPath: /home/josh/dev/labs/contentMachine
+    defaultBranch: main
+    status: active
+    onboardedAt: "2026-05-25T06:05:23.000Z"
     agents: [quinn]
     discord:
       dev:
