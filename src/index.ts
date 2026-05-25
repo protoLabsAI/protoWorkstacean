@@ -271,6 +271,20 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Registers a FunctionExecutor for `ceremony.clawpatch_cache_cleanup`
+    // (workspace/ceremonies/clawpatch-cache-cleanup.yaml). Pure janitor — calls
+    // CheckoutCache.prune() directly; no agent involved. Same install-order
+    // constraint as alert-skill-executor.
+    name: "clawpatch-cache-cleanup-skill-executor",
+    condition: () => true,
+    factory: async () => {
+      const { ClawpatchCacheCleanupSkillExecutorPlugin } = await import(
+        "./plugins/clawpatch-cache-cleanup-skill-executor-plugin.js"
+      );
+      return new ClawpatchCacheCleanupSkillExecutorPlugin(executorRegistry);
+    },
+  },
+  {
     // Registers FunctionExecutors for the `action.pr_*` /
     // `action.dispatch_backmerge` skills whose handlers live in
     // PrRemediatorPlugin.

@@ -1,0 +1,13 @@
+id: clawpatch.cache_cleanup
+name: Clawpatch Checkout Cache Cleanup
+# Daily at 03:00 UTC — well clear of the morning sitrep window so the prune
+# IO doesn't fight live review traffic.
+schedule: "0 3 * * *"
+skill: ceremony.clawpatch_cache_cleanup
+# Pure janitorial — no agent needed. The skill is wired to a FunctionExecutor
+# in src/plugins/clawpatch-cache-cleanup-skill-executor-plugin.ts that calls
+# CheckoutCache.prune() directly.
+targets:
+  - function
+notifyChannel: ""
+enabled: true
