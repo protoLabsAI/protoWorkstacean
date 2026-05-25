@@ -7,11 +7,16 @@
  *
  * Repo resolution
  * ---------------
- * The tool accepts `repo` in owner/name format. We map it to a local
- * filesystem path via `CLAWPATCH_REPO_PATH_MAP` (JSON env override) or a
- * built-in default that knows about repos mounted into the workstacean
- * container today. v1 only supports already-mounted repos; on-demand PR
- * checkouts are phase 2.
+ * The tool accepts `repo` in owner/name format. Resolution tries, in order:
+ *
+ *   1. `CLAWPATCH_REPO_PATH_MAP` env override (JSON owner/name → abs path)
+ *   2. `BUILT_IN_REPO_PATHS` — bind mounts already in the container, kept
+ *      as a zero-latency fast path
+ *   3. `workspace/projects.yaml` allowlist gate, then `CheckoutCache` —
+ *      on-demand fetch from GitHub tarball + extract into /data/checkouts/
+ *
+ * See docs/explanation/clawpatch-checkouts.md (C1 design doc) for the
+ * cache's eviction, TTL, and security model.
  *
  * Env
  * ---
@@ -70,12 +75,13 @@ interface ReviewRequest {
 }
 
 const BUILT_IN_REPO_PATHS: Record<string, string> = {
-  // Repos clawpatch can review. Paths follow the deploy-host convention
-  // (~/dev/labs/{repo}, protoWorkstacean at ~/dev/protoWorkstacean). Each
-  // must ALSO be mounted read-only into the container for the path to exist —
-  // see homelab-iac/stacks/ai/docker-compose.yml workstacean.volumes. An entry
-  // here without a mount resolves to a missing path and clawpatch reports it.
-  // Keep in sync with the active repos in workspace/projects.yaml.
+  // Fast path: repos with a bind-mount already configured in the container.
+  // Resolution falls back to the on-demand CheckoutCache for any repo not
+  // listed here, so these are now an OPTIMIZATION rather than a hard
+  // requirement — clawpatch works against any repo in projects.yaml even
+  // without an entry. Paths follow the deploy-host convention
+  // (~/dev/labs/{repo}, protoWorkstacean at ~/dev/protoWorkstacean) and need
+  // a matching read-only mount in homelab-iac/stacks/ai/docker-compose.yml.
   "protoLabsAI/protoWorkstacean": "/home/josh/dev/protoWorkstacean",
   "protoLabsAI/protoMaker": "/home/josh/dev/labs/protoMaker",
   "protoLabsAI/protoCLI": "/home/josh/dev/labs/protoCLI",
