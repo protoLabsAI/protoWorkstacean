@@ -48,6 +48,13 @@ export interface AgentRunOptions {
   /** Working directory for the agent's file operations. Defaults to process.cwd(). */
   cwd?: string;
   /**
+   * Per-call model override. When set, this string replaces `agentDef.model`
+   * in the `query()` options for this invocation only. Useful when a caller
+   * wants to escalate to a heavier model (Opus) for a tough task without
+   * editing the agent yaml. Falls back to `agentDef.model` when unset.
+   */
+  model?: string;
+  /**
    * SDK session ID to resume from a previous run.
    * When set, the query() call passes this as `resume` to continue conversation context.
    */
@@ -98,16 +105,20 @@ export class AgentExecutor {
   }
 
   async run(opts: AgentRunOptions): Promise<AgentRunResult> {
-    const { prompt, correlationId, cwd, resume, onProgress } = opts;
+    const { prompt, correlationId, cwd, model: modelOverride, resume, onProgress } = opts;
 
     const env: Record<string, string> = {};
     if (this.gatewayUrl) env.OPENAI_BASE_URL = this.gatewayUrl;
     if (this.gatewayApiKey) env.OPENAI_API_KEY = this.gatewayApiKey;
 
+    const model = (typeof modelOverride === "string" && modelOverride.trim().length > 0)
+      ? modelOverride.trim()
+      : this.agentDef.model;
+
     const session = query({
       prompt,
       options: {
-        model: this.agentDef.model,
+        model,
         authType: this.gatewayUrl ? "openai" : "anthropic",
         permissionMode: "yolo",
         systemPrompt: this.agentDef.systemPrompt,

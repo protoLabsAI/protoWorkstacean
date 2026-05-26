@@ -43,6 +43,19 @@ export function effectiveMaxTurnsFor(skillMaxTurns: number | undefined, agentMax
   return skillMaxTurns ?? agentMaxTurns;
 }
 
+/**
+ * Per-call model override wins when set + non-empty; else falls back to the
+ * agent's declared model. Whitespace-only overrides are treated as unset
+ * (covers the case where a Linear/Discord payload carries an accidental
+ * blank string through routing). Pure function — exported for unit testing.
+ */
+export function effectiveModelFor(payloadModel: unknown, agentModel: string): string {
+  if (typeof payloadModel === "string" && payloadModel.trim().length > 0) {
+    return payloadModel.trim();
+  }
+  return agentModel;
+}
+
 export function extractAiText(content: unknown): string {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
@@ -608,25 +621,54 @@ export class DeepAgentExecutor implements IExecutor {
   private readonly model: ChatOpenAI;
   private readonly http: HttpClient;
   private readonly onToolCall: DeepAgentConfig["onToolCall"];
+  private readonly gatewayUrl: string | undefined;
+  private readonly apiKey: string;
+  /**
+   * Cache of ChatOpenAI instances by model name — `agentDef.model` always
+   * resolves to `this.model`, but per-call overrides (`payload.model`) get
+   * a lazily-built clone keyed by the override string. Stops us from
+   * paying construction cost on every dispatch that overrides.
+   */
+  private readonly modelCache: Map<string, ChatOpenAI> = new Map();
 
   constructor(agentDef: AgentDefinition, config: DeepAgentConfig = {}) {
     this.agentDef = agentDef;
     this.onToolCall = config.onToolCall;
-    const gatewayUrl = config.gatewayUrl ?? process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL;
-    const apiKey = config.gatewayApiKey ?? process.env.OPENAI_API_KEY ?? "unused";
+    this.gatewayUrl = config.gatewayUrl ?? process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL;
+    this.apiKey = config.gatewayApiKey ?? process.env.OPENAI_API_KEY ?? "unused";
 
-    this.model = new ChatOpenAI({
-      model: agentDef.model,
-      temperature: 0,
-      configuration: gatewayUrl ? { baseURL: gatewayUrl } : undefined,
-      apiKey,
-    });
+    this.model = this._buildModel(agentDef.model);
+    this.modelCache.set(agentDef.model, this.model);
 
     this.http = new HttpClient({
       baseUrl: config.apiBaseUrl ?? "http://localhost:3000",
       timeoutMs: 120_000, // 2 min — chat_with_agent calls A2A which can take time
       ...(config.apiKey ? { auth: { type: "api-key" as const, key: config.apiKey } } : {}),
     });
+  }
+
+  private _buildModel(modelName: string): ChatOpenAI {
+    return new ChatOpenAI({
+      model: modelName,
+      temperature: 0,
+      configuration: this.gatewayUrl ? { baseURL: this.gatewayUrl } : undefined,
+      apiKey: this.apiKey,
+    });
+  }
+
+  /**
+   * Resolve which ChatOpenAI to use for this dispatch. Defaults to the
+   * agent's declared model; per-call override via `payload.model` builds
+   * (and caches) a clone with the new model name. All other ChatOpenAI
+   * config (gateway URL, api key, temperature) stays identical.
+   */
+  private _modelFor(override: string | undefined): ChatOpenAI {
+    if (!override || override === this.agentDef.model) return this.model;
+    const cached = this.modelCache.get(override);
+    if (cached) return cached;
+    const built = this._buildModel(override);
+    this.modelCache.set(override, built);
+    return built;
   }
 
   async execute(req: SkillRequest): Promise<SkillResult> {
@@ -661,13 +703,24 @@ export class DeepAgentExecutor implements IExecutor {
       // that replace the agent's general-purpose prompt.
       const basePrompt = skillDef?.systemPromptOverride ?? this.agentDef.systemPrompt;
 
+      // Per-call model override via payload.model — see effectiveModelFor
+      // + the matching path in ProtoSdkExecutor. Lets a caller escalate to
+      // Opus (or downshift to Haiku) for one dispatch without editing the
+      // agent yaml.
+      const resolvedModel = effectiveModelFor(req.payload?.model, this.agentDef.model);
+      const modelOverride = resolvedModel !== this.agentDef.model ? resolvedModel : undefined;
+      const llm = this._modelFor(modelOverride);
+
       const agent = createReactAgent({
-        llm: this.model,
+        llm,
         tools,
         messageModifier: new SystemMessage(basePrompt),
       });
 
-      console.log(`[deep-agent:${this.agentDef.name}] invoke skill="${req.skill ?? "?"}" tools=${tools.length}/${agentTools.length} maxTurns=${effectiveMaxTurns} promptLen=${prompt.length} langfuse=${LANGFUSE_ENABLED}`);
+      const usingModel = modelOverride && modelOverride !== this.agentDef.model
+        ? ` (model override: ${modelOverride})`
+        : "";
+      console.log(`[deep-agent:${this.agentDef.name}] invoke skill="${req.skill ?? "?"}" tools=${tools.length}/${agentTools.length} maxTurns=${effectiveMaxTurns} promptLen=${prompt.length} langfuse=${LANGFUSE_ENABLED}${usingModel}`);
 
       const result = await agent.invoke(
         { messages: [{ role: "user", content: prompt }] },
