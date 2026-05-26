@@ -690,6 +690,12 @@ export class GitHubPlugin implements Plugin {
     const correlationId = crypto.randomUUID();
     pendingComments.set(correlationId, { owner: ctx.owner, repo: ctx.repo, number: ctx.number });
 
+    // Stamp the webhook-arrival time so skill-dispatcher can compute
+    // webhook→done latency at completion. The /system trace view (D1)
+    // already has per-message timestamps via BusHistoryRecorder; this
+    // gives us a clean one-line summary in workstacean's stdout too.
+    const webhookArrivedAt = Date.now();
+
     const content = [
       `Auto-review — pull_request.${action} on ${ctx.owner}/${ctx.repo}#${ctx.number}`,
       `Title: ${ctx.title}`,
@@ -708,7 +714,7 @@ export class GitHubPlugin implements Plugin {
       id: `${event}-${action}-${ctx.owner}-${ctx.repo}-${ctx.number}-${correlationId.slice(0, 8)}`,
       correlationId,
       topic,
-      timestamp: Date.now(),
+      timestamp: webhookArrivedAt,
       payload: {
         sender: ctx.author,
         channel: `${ctx.owner}/${ctx.repo}#${ctx.number}`,
@@ -723,6 +729,7 @@ export class GitHubPlugin implements Plugin {
           title: ctx.title,
           url: ctx.url,
         },
+        meta: { webhookArrivedAt },
       },
       source: { interface: "github" as const },
       reply: { topic: replyTopic },
