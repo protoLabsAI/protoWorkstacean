@@ -263,24 +263,44 @@ export class SkillBrokerPlugin implements Plugin {
         );
       }
 
-      const registered = this.registeredSkills.get(agent.name) ?? new Set();
-      let added = 0;
-
+      const previouslyRegistered = this.registeredSkills.get(agent.name) ?? new Set<string>();
+      const currentSkills = new Set<string>();
       for (const cardSkill of card.skills ?? []) {
-        const skillName = cardSkill.id;
-        if (!skillName || registered.has(skillName)) continue;
+        if (cardSkill.id) currentSkills.add(cardSkill.id);
+      }
 
+      // Add skills that are in the new card but not yet registered.
+      let added = 0;
+      for (const skillName of currentSkills) {
+        if (previouslyRegistered.has(skillName)) continue;
         this.executorRegistry.register(skillName, executor, {
           agentName: agent.name,
           priority: 5,
         });
-        registered.add(skillName);
         added++;
       }
 
-      this.registeredSkills.set(agent.name, registered);
+      // Remove skills that were registered but are no longer in the card.
+      // Without this, an agent that drops a skill keeps absorbing dispatches
+      // for it until workstacean restarts — exactly the kind of silent drift
+      // #608's loud-failure fix was meant to prevent.
+      const removed: string[] = [];
+      for (const skillName of previouslyRegistered) {
+        if (currentSkills.has(skillName)) continue;
+        this.executorRegistry.unregister(skillName, agent.name);
+        removed.push(skillName);
+      }
+
+      this.registeredSkills.set(agent.name, currentSkills);
       if (added > 0) {
-        console.log(`[skill-broker] ${agent.name}: discovered ${added} new skill(s) from agent card (${Array.from(registered).join(", ")})`);
+        console.log(
+          `[skill-broker] ${agent.name}: discovered ${added} new skill(s) from agent card (${Array.from(currentSkills).join(", ")})`,
+        );
+      }
+      if (removed.length > 0) {
+        console.warn(
+          `[skill-broker] ${agent.name}: removed ${removed.length} skill(s) no longer in agent card — ${removed.join(", ")}`,
+        );
       }
 
       this._loadHitlModeDeclarations(agent.name, card);

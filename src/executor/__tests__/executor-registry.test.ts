@@ -294,4 +294,46 @@ describe("ExecutorRegistry", () => {
       expect(registry.resolve("skill")).toBe(solo);
     });
   });
+
+  describe("unregister", () => {
+    it("removes the matching (skill, agentName) registration and reports the count", () => {
+      const registry = new ExecutorRegistry();
+      const exec = makeExecutor("a2a");
+      registry.register("plan", exec, { agentName: "ava" });
+      registry.register("plan", exec, { agentName: "quinn" });
+      registry.register("review", exec, { agentName: "ava" });
+
+      const removed = registry.unregister("plan", "ava");
+
+      expect(removed).toBe(1);
+      // ava still has "review"
+      expect(registry.resolve("plan", ["ava"])).toBe(exec); // resolves via "review"? no — explicit target by agentName
+      // Actually: target-match scans by agentName regardless of skill. So ["ava"] still matches "review".
+      // The skill-name resolution for "plan" should now only find quinn.
+      expect(registry.resolve("plan", ["quinn"])).toBe(exec);
+      expect(registry.resolve("plan", [])).toBe(exec); // quinn's "plan" registration remains
+    });
+
+    it("returns 0 when nothing matches — no-op safe", () => {
+      const registry = new ExecutorRegistry();
+      registry.register("plan", makeExecutor("a2a"), { agentName: "ava" });
+
+      expect(registry.unregister("ghost_skill", "ava")).toBe(0);
+      expect(registry.unregister("plan", "nobody")).toBe(0);
+      expect(registry.size).toBe(1);
+    });
+
+    it("can unregister anonymous registrations (agentName undefined)", () => {
+      const registry = new ExecutorRegistry();
+      const anon = makeExecutor("function");
+      registry.register("util", anon);
+      expect(registry.size).toBe(1);
+
+      const removed = registry.unregister("util", undefined);
+
+      expect(removed).toBe(1);
+      expect(registry.size).toBe(0);
+      expect(registry.resolve("util", [])).toBeNull();
+    });
+  });
 });
