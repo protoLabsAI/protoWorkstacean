@@ -42,6 +42,27 @@ describe("parseAgentYaml", () => {
     ).toThrow(/Missing or invalid 'name'/);
   });
 
+  test("runtime defaults to 'deep-agent' when omitted", () => {
+    const def = parseAgentYaml(validRaw, "ava.yaml");
+    expect(def.runtime).toBe("deep-agent");
+  });
+
+  test("runtime: 'proto-sdk' is accepted explicitly", () => {
+    const def = parseAgentYaml({ ...validRaw, runtime: "proto-sdk" }, "proto.yaml");
+    expect(def.runtime).toBe("proto-sdk");
+  });
+
+  test("runtime: 'deep-agent' is accepted explicitly", () => {
+    const def = parseAgentYaml({ ...validRaw, runtime: "deep-agent" }, "ava.yaml");
+    expect(def.runtime).toBe("deep-agent");
+  });
+
+  test("throws on unknown runtime value", () => {
+    expect(() =>
+      parseAgentYaml({ ...validRaw, runtime: "lang-graph" }, "x.yaml"),
+    ).toThrow(/Invalid 'runtime'/);
+  });
+
   test("throws on missing model", () => {
     expect(() =>
       parseAgentYaml({ ...validRaw, model: undefined }, "x.yaml"),
