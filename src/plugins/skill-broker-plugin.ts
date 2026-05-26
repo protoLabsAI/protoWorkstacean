@@ -286,7 +286,13 @@ export class SkillBrokerPlugin implements Plugin {
       this._loadHitlModeDeclarations(agent.name, card);
       this._loadBlastDeclarations(agent.name, card);
     } catch (err) {
-      console.debug(`[skill-broker] ${agent.name}: card discovery skipped:`, err instanceof Error ? err.message : err);
+      // console.debug here would silently swallow real card-discovery
+      // bugs — see #593 where weeks of zero-skill agents went unnoticed.
+      // Warn at the operator surface so the failure shows up in the same
+      // place as the rest of the broker's per-agent lifecycle logs.
+      console.warn(
+        `[skill-broker] ${agent.name}: card discovery failed — ${err instanceof Error ? err.message : err}`,
+      );
     }
   }
 
@@ -363,17 +369,30 @@ export class SkillBrokerPlugin implements Plugin {
     const factory = new ClientFactory({
       transports: [new JsonRpcTransportFactory()],
     });
+    let primaryErr: unknown;
     try {
       const client = await factory.createFromUrl(baseUrl);
       return await client.getAgentCard();
-    } catch {
-      // Try legacy path
-      try {
-        const client = await factory.createFromUrl(baseUrl, "/.well-known/agent.json");
-        return await client.getAgentCard();
-      } catch {
-        return null;
-      }
+    } catch (err) {
+      primaryErr = err;
+    }
+    // Try legacy /.well-known/agent.json before giving up.
+    try {
+      const client = await factory.createFromUrl(baseUrl, "/.well-known/agent.json");
+      return await client.getAgentCard();
+    } catch (legacyErr) {
+      // Both failed — surface the failure loudly. Quiet `return null` here
+      // is what made #593 invisible for weeks: agents register no skills,
+      // every downstream chat_with_agent call 404s, and the operator sees
+      // nothing in stdout until they happen to inspect /api/agents/runtime.
+      // Per feedback_fail_fast_and_loud — fail loud at the boundary.
+      const primaryMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+      const legacyMsg = legacyErr instanceof Error ? legacyErr.message : String(legacyErr);
+      console.warn(
+        `[skill-broker] Failed to fetch agent card from ${baseUrl}: ` +
+          `primary path → ${primaryMsg}; legacy /.well-known/agent.json → ${legacyMsg}`,
+      );
+      return null;
     }
   }
 
