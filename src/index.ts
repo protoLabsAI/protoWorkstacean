@@ -381,6 +381,30 @@ const pluginRegistry: PluginRegistryEntry[] = [
       return new AgentFleetHealthPlugin(executorRegistry);
     },
   },
+  {
+    // Polls fleet-health every minute (via fleet_alerts ceremony) and dispatches
+    // alert.* skills when thresholds trip. Re-wires the alert path that was
+    // orphaned when the GOAP layer was ripped (#518).
+    name: "fleet-alerts-evaluator",
+    condition: () => true,
+    factory: async () => {
+      const { FleetAlertsEvaluatorPlugin } = await import(
+        "./plugins/fleet-alerts-evaluator-plugin.js"
+      );
+      type AgentFleetHealthPlugin =
+        import("./plugins/agent-fleet-health-plugin.js").AgentFleetHealthPlugin;
+      const fleetHealth = registeredPlugins.find(p => p.name === "agent-fleet-health");
+      if (!fleetHealth) {
+        throw new Error(
+          "[fleet-alerts-evaluator] AgentFleetHealthPlugin must be registered first — check pluginRegistry order",
+        );
+      }
+      return new FleetAlertsEvaluatorPlugin(
+        executorRegistry,
+        fleetHealth as unknown as AgentFleetHealthPlugin,
+      );
+    },
+  },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
   {
     name: "echo",
