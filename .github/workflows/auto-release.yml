@@ -1,20 +1,18 @@
 name: Auto Release
 
-# Fires when a dev -> main PR is merged. Reads the version from package.json
-# on main, creates the matching v* tag, and opens a GitHub Release. The tag
-# push then triggers release.yml which posts release notes to Discord.
+# Manually-cut releases. Reads the version from package.json on main,
+# creates the matching v* tag, and opens a GitHub Release. The tag push
+# triggers release.yml which posts release notes to Discord.
 #
-# Flow: prepare-release.yml bumps on dev → dev→main PR merges → this workflow
-# tags main → release.yml (on: tags) posts Discord notes.
+# Flow: prepare-release.yml bumps the version on main → release.yml is
+# triggered manually here → tags main → release.yml (on: tags) posts
+# Discord notes.
 #
-# Simplified from protoMaker's staging-based flow — protoWorkstacean is
-# straight dev → main without a staging branch.
+# Releases are decoupled from merges (per workflow change 2026-05-26 retiring
+# the dev branch). Feature merges to main deploy via watchtower but don't
+# auto-version — version cuts are explicit.
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       force:
@@ -27,11 +25,6 @@ permissions: read-all
 jobs:
   release:
     runs-on: namespace-profile-protolabs-linux
-    if: >-
-      (github.event_name == 'workflow_dispatch') ||
-      (github.event.pull_request.merged == true &&
-       github.event.pull_request.base.ref == 'main' &&
-       github.repository == 'protoLabsAI/protoWorkstacean')
     timeout-minutes: 10
     permissions:
       contents: write

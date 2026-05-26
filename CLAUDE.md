@@ -39,17 +39,18 @@ Plugins extend reach: add a new integration → register it in `src/index.ts` �
 
 **Never push directly to `main`.** All changes flow through:
 
-1. **Feature branch** — branch from `dev`, implement, test locally (`bun test`)
-2. **PR to `dev`** — CI validates, code review, merge
-3. **PR from `dev` to `main`** — release gate, clean tested code only
+1. **Feature branch** — branch from `main`, implement, test locally (`bun test`)
+2. **PR to `main`** — CI validates, code review, merge → watchtower auto-deploys
 
 Branch naming: `feature/<short-description>` (auto-mode uses Automaker's naming convention).
 
-The Automaker `gitWorkflow.prBaseBranch` is set to `dev`. Auto-mode agents target `dev` automatically.
+The Automaker `gitWorkflow.prBaseBranch` is set to `main`. Auto-mode agents target `main` automatically.
+
+The `dev` branch was retired 2026-05-26. Prior to that, feature work targeted `dev` and was promoted to `main` via a release backmerge; that intermediate step was removed because every merge to `main` already auto-deploys via watchtower, and the release ritual is decoupled (manual `auto-release.yml` workflow_dispatch when cutting a version).
 
 ### Merge mode
 
-- **One-off PR targeting `main` / `dev`** → squash-merge (the default).
+- **One-off PR targeting `main`** → squash-merge (the default).
 - **Stacked PR (base is another PR's branch)** → **merge commit**, not squash. Squash rewrites SHAs and breaks subsequent stack rebases. See [`docs/contributing/merge-policy.md`](docs/contributing/merge-policy.md) for the full rationale + rollout steps.
 - Local git: `git config --global rebase.updateRefs true` (auto-updates dependent branch refs during rebase).
 

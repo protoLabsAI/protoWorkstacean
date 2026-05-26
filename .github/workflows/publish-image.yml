@@ -1,18 +1,17 @@
 name: Publish container image
 
 # Publishes workstacean as ghcr.io/protolabsai/workstacean on every merge to
-# dev and main. The homelab-iac deployment switches from a local build to
-# the published image so watchtower can pull new versions and the autonomous
-# PR loop closes all the way — merge → image published → container refreshed.
+# main. The homelab-iac deployment uses watchtower to pull :main on each
+# push so the autonomous loop closes — merge to main → image published →
+# watchtower pulls → container refreshed.
 #
 # Tag scheme:
-#   push to dev  → dev, dev-<short-sha>, sha-<full-sha>
 #   push to main → main, main-<short-sha>, latest, sha-<full-sha>
 #   tag v*       → <version> + its components (v1.2.3 → 1.2.3, 1.2, 1)
 
 on:
   push:
-    branches: [dev, main]
+    branches: [main]
     tags: ['v*']
   # Manual dispatch so we can rebuild the tag without a merge.
   workflow_dispatch:
