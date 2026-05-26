@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { effectiveToolsFor, effectiveMaxTurnsFor } from "../executors/deep-agent-executor.ts";
+import { effectiveToolsFor, effectiveMaxTurnsFor, effectiveModelFor } from "../executors/deep-agent-executor.ts";
 
 describe("effectiveToolsFor", () => {
   const agentTools = ["pr_inspector", "create_github_issue", "chat_with_agent", "searxng_search", "react"];
@@ -41,5 +41,43 @@ describe("effectiveMaxTurnsFor", () => {
 
   test("skill override of 0 is honored (not treated as falsy)", () => {
     expect(effectiveMaxTurnsFor(0, 12)).toBe(0);
+  });
+});
+
+describe("effectiveModelFor", () => {
+  const defaultModel = "claude-sonnet-4-6";
+
+  test("returns default when payload override is undefined", () => {
+    expect(effectiveModelFor(undefined, defaultModel)).toBe(defaultModel);
+  });
+
+  test("returns default when payload override is null", () => {
+    expect(effectiveModelFor(null, defaultModel)).toBe(defaultModel);
+  });
+
+  test("returns default when payload override is a non-string type", () => {
+    expect(effectiveModelFor(42, defaultModel)).toBe(defaultModel);
+    expect(effectiveModelFor({ foo: "bar" }, defaultModel)).toBe(defaultModel);
+  });
+
+  test("returns default when payload override is an empty string", () => {
+    expect(effectiveModelFor("", defaultModel)).toBe(defaultModel);
+  });
+
+  test("returns default when payload override is whitespace-only", () => {
+    expect(effectiveModelFor("   ", defaultModel)).toBe(defaultModel);
+    expect(effectiveModelFor("\n\t", defaultModel)).toBe(defaultModel);
+  });
+
+  test("returns the override when it's a non-empty string", () => {
+    expect(effectiveModelFor("claude-opus-4-7", defaultModel)).toBe("claude-opus-4-7");
+  });
+
+  test("trims surrounding whitespace from override", () => {
+    expect(effectiveModelFor("  claude-opus-4-7  ", defaultModel)).toBe("claude-opus-4-7");
+  });
+
+  test("override identical to default still returns the default value", () => {
+    expect(effectiveModelFor(defaultModel, defaultModel)).toBe(defaultModel);
   });
 });
