@@ -13,6 +13,10 @@
  * Phase 3 (D3): clicking an edge opens MessageDrawer with the last
  *   TOPIC_HISTORY_CAP messages observed on that topic + jump-to-trace
  *   links into /trace?correlationId=… (D1).
+ * O-4: synthesize an `api-routes` pseudo-publisher node for topics that
+ *   some plugin subscribes to but no Plugin declares as published —
+ *   typically HTTP-route-fired (src/api/*) signals. Without this, an
+ *   entire class of bus traffic is invisible in /system.
  *
  * Layout: three concentric zones.
  *   center  — agents (the action)
@@ -210,6 +214,71 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
       animated: live,
       style: { stroke: live ? "#3fb950" : "#30363d", strokeWidth: live ? 2 : 1 },
     });
+  }
+
+  // 7. Orphan-publisher synthesis. Topics that some plugin subscribes to
+  // but no plugin publishes are typically fired from HTTP route handlers
+  // (src/api/*.ts) — not Plugin instances, so they're invisible in
+  // /api/bus/topology. Without surfacing them, an entire class of bus
+  // traffic has no edge in /system (e.g. quinn.review.submitted today).
+  //
+  // We collect the orphan literal topics here, draw a single synthetic
+  // `api-routes` pseudo-publisher node, and wire one edge per
+  // (topic, subscriber). The edge inherits the same active-animation
+  // behavior as the plugin↔plugin edges, so when an API route fires the
+  // topic the edge pulses too.
+  //
+  // Wildcard subscriptions ("#", "foo.#", "foo.*") are skipped — they
+  // match by-design and a wildcard with no matching publisher isn't
+  // necessarily an orphan, just a permissive listener.
+  const publishedTopics = new Set<string>();
+  for (const plugin of plugins) {
+    for (const topic of plugin.publishes ?? []) publishedTopics.add(topic);
+  }
+  const orphanEdges: Array<{ topic: string; subscriberName: string }> = [];
+  for (const subscriber of plugins) {
+    for (const subPattern of subscriber.subscribes ?? []) {
+      if (subPattern.includes("#") || subPattern.includes("*")) continue;
+      const matched = [...publishedTopics].some(
+        (p) => p === subPattern || topicMatches(p, subPattern),
+      );
+      if (!matched) {
+        orphanEdges.push({ topic: subPattern, subscriberName: subscriber.name });
+      }
+    }
+  }
+  if (orphanEdges.length > 0) {
+    nodes.push({
+      id: "api-routes",
+      position: ringPos(0, 1, 0, 500, 100), // floats near the top of the canvas
+      data: { label: "api-routes" },
+      style: {
+        background: "#1c2128",
+        color: "#d29922",
+        border: "1px dashed #d29922",
+        borderRadius: 6,
+        padding: "6px 10px",
+        fontSize: 11,
+        fontFamily: "ui-monospace, SFMono-Regular, monospace",
+      },
+    });
+    for (const { topic, subscriberName } of orphanEdges) {
+      const active = activeEdges.has(topic);
+      edges.push({
+        id: `api-routes->${subscriberName}:${topic}`,
+        source: "api-routes",
+        target: `plugin-${subscriberName}`,
+        label: topic,
+        animated: active,
+        style: {
+          stroke: active ? "#3fb950" : "#d29922",
+          strokeWidth: active ? 1.5 : 1,
+          strokeDasharray: active ? undefined : "4 4",
+          opacity: active ? 1 : 0.7,
+        },
+        labelStyle: { fill: "#d29922", fontSize: 9, fontFamily: "ui-monospace, monospace" },
+      });
+    }
   }
 
   return { nodes, edges };
