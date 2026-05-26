@@ -91,3 +91,83 @@ skills:
       events on `agent.skill.progress.{correlationId}` for any caller
       that wants to stream.
     keywords: [code.execute, run task, coding task, proto task]
+
+  - name: code.review
+    description: |
+      Read-only code review of a diff or PR context provided in `content`.
+      Comments on correctness, regressions, anti-patterns. Does NOT
+      apply changes — opinions only. Complementary to Quinn's `pr_review`
+      (which issues APPROVED/COMMENTED/CHANGES_REQUESTED verdicts on
+      GitHub); use code.review for second-opinion / pre-PR drafts where
+      you want an analysis but don't want to invoke Quinn's formal
+      verdict pipeline.
+    keywords: [code.review, code review, second opinion, review diff, review pr, review changes]
+    systemPromptOverride: |
+      You are proto in code-review mode. Read the provided diff or PR
+      context, then produce a structured review:
+
+        1. Correctness — does the change do what it claims?
+        2. Regressions — what tests / call sites might break?
+        3. Anti-patterns — any structural concerns worth flagging?
+        4. Suggestions — concrete fixes or alternatives, where useful.
+
+      Lead with the verdict (LGTM / needs-work / blocking-concern) so the
+      caller can decide before reading the details. Cite file:line for
+      every claim. Don't apply changes — your output is opinion, not code.
+
+  - name: research.codebase
+    description: |
+      Research a codebase to answer a specific question — "where is X
+      defined", "what callers depend on Y", "how is feature Z wired
+      end-to-end". Uses native read/grep/glob tools to gather evidence
+      and returns a structured summary with file:line citations.
+      Read-only: never modifies files. Use this when you need a
+      report, not a fix.
+    keywords: [research.codebase, research, investigate, where is, how does, what calls]
+    systemPromptOverride: |
+      You are proto in research mode. Your task: investigate the
+      provided question against the working-directory codebase. Use
+      your native read/grep/glob/find tools — no shell mutations, no
+      file edits, no network calls unless the task explicitly asks.
+
+      Output structure:
+
+        1. Direct answer (1–3 sentences)
+        2. Evidence — file:line for every claim
+        3. Open questions — anything you couldn't verify
+
+      Be honest about what you DIDN'T find. "I couldn't locate the X
+      handler in the audited files" is more useful than guessing.
+
+  - name: port.upstream
+    description: |
+      Port a specific change from an upstream/forked repository into
+      this codebase. The dispatch `content` provides the upstream
+      reference (PR URL, commit SHA, or branch) and the target
+      integration point. Reads the upstream change, identifies the
+      analogous spot in our tree, applies the equivalent change in
+      our coding style, runs relevant tests. Returns a draft commit
+      message + the changes that would land. For repos that diverged
+      from upstream (forks, vendored deps, mirror-with-customizations).
+    keywords: [port.upstream, port upstream, cherry-pick upstream, port pr, port from, sync upstream change]
+    systemPromptOverride: |
+      You are proto in upstream-port mode. The task: take a specific
+      change from an upstream/forked repository and apply the
+      equivalent change in this codebase, accounting for whatever
+      divergence exists.
+
+      Workflow:
+
+        1. Fetch + read the upstream change (commit / PR / branch)
+        2. Identify the analogous spot in this tree — exact file map
+           where possible, semantic equivalence where the structure has
+           diverged
+        3. Apply the change in this codebase's style (not a straight
+           cherry-pick — match local conventions for naming, comments,
+           types)
+        4. Run the relevant test suite for the affected area
+        5. Output: a draft commit message + brief diff summary + any
+           open questions for the reviewer
+
+      If divergence is too large to port safely, return a structured
+      "cannot port — here's why" instead of forcing a bad fit.
