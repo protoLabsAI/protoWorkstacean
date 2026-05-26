@@ -27,6 +27,7 @@
 
 import type { Route, ApiContext } from "./types.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
+import { REVIEW_TOPICS } from "../event-bus/topics.ts";
 
 const getGithubToken = makeGitHubAuth();
 
@@ -208,6 +209,44 @@ async function diffSummary(owner: string, name: string, pr: number): Promise<str
   return `**Diff for PR#${pr}:**\n\n\`\`\`diff\n${preview}\n\`\`\`${suffix}`;
 }
 
+/**
+ * Fire-and-forget bus notification that Quinn just submitted a formal
+ * review. Subscribers (today: quinn-review-notifier-plugin for Discord
+ * embeds) react to specific verdicts. Failure to publish must never
+ * cascade into the route handler — caller already returned a successful
+ * GitHub API result by the time this runs.
+ */
+function publishReviewSubmitted(
+  ctx: ApiContext,
+  owner: string,
+  name: string,
+  pr: number,
+  event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES",
+  body: string,
+): void {
+  try {
+    const correlationId = crypto.randomUUID();
+    ctx.bus.publish(REVIEW_TOPICS.QUINN_REVIEW_SUBMITTED, {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic: REVIEW_TOPICS.QUINN_REVIEW_SUBMITTED,
+      timestamp: Date.now(),
+      payload: {
+        owner,
+        repo: name,
+        prNumber: pr,
+        event,
+        prUrl: `https://github.com/${owner}/${name}/pull/${pr}`,
+        bodyPreview: body.slice(0, 600),
+      },
+    });
+  } catch (err) {
+    console.warn(
+      `[pr-inspector] failed to publish quinn.review.submitted: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
 async function submitReview(
   owner: string,
   name: string,
@@ -295,7 +334,7 @@ async function setPrState(
   return `${verb} PR#${pr} in ${owner}/${name}.`;
 }
 
-export function createRoutes(_ctx: ApiContext): Route[] {
+export function createRoutes(ctx: ApiContext): Route[] {
   return [
     {
       method: "POST",
@@ -362,15 +401,18 @@ export function createRoutes(_ctx: ApiContext): Route[] {
                 return Response.json({ success: false, error: "body required for review_comment" }, { status: 400 });
               }
               result = await submitReview(owner, name, pr_number!, "COMMENT", body);
+              publishReviewSubmitted(ctx, owner, name, pr_number!, "COMMENT", body);
               break;
             case "review_approve":
               result = await submitReview(owner, name, pr_number!, "APPROVE", body ?? "");
+              publishReviewSubmitted(ctx, owner, name, pr_number!, "APPROVE", body ?? "");
               break;
             case "review_request_changes":
               if (!body) {
                 return Response.json({ success: false, error: "body required for review_request_changes" }, { status: 400 });
               }
               result = await submitReview(owner, name, pr_number!, "REQUEST_CHANGES", body);
+              publishReviewSubmitted(ctx, owner, name, pr_number!, "REQUEST_CHANGES", body);
               break;
             case "close_pr":
               result = await setPrState(owner, name, pr_number!, "closed", comment, false);

@@ -65,3 +65,16 @@ export const SECURITY_TOPICS = {
   /** Published when a security incident is detected. */
   SECURITY_INCIDENT_REPORTED: "security.incident.reported",
 } as const;
+
+export const REVIEW_TOPICS = {
+  /**
+   * Published by `pr-inspector` after a `review_comment` / `review_approve` /
+   * `review_request_changes` action succeeds. Fire-and-forget signal for any
+   * notifier (Discord embed, dashboard activity feed, etc.) that wants to
+   * react to Quinn's review verdicts without subscribing to every github API
+   * response. See `quinn-review-notifier-plugin` for the Discord side.
+   *
+   * Payload shape: { owner, repo, prNumber, event, reviewId?, prUrl? }.
+   */
+  QUINN_REVIEW_SUBMITTED: "quinn.review.submitted",
+} as const;
