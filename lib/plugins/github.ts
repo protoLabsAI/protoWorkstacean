@@ -688,6 +688,14 @@ export class GitHubPlugin implements Plugin {
       return;
     }
 
+    // Head SHA — threaded through to the dispatcher so cooldown keys can
+    // include it. Without this, two pushes to the same PR within the
+    // cooldown window dropped the second silently; with headSha in the
+    // key, a new commit always reviews (only repeated webhooks for the
+    // same SHA dedup). See flow-pr-review.md.
+    const head = pr?.head as Record<string, unknown> | undefined;
+    const headSha = typeof head?.["sha"] === "string" ? (head["sha"] as string) : undefined;
+
     const correlationId = crypto.randomUUID();
     pendingComments.set(correlationId, { owner: ctx.owner, repo: ctx.repo, number: ctx.number });
 
@@ -729,6 +737,7 @@ export class GitHubPlugin implements Plugin {
           number: ctx.number,
           title: ctx.title,
           url: ctx.url,
+          headSha,
         },
         meta: { webhookArrivedAt },
       },

@@ -81,18 +81,41 @@ export function cooldownMsFor(skill: string): number {
 }
 
 /**
- * Build the cooldown bucket key for a dispatch. Bucketed by (skill, repo) so
- * `bug_triage` on protoMaker has its own cooldown bucket separate from
- * `bug_triage` on protoWorkstacean — different repos don't share back-pressure.
- * Falls back to `<skill>:_` (no repo) when the payload doesn't carry a github
- * context (chat dispatches, manual /publish calls, etc.).
+ * Build the cooldown bucket key for a dispatch.
+ *
+ * Granularity (most specific to least):
+ *   `<skill>:<owner>/<repo>#<number>@<headSha7>` — pr_review on a specific
+ *      PR commit. New commits always review because the headSha changes;
+ *      repeated webhooks for the same SHA dedup.
+ *   `<skill>:<owner>/<repo>#<number>`            — issue or PR-level
+ *      (no headSha available, e.g. comment events).
+ *   `<skill>:<owner>/<repo>`                     — repo-scoped (skills
+ *      without a number context).
+ *   `<skill>:_`                                  — no github context
+ *      (chat, manual /publish, etc).
+ *
+ * Why each granularity matters:
+ *   - PR-with-headSha keying prevents the "rebase within 30s drops the
+ *     real fix" race that flagged in flow-pr-review.md.
+ *   - Issue-number keying lets bug_triage rate-limit per issue, not
+ *     per repo — two different issues in the same repo opening within
+ *     30s both get triaged.
+ *   - Repo-level fallback covers skills where neither number nor sha
+ *     are meaningful (security_triage at the repo level).
  */
 export function cooldownKeyFor(skill: string, payload: Record<string, unknown> | undefined): string {
   const github = (payload?.["github"] as Record<string, unknown> | undefined);
   const owner = typeof github?.["owner"] === "string" ? github["owner"] : undefined;
   const repo = typeof github?.["repo"] === "string" ? github["repo"] : undefined;
-  const repoKey = owner && repo ? `${owner}/${repo}` : "_";
-  return `${skill}:${repoKey}`;
+  if (!owner || !repo) return `${skill}:_`;
+
+  const number = typeof github?.["number"] === "number" ? github["number"] : undefined;
+  const headSha = typeof github?.["headSha"] === "string" ? (github["headSha"] as string) : undefined;
+
+  let key = `${skill}:${owner}/${repo}`;
+  if (number !== undefined) key += `#${number}`;
+  if (headSha) key += `@${headSha.slice(0, 7)}`;
+  return key;
 }
 
 export class SkillDispatcherPlugin implements Plugin {
