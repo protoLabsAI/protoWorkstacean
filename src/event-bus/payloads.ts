@@ -322,6 +322,16 @@ export interface AutonomousOutcomePayload {
   };
   /** Wall-clock time from dispatch to terminal state (ms). */
   durationMs: number;
+  /**
+   * LLM model used for this task — captured from the dispatch payload
+   * (`payload.model` per-call override, see #613). Undefined when the
+   * caller didn't specify an override (in that case the executor or
+   * LiteLLM gateway picked a model and we can't tell which one from
+   * the dispatcher). Cost aggregation in AgentFleetHealth uses the
+   * model-specific rate from `MODEL_RATES` when set; falls back to
+   * the default rate otherwise.
+   */
+  model?: string;
   /** World-state delta produced by this task — populated in Arc 4/5. */
   effectDelta?: Record<string, unknown>;
 }

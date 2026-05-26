@@ -182,6 +182,12 @@ export class SkillDispatcherPlugin implements Plugin {
       ?? (typeof payload.meta?.skillHint === "string" ? payload.meta.skillHint : undefined)
       ?? "";
 
+    // Per-call model override — captured for outcome cost attribution.
+    // Undefined when the caller didn't override (then the executor or
+    // gateway picks a model; we can't tell from here, so cost falls back
+    // to the default rate downstream).
+    const requestedModel = typeof payload.model === "string" ? payload.model : undefined;
+
     let targets: string[] = [];
     if (Array.isArray(payload.targets)) {
       targets = payload.targets;
@@ -360,6 +366,7 @@ export class SkillDispatcherPlugin implements Plugin {
               taskState,
               text: content,
               durationMs: Date.now() - dispatchedAt,
+              model: requestedModel,
             });
 
             const gh = payload.github as { title?: string; owner?: string; repo?: string; number?: number; url?: string } | undefined;
@@ -441,6 +448,7 @@ export class SkillDispatcherPlugin implements Plugin {
           text: result.text,
           usage: result.data?.usage,
           durationMs: Date.now() - dispatchedAt,
+          model: requestedModel,
         });
       } else {
         // Log a preview of the response so we can see what the executor actually
@@ -542,6 +550,7 @@ export class SkillDispatcherPlugin implements Plugin {
           text: result.text,
           usage: result.data?.usage,
           durationMs,
+          model: requestedModel,
         });
       }
 
@@ -578,6 +587,7 @@ export class SkillDispatcherPlugin implements Plugin {
         taskState: "failed",
         text: errorMsg,
         durationMs: Date.now() - dispatchedAt,
+        model: requestedModel,
       });
       this._publishResponse(replyTopic, correlationId, undefined, errorMsg);
     } finally {
@@ -640,6 +650,7 @@ export class SkillDispatcherPlugin implements Plugin {
     text?: string;
     usage?: AutonomousOutcomePayload["usage"];
     durationMs: number;
+    model?: string;
   }): void {
     if (!this.bus) return;
     const topic = `autonomous.outcome.${opts.systemActor}.${opts.skill}`;
@@ -656,6 +667,7 @@ export class SkillDispatcherPlugin implements Plugin {
       textPreview: opts.text ? opts.text.slice(0, 500) : undefined,
       usage: opts.usage,
       durationMs: opts.durationMs,
+      model: opts.model,
     };
     this.bus.publish(topic, {
       id: crypto.randomUUID(),
