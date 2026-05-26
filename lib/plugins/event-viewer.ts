@@ -49,7 +49,6 @@ export class EventViewerPlugin implements Plugin {
         if (url.pathname === "/api/events") return this.handleApiEvents(req);
         if (url.pathname === "/api/topics") return this.handleApiTopics();
         if (url.pathname === "/api/consumers") return this.handleApiConsumers();
-        if (url.pathname === "/api/projects") return this.handleApiProjects();
         if (url.pathname === "/api/agents") return this.handleApiAgents();
 
         if (url.pathname.startsWith("/api/")) return this.proxyToMainServer(req, url);
@@ -128,10 +127,6 @@ export class EventViewerPlugin implements Plugin {
 
   private handleApiConsumers(): Response {
     return Response.json(this.bus?.consumers() ?? []);
-  }
-
-  private handleApiProjects(): Response {
-    return this._serveYaml("projects.yaml", "projects");
   }
 
   private handleApiAgents(): Response {

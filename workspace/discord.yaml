@@ -22,7 +22,7 @@ commands:
   - name: report-bug
     description: Report a bug against a project
     # Top-level options — renders as a single command with autocomplete project picker.
-    # The `project` option value (slug) is resolved against projects.yaml to derive
+    # The `project` option value (slug) is resolved against the project registry to derive
     # devChannelId (discord.dev) and projectRepo (github field) at dispatch time.
     options:
       - name: project

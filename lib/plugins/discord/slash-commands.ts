@@ -3,49 +3,15 @@
  *
  * Handles: autocomplete, HITL button interactions, /memory command,
  * flat commands, and subcommand-based commands.
+ *
+ * Project autocomplete + project-scoped command payloads read from
+ * the in-process ProtomakerProjectRegistry and ChannelRegistry.
  */
 
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-import { Events, EmbedBuilder, type ChatInputCommandInteraction, type ButtonInteraction } from "discord.js";
-import { channelIdOf, type ProjectDiscordChannel } from "../../project-schema.ts";
+import { Events, type ChatInputCommandInteraction } from "discord.js";
 import { makeId, OPTION_TYPE_CODES } from "./core.ts";
 import { pendingReplies } from "./outbound.ts";
 import type { DiscordContext, CommandOption } from "./core.ts";
-
-// ── Project types ─────────────────────────────────────────────────────────────
-
-interface ProjectEntry {
-  slug: string;
-  title: string;
-  github?: string;
-  status?: string;
-  discord?: {
-    general?: ProjectDiscordChannel;
-    updates?: ProjectDiscordChannel;
-    dev?: ProjectDiscordChannel;
-  };
-}
-
-interface ProjectsYaml {
-  projects: ProjectEntry[];
-}
-
-export function loadProjectsDefs(workspaceDir: string): ProjectEntry[] {
-  const projectsPath = join(workspaceDir, "projects.yaml");
-  if (!existsSync(projectsPath)) return [];
-  try {
-    const raw = readFileSync(projectsPath, "utf8");
-    const parsed = parseYaml(raw) as ProjectsYaml;
-    return (parsed.projects ?? []).filter(
-      p => p.status !== "archived" && p.status !== "suspended"
-    );
-  } catch (err) {
-    console.error("[discord] Failed to parse projects.yaml:", err);
-    return [];
-  }
-}
 
 // ── Content interpolation ─────────────────────────────────────────────────────
 
@@ -112,11 +78,11 @@ export function registerSlashCommandHandlers(ctx: DiscordContext): void {
       if (!cmdConfig) return;
       const focused = interaction.options.getFocused(true);
       if (focused.name === "project") {
-        const projects = loadProjectsDefs(ctx.workspaceDir);
+        const projects = ctx.projectRegistry?.getProjects() ?? [];
         const typed = focused.value.toLowerCase();
         const choices = projects
-          .filter(p => p.slug.toLowerCase().includes(typed) || p.title.toLowerCase().includes(typed))
-          .slice(0, 25).map(p => ({ name: p.title, value: p.slug }));
+          .filter(p => p.slug.toLowerCase().includes(typed) || p.name.toLowerCase().includes(typed))
+          .slice(0, 25).map(p => ({ name: p.name, value: p.slug }));
         await interaction.respond(choices).catch(console.error);
       }
       return;
@@ -142,10 +108,10 @@ export function registerSlashCommandHandlers(ctx: DiscordContext): void {
       let devChannelId: string | undefined;
       let projectRepo: string | undefined;
       if (projectSlug) {
-        const project = loadProjectsDefs(ctx.workspaceDir).find(p => p.slug === projectSlug);
+        const project = ctx.projectRegistry?.getBySlug(projectSlug);
         if (project) {
-          devChannelId = channelIdOf(project.discord?.dev) || undefined;
-          projectRepo = project.github || undefined;
+          devChannelId = ctx.channelRegistry?.getProjectChannel(projectSlug, "dev")?.channelId || undefined;
+          projectRepo = project.github ? `${project.github.owner}/${project.github.repo}` : undefined;
         }
       }
       const content = interpolateContent(cmdConfig.content ?? "", cmdConfig.options ?? [], interaction);

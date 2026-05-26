@@ -43,66 +43,14 @@
  *     off; dry-run mode just logs)
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import type { WorldState } from "../types/world-state.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
+import type { ProtomakerProjectRegistryPlugin } from "../../src/plugins/protomaker-project-registry-plugin.ts";
 
 const AUTO_MERGE_ENABLED = process.env.PR_REMEDIATOR_AUTO_MERGE === "1";
 // Resolved at install() time — null when no GitHub credentials are present.
 const getGithubToken = makeGitHubAuth();
-
-/**
- * Load `workspace/projects.yaml` and build a repo → projectPath lookup.
- * Ava needs the full projectPath (not just a slug) to scope her
- * create_feature / start_auto_mode tool calls to the right board.
- * The map is loaded lazily on first use and cached per-process.
- */
-interface ProjectMeta {
-  projectPath?: string;
-  devChannelId?: string;
-}
-let projectMetaCache: Map<string, ProjectMeta> | null = null;
-function loadProjectMetaMap(workspaceDir: string = process.env.WORKSPACE_DIR ?? "workspace"): Map<string, ProjectMeta> {
-  if (projectMetaCache) return projectMetaCache;
-  const map = new Map<string, ProjectMeta>();
-  const yamlPath = join(workspaceDir, "projects.yaml");
-  if (!existsSync(yamlPath)) {
-    console.warn(`[pr-remediator] projects.yaml not found at ${yamlPath} — project metadata will be empty`);
-    projectMetaCache = map;
-    return map;
-  }
-  try {
-    const parsed = parseYaml(readFileSync(yamlPath, "utf8")) as {
-      projects?: Array<{
-        github?: string;
-        projectPath?: string;
-        discord?: { dev?: { channelId?: string } };
-      }>;
-    };
-    for (const p of parsed.projects ?? []) {
-      if (!p.github) continue;
-      map.set(p.github, {
-        projectPath: p.projectPath,
-        devChannelId: p.discord?.dev?.channelId,
-      });
-    }
-  } catch (err) {
-    console.warn(`[pr-remediator] failed to parse projects.yaml: ${String(err)}`);
-  }
-  projectMetaCache = map;
-  return map;
-}
-function loadProjectPathMap(workspaceDir?: string): Map<string, string> {
-  const meta = loadProjectMetaMap(workspaceDir);
-  const out = new Map<string, string>();
-  for (const [repo, m] of meta) {
-    if (m.projectPath) out.set(repo, m.projectPath);
-  }
-  return out;
-}
 
 /**
  * Directly start auto-mode on Ava for a target project via HTTP — bypasses
@@ -205,9 +153,9 @@ interface InFlightEntry {
 // error-path fallback when ghMerge() fails.
 
 /**
- * Derive the workstacean/ava project slug from a GitHub `owner/repo` string.
- * Matches the slugs in workspace/projects.yaml: lowercase repo name with dots
- * replaced by dashes (e.g. `rabbit-hole.io` → `rabbit-hole-io`).
+ * Derive the project slug from a GitHub `owner/repo` string as a fallback
+ * when the project registry doesn't have an entry. Matches the same
+ * `name → lowercase-dashed` shape the registry uses.
  *
  * Returns empty string if the repo slug is malformed — caller should fall
  * back to including the full `owner/repo` in the message content so Ava
@@ -216,7 +164,7 @@ interface InFlightEntry {
 function deriveProjectSlug(repo: string): string {
   const parts = repo.split("/");
   if (parts.length !== 2 || !parts[1]) return "";
-  return parts[1].toLowerCase().replace(/\./g, "-");
+  return parts[1].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 // ── Domain data shape (mirrors src/api/github.ts handleGetPrPipeline) ────────
@@ -593,9 +541,27 @@ export class PrRemediatorPlugin implements Plugin {
   readonly capabilities = ["pr-merge", "pr-feedback-dispatch", "hitl-emit"];
 
   private readonly fetchLiveCiStatus: LiveCiStatusFetcher;
+  private readonly projectRegistry?: ProtomakerProjectRegistryPlugin;
 
-  constructor(options: { fetchLiveCiStatus?: LiveCiStatusFetcher } = {}) {
+  constructor(
+    options: {
+      fetchLiveCiStatus?: LiveCiStatusFetcher;
+      projectRegistry?: ProtomakerProjectRegistryPlugin;
+    } = {},
+  ) {
     this.fetchLiveCiStatus = options.fetchLiveCiStatus ?? defaultFetchLiveCiStatus;
+    this.projectRegistry = options.projectRegistry;
+  }
+
+  /**
+   * Resolve (projectSlug, projectPath) for a `owner/repo`. Uses the project
+   * registry when wired; falls back to the derived slug with an undefined
+   * path (Ava will then call `list_projects` to disambiguate).
+   */
+  private _resolveProject(repo: string): { slug: string; path: string | undefined } {
+    const entry = this.projectRegistry?.getByGithub(repo);
+    if (entry) return { slug: entry.slug, path: entry.path };
+    return { slug: deriveProjectSlug(repo), path: undefined };
   }
 
   private bus?: EventBus;
@@ -1126,8 +1092,7 @@ export class PrRemediatorPlugin implements Plugin {
         console.log(`[pr-remediator] skip fix_ci ${pr.repo}#${pr.number}: ${gate.reason}`);
         continue;
       }
-      const projectSlug = deriveProjectSlug(pr.repo);
-      const projectPath = loadProjectPathMap().get(pr.repo);
+      const { slug: projectSlug, path: projectPath } = this._resolveProject(pr.repo);
       console.log(`[pr-remediator] dispatching fix_ci for ${pr.repo}#${pr.number} (slug: ${projectSlug}, path: ${projectPath ?? "unknown"})`);
       const correlationId = this._dispatchToAva(
         `PR ${pr.repo}#${pr.number} has failing CI. **Autonomous remediation requested.**
@@ -1192,8 +1157,7 @@ Critical rules:
         console.log(`[pr-remediator] skip address_feedback ${pr.repo}#${pr.number}: ${gate.reason}`);
         continue;
       }
-      const projectSlug = deriveProjectSlug(pr.repo);
-      const projectPath = loadProjectPathMap().get(pr.repo);
+      const { slug: projectSlug, path: projectPath } = this._resolveProject(pr.repo);
       console.log(`[pr-remediator] dispatching address_feedback for ${pr.repo}#${pr.number} (slug: ${projectSlug}, path: ${projectPath ?? "unknown"})`);
       const correlationId = this._dispatchToAva(
         `PR ${pr.repo}#${pr.number} has CHANGES_REQUESTED review feedback. **Autonomous remediation requested.**

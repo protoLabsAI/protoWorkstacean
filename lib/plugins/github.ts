@@ -34,6 +34,7 @@ import { sanitizeIssueBody } from "../sanitize.ts";
 import type { SanitizationConfig } from "../sanitize.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
 import { withCircuitBreaker } from "./circuit-breaker.ts";
+import type { ProtomakerProjectRegistryPlugin } from "../../src/plugins/protomaker-project-registry-plugin.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ interface AutoTriageConfig {
   orgName: string;
   events: string[];
   skillHint: string;
-  /** Derived at runtime from projects.yaml — not read from github.yaml. */
+  /** Derived at runtime from the project registry — not read from github.yaml. */
   monitoredRepos: string[];
   sanitization: SanitizationConfig;
   /** Label that identifies "needs triage" issues during sweep (default: "status: needs-triage"). */
@@ -106,53 +107,26 @@ export function isAgentBotActor(login: string | undefined | null): boolean {
 }
 
 /**
- * Derive monitoredRepos from projects.yaml (all active projects with a github field).
- * Called each time config is loaded so hot-reloads of projects.yaml are reflected.
+ * Build a per-repo metadata map (slug + absolute projectPath) for the
+ * triage sweep. Ava's bug_triage skill refuses to run without an
+ * authoritative projectPath; the sweep threads it into the synthetic
+ * inbound event payload.
  */
-function deriveMonitoredRepos(workspaceDir: string): string[] {
-  const projectsPath = join(workspaceDir, "projects.yaml");
-  if (!existsSync(projectsPath)) return [];
-  try {
-    const raw = readFileSync(projectsPath, "utf8");
-    const data = parseYaml(raw) as { projects?: { github?: string; status?: string }[] };
-    return (data.projects ?? [])
-      .filter(p => p.github && p.status !== "archived" && p.status !== "suspended")
-      .map(p => p.github as string);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Load per-repo project metadata (slug + absolute projectPath) for the triage
- * sweep. Ava's bug_triage skill refuses to run without an authoritative
- * projectPath; the sweep grabs it from projects.yaml and threads it into the
- * synthetic inbound event payload.
- */
-function loadProjectMetaForSweep(
-  workspaceDir: string,
+function projectMetaFromRegistry(
+  registry: ProtomakerProjectRegistryPlugin,
 ): Map<string, { slug: string; projectPath: string | undefined }> {
   const map = new Map<string, { slug: string; projectPath: string | undefined }>();
-  const projectsPath = join(workspaceDir, "projects.yaml");
-  if (!existsSync(projectsPath)) return map;
-  try {
-    const raw = readFileSync(projectsPath, "utf8");
-    const data = parseYaml(raw) as {
-      projects?: Array<{ slug?: string; github?: string; projectPath?: string; status?: string }>;
-    };
-    for (const p of data.projects ?? []) {
-      if (!p.github || !p.slug) continue;
-      if (p.status === "archived" || p.status === "suspended") continue;
-      map.set(p.github, { slug: p.slug, projectPath: p.projectPath });
-    }
-  } catch {
-    // ignore — sweep will proceed without projectPath (dispatches will error
-    // on Ava's side, surfaced via skill-dispatcher error logs)
+  for (const p of registry.getProjects()) {
+    if (!p.github) continue;
+    map.set(`${p.github.owner}/${p.github.repo}`, { slug: p.slug, projectPath: p.path });
   }
   return map;
 }
 
-function loadConfig(workspaceDir: string): GitHubConfig {
+function loadConfig(
+  workspaceDir: string,
+  registry: ProtomakerProjectRegistryPlugin,
+): GitHubConfig {
   const configPath = join(workspaceDir, "github.yaml");
   let config: GitHubConfig;
 
@@ -170,10 +144,10 @@ function loadConfig(workspaceDir: string): GitHubConfig {
     config = parseYaml(readFileSync(configPath, "utf8")) as GitHubConfig;
   }
 
-  // monitoredRepos is always derived from projects.yaml at runtime
-  // (never read from github.yaml) so that onboarding new projects takes effect immediately.
+  // monitoredRepos is always derived from the project registry at runtime so
+  // that newly-registered projects take effect on the next refresh cycle.
   if (config.autoTriage) {
-    config.autoTriage.monitoredRepos = deriveMonitoredRepos(workspaceDir);
+    config.autoTriage.monitoredRepos = registry.getGithubCoords();
   }
 
   return config;
@@ -308,11 +282,13 @@ export class GitHubPlugin implements Plugin {
 
   private server: ReturnType<typeof Bun.serve> | null = null;
   private workspaceDir: string;
+  private projectRegistry: ProtomakerProjectRegistryPlugin;
   private config!: GitHubConfig;
   private projectMeta = new Map<string, { slug: string; projectPath: string | undefined }>();
 
-  constructor(workspaceDir: string) {
+  constructor(workspaceDir: string, projectRegistry: ProtomakerProjectRegistryPlugin) {
     this.workspaceDir = workspaceDir;
+    this.projectRegistry = projectRegistry;
   }
 
   install(bus: EventBus): void {
@@ -325,21 +301,22 @@ export class GitHubPlugin implements Plugin {
     const usingApp = !!(process.env.QUINN_APP_ID && process.env.QUINN_APP_PRIVATE_KEY);
     console.log(`[github] Auth: ${usingApp ? "GitHub App (quinn[bot])" : "PAT (GITHUB_TOKEN)"}`);
 
-    this.config = loadConfig(this.workspaceDir);
-    this.projectMeta = loadProjectMetaForSweep(this.workspaceDir);
+    this.config = loadConfig(this.workspaceDir, this.projectRegistry);
+    this.projectMeta = projectMetaFromRegistry(this.projectRegistry);
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? "";
     const port = parseInt(process.env.GITHUB_WEBHOOK_PORT ?? "8082", 10);
 
-    // ── Hot-reload github.yaml and projects.yaml ──────────────────────────────
+    // ── Hot-reload github.yaml ────────────────────────────────────────────────
+    // Project list lives in protoMaker and is refreshed by the registry's own
+    // 5-min interval — no file watcher needed for it here.
     const configPath = join(this.workspaceDir, "github.yaml");
-    const projectsPath = join(this.workspaceDir, "projects.yaml");
 
     let reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     const reloadConfig = () => {
       if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer);
       reloadDebounceTimer = setTimeout(() => {
-        this.config = loadConfig(this.workspaceDir);
-        this.projectMeta = loadProjectMetaForSweep(this.workspaceDir);
+        this.config = loadConfig(this.workspaceDir, this.projectRegistry);
+        this.projectMeta = projectMetaFromRegistry(this.projectRegistry);
         const repoCount = this.config.autoTriage?.monitoredRepos?.length ?? 0;
         console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
       }, 300);
@@ -347,8 +324,6 @@ export class GitHubPlugin implements Plugin {
 
     // watchFile works even if the file doesn't exist yet — it will fire on creation.
     watchFile(configPath, { interval: 5_000 }, reloadConfig);
-    // Also watch projects.yaml so monitoredRepos updates when projects are onboarded.
-    watchFile(projectsPath, { interval: 5_000 }, reloadConfig);
 
     // ── Triage sweep: on-demand + startup ────────────────────────────────────
     //
@@ -431,7 +406,6 @@ export class GitHubPlugin implements Plugin {
   uninstall(): void {
     this.server?.stop();
     unwatchFile(join(this.workspaceDir, "github.yaml"));
-    unwatchFile(join(this.workspaceDir, "projects.yaml"));
   }
 
   private _handleEvent(
@@ -907,7 +881,7 @@ export class GitHubPlugin implements Plugin {
 
     const repos = config.autoTriage.monitoredRepos ?? [];
     const sweepLabel = config.autoTriage.sweepLabel ?? "status: needs-triage";
-    const projectMeta = loadProjectMetaForSweep(this.workspaceDir);
+    const projectMeta = projectMetaFromRegistry(this.projectRegistry);
     console.log(`[github] triage sweep starting — ${repos.length} repo(s), label="${sweepLabel}"`);
 
     let dispatched = 0;

@@ -1,7 +1,7 @@
 /**
  * ProtomakerProjectRegistryPlugin tests — covers the pure helpers
- * (git-config parsing) and the plugin's refresh + parity-check behavior
- * against a fake protoMaker HTTP server and a temporary workspace dir.
+ * (git-config parsing, slug derivation) and the plugin's refresh + accessor
+ * behavior against a fake protoMaker HTTP server.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
@@ -13,7 +13,20 @@ import {
   ProtomakerProjectRegistryPlugin,
   parseGithubFromGitConfig,
   parseDefaultBranchFromHead,
+  deriveSlug,
 } from "../protomaker-project-registry-plugin.ts";
+
+describe("deriveSlug", () => {
+  test("lowercases and dashes non-alphanum", () => {
+    expect(deriveSlug("protoMaker")).toBe("protomaker");
+    expect(deriveSlug("rabbit-hole.io")).toBe("rabbit-hole-io");
+    expect(deriveSlug("escape from qud")).toBe("escape-from-qud");
+  });
+
+  test("trims leading/trailing dashes", () => {
+    expect(deriveSlug(".myproject.")).toBe("myproject");
+  });
+});
 
 describe("parseGithubFromGitConfig", () => {
   test("SSH origin url → owner/repo", () => {
@@ -89,7 +102,6 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     tempDir = mkdtempSync(join(tmpdir(), "wsk-pm-registry-test-"));
     fakeProjects = [];
     fetchCount = 0;
-    // Fake protoMaker server returning settings.global with the fakeProjects list.
     server = Bun.serve({
       port: 0,
       fetch(req) {
@@ -113,12 +125,10 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     }
   });
 
-  function newPlugin(opts?: { parityCheck?: boolean; refreshIntervalMs?: number }): ProtomakerProjectRegistryPlugin {
+  function newPlugin(): ProtomakerProjectRegistryPlugin {
     return new ProtomakerProjectRegistryPlugin({
       apiBase: `http://localhost:${server!.port}`,
-      workspaceDir: tempDir,
-      refreshIntervalMs: opts?.refreshIntervalMs ?? 50_000, // long, so test drives refreshes manually via setTimeout below
-      parityCheck: opts?.parityCheck ?? false,
+      refreshIntervalMs: 50_000,
     });
   }
 
@@ -134,25 +144,23 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     );
   }
 
-  test("fetches projects from protoMaker on install + populates registry", async () => {
+  test("refreshNow populates registry with derived slug + git enrichment", async () => {
     const projPath = join(tempDir, "myproj");
-    makeGitRepo(projPath, "protoLabsAI/myproj", "main");
-    fakeProjects.push({ id: "p1", name: "myproj", path: projPath });
+    makeGitRepo(projPath, "protoLabsAI/myProject", "main");
+    fakeProjects.push({ id: "p1", name: "myProject", path: projPath });
 
     plugin = newPlugin();
+    await plugin.refreshNow();
     plugin.install(bus);
-
-    // Initial fetch is async fire-and-forget — wait briefly for it.
-    await new Promise((r) => setTimeout(r, 50));
 
     const projects = plugin.getProjects();
     expect(projects).toHaveLength(1);
     expect(projects[0]!.id).toBe("p1");
-    expect(projects[0]!.name).toBe("myproj");
+    expect(projects[0]!.name).toBe("myProject");
+    expect(projects[0]!.slug).toBe("myproject");
     expect(projects[0]!.path).toBe(projPath);
-    expect(projects[0]!.github).toEqual({ owner: "protoLabsAI", repo: "myproj" });
+    expect(projects[0]!.github).toEqual({ owner: "protoLabsAI", repo: "myProject" });
     expect(projects[0]!.defaultBranch).toBe("main");
-    expect(projects[0]!.source).toBe("protomaker");
     expect(fetchCount).toBe(1);
   });
 
@@ -162,25 +170,19 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     fakeProjects.push({ id: "p2", name: "no-git", path: projPath });
 
     plugin = newPlugin();
-    plugin.install(bus);
-    await new Promise((r) => setTimeout(r, 50));
+    await plugin.refreshNow();
 
     const p = plugin.getProjects()[0]!;
     expect(p.github).toBeUndefined();
     expect(p.defaultBranch).toBeUndefined();
   });
 
-  test("unreachable protoMaker server → plugin starts empty, lastError set", async () => {
-    // Point at a port that's not listening — any free port other than the
-    // test server's. Pick a high port and assume it's unused.
+  test("unreachable protoMaker server → plugin stays empty, lastError set", async () => {
     plugin = new ProtomakerProjectRegistryPlugin({
-      apiBase: "http://localhost:1", // port 1 is reserved + reliably refuses
-      workspaceDir: tempDir,
+      apiBase: "http://localhost:1",
       refreshIntervalMs: 50_000,
-      parityCheck: false,
     });
-    plugin.install(bus);
-    await new Promise((r) => setTimeout(r, 100));
+    await plugin.refreshNow();
 
     expect(plugin.getProjects()).toHaveLength(0);
     expect(plugin.getLastError()).toBeDefined();
@@ -196,109 +198,30 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     });
 
     plugin = newPlugin();
-    plugin.install(bus);
-    await new Promise((r) => setTimeout(r, 50));
+    await plugin.refreshNow();
 
     expect(plugin.getProjects()).toHaveLength(0);
     expect(plugin.getLastError()).toBeDefined();
     expect(plugin.getLastError()!).toContain("success=false");
   });
 
-  test("parityCheck: logs nothing when no projects.yaml exists", async () => {
-    // No projects.yaml in tempDir → parityCheck silently does nothing.
-    const projPath = join(tempDir, "x");
-    makeGitRepo(projPath, "foo/x", "main");
-    fakeProjects.push({ id: "p1", name: "x", path: projPath });
+  test("accessors: getBySlug / getByGithub / getByPath / getGithubCoords", async () => {
+    const a = join(tempDir, "alpha");
+    const b = join(tempDir, "beta");
+    makeGitRepo(a, "org/alpha", "main");
+    makeGitRepo(b, "org/beta", "dev");
+    fakeProjects.push({ id: "a", name: "alpha", path: a });
+    fakeProjects.push({ id: "b", name: "beta", path: b });
 
-    const warnLogs: string[] = [];
-    const origWarn = console.warn;
-    console.warn = (...args: unknown[]) => warnLogs.push(args.join(" "));
+    plugin = newPlugin();
+    await plugin.refreshNow();
 
-    plugin = newPlugin({ parityCheck: true });
-    plugin.install(bus);
-    await new Promise((r) => setTimeout(r, 50));
-
-    console.warn = origWarn;
-    const parityWarns = warnLogs.filter((l) => l.includes("parity"));
-    expect(parityWarns).toHaveLength(0);
-  });
-
-  test("parityCheck: logs warning when project is only in protoMaker", async () => {
-    const projPath = join(tempDir, "only-pm");
-    makeGitRepo(projPath, "foo/only-pm", "main");
-    fakeProjects.push({ id: "p1", name: "only-pm", path: projPath });
-
-    // projects.yaml present but empty.
-    writeFileSync(join(tempDir, "projects.yaml"), "projects: []\n");
-
-    const warnLogs: string[] = [];
-    const origWarn = console.warn;
-    console.warn = (...args: unknown[]) => warnLogs.push(args.join(" "));
-
-    plugin = newPlugin({ parityCheck: true });
-    plugin.install(bus);
-    await new Promise((r) => setTimeout(r, 50));
-
-    console.warn = origWarn;
-    const onlyPmWarn = warnLogs.find((l) => l.includes("only in protoMaker"));
-    expect(onlyPmWarn).toBeDefined();
-    expect(onlyPmWarn!).toContain("only-pm");
-  });
-
-  test("parityCheck: logs warning when project is only in yaml", async () => {
-    // protoMaker returns nothing.
-    writeFileSync(
-      join(tempDir, "projects.yaml"),
-      `projects:
-  - slug: stale-project
-    projectPath: /tmp/stale-project
-    github: foo/stale
-`,
-    );
-
-    const warnLogs: string[] = [];
-    const origWarn = console.warn;
-    console.warn = (...args: unknown[]) => warnLogs.push(args.join(" "));
-
-    plugin = newPlugin({ parityCheck: true });
-    plugin.install(bus);
-    await new Promise((r) => setTimeout(r, 50));
-
-    console.warn = origWarn;
-    const onlyYamlWarn = warnLogs.find((l) => l.includes("only in projects.yaml"));
-    expect(onlyYamlWarn).toBeDefined();
-    expect(onlyYamlWarn!).toContain("stale-project");
-  });
-
-  test("parityCheck: logs warning on github mismatch for same path", async () => {
-    const projPath = join(tempDir, "shared");
-    makeGitRepo(projPath, "protoLabsAI/shared", "main"); // git config says protoLabsAI/shared
-
-    fakeProjects.push({ id: "p1", name: "shared", path: projPath });
-
-    // yaml says a different github coordinate.
-    writeFileSync(
-      join(tempDir, "projects.yaml"),
-      `projects:
-  - slug: shared
-    projectPath: ${projPath}
-    github: different-org/different-repo
-`,
-    );
-
-    const warnLogs: string[] = [];
-    const origWarn = console.warn;
-    console.warn = (...args: unknown[]) => warnLogs.push(args.join(" "));
-
-    plugin = newPlugin({ parityCheck: true });
-    plugin.install(bus);
-    await new Promise((r) => setTimeout(r, 50));
-
-    console.warn = origWarn;
-    const mismatchWarn = warnLogs.find((l) => l.includes("github mismatch"));
-    expect(mismatchWarn).toBeDefined();
-    expect(mismatchWarn!).toContain("protoLabsAI/shared");
-    expect(mismatchWarn!).toContain("different-org/different-repo");
+    expect(plugin.getBySlug("alpha")?.id).toBe("a");
+    expect(plugin.getBySlug("missing")).toBeUndefined();
+    expect(plugin.getByGithub("org/beta")?.id).toBe("b");
+    expect(plugin.getByGithub("missing/repo")).toBeUndefined();
+    expect(plugin.getByPath(a)?.id).toBe("a");
+    expect(plugin.getGithubCoords().sort()).toEqual(["org/alpha", "org/beta"]);
   });
 
   test("uninstall clears refresh timer + project list", async () => {
@@ -307,8 +230,8 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     fakeProjects.push({ id: "p1", name: "x", path: projPath });
 
     plugin = newPlugin();
+    await plugin.refreshNow();
     plugin.install(bus);
-    await new Promise((r) => setTimeout(r, 50));
     expect(plugin.getProjects()).toHaveLength(1);
 
     plugin.uninstall();

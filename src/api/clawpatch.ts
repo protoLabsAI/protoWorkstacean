@@ -11,9 +11,9 @@
  *
  *   1. `CLAWPATCH_REPO_PATH_MAP` env override (JSON owner/name → abs path)
  *      — dev-only escape hatch for pointing at a local working tree.
- *   2. `workspace/projects.yaml` allowlist gate, then `CheckoutCache` —
- *      every other repo (including the ones that used to be bind-mounted)
- *      goes through the cache so Quinn always reviews the exact PR ref.
+ *   2. Project-registry allowlist gate, then `CheckoutCache` — every other
+ *      repo (including the ones that used to be bind-mounted) goes through
+ *      the cache so Quinn always reviews the exact PR ref.
  *
  * No bind-mount fast path. Per C1 sign-off (#578): "better way over fast
  * way" — a single resolution code path means no "did Quinn review the
@@ -31,13 +31,12 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { CheckoutCache } from "../../lib/checkout-cache.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
-import { parseProjectsYaml } from "../../lib/project-schema.ts";
 import type { Route, ApiContext } from "./types.ts";
+import type { ProtomakerProjectRegistryPlugin } from "../plugins/protomaker-project-registry-plugin.ts";
 
 /**
  * Where clawpatch persists `.clawpatch/` (features, findings, runs, reports,
@@ -120,22 +119,14 @@ export function setCheckoutCacheForTesting(cache: CheckoutCache | null): void {
 }
 
 /**
- * Load the set of repos allowed for clawpatch review from workspace/projects.yaml.
- * Same allowlist boundary that `create_github_issue` enforces — agents can't
- * point clawpatch at arbitrary GitHub repos.
+ * Load the set of repos allowed for clawpatch review from the project
+ * registry. Same allowlist boundary that `create_github_issue` enforces —
+ * agents can't point clawpatch at arbitrary GitHub repos.
  */
-function loadProjectAllowlist(workspaceDir: string): Set<string> {
-  const path = join(workspaceDir, "projects.yaml");
-  if (!existsSync(path)) return new Set();
-  try {
-    const raw = parseYaml(readFileSync(path, "utf8")) as unknown;
-    const parsed = parseProjectsYaml(raw);
-    return new Set(parsed.projects.map(p => p.github));
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[clawpatch] projects.yaml load failed: ${msg} — allowlist empty`);
-    return new Set();
-  }
+function loadProjectAllowlist(
+  projectRegistry: ProtomakerProjectRegistryPlugin | undefined,
+): Set<string> {
+  return new Set(projectRegistry?.getGithubCoords() ?? []);
 }
 
 /**
@@ -147,7 +138,7 @@ function loadProjectAllowlist(workspaceDir: string): Set<string> {
  *
  *   1. `CLAWPATCH_REPO_PATH_MAP` env override — dev-only escape hatch,
  *      lets a developer point clawpatch at a working tree.
- *   2. `projects.yaml` allowlist gate — same security boundary as
+ *   2. Project-registry allowlist gate — same security boundary as
  *      `create_github_issue`. Agents can't aim clawpatch at arbitrary
  *      GitHub repos.
  *   3. `CheckoutCache.resolve(repo, since)` — fetches the tarball at the
@@ -160,19 +151,19 @@ function loadProjectAllowlist(workspaceDir: string): Set<string> {
 async function resolveRepoPath(
   repo: string,
   since: string | undefined,
-  workspaceDir: string,
+  projectRegistry: ProtomakerProjectRegistryPlugin | undefined,
 ): Promise<{ ok: true; path: string } | { ok: false; error: string; status: number }> {
   const devOverride = resolveDevOverridePath(repo);
   if (devOverride) return { ok: true, path: devOverride };
 
-  const allow = loadProjectAllowlist(workspaceDir);
+  const allow = loadProjectAllowlist(projectRegistry);
   if (!allow.has(repo)) {
     return {
       ok: false,
       status: 400,
       error:
-        `repo '${repo}' is not in workspace/projects.yaml — clawpatch only reviews ` +
-        `managed projects. Add it to projects.yaml first (or set CLAWPATCH_REPO_PATH_MAP for local dev).`,
+        `repo '${repo}' is not in the project registry — clawpatch only reviews ` +
+        `managed projects. Register it in protoMaker first (or set CLAWPATCH_REPO_PATH_MAP for local dev).`,
     };
   }
 
@@ -271,7 +262,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
             { status: 400 },
           );
         }
-        const resolution = await resolveRepoPath(repo, since, ctx.workspaceDir);
+        const resolution = await resolveRepoPath(repo, since, ctx.projectRegistry);
         if (!resolution.ok) {
           return Response.json(
             { success: false, error: resolution.error },

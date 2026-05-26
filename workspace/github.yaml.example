@@ -2,7 +2,7 @@
 #
 # Copy this to workspace/github.yaml and edit. Read by lib/plugins/github.ts
 # on install and hot-reloaded on file change. monitoredRepos is derived from
-# projects.yaml automatically — never listed here.
+# the project registry automatically — never listed here.
 
 # The bot handle admins use to mention in issue/PR comments. Case-insensitive.
 # Use a dedicated handle (e.g. @protoquinn) to avoid colliding with real
@@ -43,7 +43,7 @@ autoTriage:
   events:
     - issues
   skillHint: bug_triage
-  monitoredRepos: [] # populated from projects.yaml at load time
+  monitoredRepos: [] # populated from the project registry at load time
   # Startup sweep: walk every monitored repo's open issues with the sweep
   # label on plugin install and dispatch any as synthetic inbound events.
   # Closes the "webhooks don't replay history" hole. Can also be triggered

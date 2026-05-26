@@ -15,6 +15,8 @@ import type { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "../executor/task-tracker.ts";
 import type { AgentKeyRegistry } from "../../lib/auth/agent-keys.ts";
 import type { BusHistoryRecorder } from "../event-bus/history-recorder.ts";
+import type { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
+import type { ProtomakerProjectRegistryPlugin } from "../plugins/protomaker-project-registry-plugin.ts";
 
 export type Params = Record<string, string>;
 export type RouteHandler = (req: Request, params: Params) => Response | Promise<Response>;
@@ -52,6 +54,10 @@ export interface ApiContext {
    * when the bus-history-recorder plugin is installed.
    */
   busHistory?: BusHistoryRecorder;
+  /** Source of truth for project metadata (slug, path, github coordinates). */
+  projectRegistry?: ProtomakerProjectRegistryPlugin;
+  /** Channels registry — used by routes that need per-project channel lookups. */
+  channelRegistry?: ChannelRegistry;
 }
 
 /** Match a path against a pattern like "/api/foo/:id/run". Returns params or null. */

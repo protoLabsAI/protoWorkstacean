@@ -1,16 +1,19 @@
 /**
  * OnboardingPlugin — deterministic project onboarding pipeline.
  *
- * Each step is idempotent: re-running for the same project slug is safe.
+ * Each step is idempotent: re-running for the same project is safe.
  *
  * Steps:
  *   1. validate       — check required fields, validate github format
- *   2. idempotency    — skip if project slug already in projects.yaml
- *   3. github_webhook — register GitHub webhook (no-op if no GitHub auth)
- *   4. drive_folder   — create per-project Drive folder under the org root
- *   5. projects_yaml  — upsert project entry into workspace/projects.yaml
- *   6. bus_notify     — publish message.inbound.onboard.complete for downstream consumers
- *   7. reply          — send confirmation to reply topic / Discord
+ *   2. github_webhook — register GitHub webhook (no-op if no GitHub auth)
+ *   3. drive_folder   — create per-project Drive folder under the org root
+ *   4. bus_notify     — publish message.inbound.onboard.complete for downstream consumers
+ *   5. reply          — send confirmation to reply topic / Discord
+ *
+ * Project registration itself is owned by protoMaker (the source of truth);
+ * this plugin only handles the side-effects (webhook + Drive folder) plus
+ * the bus notification. Operators register the project in protoMaker's UI
+ * before triggering onboarding here.
  *
  * Inbound triggers:
  *   message.inbound.onboard   (from POST /api/onboard or Discord /onboard command)
@@ -25,25 +28,12 @@
  *   WORKSTACEAN_PUBLIC_URL  base URL for webhook registration (e.g. https://ws.example.com)
  */
 
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
-import { validateProjectEntry } from "../project-schema.ts";
 import { createDriveFolder } from "./google.ts";
-
-// ── In-process write lock for projects.yaml ───────────────────────────────────
-// Serialises concurrent onboarding writes to prevent TOCTOU races when two
-// different slugs are onboarded simultaneously in the same Bun process.
-
-let _projectsYamlLockChain: Promise<void> = Promise.resolve();
-
-function withProjectsYamlLock(fn: () => void): Promise<void> {
-  const next = _projectsYamlLockChain.then(fn);
-  _projectsYamlLockChain = next.catch(() => {});
-  return next;
-}
 
 // ── Request / response types ──────────────────────────────────────────────────
 
@@ -72,7 +62,6 @@ interface StepResult {
 interface OnboardSteps {
   githubWebhook?: StepResult;
   driveFolder?: StepResult & { folderId?: string };
-  projectsYaml?: StepResult;
 }
 
 // ── GitHub webhook helpers ────────────────────────────────────────────────────
@@ -132,28 +121,6 @@ async function createGitHubWebhook(
   );
 
   return resp.ok;
-}
-
-// ── projects.yaml helpers ─────────────────────────────────────────────────────
-
-interface ProjectsYaml {
-  projects: Record<string, unknown>[];
-}
-
-function readProjectsYaml(projectsPath: string): ProjectsYaml {
-  if (!existsSync(projectsPath)) return { projects: [] };
-  try {
-    const raw = readFileSync(projectsPath, "utf8");
-    const parsed = parseYaml(raw) as ProjectsYaml;
-    return { projects: parsed.projects ?? [] };
-  } catch {
-    return { projects: [] };
-  }
-}
-
-function projectSlugExists(projectsPath: string, slug: string): boolean {
-  const { projects } = readProjectsYaml(projectsPath);
-  return projects.some(p => (p as Record<string, unknown>).slug === slug);
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -228,55 +195,24 @@ export class OnboardingPlugin implements Plugin {
   }
 
   private async _pipeline(bus: EventBus, msg: BusMessage, req: OnboardRequest): Promise<void> {
-    const projectsPath = join(this.workspaceDir, "projects.yaml");
-
-    // ── Step 2: Idempotency check ────────────────────────────────────────────
-    if (projectSlugExists(projectsPath, req.slug)) {
-      console.log(`[onboarding] ${req.slug}: already onboarded — skipping`);
-      this._reply(bus, msg, {
-        success: true,
-        step: "idempotency",
-        status: "already_onboarded",
-        slug: req.slug,
-        message: `Project "${req.slug}" is already registered in projects.yaml`,
-      });
-      return;
-    }
-
     console.log(`[onboarding] Starting pipeline for "${req.slug}" (${req.github})`);
     const steps: OnboardSteps = {};
 
-    // ── Step 3: GitHub webhook ───────────────────────────────────────────────
+    // ── Step 2: GitHub webhook ───────────────────────────────────────────────
     steps.githubWebhook = await this._stepGitHubWebhook(req);
-    console.log(`[onboarding] Step 3 github_webhook: ${steps.githubWebhook.status} — ${steps.githubWebhook.detail ?? ""}`);
+    console.log(`[onboarding] Step 2 github_webhook: ${steps.githubWebhook.status} — ${steps.githubWebhook.detail ?? ""}`);
 
-    // ── Step 4: Drive folder creation ────────────────────────────────────────
+    // ── Step 3: Drive folder creation ────────────────────────────────────────
     steps.driveFolder = await this._stepDriveFolder(req);
-    console.log(`[onboarding] Step 4 drive_folder: ${steps.driveFolder.status} — ${steps.driveFolder.detail ?? ""}`);
+    console.log(`[onboarding] Step 3 drive_folder: ${steps.driveFolder.status} — ${steps.driveFolder.detail ?? ""}`);
 
-    // ── Step 5: Update projects.yaml (serialised to prevent TOCTOU races) ────
-    const driveFolderId = steps.driveFolder?.data?.folderId as string | undefined;
-    await withProjectsYamlLock(() => {
-      steps.projectsYaml = this._stepUpdateProjectsYaml(req, projectsPath, driveFolderId);
-    });
-    console.log(`[onboarding] Step 5 projects_yaml: ${steps.projectsYaml!.status} — ${steps.projectsYaml!.detail ?? ""}`);
-
-    if (steps.projectsYaml!.status === "error") {
-      this._reply(bus, msg, {
-        success: false,
-        step: "projects_yaml",
-        error: steps.projectsYaml!.detail ?? "Failed to write projects.yaml",
-      });
-      return;
-    }
-
-    // ── Step 6: Bus notify ───────────────────────────────────────────────────
+    // ── Step 4: Bus notify ───────────────────────────────────────────────────
     this._stepBusNotify(bus, req, steps, msg.correlationId);
-    console.log(`[onboarding] Step 6 bus_notify: ok — published message.inbound.onboard.complete`);
+    console.log(`[onboarding] Step 4 bus_notify: ok — published message.inbound.onboard.complete`);
 
-    // ── Step 7: Reply ────────────────────────────────────────────────────────
+    // ── Step 5: Reply ────────────────────────────────────────────────────────
     const summary = this._buildSummary(req, steps);
-    console.log(`[onboarding] Step 7 reply: ok — ${req.slug} onboarded`);
+    console.log(`[onboarding] Step 5 reply: ok — ${req.slug} onboarded`);
     this._reply(bus, msg, {
       success: true,
       step: "complete",
@@ -287,7 +223,6 @@ export class OnboardingPlugin implements Plugin {
       steps: {
         githubWebhook: steps.githubWebhook?.status,
         driveFolder: steps.driveFolder?.status,
-        projectsYaml: steps.projectsYaml?.status,
       },
     });
   }
@@ -379,75 +314,7 @@ export class OnboardingPlugin implements Plugin {
     }
   }
 
-  /** Step 5: Upsert project entry into workspace/projects.yaml. */
-  private _stepUpdateProjectsYaml(
-    req: OnboardRequest,
-    projectsPath: string,
-    driveFolderId?: string,
-  ): StepResult {
-    try {
-      // Double-check idempotency (guard against race between two concurrent runs)
-      if (projectSlugExists(projectsPath, req.slug)) {
-        return { status: "skip", detail: `Slug "${req.slug}" already present — skipping write` };
-      }
-
-      const { projects } = readProjectsYaml(projectsPath);
-
-      const entry: Record<string, unknown> = {
-        slug: req.slug,
-        title: req.title,
-        team: req.team ?? "dev",
-        github: req.github,
-        defaultBranch: req.defaultBranch ?? "main",
-        status: "active",
-        onboardedAt: new Date().toISOString(),
-        agents: req.agents ?? ["protomaker", "quinn"],
-        // Ensure discord.dev is always present (required by schema)
-        discord: {
-          dev: "",
-          ...(req.discord ?? {}),
-        },
-      };
-
-      // Add Google Workspace metadata (folder ID populated if Drive step succeeded)
-      entry.googleWorkspace = {
-        driveFolderId: driveFolderId ?? "",
-        sharedDocId: "",
-        calendarId: "",
-      };
-
-      // Validate the entry against the project schema before writing
-      const validation = validateProjectEntry(entry);
-      if (!validation.ok) {
-        return {
-          status: "error",
-          detail: `Schema validation failed: ${validation.errors.join("; ")}`,
-        };
-      }
-
-      projects.push(entry);
-
-      // Preserve header comment if present
-      let existingContent = "";
-      if (existsSync(projectsPath)) {
-        existingContent = readFileSync(projectsPath, "utf8");
-      }
-      const headerMatch = existingContent.match(/^(#[^\n]*\n)*/);
-      const header = headerMatch ? headerMatch[0] : "";
-
-      const newContent = header + stringifyYaml({ projects }, { lineWidth: 120 });
-      writeFileSync(projectsPath, newContent, "utf8");
-
-      return { status: "ok", detail: `Appended "${req.slug}" to projects.yaml` };
-    } catch (err) {
-      return {
-        status: "error",
-        detail: `Failed to write projects.yaml: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-  }
-
-  /** Step 6: Publish completion event to bus. */
+  /** Step 4: Publish completion event to bus. */
   private _stepBusNotify(
     bus: EventBus,
     req: OnboardRequest,
@@ -522,7 +389,8 @@ export class OnboardingPlugin implements Plugin {
       "Steps:",
       `  • GitHub webhook: ${this._statusEmoji(steps.githubWebhook?.status)} ${steps.githubWebhook?.detail ?? ""}`,
       `  • Drive folder: ${this._statusEmoji(steps.driveFolder?.status)} ${steps.driveFolder?.detail ?? ""}`,
-      `  • projects.yaml: ${this._statusEmoji(steps.projectsYaml?.status)} ${steps.projectsYaml?.detail ?? ""}`,
+      "",
+      "Project registration itself is owned by protoMaker — register the project there before triggering onboarding.",
     ];
     return lines.join("\n");
   }

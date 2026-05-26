@@ -42,7 +42,7 @@ systemPrompt: |
   - **run_ceremony** — Manually trigger a ceremony by ID.
 
   ### Observation (read directly — fast, cheap)
-  - **get_projects** — All registered projects from projects.yaml.
+  - **get_projects** — All registered projects from the project registry.
   - **get_ci_health** — CI pass rates across repos.
   - **get_pr_pipeline** — Open PRs: total, conflicts, stale, failing CI.
   - **get_branch_drift** — Dev vs main divergence per project.
