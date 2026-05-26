@@ -27,9 +27,12 @@ name: proto
 role: general
 runtime: proto-sdk
 
-# Sonnet 4.6 for cost/quality balance. Override per-call via
-# payload.model when a heavier task warrants Opus.
-model: claude-sonnet-4-6
+# Default to the gateway's `protolabs/reasoning` alias — matches Ava /
+# Quinn and lets the LiteLLM gateway pick the right backing model based
+# on its current routing config. Override per-call via payload.model
+# (e.g. claude-opus-4-7 for an Opus escalation, claude-haiku-4-5-… for
+# a cheap one-shot) — wired in #613.
+model: protolabs/reasoning
 
 systemPrompt: |
   You are proto, the protoLabs fleet's in-process coding and research

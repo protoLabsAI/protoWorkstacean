@@ -69,7 +69,7 @@ In-process agent definition. One file per agent. Read by `AgentRuntimePlugin`.
 ```yaml
 name: string                    # Must be globally unique and match the filename
 role: orchestrator | qa | devops | content | research | general
-model: string                   # LLM model alias (e.g. "claude-sonnet-4-6")
+model: string                   # LLM model alias (e.g. "protolabs/reasoning", "claude-sonnet-4-6")
 systemPrompt: string            # Full system prompt
 tools:                          # Workstacean bus tools this agent may call
   - string                      # publish_event | get_world_state | get_incidents |
@@ -95,7 +95,7 @@ skills:
 # workspace/agents/ava.yaml
 name: ava
 role: general
-model: claude-sonnet-4-6
+model: protolabs/reasoning
 systemPrompt: |
   You are Ava, a conversational protoAgent. Your job is to be a
   thoughtful chat partner. You have no tools — when a request needs

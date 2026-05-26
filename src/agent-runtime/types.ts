@@ -73,7 +73,12 @@ export interface AgentDefinition {
 
   /**
    * LLM model alias as recognised by the gateway.
-   * Example: "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"
+   * Fleet default: "protolabs/reasoning" (LiteLLM resolves it to whichever
+   * concrete model is currently provisioned for reasoning workloads).
+   * Concrete names also work — e.g. "claude-opus-4-7", "claude-sonnet-4-6",
+   * "claude-haiku-4-5-20251001" — and bypass the gateway-side alias.
+   * Per-call override: dispatch payload may carry `model: "<alias>"` to
+   * temporarily swap this for one invocation (wired in #613).
    */
   model: string;
 
