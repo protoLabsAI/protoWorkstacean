@@ -13,7 +13,9 @@
  *   merge_ready:
  *     - If title/author matches auto-merge allowlist (dependabot, promote:,
  *       labeled "auto-merge") → POST /repos/{repo}/pulls/{num}/merge
- *     - Otherwise → publish hitl.request.pr.merge.{id} with an approval card
+ *     - Otherwise → no auto-merge; PR sits until operator action. (See
+ *       _emitStuckHitlEscalation for the operator-DM escalation that fires
+ *       when remediation attempts exhaust.)
  *
  *   fix_ci:
  *     - Publish agent.skill.request to Ava with skillHint="bug_triage" and
@@ -774,16 +776,19 @@ export class PrRemediatorPlugin implements Plugin {
   }
 
   /**
-   * Emit a HITL request when a (PR, kind) tuple exhausts its attempt budget.
+   * Escalate to the operator when a (PR, kind) tuple exhausts its attempt budget.
    *
    * This is the "bottlenecks are growth opportunities" escalation: every stuck
    * remediation is a signal that the auto-remediation capability is missing
-   * something. Notifying a human via HITL both unblocks the immediate case
-   * AND creates a visible record that pattern analysis can turn into
-   * future improvements (new goals, new actions, new skills).
+   * something. Notifying a human both unblocks the immediate case AND creates a
+   * visible record that pattern analysis can turn into future improvements
+   * (new goals, new actions, new skills).
    *
-   * The request goes to topic `hitl.request.pr.remediation_stuck.{correlationId}`
-   * which the HITL plugin routes to its registered renderers (Discord, etc).
+   * Wire: publishes `operator.message.request` which OperatorRoutingPlugin
+   * routes to a Discord DM via the admin identity in `workspace/users.yaml`.
+   * One-way today — the operator decides + acts manually on GitHub. If/when
+   * a bidirectional reply path is wired, it will appear as a separate
+   * `operator.message.response` subscriber here.
    */
   private async _emitStuckHitlEscalation(
     repo: string,
@@ -831,16 +836,42 @@ export class PrRemediatorPlugin implements Plugin {
 
     const durationMs = Date.now() - entry.startedAt;
     const durationMin = Math.round(durationMs / 60_000);
+    const prUrl = `https://github.com/${repo}/pull/${number}`;
 
-    // No approval gate is wired in this build — log loudly and stop trying.
-    // The PR stays in its current state; an operator can re-trigger remediation
-    // by hand or close/merge the PR themselves.
+    // Log loudly for ops tailing container logs — independent of the bus path.
     console.warn(
-      `[pr-remediator] STUCK → giving up: ${repo}#${number} kind=${kind} attempts=${entry.attempts}/${MAX_ATTEMPTS_PER_PR} duration=${durationMin}min. ` +
-      `Auto-remediation budget exhausted, no approval gate wired. ` +
+      `[pr-remediator] STUCK → escalating to operator: ${repo}#${number} kind=${kind} attempts=${entry.attempts}/${MAX_ATTEMPTS_PER_PR} duration=${durationMin}min. ` +
       (conflictDetails ? `Conflict: ${conflictDetails}. ` : "") +
-      `https://github.com/${repo}/pull/${number}`,
+      prUrl,
     );
+
+    const messageLines = [
+      `PR stuck after ${entry.attempts}/${MAX_ATTEMPTS_PER_PR} ${kind} attempts (${durationMin}m). Auto-remediation budget exhausted.`,
+    ];
+    if (conflictDetails) {
+      messageLines.push("", `**Why:** ${conflictDetails}`);
+    }
+    messageLines.push("", prUrl);
+
+    // Conflict-bearing escalations carry diagnostic context from
+    // diagnose_pr_stuck (genuine semantic conflict or promotion-PR guard) —
+    // those need higher urgency than a plain "ran out of retries".
+    const urgency: "normal" | "high" = conflictDetails ? "high" : "normal";
+
+    this.bus.publish("operator.message.request", {
+      id: crypto.randomUUID(),
+      correlationId: entry.correlationId,
+      topic: "operator.message.request",
+      timestamp: Date.now(),
+      payload: {
+        type: "operator_message_request",
+        correlationId: entry.correlationId,
+        message: messageLines.join("\n"),
+        urgency,
+        topic: `pr-remediation-stuck/${repo}#${number}/${kind}`,
+        from: "pr-remediator",
+      },
+    });
   }
 
   private _recordDispatch(

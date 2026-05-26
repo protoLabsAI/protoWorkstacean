@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
-    branches: [main, dev]
+    branches: [main]
 
 env:
   REGISTRY: ghcr.io
@@ -12,7 +12,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-protolabs-linux
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +38,7 @@ jobs:
     # because every PR CI went green while dashboard build would have blown
     # up. See task #82 in the board. Keep this job fast (astro build is ~1s)
     # and independent so the full CI cost is negligible.
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-protolabs-linux
     steps:
       - uses: actions/checkout@v4
 
@@ -60,6 +60,14 @@ jobs:
         working-directory: dashboard
         run: bun install --frozen-lockfile
 
+      - name: Run dashboard tests
+        # Dashboard owns its own deps (preact/compat, @xyflow/react, …) —
+        # root `bun test` is scoped via root bunfig.toml to lib/ + src/
+        # only, so tests under dashboard/src/**/__tests__/ have to run
+        # here where dashboard node_modules is resolvable.
+        working-directory: dashboard
+        run: bun test
+
       - name: Build dashboard (astro build)
         working-directory: dashboard
         run: bun run build
@@ -67,6 +75,7 @@ jobs:
   build-and-push:
     needs: [test, dashboard]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # workspace-config: allow-hosted-runner docker buildx multi-arch build + registry push
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -114,7 +123,7 @@ jobs:
         run: |
           node -e "
           const webhook = process.env.WEBHOOK;
-          if (!webhook) { console.log('No dev webhook configured — skipping'); process.exit(0); }
+          if (!webhook) { console.log('No dev-channel webhook secret configured — skipping'); process.exit(0); }
 
           const subject = (process.env.COMMIT_SUBJECT ?? '').split('\n')[0];
           const sha     = (process.env.SHORT_SHA ?? '').slice(0, 7);
@@ -126,5 +135,5 @@ jobs:
             body: JSON.stringify({ embeds: [{ title: \`Shipped — \${sha}\`, description: subject, url, color: 5763719, footer: { text: 'protoWorkstacean' } }] }),
           });
           if (!resp.ok) { console.error('Discord post failed:', resp.status); process.exit(1); }
-          console.log('Posted to dev channel.');
+          console.log('Posted to dev-channel webhook.');
           " --input-type=module

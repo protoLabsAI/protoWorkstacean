@@ -36,6 +36,15 @@ if (!existsSync(dataDir)) {
 
 const bus = new InMemoryEventBus();
 
+// --- Bus history recorder — in-memory ring buffer that captures every bus
+//     message for /api/bus/history (D1 skill-trace view). Installed BEFORE
+//     any other plugin so we don't miss early-startup traffic. See
+//     src/event-bus/history-recorder.ts for ring + TTL semantics.
+import { BusHistoryRecorder, BusHistoryRecorderPlugin } from "./event-bus/history-recorder.ts";
+const busHistoryRecorder = new BusHistoryRecorder();
+const busHistoryRecorderPlugin = new BusHistoryRecorderPlugin(busHistoryRecorder);
+busHistoryRecorderPlugin.install(bus);
+
 // --- Context mailbox — mid-execution DM queue for debounced message injection ---
 import { ContextMailbox } from "../lib/dm/context-mailbox.ts";
 const contextMailbox = new ContextMailbox();
@@ -186,6 +195,19 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Linear → proto code.execute bridge. Label-gated (default
+    // "proto-task", override via LINEAR_PROTO_BRIDGE_LABEL). No yaml
+    // config needed; safe to install unconditionally.
+    name: "linear-proto-bridge",
+    condition: () => true,
+    factory: async () => {
+      const { LinearProtoBridgePlugin } = await import(
+        "../lib/plugins/linear-proto-bridge"
+      );
+      return new LinearProtoBridgePlugin();
+    },
+  },
+  {
     // Google Workspace — Drive / Docs / Calendar / Gmail outbound + polling.
     // Gated on the full OAuth2 credential triple. The plugin's own install()
     // logs and skips wiring when any are missing, so the gate here is mostly
@@ -257,6 +279,20 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Routes Quinn's REQUEST_CHANGES verdicts to Discord. Subscribes to
+    // quinn.review.submitted (published by src/api/pr-inspector.ts after
+    // every review_* action) and republishes blocking verdicts as
+    // message.outbound.discord.alert so the operator sees them in Discord
+    // without refreshing GitHub. APPROVE/COMMENT verdicts are intentionally
+    // silent — only blocking signals get pinged.
+    name: "quinn-review-notifier",
+    condition: () => true,
+    factory: async () => {
+      const { QuinnReviewNotifierPlugin } = await import("./plugins/quinn-review-notifier-plugin.js");
+      return new QuinnReviewNotifierPlugin();
+    },
+  },
+  {
     // Registers FunctionExecutors that bridge `ceremony.*` skills to the
     // matching `ceremony.<id>.execute` bus trigger CeremonyPlugin listens
     // for, so any skill caller (cron, external trigger, agent) can invoke
@@ -268,6 +304,20 @@ const pluginRegistry: PluginRegistryEntry[] = [
     factory: async () => {
       const { CeremonySkillExecutorPlugin } = await import("./plugins/ceremony-skill-executor-plugin.js");
       return new CeremonySkillExecutorPlugin(executorRegistry);
+    },
+  },
+  {
+    // Registers a FunctionExecutor for `ceremony.clawpatch_cache_cleanup`
+    // (workspace/ceremonies/clawpatch-cache-cleanup.yaml). Pure janitor — calls
+    // CheckoutCache.prune() directly; no agent involved. Same install-order
+    // constraint as alert-skill-executor.
+    name: "clawpatch-cache-cleanup-skill-executor",
+    condition: () => true,
+    factory: async () => {
+      const { ClawpatchCacheCleanupSkillExecutorPlugin } = await import(
+        "./plugins/clawpatch-cache-cleanup-skill-executor-plugin.js"
+      );
+      return new ClawpatchCacheCleanupSkillExecutorPlugin(executorRegistry);
     },
   },
   {
@@ -329,6 +379,44 @@ const pluginRegistry: PluginRegistryEntry[] = [
       const { AgentFleetHealthPlugin } = await import("./plugins/agent-fleet-health-plugin.js");
       // executorRegistry wired for outcome attribution whitelist (#459).
       return new AgentFleetHealthPlugin(executorRegistry);
+    },
+  },
+  {
+    // Polls fleet-health every minute (via fleet_alerts ceremony) and dispatches
+    // alert.* skills when thresholds trip. Re-wires the alert path that was
+    // orphaned when the GOAP layer was ripped (#518).
+    name: "fleet-alerts-evaluator",
+    condition: () => true,
+    factory: async () => {
+      const { FleetAlertsEvaluatorPlugin } = await import(
+        "./plugins/fleet-alerts-evaluator-plugin.js"
+      );
+      type AgentFleetHealthPlugin =
+        import("./plugins/agent-fleet-health-plugin.js").AgentFleetHealthPlugin;
+      const fleetHealth = registeredPlugins.find(p => p.name === "agent-fleet-health");
+      if (!fleetHealth) {
+        throw new Error(
+          "[fleet-alerts-evaluator] AgentFleetHealthPlugin must be registered first — check pluginRegistry order",
+        );
+      }
+      return new FleetAlertsEvaluatorPlugin(
+        executorRegistry,
+        fleetHealth as unknown as AgentFleetHealthPlugin,
+      );
+    },
+  },
+  {
+    // Watches dispatch.dropped.# (from SkillDispatcher) for storms — N drops
+    // on same key in M min. Escalates to operator.message.request (same pipe
+    // as #619 pr-remediator stuck-PR escalations). Per-key cooldown prevents
+    // DM flood.
+    name: "dispatch-drop-escalator",
+    condition: () => true,
+    factory: async () => {
+      const { DispatchDropEscalatorPlugin } = await import(
+        "./plugins/dispatch-drop-escalator-plugin.js"
+      );
+      return new DispatchDropEscalatorPlugin();
     },
   },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
@@ -460,6 +548,7 @@ const apiContext: ApiContext = {
   agentKeys,
   mailbox: contextMailbox,
   taskTracker,
+  busHistory: busHistoryRecorder,
 };
 
 const routes = createAllRoutes(apiContext);
@@ -473,6 +562,70 @@ const routes = createAllRoutes(apiContext);
 interface BusSubscribeWsData {
   topic: string;
   subscriberId?: string;
+}
+
+// ── Dashboard static-asset serving ───────────────────────────────────────────
+// Astro emits an HTML-per-route layout (`dashboard/dist/system/index.html`,
+// `dashboard/dist/_astro/<hash>.css`, etc.). Map pathnames to files like a
+// minimal static host:
+//   /                  → dashboard/dist/index.html
+//   /system            → dashboard/dist/system/index.html
+//   /system/           → dashboard/dist/system/index.html
+//   /system/foo.png    → dashboard/dist/system/foo.png
+//   /_astro/x.css      → dashboard/dist/_astro/x.css
+// Returns null when no file matches; the caller falls through to the 404.
+const DASHBOARD_DIST = resolve(import.meta.dir, "../dashboard/dist");
+const MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".css":  "text/css; charset=utf-8",
+  ".js":   "application/javascript; charset=utf-8",
+  ".mjs":  "application/javascript; charset=utf-8",
+  ".json": "application/json",
+  ".svg":  "image/svg+xml",
+  ".png":  "image/png",
+  ".jpg":  "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".ico":  "image/x-icon",
+  ".woff2":"font/woff2",
+  ".woff": "font/woff",
+  ".map":  "application/json",
+  ".txt":  "text/plain; charset=utf-8",
+};
+
+async function serveDashboardAsset(pathname: string): Promise<Response | null> {
+  // Path traversal guard. Reject anything with `..` segments — Bun.file()
+  // resolves symlinks, but normalizing here is cheaper + clearer than
+  // discovering an escape after the fact.
+  if (pathname.split("/").some(seg => seg === "..")) return null;
+
+  // Strip leading slash; map "" / "/" to the dashboard index.
+  const rel = pathname.replace(/^\/+/, "") || "index.html";
+
+  // Try, in order: exact file, then directory/index.html (so /system loads
+  // /system/index.html the way Astro's static server would). For routes
+  // that don't match the dist layout at all (e.g. /api/foo would already
+  // have been handled by the API loop), both probes miss and we return null.
+  const candidates = [
+    join(DASHBOARD_DIST, rel),
+    join(DASHBOARD_DIST, rel, "index.html"),
+  ];
+  for (const candidate of candidates) {
+    const file = Bun.file(candidate);
+    if (await file.exists()) {
+      const ext = candidate.slice(candidate.lastIndexOf("."));
+      const type = MIME[ext] ?? "application/octet-stream";
+      // Hashed _astro/ assets are content-addressed and safe to cache hard;
+      // everything else (route HTML) stays mutable so dashboard rebuilds land.
+      const cacheControl = pathname.startsWith("/_astro/")
+        ? "public, max-age=31536000, immutable"
+        : "no-cache";
+      return new Response(file, {
+        headers: { "content-type": type, "cache-control": cacheControl },
+      });
+    }
+  }
+  return null;
 }
 
 Bun.serve<BusSubscribeWsData>({
@@ -504,6 +657,18 @@ Bun.serve<BusSubscribeWsData>({
       const params = matchPath(route.path, pathname);
       if (params) return route.handler(req, params);
     }
+
+    // Static dashboard fallback. The Astro static build lives at
+    // dashboard/dist/ in the container image (baked in by Dockerfile's
+    // dashboard-build stage). Without this, /system + /trace + every
+    // other dashboard route 404'd despite the assets being present —
+    // never wired since #555 shipped the dashboard. GET-only; API
+    // routes above always win.
+    if (req.method === "GET") {
+      const staticResp = await serveDashboardAsset(pathname);
+      if (staticResp) return staticResp;
+    }
+
     return Response.json({ success: false, error: "Not found" }, { status: 404 });
   },
   websocket: {

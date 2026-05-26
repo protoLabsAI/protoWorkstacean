@@ -20,10 +20,14 @@
  *   review_comment         → POST review with state=COMMENT
  *   review_approve         → POST review with state=APPROVE
  *   review_request_changes → POST review with state=REQUEST_CHANGES
+ *   close_pr               → PATCH state=closed (optionally with a leading comment)
+ *   close_pr_as_not_planned → PATCH state=closed + state_reason=not_planned
+ *   reopen_pr              → PATCH state=open
  */
 
 import type { Route, ApiContext } from "./types.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
+import { REVIEW_TOPICS } from "../event-bus/topics.ts";
 
 const getGithubToken = makeGitHubAuth();
 
@@ -34,13 +38,22 @@ type Action =
   | "diff_summary"
   | "review_comment"
   | "review_approve"
-  | "review_request_changes";
+  | "review_request_changes"
+  | "close_pr"
+  | "close_pr_as_not_planned"
+  | "reopen_pr";
 
 interface InspectRequest {
   action: Action;
   repo: string;
   pr_number?: number;
   body?: string;
+  /**
+   * When closing a PR via close_pr / close_pr_as_not_planned, optionally
+   * post a comment explaining why before flipping the state. Quinn uses
+   * this to link the close back to a verdict / fix-PR / triage decision.
+   */
+  comment?: string;
 }
 
 function parseRepo(repo: string): { owner: string; name: string } | null {
@@ -196,6 +209,44 @@ async function diffSummary(owner: string, name: string, pr: number): Promise<str
   return `**Diff for PR#${pr}:**\n\n\`\`\`diff\n${preview}\n\`\`\`${suffix}`;
 }
 
+/**
+ * Fire-and-forget bus notification that Quinn just submitted a formal
+ * review. Subscribers (today: quinn-review-notifier-plugin for Discord
+ * embeds) react to specific verdicts. Failure to publish must never
+ * cascade into the route handler — caller already returned a successful
+ * GitHub API result by the time this runs.
+ */
+function publishReviewSubmitted(
+  ctx: ApiContext,
+  owner: string,
+  name: string,
+  pr: number,
+  event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES",
+  body: string,
+): void {
+  try {
+    const correlationId = crypto.randomUUID();
+    ctx.bus.publish(REVIEW_TOPICS.QUINN_REVIEW_SUBMITTED, {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic: REVIEW_TOPICS.QUINN_REVIEW_SUBMITTED,
+      timestamp: Date.now(),
+      payload: {
+        owner,
+        repo: name,
+        prNumber: pr,
+        event,
+        prUrl: `https://github.com/${owner}/${name}/pull/${pr}`,
+        bodyPreview: body.slice(0, 600),
+      },
+    });
+  } catch (err) {
+    console.warn(
+      `[pr-inspector] failed to publish quinn.review.submitted: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
 async function submitReview(
   owner: string,
   name: string,
@@ -218,7 +269,72 @@ async function submitReview(
   return `${label} PR#${pr} in ${owner}/${name}.`;
 }
 
-export function createRoutes(_ctx: ApiContext): Route[] {
+async function postIssueComment(owner: string, name: string, n: number, body: string): Promise<void> {
+  const resp = await ghFetch(
+    owner,
+    name,
+    `https://api.github.com/repos/${owner}/${name}/issues/${n}/comments`,
+    {
+      method: "POST",
+      body: JSON.stringify({ body }),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+  if (!resp.ok) throw new Error(`GitHub API error posting comment on #${n}: ${resp.status} ${await resp.text()}`);
+}
+
+/**
+ * Flip a PR's state. GitHub uses the same /pulls/{n} PATCH endpoint for
+ * close + reopen via `state: "closed" | "open"`. PRs that are merged
+ * cannot be reopened — this surfaces as a 422 from GitHub. We let that
+ * bubble up so Quinn can fold the failure into her observation list.
+ *
+ * `state_reason` distinguishes the close motive on PRs the same way
+ * GitHub does for issues — "completed" (default) vs "not_planned"
+ * (closed without merging because it's stale / superseded / wrong
+ * approach). Quinn uses not_planned when the PR's underlying request
+ * has been resolved a different way.
+ */
+async function setPrState(
+  owner: string,
+  name: string,
+  pr: number,
+  state: "open" | "closed",
+  comment: string | undefined,
+  notPlanned = false,
+): Promise<string> {
+  // Drop the comment first so observers see the rationale before the
+  // state-change webhook fires. Failure to comment is non-fatal — log
+  // and proceed to the state change.
+  if (comment && comment.trim()) {
+    try {
+      await postIssueComment(owner, name, pr, comment);
+    } catch (e) {
+      console.warn(`[pr-inspector] comment-then-close: comment failed (proceeding): ${String(e).slice(0, 300)}`);
+    }
+  }
+
+  const body: Record<string, unknown> = { state };
+  if (state === "closed" && notPlanned) body.state_reason = "not_planned";
+
+  const resp = await ghFetch(
+    owner,
+    name,
+    `https://api.github.com/repos/${owner}/${name}/pulls/${pr}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+  if (!resp.ok) {
+    throw new Error(`GitHub API error setting PR#${pr} state=${state}: ${resp.status} ${await resp.text()}`);
+  }
+  const verb = state === "open" ? "Reopened" : notPlanned ? "Closed (not planned)" : "Closed";
+  return `${verb} PR#${pr} in ${owner}/${name}.`;
+}
+
+export function createRoutes(ctx: ApiContext): Route[] {
   return [
     {
       method: "POST",
@@ -231,7 +347,7 @@ export function createRoutes(_ctx: ApiContext): Route[] {
           return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 });
         }
 
-        const { action, repo, pr_number, body } = payload;
+        const { action, repo, pr_number, body, comment } = payload;
         if (!action || !repo) {
           return Response.json(
             { success: false, error: "action and repo are required" },
@@ -254,6 +370,9 @@ export function createRoutes(_ctx: ApiContext): Route[] {
           "review_comment",
           "review_approve",
           "review_request_changes",
+          "close_pr",
+          "close_pr_as_not_planned",
+          "reopen_pr",
         ];
         if (needsPr.includes(action) && (typeof pr_number !== "number" || !Number.isInteger(pr_number))) {
           return Response.json(
@@ -282,15 +401,27 @@ export function createRoutes(_ctx: ApiContext): Route[] {
                 return Response.json({ success: false, error: "body required for review_comment" }, { status: 400 });
               }
               result = await submitReview(owner, name, pr_number!, "COMMENT", body);
+              publishReviewSubmitted(ctx, owner, name, pr_number!, "COMMENT", body);
               break;
             case "review_approve":
               result = await submitReview(owner, name, pr_number!, "APPROVE", body ?? "");
+              publishReviewSubmitted(ctx, owner, name, pr_number!, "APPROVE", body ?? "");
               break;
             case "review_request_changes":
               if (!body) {
                 return Response.json({ success: false, error: "body required for review_request_changes" }, { status: 400 });
               }
               result = await submitReview(owner, name, pr_number!, "REQUEST_CHANGES", body);
+              publishReviewSubmitted(ctx, owner, name, pr_number!, "REQUEST_CHANGES", body);
+              break;
+            case "close_pr":
+              result = await setPrState(owner, name, pr_number!, "closed", comment, false);
+              break;
+            case "close_pr_as_not_planned":
+              result = await setPrState(owner, name, pr_number!, "closed", comment, true);
+              break;
+            case "reopen_pr":
+              result = await setPrState(owner, name, pr_number!, "open", comment, false);
               break;
             default:
               return Response.json({ success: false, error: `unknown action '${action}'` }, { status: 400 });

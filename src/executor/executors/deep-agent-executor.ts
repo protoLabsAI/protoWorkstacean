@@ -43,6 +43,19 @@ export function effectiveMaxTurnsFor(skillMaxTurns: number | undefined, agentMax
   return skillMaxTurns ?? agentMaxTurns;
 }
 
+/**
+ * Per-call model override wins when set + non-empty; else falls back to the
+ * agent's declared model. Whitespace-only overrides are treated as unset
+ * (covers the case where a Linear/Discord payload carries an accidental
+ * blank string through routing). Pure function — exported for unit testing.
+ */
+export function effectiveModelFor(payloadModel: unknown, agentModel: string): string {
+  if (typeof payloadModel === "string" && payloadModel.trim().length > 0) {
+    return payloadModel.trim();
+  }
+  return agentModel;
+}
+
 export function extractAiText(content: unknown): string {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
@@ -65,6 +78,17 @@ export interface DeepAgentConfig {
   gatewayApiKey?: string;
   apiBaseUrl?: string;
   apiKey?: string;
+  /**
+   * Best-effort telemetry hook fired for each tool-call turn made during
+   * a skill invocation. Wired by `AgentRuntimePlugin` to publish on
+   * `agent.runtime.activity.tool.call` so the /system dashboard can show
+   * live per-tool-call detail inside each agent's node. Errors thrown
+   * inside the callback are swallowed — telemetry never breaks a skill.
+   *
+   * Skill-level lifecycle (start / complete / error) is emitted by the
+   * SkillDispatcher across ALL executor types and does not need this hook.
+   */
+  onToolCall?: (event: { agentName: string; correlationId: string; skill?: string; toolNames: string[] }) => void;
 }
 
 // Each tool() call infers a unique DynamicStructuredTool<ZodObject<{specific fields}>, ...>.
@@ -231,14 +255,18 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
       {
         name: "pr_inspector",
         description:
-          "Inspect and review GitHub PRs. The `repo` arg (owner/name) is REQUIRED on every call — there is no default. Actions:\n" +
+          "Inspect AND act on GitHub PRs. The `repo` arg (owner/name) is REQUIRED on every call. Actions:\n" +
           "- list_open: list open PRs in a repo\n" +
           "- check_ci: CI check states for a PR\n" +
           "- coderabbit_threads: unresolved review threads on a PR\n" +
           "- diff_summary: first 200 lines of the PR diff\n" +
           "- review_comment: post a COMMENTED review (requires body)\n" +
           "- review_approve: post an APPROVED review (body optional)\n" +
-          "- review_request_changes: post a CHANGES_REQUESTED review (requires body)",
+          "- review_request_changes: post a CHANGES_REQUESTED review (requires body)\n" +
+          "- close_pr: close a PR (optionally with a leading comment explaining why)\n" +
+          "- close_pr_as_not_planned: close + mark state_reason=not_planned (use when the PR is stale, superseded, or the underlying request was resolved differently)\n" +
+          "- reopen_pr: reopen a closed (non-merged) PR\n\n" +
+          "Prefer closing a stale/resolved PR directly to filing a 'please close #X' issue — that's the cascade pattern from #556. Always include `comment` on close_pr / close_pr_as_not_planned so the close has audit context.",
         schema: z.object({
           action: z.enum([
             "list_open",
@@ -248,12 +276,16 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
             "review_comment",
             "review_approve",
             "review_request_changes",
+            "close_pr",
+            "close_pr_as_not_planned",
+            "reopen_pr",
           ]),
           repo: z.string().describe(
             "Repository in owner/name format (e.g. protoLabsAI/protoWorkstacean). REQUIRED on every call.",
           ),
           pr_number: z.number().int().optional(),
-          body: z.string().optional(),
+          body: z.string().optional().describe("Review body for review_* actions."),
+          comment: z.string().optional().describe("Optional leading comment posted before close_pr / close_pr_as_not_planned. Recommended for audit trail."),
         }),
       },
     ),
@@ -588,24 +620,55 @@ export class DeepAgentExecutor implements IExecutor {
   private readonly agentDef: AgentDefinition;
   private readonly model: ChatOpenAI;
   private readonly http: HttpClient;
+  private readonly onToolCall: DeepAgentConfig["onToolCall"];
+  private readonly gatewayUrl: string | undefined;
+  private readonly apiKey: string;
+  /**
+   * Cache of ChatOpenAI instances by model name — `agentDef.model` always
+   * resolves to `this.model`, but per-call overrides (`payload.model`) get
+   * a lazily-built clone keyed by the override string. Stops us from
+   * paying construction cost on every dispatch that overrides.
+   */
+  private readonly modelCache: Map<string, ChatOpenAI> = new Map();
 
   constructor(agentDef: AgentDefinition, config: DeepAgentConfig = {}) {
     this.agentDef = agentDef;
-    const gatewayUrl = config.gatewayUrl ?? process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL;
-    const apiKey = config.gatewayApiKey ?? process.env.OPENAI_API_KEY ?? "unused";
+    this.onToolCall = config.onToolCall;
+    this.gatewayUrl = config.gatewayUrl ?? process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL;
+    this.apiKey = config.gatewayApiKey ?? process.env.OPENAI_API_KEY ?? "unused";
 
-    this.model = new ChatOpenAI({
-      model: agentDef.model,
-      temperature: 0,
-      configuration: gatewayUrl ? { baseURL: gatewayUrl } : undefined,
-      apiKey,
-    });
+    this.model = this._buildModel(agentDef.model);
+    this.modelCache.set(agentDef.model, this.model);
 
     this.http = new HttpClient({
       baseUrl: config.apiBaseUrl ?? "http://localhost:3000",
       timeoutMs: 120_000, // 2 min — chat_with_agent calls A2A which can take time
       ...(config.apiKey ? { auth: { type: "api-key" as const, key: config.apiKey } } : {}),
     });
+  }
+
+  private _buildModel(modelName: string): ChatOpenAI {
+    return new ChatOpenAI({
+      model: modelName,
+      temperature: 0,
+      configuration: this.gatewayUrl ? { baseURL: this.gatewayUrl } : undefined,
+      apiKey: this.apiKey,
+    });
+  }
+
+  /**
+   * Resolve which ChatOpenAI to use for this dispatch. Defaults to the
+   * agent's declared model; per-call override via `payload.model` builds
+   * (and caches) a clone with the new model name. All other ChatOpenAI
+   * config (gateway URL, api key, temperature) stays identical.
+   */
+  private _modelFor(override: string | undefined): ChatOpenAI {
+    if (!override || override === this.agentDef.model) return this.model;
+    const cached = this.modelCache.get(override);
+    if (cached) return cached;
+    const built = this._buildModel(override);
+    this.modelCache.set(override, built);
+    return built;
   }
 
   async execute(req: SkillRequest): Promise<SkillResult> {
@@ -640,13 +703,24 @@ export class DeepAgentExecutor implements IExecutor {
       // that replace the agent's general-purpose prompt.
       const basePrompt = skillDef?.systemPromptOverride ?? this.agentDef.systemPrompt;
 
+      // Per-call model override via payload.model — see effectiveModelFor
+      // + the matching path in ProtoSdkExecutor. Lets a caller escalate to
+      // Opus (or downshift to Haiku) for one dispatch without editing the
+      // agent yaml.
+      const resolvedModel = effectiveModelFor(req.payload?.model, this.agentDef.model);
+      const modelOverride = resolvedModel !== this.agentDef.model ? resolvedModel : undefined;
+      const llm = this._modelFor(modelOverride);
+
       const agent = createReactAgent({
-        llm: this.model,
+        llm,
         tools,
         messageModifier: new SystemMessage(basePrompt),
       });
 
-      console.log(`[deep-agent:${this.agentDef.name}] invoke skill="${req.skill ?? "?"}" tools=${tools.length}/${agentTools.length} maxTurns=${effectiveMaxTurns} promptLen=${prompt.length} langfuse=${LANGFUSE_ENABLED}`);
+      const usingModel = modelOverride && modelOverride !== this.agentDef.model
+        ? ` (model override: ${modelOverride})`
+        : "";
+      console.log(`[deep-agent:${this.agentDef.name}] invoke skill="${req.skill ?? "?"}" tools=${tools.length}/${agentTools.length} maxTurns=${effectiveMaxTurns} promptLen=${prompt.length} langfuse=${LANGFUSE_ENABLED}${usingModel}`);
 
       const result = await agent.invoke(
         { messages: [{ role: "user", content: prompt }] },
@@ -656,13 +730,27 @@ export class DeepAgentExecutor implements IExecutor {
       const messages = result.messages ?? [];
       console.log(`[deep-agent:${this.agentDef.name}] ${messages.length} messages returned`);
 
-      // Log tool calls made
+      // Log tool calls made + emit telemetry for the /system dashboard.
       for (const msg of messages) {
         const type = msg._getType?.() ?? msg.constructor?.name ?? "";
         if (type === "ai" || type === "AIMessage") {
           const tc = (msg as unknown as Record<string, unknown>).tool_calls;
           if (Array.isArray(tc) && tc.length > 0) {
-            console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${tc.map((t: { name?: string }) => t.name).join(", ")}`);
+            const toolNames = tc.map((t: { name?: string }) => t.name).filter((n): n is string => !!n);
+            console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${toolNames.join(", ")}`);
+            if (this.onToolCall && toolNames.length > 0) {
+              try {
+                this.onToolCall({
+                  agentName: this.agentDef.name,
+                  correlationId: req.correlationId,
+                  skill: req.skill,
+                  toolNames,
+                });
+              } catch (cbErr) {
+                // Telemetry must never break a running skill.
+                console.warn(`[deep-agent:${this.agentDef.name}] onToolCall callback threw:`, cbErr);
+              }
+            }
           }
         }
       }

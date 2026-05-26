@@ -263,30 +263,56 @@ export class SkillBrokerPlugin implements Plugin {
         );
       }
 
-      const registered = this.registeredSkills.get(agent.name) ?? new Set();
-      let added = 0;
-
+      const previouslyRegistered = this.registeredSkills.get(agent.name) ?? new Set<string>();
+      const currentSkills = new Set<string>();
       for (const cardSkill of card.skills ?? []) {
-        const skillName = cardSkill.id;
-        if (!skillName || registered.has(skillName)) continue;
+        if (cardSkill.id) currentSkills.add(cardSkill.id);
+      }
 
+      // Add skills that are in the new card but not yet registered.
+      let added = 0;
+      for (const skillName of currentSkills) {
+        if (previouslyRegistered.has(skillName)) continue;
         this.executorRegistry.register(skillName, executor, {
           agentName: agent.name,
           priority: 5,
         });
-        registered.add(skillName);
         added++;
       }
 
-      this.registeredSkills.set(agent.name, registered);
+      // Remove skills that were registered but are no longer in the card.
+      // Without this, an agent that drops a skill keeps absorbing dispatches
+      // for it until workstacean restarts — exactly the kind of silent drift
+      // #608's loud-failure fix was meant to prevent.
+      const removed: string[] = [];
+      for (const skillName of previouslyRegistered) {
+        if (currentSkills.has(skillName)) continue;
+        this.executorRegistry.unregister(skillName, agent.name);
+        removed.push(skillName);
+      }
+
+      this.registeredSkills.set(agent.name, currentSkills);
       if (added > 0) {
-        console.log(`[skill-broker] ${agent.name}: discovered ${added} new skill(s) from agent card (${Array.from(registered).join(", ")})`);
+        console.log(
+          `[skill-broker] ${agent.name}: discovered ${added} new skill(s) from agent card (${Array.from(currentSkills).join(", ")})`,
+        );
+      }
+      if (removed.length > 0) {
+        console.warn(
+          `[skill-broker] ${agent.name}: removed ${removed.length} skill(s) no longer in agent card — ${removed.join(", ")}`,
+        );
       }
 
       this._loadHitlModeDeclarations(agent.name, card);
       this._loadBlastDeclarations(agent.name, card);
     } catch (err) {
-      console.debug(`[skill-broker] ${agent.name}: card discovery skipped:`, err instanceof Error ? err.message : err);
+      // console.debug here would silently swallow real card-discovery
+      // bugs — see #593 where weeks of zero-skill agents went unnoticed.
+      // Warn at the operator surface so the failure shows up in the same
+      // place as the rest of the broker's per-agent lifecycle logs.
+      console.warn(
+        `[skill-broker] ${agent.name}: card discovery failed — ${err instanceof Error ? err.message : err}`,
+      );
     }
   }
 
@@ -363,17 +389,30 @@ export class SkillBrokerPlugin implements Plugin {
     const factory = new ClientFactory({
       transports: [new JsonRpcTransportFactory()],
     });
+    let primaryErr: unknown;
     try {
       const client = await factory.createFromUrl(baseUrl);
       return await client.getAgentCard();
-    } catch {
-      // Try legacy path
-      try {
-        const client = await factory.createFromUrl(baseUrl, "/.well-known/agent.json");
-        return await client.getAgentCard();
-      } catch {
-        return null;
-      }
+    } catch (err) {
+      primaryErr = err;
+    }
+    // Try legacy /.well-known/agent.json before giving up.
+    try {
+      const client = await factory.createFromUrl(baseUrl, "/.well-known/agent.json");
+      return await client.getAgentCard();
+    } catch (legacyErr) {
+      // Both failed — surface the failure loudly. Quiet `return null` here
+      // is what made #593 invisible for weeks: agents register no skills,
+      // every downstream chat_with_agent call 404s, and the operator sees
+      // nothing in stdout until they happen to inspect /api/agents/runtime.
+      // Per feedback_fail_fast_and_loud — fail loud at the boundary.
+      const primaryMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+      const legacyMsg = legacyErr instanceof Error ? legacyErr.message : String(legacyErr);
+      console.warn(
+        `[skill-broker] Failed to fetch agent card from ${baseUrl}: ` +
+          `primary path → ${primaryMsg}; legacy /.well-known/agent.json → ${legacyMsg}`,
+      );
+      return null;
     }
   }
 

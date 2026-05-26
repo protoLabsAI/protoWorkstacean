@@ -53,7 +53,7 @@ Create `workspace/agents/<name>.yaml`:
 ```yaml
 name: my-agent
 role: general                   # orchestrator | qa | devops | content | research | general
-model: claude-sonnet-4-6
+model: protolabs/reasoning      # gateway alias; e.g. claude-sonnet-4-6 / claude-opus-4-7 also work
 systemPrompt: |
   You are MyAgent. Your job is...
 tools:

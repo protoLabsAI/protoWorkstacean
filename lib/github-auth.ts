@@ -72,15 +72,48 @@ export class GitHubAppAuth {
 /**
  * Returns a token getter for the Quinn GitHub App, or falls back to GITHUB_TOKEN PAT.
  * Returns null if no auth is configured.
+ *
+ * **Fail-loud on partial App config.** If exactly one of `QUINN_APP_ID` and
+ * `QUINN_APP_PRIVATE_KEY` is set (the other empty / unset), refuse to
+ * silently fall back to the PAT path — that's how Quinn's PR reviews
+ * started showing up as the operator (mabry1985) instead of
+ * @protoquinn[bot] when infisical hiccuped and only injected half the
+ * secret pair on a container restart. PAT fallback only fires when *both*
+ * App vars are absent, which is the legitimate "this deployment doesn't
+ * have a GitHub App, just a PAT" mode.
+ *
+ * `env` defaults to `process.env`; tests pass a literal so they don't have
+ * to mutate the live env (which `bun test` runs test files in parallel
+ * over, causing race conditions on shared `process.env`).
  */
-export function makeGitHubAuth(): ((owner: string, repo: string) => Promise<string>) | null {
-  const appId = process.env.QUINN_APP_ID;
-  const privateKey = process.env.QUINN_APP_PRIVATE_KEY;
+export function makeGitHubAuth(
+  env: Record<string, string | undefined> = process.env,
+): ((owner: string, repo: string) => Promise<string>) | null {
+  const appId = (env.QUINN_APP_ID ?? "").trim();
+  const privateKey = (env.QUINN_APP_PRIVATE_KEY ?? "").trim();
+
   if (appId && privateKey) {
     const app = new GitHubAppAuth(appId, privateKey);
     return (owner, repo) => app.getToken(owner, repo);
   }
-  const pat = process.env.GITHUB_TOKEN;
+
+  // Partial App config — one set, the other empty. This is misconfiguration,
+  // not a legitimate fallback. Refusing to mint a token means the next code
+  // path that needs auth throws loudly instead of silently writing as the
+  // operator's PAT identity.
+  if (appId || privateKey) {
+    const present  = appId ? "QUINN_APP_ID"          : "QUINN_APP_PRIVATE_KEY";
+    const missing  = appId ? "QUINN_APP_PRIVATE_KEY" : "QUINN_APP_ID";
+    throw new Error(
+      `[github-auth] partial GitHub App config: ${present} set but ${missing} empty/unset. ` +
+        `Refusing to fall back to GITHUB_TOKEN PAT — that would silently author commits / ` +
+        `PR reviews as the operator instead of the bot. Fix the env (likely an infisical injection ` +
+        `gap) before restarting.`,
+    );
+  }
+
+  // No App config at all — legitimate PAT-only mode.
+  const pat = env.GITHUB_TOKEN;
   if (pat) return () => Promise.resolve(pat);
   return null;
 }

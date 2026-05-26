@@ -16,7 +16,15 @@
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "./executor-registry.ts";
 import type { SkillRequest } from "./types.ts";
-import type { AgentSkillRequestPayload, AutonomousOutcomePayload, FlowItemPayload } from "../event-bus/payloads.ts";
+import type {
+  AgentSkillRequestPayload,
+  AutonomousOutcomePayload,
+  FlowItemPayload,
+  AgentActivityPayload,
+  AgentActivityType,
+  DispatchDroppedPayload,
+  DispatchDropReason,
+} from "../event-bus/payloads.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "./task-tracker.ts";
@@ -73,18 +81,41 @@ export function cooldownMsFor(skill: string): number {
 }
 
 /**
- * Build the cooldown bucket key for a dispatch. Bucketed by (skill, repo) so
- * `bug_triage` on protoMaker has its own cooldown bucket separate from
- * `bug_triage` on protoWorkstacean — different repos don't share back-pressure.
- * Falls back to `<skill>:_` (no repo) when the payload doesn't carry a github
- * context (chat dispatches, manual /publish calls, etc.).
+ * Build the cooldown bucket key for a dispatch.
+ *
+ * Granularity (most specific to least):
+ *   `<skill>:<owner>/<repo>#<number>@<headSha7>` — pr_review on a specific
+ *      PR commit. New commits always review because the headSha changes;
+ *      repeated webhooks for the same SHA dedup.
+ *   `<skill>:<owner>/<repo>#<number>`            — issue or PR-level
+ *      (no headSha available, e.g. comment events).
+ *   `<skill>:<owner>/<repo>`                     — repo-scoped (skills
+ *      without a number context).
+ *   `<skill>:_`                                  — no github context
+ *      (chat, manual /publish, etc).
+ *
+ * Why each granularity matters:
+ *   - PR-with-headSha keying prevents the "rebase within 30s drops the
+ *     real fix" race that flagged in flow-pr-review.md.
+ *   - Issue-number keying lets bug_triage rate-limit per issue, not
+ *     per repo — two different issues in the same repo opening within
+ *     30s both get triaged.
+ *   - Repo-level fallback covers skills where neither number nor sha
+ *     are meaningful (security_triage at the repo level).
  */
 export function cooldownKeyFor(skill: string, payload: Record<string, unknown> | undefined): string {
   const github = (payload?.["github"] as Record<string, unknown> | undefined);
   const owner = typeof github?.["owner"] === "string" ? github["owner"] : undefined;
   const repo = typeof github?.["repo"] === "string" ? github["repo"] : undefined;
-  const repoKey = owner && repo ? `${owner}/${repo}` : "_";
-  return `${skill}:${repoKey}`;
+  if (!owner || !repo) return `${skill}:_`;
+
+  const number = typeof github?.["number"] === "number" ? github["number"] : undefined;
+  const headSha = typeof github?.["headSha"] === "string" ? (github["headSha"] as string) : undefined;
+
+  let key = `${skill}:${owner}/${repo}`;
+  if (number !== undefined) key += `#${number}`;
+  if (headSha) key += `@${headSha.slice(0, 7)}`;
+  return key;
 }
 
 export class SkillDispatcherPlugin implements Plugin {
@@ -99,6 +130,10 @@ export class SkillDispatcherPlugin implements Plugin {
     "flow.item.created",
     "flow.item.updated",
     "flow.item.completed",
+    "agent.runtime.activity.skill.start",
+    "agent.runtime.activity.skill.complete",
+    "agent.runtime.activity.skill.error",
+    "agent.skill.latency",
   ];
 
   private bus?: EventBus;
@@ -170,6 +205,12 @@ export class SkillDispatcherPlugin implements Plugin {
       ?? (typeof payload.meta?.skillHint === "string" ? payload.meta.skillHint : undefined)
       ?? "";
 
+    // Per-call model override — captured for outcome cost attribution.
+    // Undefined when the caller didn't override (then the executor or
+    // gateway picks a model; we can't tell from here, so cost falls back
+    // to the default rate downstream).
+    const requestedModel = typeof payload.model === "string" ? payload.model : undefined;
+
     let targets: string[] = [];
     if (Array.isArray(payload.targets)) {
       targets = payload.targets;
@@ -190,7 +231,9 @@ export class SkillDispatcherPlugin implements Plugin {
 
     if (!skill) {
       this.activeExecutions.delete(correlationId);
-      console.warn("[skill-dispatcher] Received skill request with no skill — dropping");
+      const dropMsg = "Received skill request with no skill — dropping";
+      console.warn(`[skill-dispatcher] ${dropMsg}`);
+      this._publishDispatchDropped("no_skill", correlationId, dropMsg, { targets });
       this._publishResponse(replyTopic, correlationId, undefined, "No skill specified");
       return;
     }
@@ -202,7 +245,9 @@ export class SkillDispatcherPlugin implements Plugin {
       const searched = targets.length > 0
         ? `targets [${targets.join(", ")}] or skill "${skill}"`
         : `skill "${skill}"`;
-      console.warn(`[skill-dispatcher] No executor found for ${searched} — dropping`);
+      const dropMsg = `No executor found for ${searched} — dropping`;
+      console.warn(`[skill-dispatcher] ${dropMsg}`);
+      this._publishDispatchDropped("target_unresolved", correlationId, dropMsg, { skill, targets });
       this._publishResponse(replyTopic, correlationId, undefined, `No executor registered for ${searched}`);
       return;
     }
@@ -218,11 +263,18 @@ export class SkillDispatcherPlugin implements Plugin {
       const key = cooldownKeyFor(skill, payload as Record<string, unknown>);
       const last = this.lastDispatchAt.get(key);
       if (last !== undefined && Date.now() - last < cooldownMs) {
-        const remaining = cooldownMs - (Date.now() - last);
+        const elapsed = Date.now() - last;
+        const remaining = cooldownMs - elapsed;
         this.activeExecutions.delete(correlationId);
-        console.warn(
-          `[skill-dispatcher] Cooldown drop: "${key}" dispatched ${Date.now() - last}ms ago (window=${cooldownMs}ms, ${remaining}ms remaining)`,
-        );
+        const dropMsg = `Cooldown drop: "${key}" dispatched ${elapsed}ms ago (window=${cooldownMs}ms, ${remaining}ms remaining)`;
+        console.warn(`[skill-dispatcher] ${dropMsg}`);
+        this._publishDispatchDropped("cooldown", correlationId, dropMsg, {
+          skill,
+          targets,
+          cooldownKey: key,
+          cooldownWindowMs: cooldownMs,
+          cooldownRemainingMs: remaining,
+        });
         this._publishResponse(replyTopic, correlationId, undefined, `Cooldown: ${key} (${remaining}ms remaining)`);
         return;
       }
@@ -282,6 +334,17 @@ export class SkillDispatcherPlugin implements Plugin {
       meta: { skill, executorType: executor.type },
     });
 
+    // Live agent telemetry — the /system dashboard subscribes to
+    // agent.runtime.activity.# to render live agent state. Covers ALL
+    // executor types uniformly because we emit at the dispatcher (the
+    // chokepoint), not inside each executor.
+    const targetAgent = targets[0] ?? "(no-target)";
+    this._publishActivity("skill.start", {
+      agentName: targetAgent,
+      correlationId,
+      skill,
+    });
+
     try {
       const result = await executor.execute(req);
 
@@ -326,6 +389,7 @@ export class SkillDispatcherPlugin implements Plugin {
               taskState,
               text: content,
               durationMs: Date.now() - dispatchedAt,
+              model: requestedModel,
             });
 
             const gh = payload.github as { title?: string; owner?: string; repo?: string; number?: number; url?: string } | undefined;
@@ -382,6 +446,13 @@ export class SkillDispatcherPlugin implements Plugin {
         console.error(
           `[skill-dispatcher] Executor "${executor.type}" error for skill "${skill}": ${(result.text ?? "").slice(0, 500)}`,
         );
+        this._publishActivity("skill.error", {
+          agentName: targetAgent,
+          correlationId,
+          skill,
+          errorMessage: (result.text ?? "").slice(0, 500),
+          durationMs: Date.now() - dispatchedAt,
+        });
         this._publishFlowEvent("flow.item.updated", {
           id: flowItemId,
           status: "blocked",
@@ -400,6 +471,7 @@ export class SkillDispatcherPlugin implements Plugin {
           text: result.text,
           usage: result.data?.usage,
           durationMs: Date.now() - dispatchedAt,
+          model: requestedModel,
         });
       } else {
         // Log a preview of the response so we can see what the executor actually
@@ -409,6 +481,65 @@ export class SkillDispatcherPlugin implements Plugin {
         console.log(
           `[skill-dispatcher] Skill "${skill}" completed via ${executor.type} — ${(result.text ?? "").length} chars: ${preview}${(result.text ?? "").length > 300 ? "…" : ""}`,
         );
+
+        // Trigger-to-done latency. When a surface plugin (today: github
+        // _handleAutoReview) stamps payload.meta.webhookArrivedAt, surface
+        // the full webhook→done duration split into queue time vs execute
+        // time. A separate single-line summary so it's grep-friendly and
+        // independent of the completion-text-preview log above.
+        const webhookArrivedAt = typeof payload.meta?.webhookArrivedAt === "number"
+          ? payload.meta.webhookArrivedAt
+          : undefined;
+        if (webhookArrivedAt) {
+          const now = Date.now();
+          const totalMs = now - webhookArrivedAt;
+          const queueMs = dispatchedAt - webhookArrivedAt;
+          const executeMs = now - dispatchedAt;
+          const gh = payload.github as { owner?: string; repo?: string; number?: number } | undefined;
+          const repoRef = gh?.owner && gh?.repo && gh?.number
+            ? ` [${gh.owner}/${gh.repo}#${gh.number}]`
+            : "";
+          console.log(
+            `[skill-latency] ${skill} webhook→done ${(totalMs / 1000).toFixed(2)}s ` +
+              `(queue ${queueMs}ms, execute ${(executeMs / 1000).toFixed(2)}s)${repoRef}`,
+          );
+
+          // Structured form of the same data for dashboard tiles + future
+          // alerting subscribers (see all-topics.ts AGENT_SKILL_LATENCY).
+          // Best-effort: a publish failure must not poison the success path
+          // we're already on.
+          if (this.bus) {
+            try {
+              this.bus.publish("agent.skill.latency", {
+                id: crypto.randomUUID(),
+                correlationId,
+                topic: "agent.skill.latency",
+                timestamp: now,
+                payload: {
+                  skill,
+                  totalMs,
+                  queueMs,
+                  executeMs,
+                  github: gh?.owner && gh?.repo && gh?.number
+                    ? { owner: gh.owner, repo: gh.repo, number: gh.number }
+                    : undefined,
+                },
+              });
+            } catch (err) {
+              console.warn(
+                `[skill-dispatcher] failed to publish agent.skill.latency: ${err instanceof Error ? err.message : err}`,
+              );
+            }
+          }
+        }
+
+        this._publishActivity("skill.complete", {
+          agentName: targetAgent,
+          correlationId,
+          skill,
+          resultPreview: preview.slice(0, 120),
+          durationMs: Date.now() - dispatchedAt,
+        });
         if (result.data?.stopReason === "max_turns") {
           console.warn("[skill-dispatcher] Agent hit maxTurns limit");
         }
@@ -442,6 +573,7 @@ export class SkillDispatcherPlugin implements Plugin {
           text: result.text,
           usage: result.data?.usage,
           durationMs,
+          model: requestedModel,
         });
       }
 
@@ -454,6 +586,13 @@ export class SkillDispatcherPlugin implements Plugin {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(`[skill-dispatcher] Unhandled error dispatching "${skill}": ${errorMsg}`);
+      this._publishActivity("skill.error", {
+        agentName: targetAgent,
+        correlationId,
+        skill,
+        errorMessage: errorMsg,
+        durationMs: Date.now() - dispatchedAt,
+      });
       this._publishFlowEvent("flow.item.updated", {
         id: flowItemId,
         status: "blocked",
@@ -471,6 +610,7 @@ export class SkillDispatcherPlugin implements Plugin {
         taskState: "failed",
         text: errorMsg,
         durationMs: Date.now() - dispatchedAt,
+        model: requestedModel,
       });
       this._publishResponse(replyTopic, correlationId, undefined, errorMsg);
     } finally {
@@ -533,6 +673,7 @@ export class SkillDispatcherPlugin implements Plugin {
     text?: string;
     usage?: AutonomousOutcomePayload["usage"];
     durationMs: number;
+    model?: string;
   }): void {
     if (!this.bus) return;
     const topic = `autonomous.outcome.${opts.systemActor}.${opts.skill}`;
@@ -549,6 +690,7 @@ export class SkillDispatcherPlugin implements Plugin {
       textPreview: opts.text ? opts.text.slice(0, 500) : undefined,
       usage: opts.usage,
       durationMs: opts.durationMs,
+      model: opts.model,
     };
     this.bus.publish(topic, {
       id: crypto.randomUUID(),
@@ -634,6 +776,33 @@ export class SkillDispatcherPlugin implements Plugin {
     });
   }
 
+  /**
+   * Publish a live agent activity event. Best-effort: any failure to publish
+   * is swallowed — telemetry must never break a running skill. The /system
+   * dashboard subscribes to `agent.runtime.activity.#` to render live agent
+   * state, but any other consumer is welcome.
+   */
+  private _publishActivity(type: AgentActivityType, fields: Omit<AgentActivityPayload, "type" | "timestamp">): void {
+    if (!this.bus) return;
+    const topic = `agent.runtime.activity.${type}`;
+    const payload: AgentActivityPayload = {
+      type,
+      timestamp: Date.now(),
+      ...fields,
+    };
+    try {
+      this.bus.publish(topic, {
+        id: crypto.randomUUID(),
+        correlationId: fields.correlationId,
+        topic,
+        timestamp: payload.timestamp,
+        payload,
+      });
+    } catch (err) {
+      console.warn(`[skill-dispatcher] activity-publish failed (${type}):`, err);
+    }
+  }
+
   private _publishResponse(
     replyTopic: string,
     correlationId: string,
@@ -647,6 +816,35 @@ export class SkillDispatcherPlugin implements Plugin {
       topic: replyTopic,
       timestamp: Date.now(),
       payload: { content: result, error, correlationId },
+    });
+  }
+
+  /**
+   * Publish a dispatch-dropped telemetry event at the matching chokepoint
+   * site. Topic is `dispatch.dropped.{reason}` so subscribers can filter
+   * by reason. The console.warn is kept alongside this for log-tail
+   * visibility — both paths fire independently.
+   */
+  private _publishDispatchDropped(
+    reason: DispatchDropReason,
+    correlationId: string,
+    message: string,
+    extra: Omit<DispatchDroppedPayload, "reason" | "correlationId" | "message">,
+  ): void {
+    if (!this.bus) return;
+    const topic = `dispatch.dropped.${reason}`;
+    const payload: DispatchDroppedPayload = {
+      reason,
+      correlationId,
+      message,
+      ...extra,
+    };
+    this.bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic,
+      timestamp: Date.now(),
+      payload,
     });
   }
 }

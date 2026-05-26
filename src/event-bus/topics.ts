@@ -11,18 +11,21 @@ export {
   MESSAGE_TOPICS,
   ACTION_TOPICS,
   SECURITY_TOPICS,
+  REVIEW_TOPICS,
 } from "./all-topics.ts";
 
 import {
   MESSAGE_TOPICS,
   ACTION_TOPICS,
   SECURITY_TOPICS,
+  REVIEW_TOPICS,
 } from "./all-topics.ts";
 
 export const TOPICS = {
   ...MESSAGE_TOPICS,
   ...ACTION_TOPICS,
   ...SECURITY_TOPICS,
+  ...REVIEW_TOPICS,
 } as const;
 
 export type TopicValue = (typeof TOPICS)[keyof typeof TOPICS];

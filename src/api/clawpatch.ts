@@ -7,11 +7,19 @@
  *
  * Repo resolution
  * ---------------
- * The tool accepts `repo` in owner/name format. We map it to a local
- * filesystem path via `CLAWPATCH_REPO_PATH_MAP` (JSON env override) or a
- * built-in default that knows about repos mounted into the workstacean
- * container today. v1 only supports already-mounted repos; on-demand PR
- * checkouts are phase 2.
+ * The tool accepts `repo` in owner/name format. Resolution tries, in order:
+ *
+ *   1. `CLAWPATCH_REPO_PATH_MAP` env override (JSON owner/name → abs path)
+ *      — dev-only escape hatch for pointing at a local working tree.
+ *   2. `workspace/projects.yaml` allowlist gate, then `CheckoutCache` —
+ *      every other repo (including the ones that used to be bind-mounted)
+ *      goes through the cache so Quinn always reviews the exact PR ref.
+ *
+ * No bind-mount fast path. Per C1 sign-off (#578): "better way over fast
+ * way" — a single resolution code path means no "did Quinn review the
+ * host's checkout or the PR head" ambiguity. See
+ * docs/explanation/clawpatch-checkouts.md for the cache's eviction, TTL,
+ * and security model.
  *
  * Env
  * ---
@@ -23,8 +31,12 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { CheckoutCache } from "../../lib/checkout-cache.ts";
+import { makeGitHubAuth } from "../../lib/github-auth.ts";
+import { parseProjectsYaml } from "../../lib/project-schema.ts";
 import type { Route, ApiContext } from "./types.ts";
 
 /**
@@ -35,8 +47,8 @@ import type { Route, ApiContext } from "./types.ts";
  * Override with CLAWPATCH_STATE_ROOT for testing or when DATA_DIR isn't set.
  */
 const CLAWPATCH_STATE_ROOT =
-  process.env["CLAWPATCH_STATE_ROOT"]
-  ?? join(process.env["DATA_DIR"] ?? "/data", "clawpatch");
+  process.env["CLAWPATCH_STATE_ROOT"] ??
+  join(process.env["DATA_DIR"] ?? "/data", "clawpatch");
 
 function stateDirFor(repo: string): string {
   // owner/repo → owner-repo so the path stays one level deep.
@@ -65,28 +77,122 @@ interface ReviewRequest {
   provider?: "gateway" | "proto" | "claude" | "codex" | "acpx";
 }
 
-const BUILT_IN_REPO_PATHS: Record<string, string> = {
-  // Repos mounted read-only into the workstacean container today (see
-  // homelab-iac/stacks/ai/docker-compose.yml workstacean.volumes).
-  "protoLabsAI/protoWorkstacean": "/home/josh/dev/protoWorkstacean",
-  "protoLabsAI/protoCLI": "/home/josh/dev/labs/protoCLI",
-  "protoLabsAI/mythxengine": "/home/josh/dev/labs/mythxengine",
-};
-
-function resolveRepoPath(repo: string): string | null {
-  let overrides: Record<string, string> = {};
+/**
+ * Read the dev-only `CLAWPATCH_REPO_PATH_MAP` override, if set. Lets a
+ * developer point clawpatch at a working tree on disk instead of going
+ * through the GitHub-tarball cache — handy when iterating on protoPatch
+ * itself, or when reviewing a local-only branch that GitHub doesn't have
+ * a ref for. Production never sets this; everything routes through the
+ * cache so Quinn reviews the exact ref the PR is on.
+ */
+function resolveDevOverridePath(repo: string): string | null {
   const raw = process.env["CLAWPATCH_REPO_PATH_MAP"];
-  if (raw) {
-    try {
-      overrides = JSON.parse(raw) as Record<string, string>;
-    } catch {
-      // Fall through with empty overrides — bad JSON shouldn't break the route.
-    }
+  if (!raw) return null;
+  let overrides: Record<string, string>;
+  try {
+    overrides = JSON.parse(raw) as Record<string, string>;
+  } catch {
+    // Bad JSON shouldn't break the route — log once and fall through to cache.
+    console.warn("[clawpatch] CLAWPATCH_REPO_PATH_MAP is not valid JSON — ignoring");
+    return null;
   }
-  const path = overrides[repo] ?? BUILT_IN_REPO_PATHS[repo];
-  if (!path) return null;
-  if (!existsSync(path)) return null;
+  const path = overrides[repo];
+  if (!path || !existsSync(path)) return null;
   return path;
+}
+
+/**
+ * Lazy singleton — first review request after process start initializes it.
+ * Test override via the `setCheckoutCacheForTesting` helper below.
+ */
+let _cache: CheckoutCache | null = null;
+function getCheckoutCache(): CheckoutCache {
+  if (_cache) return _cache;
+  const auth = makeGitHubAuth();
+  _cache = new CheckoutCache({
+    getToken: auth ?? undefined,
+  });
+  return _cache;
+}
+
+export function setCheckoutCacheForTesting(cache: CheckoutCache | null): void {
+  _cache = cache;
+}
+
+/**
+ * Load the set of repos allowed for clawpatch review from workspace/projects.yaml.
+ * Same allowlist boundary that `create_github_issue` enforces — agents can't
+ * point clawpatch at arbitrary GitHub repos.
+ */
+function loadProjectAllowlist(workspaceDir: string): Set<string> {
+  const path = join(workspaceDir, "projects.yaml");
+  if (!existsSync(path)) return new Set();
+  try {
+    const raw = parseYaml(readFileSync(path, "utf8")) as unknown;
+    const parsed = parseProjectsYaml(raw);
+    return new Set(parsed.projects.map(p => p.github));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[clawpatch] projects.yaml load failed: ${msg} — allowlist empty`);
+    return new Set();
+  }
+}
+
+/**
+ * Resolve a local filesystem path for clawpatch to operate on. One code
+ * path, no bind-mount fast path: every repo (including protoWorkstacean
+ * itself) routes through the GitHub-tarball cache so Quinn always reviews
+ * the exact ref the PR is on, not whatever happens to be checked out on
+ * the host. Per the C1 sign-off — "better way over fast way".
+ *
+ *   1. `CLAWPATCH_REPO_PATH_MAP` env override — dev-only escape hatch,
+ *      lets a developer point clawpatch at a working tree.
+ *   2. `projects.yaml` allowlist gate — same security boundary as
+ *      `create_github_issue`. Agents can't aim clawpatch at arbitrary
+ *      GitHub repos.
+ *   3. `CheckoutCache.resolve(repo, since)` — fetches the tarball at the
+ *      given SHA, extracts under /data/checkouts/<owner>-<repo>/<sha>/,
+ *      and returns the path. Content-addressed; 1h TTL.
+ *
+ * Returns `{ ok: false, error }` instead of throwing so the route handler
+ * can shape a 400 response without a try/catch.
+ */
+async function resolveRepoPath(
+  repo: string,
+  since: string | undefined,
+  workspaceDir: string,
+): Promise<{ ok: true; path: string } | { ok: false; error: string; status: number }> {
+  const devOverride = resolveDevOverridePath(repo);
+  if (devOverride) return { ok: true, path: devOverride };
+
+  const allow = loadProjectAllowlist(workspaceDir);
+  if (!allow.has(repo)) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        `repo '${repo}' is not in workspace/projects.yaml — clawpatch only reviews ` +
+        `managed projects. Add it to projects.yaml first (or set CLAWPATCH_REPO_PATH_MAP for local dev).`,
+    };
+  }
+
+  if (!since) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        `clawpatch review needs 'since' (the PR head SHA) so the checkout ` +
+        `cache can fetch the right ref from GitHub.`,
+    };
+  }
+
+  try {
+    const path = await getCheckoutCache().resolve(repo, since);
+    return { ok: true, path };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, status: 502, error: `checkout cache failed: ${msg}` };
+  }
 }
 
 interface ClawpatchExecResult {
@@ -98,7 +204,11 @@ interface ClawpatchExecResult {
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
-function runClawpatch(args: string[], cwd: string, timeoutMs: number): Promise<ClawpatchExecResult> {
+function runClawpatch(
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+): Promise<ClawpatchExecResult> {
   return new Promise((resolve) => {
     const child = spawn("clawpatch", args, {
       cwd,
@@ -112,8 +222,12 @@ function runClawpatch(args: string[], cwd: string, timeoutMs: number): Promise<C
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs);
-    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf-8"); });
-    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf-8"); });
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf-8");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf-8");
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
       resolve({ stdout, stderr, exitCode: code ?? -1, timedOut });
@@ -135,7 +249,7 @@ interface CiJsonOutput {
   items?: unknown[];
 }
 
-export function createRoutes(_ctx: ApiContext): Route[] {
+export function createRoutes(ctx: ApiContext): Route[] {
   return [
     {
       method: "POST",
@@ -145,37 +259,52 @@ export function createRoutes(_ctx: ApiContext): Route[] {
         try {
           payload = (await req.json()) as ReviewRequest;
         } catch {
-          return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 });
-        }
-        const { repo, since, limit, model, provider } = payload;
-        if (!repo) {
-          return Response.json({ success: false, error: "repo is required" }, { status: 400 });
-        }
-        const repoPath = resolveRepoPath(repo);
-        if (!repoPath) {
           return Response.json(
-            {
-              success: false,
-              error: `repo '${repo}' is not mounted in this container — only repos in CLAWPATCH_REPO_PATH_MAP / the built-in mounts (protoWorkstacean, protoCLI, mythxengine) work today. On-demand PR checkouts are not implemented.`,
-            },
+            { success: false, error: "Invalid JSON" },
             { status: 400 },
           );
         }
+        const { repo, since, limit, model, provider } = payload;
+        if (!repo) {
+          return Response.json(
+            { success: false, error: "repo is required" },
+            { status: 400 },
+          );
+        }
+        const resolution = await resolveRepoPath(repo, since, ctx.workspaceDir);
+        if (!resolution.ok) {
+          return Response.json(
+            { success: false, error: resolution.error },
+            { status: resolution.status },
+          );
+        }
+        const repoPath = resolution.path;
 
         // Workstacean mounts repo source read-only, so push clawpatch state
         // into the writable data volume — one dir per owner/repo so we don't
         // re-map features for every PR review.
         const stateDir = stateDirFor(repo);
         const effectiveProvider = provider ?? "gateway";
-        const args = ["ci", "--provider", effectiveProvider, "--json", "--state-dir", stateDir];
+        const args = [
+          "ci",
+          "--provider",
+          effectiveProvider,
+          "--json",
+          "--state-dir",
+          stateDir,
+        ];
         if (since) args.push("--since", since);
-        if (typeof limit === "number" && limit > 0) args.push("--limit", String(limit));
+        if (typeof limit === "number" && limit > 0)
+          args.push("--limit", String(limit));
         if (model) args.push("--model", model);
 
         const result = await runClawpatch(args, repoPath, DEFAULT_TIMEOUT_MS);
         if (result.timedOut) {
           return Response.json(
-            { success: false, error: `clawpatch timed out after ${DEFAULT_TIMEOUT_MS}ms` },
+            {
+              success: false,
+              error: `clawpatch timed out after ${DEFAULT_TIMEOUT_MS}ms`,
+            },
             { status: 504 },
           );
         }
@@ -205,7 +334,10 @@ export function createRoutes(_ctx: ApiContext): Route[] {
           );
         }
 
-        return Response.json({ success: true, data: { repo, repoPath, ...parsed } });
+        return Response.json({
+          success: true,
+          data: { repo, repoPath, ...parsed },
+        });
       },
     },
   ];

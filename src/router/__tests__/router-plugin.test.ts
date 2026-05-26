@@ -408,6 +408,101 @@ describe("RouterPlugin", () => {
     });
   });
 
+  describe("linear event delivery surface", () => {
+    test("emits [linear] event=… delivered to <agent> alongside [router] log", async () => {
+      const { workspaceDir, cleanup } = makeWorkspace({
+        agents: { "quinn.yaml": quinnAgent, "ava.yaml": avaAgent },
+      });
+      try {
+        const bus = new InMemoryEventBus();
+        const plugin = new RouterPlugin({ workspaceDir });
+        plugin.install(bus);
+
+        const logs: string[] = [];
+        const origLog = console.log;
+        console.log = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
+        try {
+          const requestPromise = waitForSkillRequest(bus);
+          bus.publish(
+            "message.inbound.linear.agent.issueCommentMention",
+            makeInbound("message.inbound.linear.agent.issueCommentMention", {
+              content: "this is a bug in the auth flow",
+            }),
+          );
+          await requestPromise;
+        } finally {
+          console.log = origLog;
+        }
+
+        const linearLine = logs.find(l => l.includes("[linear] event=agent.issueCommentMention"));
+        expect(linearLine).toBeDefined();
+        expect(linearLine).toContain("delivered to quinn");
+        expect(linearLine).toContain("skill=bug_triage");
+
+        plugin.uninstall();
+      } finally { cleanup(); }
+    });
+
+    test("logs delivered to none when no skill matches a linear topic", async () => {
+      const { workspaceDir, cleanup } = makeWorkspace({ agents: { "quinn.yaml": quinnAgent } });
+      try {
+        const bus = new InMemoryEventBus();
+        const plugin = new RouterPlugin({ workspaceDir });
+        plugin.install(bus);
+
+        const logs: string[] = [];
+        const origLog = console.log;
+        console.log = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
+        try {
+          bus.publish(
+            "message.inbound.linear.project.created",
+            makeInbound("message.inbound.linear.project.created", { content: "no keywords here" }),
+          );
+          // Synchronous publish path — give the subscriber a tick to run.
+          await new Promise(r => setTimeout(r, 20));
+        } finally {
+          console.log = origLog;
+        }
+
+        const linearLine = logs.find(l => l.includes("[linear] event=project.created"));
+        expect(linearLine).toBeDefined();
+        expect(linearLine).toContain("delivered to none");
+
+        plugin.uninstall();
+      } finally { cleanup(); }
+    });
+
+    test("does not emit [linear] line for non-linear topics", async () => {
+      const { workspaceDir, cleanup } = makeWorkspace({ agents: { "quinn.yaml": quinnAgent } });
+      try {
+        const bus = new InMemoryEventBus();
+        const plugin = new RouterPlugin({ workspaceDir });
+        plugin.install(bus);
+
+        const logs: string[] = [];
+        const origLog = console.log;
+        console.log = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
+        try {
+          const requestPromise = waitForSkillRequest(bus);
+          bus.publish(
+            "message.inbound.discord.42",
+            makeInbound("message.inbound.discord.42", {
+              content: "bug report",
+              skillHint: "bug_triage",
+            }),
+          );
+          await requestPromise;
+        } finally {
+          console.log = origLog;
+        }
+
+        expect(logs.some(l => l.startsWith("[linear]"))).toBe(false);
+
+        plugin.uninstall();
+      } finally { cleanup(); }
+    });
+  });
+
   describe("uninstall", () => {
     test("stops routing after uninstall", async () => {
       const { workspaceDir, cleanup } = makeWorkspace({ agents: { "quinn.yaml": quinnAgent } });
