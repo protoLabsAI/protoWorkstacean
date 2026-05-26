@@ -195,6 +195,19 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Linear → proto code.execute bridge. Label-gated (default
+    // "proto-task", override via LINEAR_PROTO_BRIDGE_LABEL). No yaml
+    // config needed; safe to install unconditionally.
+    name: "linear-proto-bridge",
+    condition: () => true,
+    factory: async () => {
+      const { LinearProtoBridgePlugin } = await import(
+        "../lib/plugins/linear-proto-bridge"
+      );
+      return new LinearProtoBridgePlugin();
+    },
+  },
+  {
     // Google Workspace — Drive / Docs / Calendar / Gmail outbound + polling.
     // Gated on the full OAuth2 credential triple. The plugin's own install()
     // logs and skips wiring when any are missing, so the gate here is mostly
