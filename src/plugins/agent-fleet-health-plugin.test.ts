@@ -35,6 +35,7 @@ const makeOutcomeMsg = (payload: Partial<AutonomousOutcomePayload> & { systemAct
     durationMs: payload.durationMs ?? 500,
     taskState: payload.taskState,
     usage: payload.usage,
+    model: payload.model,
   } satisfies AutonomousOutcomePayload,
 });
 
@@ -431,5 +432,72 @@ describe("AgentFleetHealthPlugin", () => {
     }).not.toThrow();
     const snapshot = plugin.getFleetHealth();
     expect(snapshot.agents).toHaveLength(0);
+  });
+
+  describe("per-model cost attribution (MODEL_RATES lookup)", () => {
+    test("uses Opus rate when payload.model='claude-opus-4-6' (5x default)", async () => {
+      bus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "ava",
+        skill: "plan",
+        success: true,
+        durationMs: 500,
+        usage: { input_tokens: 1000, output_tokens: 1000 },
+        model: "claude-opus-4-6",
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const ava = plugin.getFleetHealth().agents.find(a => a.agentName === "ava")!;
+      // Opus: 0.000015 in + 0.000075 out per token → 1000*(0.000015+0.000075) = 0.09
+      // Default would be: 0.000003 + 0.000015 → 0.018. So Opus reads 5x default.
+      expect(ava.costPerSuccessfulOutcome).toBeCloseTo(0.09, 3);
+    });
+
+    test("uses Haiku rate when payload.model='claude-haiku-4-5' (~1/12 default)", async () => {
+      bus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "ava",
+        skill: "plan",
+        success: true,
+        durationMs: 500,
+        usage: { input_tokens: 1000, output_tokens: 1000 },
+        model: "claude-haiku-4-5",
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const ava = plugin.getFleetHealth().agents.find(a => a.agentName === "ava")!;
+      // Haiku: 0.00000025 + 0.00000125 per token → 1000*(0.0000015) = 0.0015
+      expect(ava.costPerSuccessfulOutcome).toBeCloseTo(0.0015, 4);
+    });
+
+    test("falls back to default rate when model is undefined (caller didn't override)", async () => {
+      bus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "ava",
+        skill: "plan",
+        success: true,
+        durationMs: 500,
+        usage: { input_tokens: 1000, output_tokens: 1000 },
+        // no model field
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const ava = plugin.getFleetHealth().agents.find(a => a.agentName === "ava")!;
+      // Default: 0.000003 + 0.000015 per token → 0.018
+      expect(ava.costPerSuccessfulOutcome).toBeCloseTo(0.018, 4);
+    });
+
+    test("unknown model falls back to default and is acceptable (warn-once side-effect not asserted here)", async () => {
+      bus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "ava",
+        skill: "plan",
+        success: true,
+        durationMs: 500,
+        usage: { input_tokens: 1000, output_tokens: 1000 },
+        model: "made-up-model-that-does-not-exist",
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const ava = plugin.getFleetHealth().agents.find(a => a.agentName === "ava")!;
+      // Falls back to default rate
+      expect(ava.costPerSuccessfulOutcome).toBeCloseTo(0.018, 4);
+    });
   });
 });

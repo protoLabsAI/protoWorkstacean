@@ -32,6 +32,35 @@ const WINDOW_1H_MS = 60 * 60 * 1_000; // 1 hour
 const MAX_RECENT_FAILURES = 10;
 const DEFAULT_RATES = MODEL_RATES["default"];
 
+/**
+ * Track which unknown models we've warned about so we don't spam the
+ * log on every outcome. One warn per distinct model name across the
+ * process lifetime — fits the "fail loud once" convention from #459's
+ * synthetic-actor logging.
+ */
+const _warnedUnknownModels = new Set<string>();
+
+/**
+ * Resolve per-token rates for a model. Returns the model-specific entry
+ * from MODEL_RATES when set; falls back to DEFAULT_RATES with a one-time
+ * warn for unknown models so operators notice when LiteLLM is routing
+ * to something we don't have a rate for. Undefined model (no override)
+ * silently uses default — that's the documented "we can't tell" case.
+ */
+function _ratesFor(model: string | undefined): { input: number; output: number } {
+  if (!model) return DEFAULT_RATES;
+  const rates = MODEL_RATES[model];
+  if (rates) return rates;
+  if (!_warnedUnknownModels.has(model)) {
+    _warnedUnknownModels.add(model);
+    console.warn(
+      `[agent-fleet-health] No MODEL_RATES entry for "${model}" — using default rate. ` +
+        `Add the model to lib/types/budget.ts MODEL_RATES table for accurate cost attribution.`,
+    );
+  }
+  return DEFAULT_RATES;
+}
+
 // ── Internal record ───────────────────────────────────────────────────────────
 
 interface OutcomeRecord {
@@ -279,9 +308,10 @@ export class AgentFleetHealthPlugin implements Plugin {
   // ── Private ─────────────────────────────────────────────────────────────────
 
   private _record(p: AutonomousOutcomePayload): void {
+    const rates = _ratesFor(p.model);
     const costUsd = p.usage
-      ? (p.usage.input_tokens ?? 0) * DEFAULT_RATES.input +
-        (p.usage.output_tokens ?? 0) * DEFAULT_RATES.output
+      ? (p.usage.input_tokens ?? 0) * rates.input +
+        (p.usage.output_tokens ?? 0) * rates.output
       : 0;
 
     const record: OutcomeRecord = {
