@@ -419,6 +419,21 @@ const pluginRegistry: PluginRegistryEntry[] = [
       return new DispatchDropEscalatorPlugin();
     },
   },
+  {
+    // Phase 1: fetches the canonical project list from protoMaker
+    // (GET /api/settings/global → settings.projects[]) and exposes it
+    // alongside workspace/projects.yaml. Logs parity warnings between
+    // the two sources so we get telemetry on drift before flipping
+    // consumers to read from protoMaker exclusively. See task #88.
+    name: "protomaker-project-registry",
+    condition: () => true,
+    factory: async () => {
+      const { ProtomakerProjectRegistryPlugin } = await import(
+        "./plugins/protomaker-project-registry-plugin.js"
+      );
+      return new ProtomakerProjectRegistryPlugin({ workspaceDir });
+    },
+  },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
   {
     name: "echo",
