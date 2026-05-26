@@ -59,6 +59,22 @@ export const ACTION_TOPICS = {
    * Full topic is `autonomous.outcome.{systemActor}.{skill}`.
    */
   AUTONOMOUS_OUTCOME_PREFIX: "autonomous.outcome",
+
+  /**
+   * Published by SkillDispatcherPlugin after every successful skill
+   * completion that came from a webhook-stamped dispatch (today: github's
+   * `_handleAutoReview`). Structured form of the existing
+   * `[skill-latency]` log line — dashboard tiles + downstream alerting
+   * can subscribe and accumulate without parsing stdout.
+   *
+   * Payload shape: { skill, totalMs, queueMs, executeMs, github? }.
+   *   - totalMs   = webhook arrival → done
+   *   - queueMs   = webhook arrival → dispatch start (bus hops + routing)
+   *   - executeMs = dispatch start → done (LLM + tools)
+   *   - github    = { owner, repo, number } when the original payload
+   *                 carried it (PR reviews, etc.); absent otherwise.
+   */
+  AGENT_SKILL_LATENCY: "agent.skill.latency",
 } as const;
 
 export const SECURITY_TOPICS = {

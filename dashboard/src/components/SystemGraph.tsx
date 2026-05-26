@@ -31,6 +31,7 @@ import AgentNode, { type AgentActivityState } from "./AgentNode.tsx";
 import ServiceNode from "./ServiceNode.tsx";
 import MessageDrawer, { type DrawerMessage } from "./MessageDrawer.tsx";
 import QuinnVerdictCounters from "./QuinnVerdictCounters.tsx";
+import LatencyHistogram from "./LatencyHistogram.tsx";
 
 /** Ring-buffer cap for per-topic history shown in the edge drawer. */
 const TOPIC_HISTORY_CAP = 20;
@@ -497,6 +498,7 @@ export default function SystemGraph() {
         <Controls position="bottom-right" />
       </ReactFlow>
       <QuinnVerdictCounters />
+      <LatencyHistogram />
       {openTopic && (
         <MessageDrawer
           topic={openTopic}
