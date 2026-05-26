@@ -436,6 +436,30 @@ export class SkillDispatcherPlugin implements Plugin {
         console.log(
           `[skill-dispatcher] Skill "${skill}" completed via ${executor.type} — ${(result.text ?? "").length} chars: ${preview}${(result.text ?? "").length > 300 ? "…" : ""}`,
         );
+
+        // Trigger-to-done latency. When a surface plugin (today: github
+        // _handleAutoReview) stamps payload.meta.webhookArrivedAt, surface
+        // the full webhook→done duration split into queue time vs execute
+        // time. A separate single-line summary so it's grep-friendly and
+        // independent of the completion-text-preview log above.
+        const webhookArrivedAt = typeof payload.meta?.webhookArrivedAt === "number"
+          ? payload.meta.webhookArrivedAt
+          : undefined;
+        if (webhookArrivedAt) {
+          const now = Date.now();
+          const totalMs = now - webhookArrivedAt;
+          const queueMs = dispatchedAt - webhookArrivedAt;
+          const executeMs = now - dispatchedAt;
+          const gh = payload.github as { owner?: string; repo?: string; number?: number } | undefined;
+          const repoRef = gh?.owner && gh?.repo && gh?.number
+            ? ` [${gh.owner}/${gh.repo}#${gh.number}]`
+            : "";
+          console.log(
+            `[skill-latency] ${skill} webhook→done ${(totalMs / 1000).toFixed(2)}s ` +
+              `(queue ${queueMs}ms, execute ${(executeMs / 1000).toFixed(2)}s)${repoRef}`,
+          );
+        }
+
         this._publishActivity("skill.complete", {
           agentName: targetAgent,
           correlationId,
