@@ -17,6 +17,17 @@ RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${
     curl -fsSL "https://github.com/docker/buildx/releases/download/v${BUILDX_VERSION}/buildx-v${BUILDX_VERSION}.linux-amd64" -o /usr/local/lib/docker/cli-plugins/docker-buildx && \
     chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 
+# beads_rust (`br`) — beads issue-tracker CLI. Single 17 MB binary,
+# glibc-linked. Used by Ava (and any plugin) to read/write the .beads/
+# store on a mounted host repo. amd64 only — this image is amd64-only
+# anyway (see hard-coded docker/x86_64 above).
+ENV BR_VERSION=0.2.11
+RUN curl -fsSL "https://github.com/Dicklesworthstone/beads_rust/releases/download/v${BR_VERSION}/br-${BR_VERSION}-linux_amd64.tar.gz" -o /tmp/br.tar.gz && \
+    echo "3907b968122c9982e39822c5f56964f786ccf2f3ecdfc3291e8653eca39de9cf  /tmp/br.tar.gz" | sha256sum -c - && \
+    tar -xzf /tmp/br.tar.gz -C /usr/local/bin br && \
+    chmod +x /usr/local/bin/br && \
+    rm -f /tmp/br.tar.gz
+
 # clawpatch (protoLabs fork) — installed in a dedicated Node stage so it
 # stays isolated from the bun-based release image. The fork ships a `gateway`
 # provider that POSTs the assembled prompt to our LiteLLM endpoint
