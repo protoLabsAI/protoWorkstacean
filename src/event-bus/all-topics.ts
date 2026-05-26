@@ -75,6 +75,16 @@ export const ACTION_TOPICS = {
    *                 carried it (PR reviews, etc.); absent otherwise.
    */
   AGENT_SKILL_LATENCY: "agent.skill.latency",
+
+  /**
+   * Prefix for dispatcher drop events. Full topic is
+   * `dispatch.dropped.{reason}` where reason ∈ {no_skill, target_unresolved,
+   * cooldown}. Published by SkillDispatcherPlugin at each chokepoint drop
+   * site so subscribers (dashboard, drop-rate alerts) can count + filter
+   * by reason without scraping stdout. Payload shape:
+   * see `DispatchDroppedPayload` in src/event-bus/payloads.ts.
+   */
+  DISPATCH_DROPPED_PREFIX: "dispatch.dropped",
 } as const;
 
 export const SECURITY_TOPICS = {

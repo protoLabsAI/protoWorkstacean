@@ -149,4 +149,70 @@ describe("SkillDispatcherPlugin", () => {
     const reply = bus.published.find(m => m.topic === defaultTopic);
     expect(reply).toBeDefined();
   });
+
+  describe("dispatch.dropped.* telemetry", () => {
+    it("publishes dispatch.dropped.no_skill when skill is missing", async () => {
+      const msg = makeMsg({ payload: {} }); // no skill, no skillHint
+      bus.publish("agent.skill.request", msg);
+      await new Promise(r => setTimeout(r, 10));
+
+      const drop = bus.published.find(m => m.topic === "dispatch.dropped.no_skill");
+      expect(drop).toBeDefined();
+      const p = drop!.payload as Record<string, unknown>;
+      expect(p.reason).toBe("no_skill");
+      expect(p.correlationId).toBe("trace-abc");
+      expect(typeof p.message).toBe("string");
+    });
+
+    it("publishes dispatch.dropped.target_unresolved when no executor matches", async () => {
+      const msg = makeMsg({
+        payload: { skill: "ghost_skill", targets: ["nobody"] },
+      });
+      bus.publish("agent.skill.request", msg);
+      await new Promise(r => setTimeout(r, 10));
+
+      const drop = bus.published.find(m => m.topic === "dispatch.dropped.target_unresolved");
+      expect(drop).toBeDefined();
+      const p = drop!.payload as Record<string, unknown>;
+      expect(p.reason).toBe("target_unresolved");
+      expect(p.skill).toBe("ghost_skill");
+      expect(p.targets).toEqual(["nobody"]);
+    });
+
+    it("publishes dispatch.dropped.cooldown with cooldownKey + remainingMs when cooldown trips", async () => {
+      const fn = mock(async (req: SkillRequest): Promise<SkillResult> => ({
+        text: "ok",
+        isError: false,
+        correlationId: req.correlationId,
+      }));
+      // bug_triage has a 30s default cooldown
+      registry.register("bug_triage", new FunctionExecutor(fn));
+
+      // First dispatch — should succeed and seed lastDispatchAt
+      bus.publish("agent.skill.request", makeMsg({
+        correlationId: "trace-first",
+        payload: { skill: "bug_triage", meta: { owner: "protoLabsAI", repo: "foo" } },
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      // Second dispatch in-window — should drop with cooldown reason
+      bus.publish("agent.skill.request", makeMsg({
+        correlationId: "trace-second",
+        payload: { skill: "bug_triage", meta: { owner: "protoLabsAI", repo: "foo" } },
+      }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const drops = bus.published.filter(m => m.topic === "dispatch.dropped.cooldown");
+      expect(drops).toHaveLength(1);
+      const p = drops[0].payload as Record<string, unknown>;
+      expect(p.reason).toBe("cooldown");
+      expect(p.skill).toBe("bug_triage");
+      expect(typeof p.cooldownKey).toBe("string");
+      expect(typeof p.cooldownWindowMs).toBe("number");
+      expect(typeof p.cooldownRemainingMs).toBe("number");
+      expect(p.correlationId).toBe("trace-second");
+      // executor should NOT have been called for the dropped dispatch
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+  });
 });

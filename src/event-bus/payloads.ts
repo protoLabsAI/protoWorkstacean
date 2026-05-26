@@ -174,6 +174,37 @@ export interface FlowItemPayload {
   meta?: Record<string, unknown>;
 }
 
+// ── dispatch.dropped.* ───────────────────────────────────────────────────────
+
+/** Reason for a dropped dispatch — matches the trailing segment of the topic. */
+export type DispatchDropReason = "no_skill" | "target_unresolved" | "cooldown";
+
+/**
+ * Payload for `dispatch.dropped.{reason}`. Published by SkillDispatcherPlugin
+ * when a skill request reaches the chokepoint but is rejected before any
+ * executor runs. Subscribers (dashboard tiles, drop-rate alerts) can match
+ * `dispatch.dropped.cooldown` for cooldown-only or `dispatch.dropped.#` for
+ * all drops.
+ *
+ * Reason-specific fields are optional — uniform shape, single subscriber path.
+ */
+export interface DispatchDroppedPayload {
+  reason: DispatchDropReason;
+  correlationId: string;
+  /** The dispatcher's human-readable drop message — same content as the console.warn line. */
+  message: string;
+  /** Skill name (absent only when reason="no_skill"). */
+  skill?: string;
+  /** Explicit targets from the dispatch request (empty when none specified). */
+  targets?: string[];
+  /** Cooldown bucket key — populated only when reason="cooldown". */
+  cooldownKey?: string;
+  /** Configured cooldown window in ms — populated only when reason="cooldown". */
+  cooldownWindowMs?: number;
+  /** Remaining cooldown in ms when the drop fired — populated only when reason="cooldown". */
+  cooldownRemainingMs?: number;
+}
+
 // ── security.incident.reported ───────────────────────────────────────────────
 
 /** Severity level for security incidents. */

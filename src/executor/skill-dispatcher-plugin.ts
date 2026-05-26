@@ -22,6 +22,8 @@ import type {
   FlowItemPayload,
   AgentActivityPayload,
   AgentActivityType,
+  DispatchDroppedPayload,
+  DispatchDropReason,
 } from "../event-bus/payloads.ts";
 import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
@@ -200,7 +202,9 @@ export class SkillDispatcherPlugin implements Plugin {
 
     if (!skill) {
       this.activeExecutions.delete(correlationId);
-      console.warn("[skill-dispatcher] Received skill request with no skill — dropping");
+      const dropMsg = "Received skill request with no skill — dropping";
+      console.warn(`[skill-dispatcher] ${dropMsg}`);
+      this._publishDispatchDropped("no_skill", correlationId, dropMsg, { targets });
       this._publishResponse(replyTopic, correlationId, undefined, "No skill specified");
       return;
     }
@@ -212,7 +216,9 @@ export class SkillDispatcherPlugin implements Plugin {
       const searched = targets.length > 0
         ? `targets [${targets.join(", ")}] or skill "${skill}"`
         : `skill "${skill}"`;
-      console.warn(`[skill-dispatcher] No executor found for ${searched} — dropping`);
+      const dropMsg = `No executor found for ${searched} — dropping`;
+      console.warn(`[skill-dispatcher] ${dropMsg}`);
+      this._publishDispatchDropped("target_unresolved", correlationId, dropMsg, { skill, targets });
       this._publishResponse(replyTopic, correlationId, undefined, `No executor registered for ${searched}`);
       return;
     }
@@ -228,11 +234,18 @@ export class SkillDispatcherPlugin implements Plugin {
       const key = cooldownKeyFor(skill, payload as Record<string, unknown>);
       const last = this.lastDispatchAt.get(key);
       if (last !== undefined && Date.now() - last < cooldownMs) {
-        const remaining = cooldownMs - (Date.now() - last);
+        const elapsed = Date.now() - last;
+        const remaining = cooldownMs - elapsed;
         this.activeExecutions.delete(correlationId);
-        console.warn(
-          `[skill-dispatcher] Cooldown drop: "${key}" dispatched ${Date.now() - last}ms ago (window=${cooldownMs}ms, ${remaining}ms remaining)`,
-        );
+        const dropMsg = `Cooldown drop: "${key}" dispatched ${elapsed}ms ago (window=${cooldownMs}ms, ${remaining}ms remaining)`;
+        console.warn(`[skill-dispatcher] ${dropMsg}`);
+        this._publishDispatchDropped("cooldown", correlationId, dropMsg, {
+          skill,
+          targets,
+          cooldownKey: key,
+          cooldownWindowMs: cooldownMs,
+          cooldownRemainingMs: remaining,
+        });
         this._publishResponse(replyTopic, correlationId, undefined, `Cooldown: ${key} (${remaining}ms remaining)`);
         return;
       }
@@ -768,6 +781,35 @@ export class SkillDispatcherPlugin implements Plugin {
       topic: replyTopic,
       timestamp: Date.now(),
       payload: { content: result, error, correlationId },
+    });
+  }
+
+  /**
+   * Publish a dispatch-dropped telemetry event at the matching chokepoint
+   * site. Topic is `dispatch.dropped.{reason}` so subscribers can filter
+   * by reason. The console.warn is kept alongside this for log-tail
+   * visibility — both paths fire independently.
+   */
+  private _publishDispatchDropped(
+    reason: DispatchDropReason,
+    correlationId: string,
+    message: string,
+    extra: Omit<DispatchDroppedPayload, "reason" | "correlationId" | "message">,
+  ): void {
+    if (!this.bus) return;
+    const topic = `dispatch.dropped.${reason}`;
+    const payload: DispatchDroppedPayload = {
+      reason,
+      correlationId,
+      message,
+      ...extra,
+    };
+    this.bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId,
+      topic,
+      timestamp: Date.now(),
+      payload,
     });
   }
 }
