@@ -405,6 +405,20 @@ const pluginRegistry: PluginRegistryEntry[] = [
       );
     },
   },
+  {
+    // Watches dispatch.dropped.# (from SkillDispatcher) for storms — N drops
+    // on same key in M min. Escalates to operator.message.request (same pipe
+    // as #619 pr-remediator stuck-PR escalations). Per-key cooldown prevents
+    // DM flood.
+    name: "dispatch-drop-escalator",
+    condition: () => true,
+    factory: async () => {
+      const { DispatchDropEscalatorPlugin } = await import(
+        "./plugins/dispatch-drop-escalator-plugin.js"
+      );
+      return new DispatchDropEscalatorPlugin();
+    },
+  },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
   {
     name: "echo",
