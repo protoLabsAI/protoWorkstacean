@@ -571,7 +571,7 @@ export class GitHubPlugin implements Plugin {
     // verdict. Dedup'd via recentDispatches so a fast-updating branch doesn't
     // flood the bus.
     if (event === "pull_request" && (payload.action === "opened" || payload.action === "synchronize")) {
-      this._handleAutoReview(event, payload, ctx, bus, { skipDedup: false });
+      this._handleAutoReview(event, payload, ctx, bus, getToken, { skipDedup: false });
       return;
     }
 
@@ -583,7 +583,7 @@ export class GitHubPlugin implements Plugin {
       const reviewer = payload.requested_reviewer as Record<string, unknown> | undefined;
       const login = (reviewer?.login as string | undefined)?.toLowerCase();
       if (login === "protoquinn" || login === "protoquinn[bot]") {
-        this._handleAutoReview(event, payload, ctx, bus, { skipDedup: true });
+        this._handleAutoReview(event, payload, ctx, bus, getToken, { skipDedup: true });
       }
       return;
     }
@@ -667,6 +667,7 @@ export class GitHubPlugin implements Plugin {
     payload: Record<string, unknown>,
     ctx: GitHubEventContext,
     bus: EventBus,
+    getToken: (owner: string, repo: string) => Promise<string>,
     opts: { skipDedup: boolean } = { skipDedup: false },
   ): void {
     const action = payload.action as string;
@@ -736,6 +737,29 @@ export class GitHubPlugin implements Plugin {
     });
 
     console.log(`[github] Auto-review: ${ctx.owner}/${ctx.repo}#${ctx.number} (${action}) → pr_review`);
+
+    // Leading acknowledgment comment so the PR shows Quinn engagement
+    // immediately, not minutes later when the formal verdict review
+    // lands. GitHub Apps can't be added as requested reviewers
+    // (collaborator-only), so an explicit timeline comment is the
+    // closest equivalent UI signal. Same pattern Renovate / Dependabot
+    // / CodeRabbit use.
+    //
+    // Gated on `opened` only — `synchronize` and `review_requested`
+    // already happen against PRs that have a prior leading comment,
+    // so re-posting would be noise. Best-effort: a failure here must
+    // never block the actual dispatch above.
+    if (action === "opened") {
+      void this._postComment(
+        getToken,
+        { owner: ctx.owner, repo: ctx.repo, number: ctx.number },
+        "👀 Quinn is reviewing — verdict (PASS / WARN / FAIL) + findings to follow.",
+      ).catch((err) => {
+        console.warn(
+          `[github] Auto-review: leading-comment post failed for ${ctx.owner}/${ctx.repo}#${ctx.number}: ${err instanceof Error ? err.message : err}`,
+        );
+      });
+    }
   }
 
   private _handleAutoTriage(
