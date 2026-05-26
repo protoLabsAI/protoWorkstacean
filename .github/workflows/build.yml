@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
-    branches: [main, dev]
+    branches: [main]
 
 env:
   REGISTRY: ghcr.io
@@ -123,7 +123,7 @@ jobs:
         run: |
           node -e "
           const webhook = process.env.WEBHOOK;
-          if (!webhook) { console.log('No dev webhook configured — skipping'); process.exit(0); }
+          if (!webhook) { console.log('No dev-channel webhook secret configured — skipping'); process.exit(0); }
 
           const subject = (process.env.COMMIT_SUBJECT ?? '').split('\n')[0];
           const sha     = (process.env.SHORT_SHA ?? '').slice(0, 7);
@@ -135,5 +135,5 @@ jobs:
             body: JSON.stringify({ embeds: [{ title: \`Shipped — \${sha}\`, description: subject, url, color: 5763719, footer: { text: 'protoWorkstacean' } }] }),
           });
           if (!resp.ok) { console.error('Discord post failed:', resp.status); process.exit(1); }
-          console.log('Posted to dev channel.');
+          console.log('Posted to dev-channel webhook.');
           " --input-type=module
