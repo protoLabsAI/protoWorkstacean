@@ -26,6 +26,7 @@ import "@xyflow/react/dist/style.css";
 import AgentNode, { type AgentActivityState } from "./AgentNode.tsx";
 import ServiceNode from "./ServiceNode.tsx";
 import MessageDrawer, { type DrawerMessage } from "./MessageDrawer.tsx";
+import QuinnVerdictCounters from "./QuinnVerdictCounters.tsx";
 
 /** Ring-buffer cap for per-topic history shown in the edge drawer. */
 const TOPIC_HISTORY_CAP = 20;
@@ -408,7 +409,7 @@ export default function SystemGraph() {
   );
 
   return (
-    <div style={{ width: "100%", height: "calc(100vh - 64px)", background: "#0d1117" }}>
+    <div style={{ width: "100%", height: "calc(100vh - 64px)", background: "#0d1117", position: "relative" }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -426,6 +427,7 @@ export default function SystemGraph() {
         <Background color="#21262d" gap={16} />
         <Controls position="bottom-right" />
       </ReactFlow>
+      <QuinnVerdictCounters />
       {openTopic && (
         <MessageDrawer
           topic={openTopic}
