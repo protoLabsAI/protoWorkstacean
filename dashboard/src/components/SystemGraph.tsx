@@ -32,6 +32,7 @@ import ServiceNode from "./ServiceNode.tsx";
 import MessageDrawer, { type DrawerMessage } from "./MessageDrawer.tsx";
 import QuinnVerdictCounters from "./QuinnVerdictCounters.tsx";
 import LatencyHistogram from "./LatencyHistogram.tsx";
+import { architecturalLayout } from "../lib/layout.ts";
 
 /** Ring-buffer cap for per-topic history shown in the edge drawer. */
 const TOPIC_HISTORY_CAP = 20;
@@ -106,13 +107,17 @@ function topicMatches(pattern: string, topic: string): boolean {
 }
 
 // ── Layout ───────────────────────────────────────────────────────────────────
-// Three concentric rings. Agents at center (smallest radius — they're the
-// focal point); plugins in the middle; services on the outside.
-
-function ringPos(idx: number, count: number, radius: number, cx = 500, cy = 380) {
-  const angle = (idx / Math.max(count, 1)) * Math.PI * 2 - Math.PI / 2; // start at top
-  return { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
-}
+// Architectural-column layout (see ../lib/layout.ts). The protoWorkstacean
+// spine is trigger → router → dispatcher → executor → agent → external, so
+// the graph reads strictly left-to-right along that spine. Concentric rings
+// (#555) and force-directed dagre both produced technically-correct but
+// noisy placements that didn't surface the architecture; this version
+// hand-classifies every plugin into a named column and stacks vertically
+// within the column.
+//
+// PLACEHOLDER_POS is what buildGraph stamps on every node; architecturalLayout
+// overwrites all positions at the end so the placeholders never reach React Flow.
+const PLACEHOLDER_POS = { x: 0, y: 0 };
 
 interface BuildArgs {
   plugins: PluginTopologyEntry[];
@@ -130,7 +135,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
     nodes.push({
       id: `agent-${a.name}`,
       type: "agent",
-      position: ringPos(idx, agents.length, 180),
+      position: PLACEHOLDER_POS,
       data: { label: a.name, type: a.type, activity: agentActivity.get(a.name) },
     });
   });
@@ -139,7 +144,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
   plugins.forEach((p, idx) => {
     nodes.push({
       id: `plugin-${p.name}`,
-      position: ringPos(idx, plugins.length, 380),
+      position: PLACEHOLDER_POS,
       data: { label: p.name },
       style: {
         background: "#161b22",
@@ -158,7 +163,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
     nodes.push({
       id: s.id,
       type: "service",
-      position: ringPos(idx, SERVICES.length, 580),
+      position: PLACEHOLDER_POS,
       data: { label: s.label, icon: s.icon, description: s.description },
     });
   });
@@ -251,7 +256,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
   if (orphanEdges.length > 0) {
     nodes.push({
       id: "api-routes",
-      position: ringPos(0, 1, 0, 500, 100), // floats near the top of the canvas
+      position: PLACEHOLDER_POS,
       data: { label: "api-routes" },
       style: {
         background: "#1c2128",
@@ -282,7 +287,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
     }
   }
 
-  return { nodes, edges };
+  return architecturalLayout(nodes, edges);
 }
 
 // ── Activity event → agent state machine ─────────────────────────────────────
