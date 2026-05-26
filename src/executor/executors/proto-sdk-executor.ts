@@ -67,11 +67,16 @@ export class ProtoSdkExecutor implements IExecutor {
     // Allow the dispatched payload to override the working directory. The
     // protoCLI session uses this as its `cwd` for shell/edit/read tools.
     const cwd = typeof req.payload?.cwd === "string" ? req.payload.cwd : undefined;
+    // Per-call model override — escalate to Opus / downshift to Haiku
+    // without editing agent yaml. Falls back to agentDef.model in
+    // AgentExecutor.run() when unset.
+    const model = typeof req.payload?.model === "string" ? req.payload.model : undefined;
 
     const result = await this.executor.run({
       prompt,
       correlationId,
       cwd,
+      ...(model ? { model } : {}),
       onProgress: (event) => {
         // Per-event progress publish — feeds the /trace timeline + any
         // A2A peer streaming our results back over JSON-RPC.
