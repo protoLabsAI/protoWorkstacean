@@ -151,7 +151,7 @@ The dispatcher enforces invariants in this order ([skill-dispatcher-plugin.ts:16
 ## Failure modes & gotchas
 
 - **No execute() timeout** — `await executor.execute()` at line 286 is unguarded. A2A hangs leave the dispatcher slot occupied indefinitely. Mitigation lives inside individual executors (A2A SDK has its own timeouts).
-- **Cooldown drop is silent on the bus** — only `console.warn`. Dashboard cannot count cooldown trips today. Reply topic still gets an error response (line 223–227).
+- **Cooldown drops emit `dispatch.dropped.cooldown`** (since #620) — dashboard tiles + `dispatch-drop-escalator` (#622) consume this. Reply topic also gets an error response. Console.warn preserved for log-tail visibility.
 - **Synthetic actors pollute fleet metrics if unfiltered** — `systemActor` whitelisting happens at [AgentFleetHealthPlugin._record](../../src/plugins/agent-fleet-health-plugin.ts) (line 281–334), **not** at the dispatcher. See [chokepoint-invariants.md](chokepoint-invariants.md).
 - **Self-cascade guard on GitHub events** — DiscordPlugin/GitHubPlugin filter bot-authored events (`protoquinn[bot]`, `ava[bot]`, `protobot[bot]`) at webhook time to prevent infinite Quinn → issue → webhook → Quinn loops ([github.ts:524–542](../../lib/plugins/github.ts)). PR events are intentionally NOT filtered — Quinn-authored PRs still get reviewed.
 - **`bug_triage` success has a deferred side-effect** — async board filing if `projectPath` is set (line 332–334). Doesn't block the response; failures here are invisible to the requester.
