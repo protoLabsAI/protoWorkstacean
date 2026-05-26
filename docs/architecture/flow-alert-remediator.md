@@ -2,7 +2,7 @@
 title: Flow — Alert / PR remediator
 ---
 
-_The fleet self-healing path: AgentFleetHealth aggregates outcomes into a snapshot; when thresholds trip, alert skills publish to Discord; pr-remediator handles `pr.remediate.*` topics that propose code mutations. The threshold-evaluation layer is currently external (Goals/Actions YAML) and is a known architectural seam._
+_The fleet self-healing path: AgentFleetHealth aggregates outcomes into a snapshot; the `fleet_alerts` ceremony polls thresholds every minute and dispatches `alert.*` skills on violation; pr-remediator handles `pr.remediate.*` topics that propose code mutations._
 
 ---
 
@@ -43,7 +43,7 @@ Both are `FunctionExecutor`-backed (no LLM at the executor itself; LLM lives one
    └──────────────┬───────────┘
                   │
                   ▼   (?) threshold evaluation
-                  │       happens externally — see "Threshold gap" below
+                  │       fleet_alerts ceremony polls every 60s
                   ▼
    ┌──────────────────────────┐  ┌──────────────────────────┐
    │ alert.fleet_agent_stuck  │  │ action.pr_update_branch  │
@@ -95,7 +95,7 @@ sequenceDiagram
     WSE->>FH: getFleetHealth()
     FH-->>WSE: FleetHealthSnapshot
 
-    Note over TE: ⚠ threshold evaluation<br/>not in source — see gap section
+    Note over TE: FleetAlertsEvaluatorPlugin<br/>(fleet_alerts ceremony, every 60s)
     TE->>Bus: agent.skill.request<br/>(skill=alert.fleet_agent_stuck)
     Bus->>SD: deliver
     SD->>AE: execute(req)
@@ -182,20 +182,34 @@ Summary: `pr-remediator`, `auto-triage-sweep`, `goap`, `user` are recognized syn
 
 ---
 
-## Threshold gap
+## Threshold evaluation (via fleet_alerts ceremony)
 
-**Where threshold evaluation actually happens is not fully visible in the audited source.** The audit found:
+Resolved by **#621** — the GOAP layer that previously evaluated thresholds was ripped in **#518** (2026-05-23), leaving the 20 `alert.*` skills as orphaned dead code for 3 days. The reconnect uses the existing ceremony spine instead of resurrecting GOAP:
 
-- `ALERT_SKILLS` declares 20 alert skill names
-- `FleetHealthSnapshot` exposes the relevant metrics (`maxFailureRate1h`, `orphanedSkillCount`, `totalCostUsd1d`, …)
-- `ActionDispatcherPlugin` presumably dispatches `alert.*` and `action.*` skills when preconditions match — but the **goals/actions YAML files were not found** in the audited tree
+```
+workspace/ceremonies/fleet-alerts.yaml
+  schedule: * * * * *               every minute
+  skill: evaluate_fleet_thresholds
 
-This points at a **partial GOAP layer still wired** despite memory saying GOAP is being removed (see [memory: app-is-switchboard](../../.claude/projects/-home-josh-dev-protoWorkstacean/memory/project_app_is_switchboard.md)). One of two states is true:
+src/plugins/fleet-alerts-evaluator-plugin.ts
+  registers evaluate_fleet_thresholds (FunctionExecutor)
 
-1. The GOAP layer is fully torn out and threshold evaluation has moved elsewhere (e.g. a simple cron-based threshold-checker) — in which case `AlertSkillExecutorPlugin` no longer fires today
-2. The GOAP layer is partially still in place, driving alerts/actions from `agent_fleet_health` world-state
+  on dispatch (every minute):
+    1. snapshot = AgentFleetHealthPlugin.getFleetHealth()
+    2. for each tripped threshold:
+         bus.publish("agent.skill.request", { skill: "alert.X", meta: { metric, value, threshold } })
+    3. per-alert cooldown (15min default) suppresses repeats
+```
 
-A maintainer needs to resolve this before the doc can claim a complete picture. **Tracking gap; not blocking the rest of the doc.**
+**Three thresholds wired today** (env-overridable):
+
+| Alert | Trigger | Default | Env |
+|---|---|---|---|
+| `alert.fleet_agent_stuck` | `maxFailureRate1h > 0.5` | 50% | `WORKSTACEAN_FLEET_FAILURE_RATE_THRESHOLD` |
+| `alert.fleet_cost_over_budget` | `totalCostUsd1d > $50` | $50/day | `WORKSTACEAN_FLEET_DAILY_BUDGET_USD` |
+| `alert.fleet_skill_orphaned` | `orphanedSkillCount > 0` | 0 | (fixed) |
+
+**The other 17 alert skills** remain unwired — they need data sources outside fleet-health (GitHub branch protection, CI failure history, security state). Same state as before #621; surfacing as known work, not regression.
 
 ---
 

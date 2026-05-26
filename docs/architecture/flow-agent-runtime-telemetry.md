@@ -164,18 +164,21 @@ This means **autonomous.outcome is sometimes published by TaskTracker, not the d
 
 ---
 
-## Aspirational topics (NOT in source)
+## Runtime activity + skill latency topics
 
-Memory and some documentation reference these — they are not implemented:
+The dispatcher and runtime publish a richer set of lifecycle events than `autonomous.outcome.*` alone:
 
-- `agent.runtime.activity.tool.call` — would emit per tool invocation inside the agent. Not published anywhere in src. ([all-topics.ts](../../src/event-bus/all-topics.ts) confirms.)
-- `agent.skill.latency` — referenced as a histogram source. Not published; latency is in `autonomous.outcome.*.durationMs`.
+| Topic | Published at | What it carries |
+|---|---|---|
+| `agent.runtime.activity.skill.start` | `skill-dispatcher-plugin.ts:110` (declared in `publishes`) | dispatch start — agent name, skill, correlationId |
+| `agent.runtime.activity.skill.complete` | same | dispatch terminal — outcome + duration |
+| `agent.runtime.activity.skill.error` | same | dispatch failure — error + duration |
+| `agent.runtime.activity.tool.call` | `agent-runtime-plugin.ts:94` (via `_publishToolCall` hook fed by DeepAgent at `deep-agent-executor.ts:743` and ProtoSdk at `proto-sdk-executor.ts:100`) | per-tool invocation — agent, correlationId, skill, toolNames[] |
+| `agent.skill.latency` | `skill-dispatcher-plugin.ts:482` | structured latency — skill, totalMs, queueMs, executeMs, optional github {owner,repo,number} |
 
-Any tile or alert depending on these is dead code today. Either:
-1. Wire them up (one-line `bus.publish` at the right hook), or
-2. Re-source the dependent tile from `autonomous.outcome.*` / `flow.item.*` instead.
+The `_publishToolCall` callback is wired uniformly in `AgentRuntimePlugin.install()` and passed into both DeepAgent and ProtoSdk executor constructors — same hook, same topic, regardless of runtime.
 
-This is tracked as a follow-up — not a blocker for the rest of the system.
+`agent.skill.latency` is best-effort (`try`/`catch` at line 497) — a publish failure can't poison the success path.
 
 ---
 
@@ -201,7 +204,7 @@ This is tracked as a follow-up — not a blocker for the rest of the system.
 
 - **Progress topics are silent today** — no executor publishes `agent.skill.progress.*`. Dashboard tiles relying on them show nothing.
 - **TaskTracker outcome publish is the canonical path for long-running A2A** — if you're debugging "outcome never fires", check whether the task is parked in TaskTracker (likely) or actually never completed (unlikely).
-- **Latency is `durationMs`, not a histogram** — `autonomous.outcome.*.durationMs` is the only latency signal. If you want p50/p95, aggregate at the consumer ([flow-alert-remediator](flow-alert-remediator.md) does this).
+- **Latency is `durationMs` on outcomes + structured `agent.skill.latency` on success** — `autonomous.outcome.*.durationMs` is wall-clock; `agent.skill.latency` adds queueMs/executeMs split + optional GitHub PR context. Aggregate at the consumer for p50/p95 ([flow-alert-remediator](flow-alert-remediator.md) does this from outcomes).
 - **`systemActor` is whatever the dispatcher writes** — it's not validated by the bus. Synthetic actors (`pr-remediator`, `goap`, `user`) coexist with real agents. The synthetic-actor filter at FleetHealth ([#459](chokepoint-invariants.md)) is the source of truth for "is this a real agent."
 
 ---

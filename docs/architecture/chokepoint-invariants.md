@@ -132,14 +132,19 @@ on autonomous.outcome.{actor}.{skill}:
 
 ---
 
-## Telemetry gap
+## Telemetry (resolved by #620 + #622)
 
-None of the four invariants publish a bus event on trip today. Dashboard tiles for "cooldown drops in last hour" or "target-unresolved warnings" require either:
+The dispatcher publishes `dispatch.dropped.{reason}` at each chokepoint drop site (shipped in **#620**), and the `dispatch-drop-escalator` plugin watches for storms — N drops on the same key in M minutes → operator DM via `operator.message.request` (shipped in **#622**).
 
-1. **`dispatch.dropped.{reason}` bus topic** — would need wiring at each drop site. Simple but invasive.
-2. **`BusHistoryRecorder` scraping `console.warn`** — fragile, breaks if log format changes.
+| Topic | Published at | Subscribed by |
+|---|---|---|
+| `dispatch.dropped.no_skill` | `skill-dispatcher-plugin.ts:201-208` | dashboard, dispatch-drop-escalator |
+| `dispatch.dropped.target_unresolved` | `:212-223` | dashboard, dispatch-drop-escalator |
+| `dispatch.dropped.cooldown` | `:236-249` | dashboard, dispatch-drop-escalator |
 
-Both are open work. Worth doing before more invariants are added; otherwise we keep losing visibility per check.
+Payload shape: `DispatchDroppedPayload` in `src/event-bus/payloads.ts` — uniform across reasons, with reason-specific optional fields (`cooldownKey`, `cooldownWindowMs`, `cooldownRemainingMs`). The console.warn at each site is kept for log-tail visibility — bus and stdout fire independently.
+
+The synthetic-actor filter (#459) still doesn't publish a "filtered" event — by design, since synthetic actors are *expected* and the bucketing is the signal. If we ever need to detect a *new* synthetic actor appearing, that's worth surfacing — open follow-up.
 
 ---
 
