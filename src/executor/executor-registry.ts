@@ -84,6 +84,29 @@ export class ExecutorRegistry {
   }
 
   /**
+   * Remove every registration matching (skill, agentName). Returns the number
+   * of entries removed. Used by SkillBrokerPlugin when an A2A agent drops a
+   * skill from its card on refresh — without this, the stale registration
+   * keeps absorbing dispatches that should fall through to another agent
+   * (or fail loud) until the next workstacean restart.
+   *
+   * Pass `agentName: undefined` to remove anonymous registrations (those
+   * registered without an agentName). This is the unique-key shape that
+   * register() supports; we match it.
+   */
+  unregister(skill: string, agentName: string | undefined): number {
+    let removed = 0;
+    for (let i = this._registrations.length - 1; i >= 0; i--) {
+      const r = this._registrations[i]!;
+      if (r.skill === skill && r.agentName === agentName) {
+        this._registrations.splice(i, 1);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  /**
    * Resolve the executor for a (skill, targets) pair.
    * Returns null if nothing matches and no default is set.
    */

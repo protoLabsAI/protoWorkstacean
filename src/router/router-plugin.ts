@@ -51,6 +51,19 @@ export interface RouterConfig {
   channelRegistry?: ChannelRegistry;
 }
 
+/**
+ * Extract the Linear event identifier from an inbound topic, returning e.g.
+ * `agent.issueCommentMention`, `issue.created`, `comment.created` — or
+ * undefined for non-Linear topics. Used to emit a `[linear] event=…` delivery
+ * log alongside the generic `[router]` line.
+ */
+function extractLinearEvent(topic: string): string | undefined {
+  const prefix = "message.inbound.linear.";
+  if (!topic.startsWith(prefix)) return undefined;
+  const rest = topic.slice(prefix.length);
+  return rest || undefined;
+}
+
 /** Build reply topic from channel + optional recipient. */
 function buildReplyTopic(channel: string, recipient?: string): string {
   if (channel === "signal") {
@@ -210,6 +223,10 @@ export class RouterPlugin implements Plugin {
         (content ? ` content="${content.slice(0, 60)}"` : "") +
         " — dropping",
       );
+      const linearEvent = extractLinearEvent(msg.topic);
+      if (linearEvent) {
+        console.log(`[linear] event=${linearEvent} delivered to none (no skill match)`);
+      }
       return;
     }
 
@@ -247,6 +264,17 @@ export class RouterPlugin implements Plugin {
       (agentName ? ` [${agentName}]` : "") +
       ` reply → ${replyTopic}`,
     );
+
+    // Per-event delivery surface for Linear so operators can debug routing
+    // without grepping for the message.inbound.linear.* topic shape. The
+    // `[linear]` prefix matches the rest of LinearPlugin's logs so a single
+    // grep covers publish + delivery.
+    const linearEvent = extractLinearEvent(msg.topic);
+    if (linearEvent) {
+      console.log(
+        `[linear] event=${linearEvent} delivered to ${agentName ?? "none"} (skill=${skill})`,
+      );
+    }
 
     const skillRequest: BusMessage = {
       id: crypto.randomUUID(),

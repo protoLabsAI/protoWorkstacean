@@ -13,6 +13,11 @@ workspace/github.yaml
 workspace/google.yaml
 workspace/agent-keys.yaml
 .automaker-lock
-.automaker/
 .worktrees/
 .claude/
+
+# protoLabs workspace-config standard
+.beads/beads.db
+.automaker/features/
+.automaker/checkpoints/
+.automaker/trajectory/

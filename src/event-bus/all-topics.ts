@@ -59,9 +59,48 @@ export const ACTION_TOPICS = {
    * Full topic is `autonomous.outcome.{systemActor}.{skill}`.
    */
   AUTONOMOUS_OUTCOME_PREFIX: "autonomous.outcome",
+
+  /**
+   * Published by SkillDispatcherPlugin after every successful skill
+   * completion that came from a webhook-stamped dispatch (today: github's
+   * `_handleAutoReview`). Structured form of the existing
+   * `[skill-latency]` log line — dashboard tiles + downstream alerting
+   * can subscribe and accumulate without parsing stdout.
+   *
+   * Payload shape: { skill, totalMs, queueMs, executeMs, github? }.
+   *   - totalMs   = webhook arrival → done
+   *   - queueMs   = webhook arrival → dispatch start (bus hops + routing)
+   *   - executeMs = dispatch start → done (LLM + tools)
+   *   - github    = { owner, repo, number } when the original payload
+   *                 carried it (PR reviews, etc.); absent otherwise.
+   */
+  AGENT_SKILL_LATENCY: "agent.skill.latency",
+
+  /**
+   * Prefix for dispatcher drop events. Full topic is
+   * `dispatch.dropped.{reason}` where reason ∈ {no_skill, target_unresolved,
+   * cooldown}. Published by SkillDispatcherPlugin at each chokepoint drop
+   * site so subscribers (dashboard, drop-rate alerts) can count + filter
+   * by reason without scraping stdout. Payload shape:
+   * see `DispatchDroppedPayload` in src/event-bus/payloads.ts.
+   */
+  DISPATCH_DROPPED_PREFIX: "dispatch.dropped",
 } as const;
 
 export const SECURITY_TOPICS = {
   /** Published when a security incident is detected. */
   SECURITY_INCIDENT_REPORTED: "security.incident.reported",
+} as const;
+
+export const REVIEW_TOPICS = {
+  /**
+   * Published by `pr-inspector` after a `review_comment` / `review_approve` /
+   * `review_request_changes` action succeeds. Fire-and-forget signal for any
+   * notifier (Discord embed, dashboard activity feed, etc.) that wants to
+   * react to Quinn's review verdicts without subscribing to every github API
+   * response. See `quinn-review-notifier-plugin` for the Discord side.
+   *
+   * Payload shape: { owner, repo, prNumber, event, reviewId?, prUrl? }.
+   */
+  QUINN_REVIEW_SUBMITTED: "quinn.review.submitted",
 } as const;

@@ -142,7 +142,7 @@ Tools are defined as LangChain tools with zod schemas in `DeepAgentExecutor`. Ea
 
 ## LLM gateway
 
-All LLM calls route through LiteLLM at `LLM_GATEWAY_URL` (or `OPENAI_BASE_URL`). The executor creates a `ChatOpenAI` instance with the gateway as `baseURL` and `OPENAI_API_KEY` for auth. Model aliases (e.g. `claude-sonnet-4-6`) are resolved by the gateway.
+All LLM calls route through LiteLLM at `LLM_GATEWAY_URL` (or `OPENAI_BASE_URL`). The executor creates a `ChatOpenAI` instance with the gateway as `baseURL` and `OPENAI_API_KEY` for auth. Model aliases (e.g. `protolabs/reasoning`, `claude-sonnet-4-6`) are resolved by the gateway.
 
 ## Observability
 

@@ -73,12 +73,31 @@ interface LinearIssuePayload {
 export class LinearProtoMakerBridgePlugin implements Plugin {
   readonly name = "linear-protomaker-bridge";
   readonly description =
-    "Linear issue → protoMaker board feature bridge (label-triggered, auto-file)";
+    "Linear issue ↔ protoMaker board feature bridge (label-triggered, with close-the-loop)";
   readonly capabilities = ["linear-protomaker-bridge"];
 
   private readonly workspaceDir: string;
   private readonly subscriptionIds: string[] = [];
   private mappings: LinearBoardMapping[] = [];
+
+  /**
+   * Tracks features the bridge filed on protoMaker so we can close the loop
+   * when feature.completed / feature.failed fires. Two index structures
+   * because the dispatch path knows correlationId (linear-bridge-<issueId>)
+   * and feature lifecycle events carry only (featureId, featureTitle,
+   * projectSlug). Stored bidirectionally so either can resolve back to
+   * the originating Linear issue.
+   *
+   * In-memory; lost on process restart. Acceptable trade-off — we'll miss
+   * a few "completed" notifications during the deploy window, and the
+   * next round-trip re-populates. Persist to disk if this proves noisy.
+   *
+   * Caps the cache to BRIDGE_CACHE_LIMIT entries, evicting oldest by
+   * insertion order so a runaway dispatch can't OOM the process.
+   */
+  private readonly issueByFeatureId = new Map<string, string>(); // featureId → linearIssueId
+  private readonly issueByTitle = new Map<string, string>();     // featureTitle → linearIssueId (fallback when featureId missing from event)
+  private readonly cacheOrder: string[] = [];
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
@@ -93,15 +112,31 @@ export class LinearProtoMakerBridgePlugin implements Plugin {
       watchFile(mappingsPath, { interval: 5_000 }, () => this._loadMappings());
     }
 
-    const subId = bus.subscribe(
+    const inSubId = bus.subscribe(
       "message.inbound.linear.issue.created",
       this.name,
       (msg: BusMessage) => this._handleIssueCreated(bus, msg),
     );
-    this.subscriptionIds.push(subId);
+    this.subscriptionIds.push(inSubId);
+
+    // Close-the-loop: when a feature we bridged from Linear hits done /
+    // failed on the protoMaker board, post a comment back to the
+    // originating Linear issue.
+    const doneSubId = bus.subscribe(
+      "feature.completed",
+      this.name,
+      (msg: BusMessage) => this._handleFeatureLifecycle(bus, msg, "completed"),
+    );
+    this.subscriptionIds.push(doneSubId);
+    const failSubId = bus.subscribe(
+      "feature.failed",
+      this.name,
+      (msg: BusMessage) => this._handleFeatureLifecycle(bus, msg, "failed"),
+    );
+    this.subscriptionIds.push(failSubId);
 
     console.log(
-      `[linear-protomaker-bridge] installed with ${this.mappings.length} mapping(s)`,
+      `[linear-protomaker-bridge] installed with ${this.mappings.length} mapping(s), close-the-loop wired (feature.completed + feature.failed)`,
     );
   }
 
@@ -205,8 +240,100 @@ export class LinearProtoMakerBridgePlugin implements Plugin {
       source: { interface: "linear" as const },
     });
 
+    // Index by title so feature.completed can resolve back to the Linear
+    // issue once protoMaker reports done. featureId isn't known until
+    // protoMaker echoes the create — that gets cached opportunistically
+    // when (and if) we see an `agent.skill.response` carrying a featureId.
+    // For the v1 path, title is unique-enough per Linear issue and the
+    // round-trip from Linear → bridge → protomaker preserves it verbatim.
+    this._rememberLinearIssue(payload.title, payload.issueId);
+
     console.log(
       `[linear-protomaker-bridge] ${payload.identifier ?? payload.issueId} → manage_feature for project '${mapping.protoMakerProjectSlug}' (reply → ${replyTopic})`,
+    );
+  }
+
+  private static readonly BRIDGE_CACHE_LIMIT = 500;
+
+  private _rememberLinearIssue(title: string, issueId: string): void {
+    // Bounded LRU-ish: evict oldest by insertion order when over cap.
+    if (this.issueByTitle.has(title)) return;
+    this.issueByTitle.set(title, issueId);
+    this.cacheOrder.push(`title:${title}`);
+    this._enforceCacheLimit();
+  }
+
+  private _rememberFeatureId(featureId: string, issueId: string): void {
+    if (this.issueByFeatureId.has(featureId)) return;
+    this.issueByFeatureId.set(featureId, issueId);
+    this.cacheOrder.push(`feat:${featureId}`);
+    this._enforceCacheLimit();
+  }
+
+  private _enforceCacheLimit(): void {
+    while (this.cacheOrder.length > LinearProtoMakerBridgePlugin.BRIDGE_CACHE_LIMIT) {
+      const oldest = this.cacheOrder.shift();
+      if (!oldest) break;
+      const [kind, key] = oldest.split(":", 2);
+      if (kind === "title") this.issueByTitle.delete(key!);
+      else if (kind === "feat") this.issueByFeatureId.delete(key!);
+    }
+  }
+
+  /**
+   * feature.completed / feature.failed handler. Looks up the originating
+   * Linear issue (by featureId first, falling back to featureTitle) and
+   * posts a comment via the existing linear.reply.{issueId} outbound
+   * subscriber.
+   *
+   * Cache miss is the normal case for features filed before this process
+   * started, or filed from non-Linear sources. We silently drop those —
+   * not every protoMaker feature has a Linear counterpart.
+   */
+  private _handleFeatureLifecycle(
+    bus: EventBus,
+    msg: BusMessage,
+    kind: "completed" | "failed",
+  ): void {
+    const payload = (msg.payload ?? {}) as {
+      featureId?: string;
+      featureTitle?: string;
+      projectSlug?: string;
+      branchName?: string;
+      prNumber?: number;
+      error?: string;
+    };
+    const issueId =
+      (payload.featureId && this.issueByFeatureId.get(payload.featureId))
+      ?? (payload.featureTitle && this.issueByTitle.get(payload.featureTitle))
+      ?? null;
+    if (!issueId) return;
+
+    const title = payload.featureTitle ?? payload.featureId ?? "(unnamed feature)";
+    let text: string;
+    if (kind === "completed") {
+      const prRef = payload.prNumber ? ` (PR #${payload.prNumber})` : "";
+      const branchRef = payload.branchName ? `\n\nBranch: \`${payload.branchName}\`` : "";
+      text =
+        `✅ **Feature shipped** — protoMaker reports "${title}" complete${prRef}.${branchRef}\n\n` +
+        `— linear-protomaker-bridge`;
+    } else {
+      const errSnip = payload.error ? `\n\n> ${payload.error.slice(0, 400)}` : "";
+      text =
+        `❌ **Feature failed** — protoMaker reports "${title}" failed.${errSnip}\n\n` +
+        `— linear-protomaker-bridge`;
+    }
+
+    const topic = `linear.reply.${issueId}`;
+    bus.publish(topic, {
+      id: crypto.randomUUID(),
+      correlationId: `linear-bridge-feedback-${payload.featureId ?? Date.now()}`,
+      topic,
+      timestamp: Date.now(),
+      payload: { text },
+    });
+    console.log(
+      `[linear-protomaker-bridge] feature.${kind} "${title}" → linear.reply.${issueId}`,
     );
   }
 }

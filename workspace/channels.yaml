@@ -10,24 +10,41 @@ channels:
       timeoutMs: 300000
       requireMentionAfterFirst: false
 
-  # ── Linear — example channel registrations ─────────────────────────────────
-  # Linear channels can be scoped by team key, a specific issue id, or a
+  # ── Linear ────────────────────────────────────────────────────────────────
+  # Linear channels are scoped by team key, a specific issue id, or a
   # project id. RouterPlugin matches the inbound message's source.channelId
   # (set by LinearPlugin to teamKey for issues/comments and projectId for
   # project events) against these entries.
   #
-  # Uncomment + customize when wiring Linear to an agent.
+  # Ava is the default Linear handler — she already has the pull-mode tools
+  # (linear_list_issues / linear_get_issue / linear_add_comment / etc.) so
+  # all team-level traffic routes to her. Agent SDK events (issueMention,
+  # issueCommentMention, etc.) flow through this path too; her
+  # linear_agent_respond skill (A2 in roadmap 2026-06) branches on the
+  # notification action.
+
+  - id: linear-team-josh
+    platform: linear
+    channelId: "JOSH"
+    agent: ava
+    description: Josh's Linear team — issues + comments + agent @mentions route to Ava
+    conversation:
+      enabled: true
+      timeoutMs: 600000
+
+  - id: linear-team-matt
+    platform: linear
+    channelId: "MATT"
+    agent: ava
+    description: Matt's Linear team — issues + comments + agent @mentions route to Ava
+    conversation:
+      enabled: true
+      timeoutMs: 600000
+
+  # To delegate a specific Linear ticket to a different agent end-to-end,
+  # add a channel entry with the team-prefixed issue identifier as channelId:
   #
-  # - id: linear-eng-triage
-  #   platform: linear
-  #   channelId: "ENG"
-  #   agent: ava
-  #   description: Engineering team — all Linear issues & comments route to Ava
-  #   conversation:
-  #     enabled: true
-  #     timeoutMs: 600000
-  #
-  # - id: linear-single-ticket
+  # - id: linear-quinn-owned-ticket
   #   platform: linear
   #   channelId: "ENG-142"
   #   agent: quinn

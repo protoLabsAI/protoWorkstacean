@@ -245,3 +245,104 @@ mappings:
     expect(content).not.toContain("Priority:");
   });
 });
+
+describe("LinearProtoMakerBridgePlugin — close-the-loop", () => {
+  let workspaceDir: string;
+  let bus: InMemoryEventBus;
+  let plugin: LinearProtoMakerBridgePlugin;
+  let linearReplies: BusMessage[];
+
+  beforeEach(() => {
+    workspaceDir = mkdtempSync(join(tmpdir(), "linear-bridge-loop-"));
+    writeFileSync(
+      join(workspaceDir, "linear-board-mappings.yaml"),
+      `mappings:\n  - linearTeamKey: ENG\n    protoMakerProjectSlug: engineering\n    triggerLabel: board\n`,
+    );
+    bus = new InMemoryEventBus();
+    plugin = new LinearProtoMakerBridgePlugin(workspaceDir);
+    plugin.install(bus);
+    linearReplies = [];
+    // Capture every linear.reply.* topic so we can inspect close-the-loop output.
+    bus.subscribe("linear.reply.#", "test-loop-collector", (msg) => { linearReplies.push(msg); });
+  });
+
+  afterEach(() => {
+    plugin.uninstall();
+    rmSync(workspaceDir, { recursive: true, force: true });
+  });
+
+  function publishFeatureCompleted(payload: Record<string, unknown>): void {
+    bus.publish("feature.completed", {
+      id: crypto.randomUUID(),
+      correlationId: `feat-${payload.featureId ?? "x"}`,
+      topic: "feature.completed",
+      timestamp: Date.now(),
+      payload,
+    });
+  }
+
+  function publishFeatureFailed(payload: Record<string, unknown>): void {
+    bus.publish("feature.failed", {
+      id: crypto.randomUUID(),
+      correlationId: `feat-${payload.featureId ?? "x"}`,
+      topic: "feature.failed",
+      timestamp: Date.now(),
+      payload,
+    });
+  }
+
+  test("feature.completed for a bridge-filed feature → linear.reply.<issueId> with ✅", () => {
+    // First dispatch — populates the title cache
+    publishIssueCreated(bus, makeIssuePayload({ title: "Add login", issueId: "issue-AAA" }));
+    expect(linearReplies).toHaveLength(0);
+
+    publishFeatureCompleted({
+      featureId: "feat-123",
+      featureTitle: "Add login",
+      projectSlug: "engineering",
+      branchName: "feature/add-login",
+      prNumber: 42,
+    });
+
+    expect(linearReplies).toHaveLength(1);
+    expect(linearReplies[0].topic).toBe("linear.reply.issue-AAA");
+    const text = (linearReplies[0].payload as { text: string }).text;
+    expect(text).toContain("✅");
+    expect(text).toContain("Add login");
+    expect(text).toContain("PR #42");
+    expect(text).toContain("feature/add-login");
+  });
+
+  test("feature.failed for a bridge-filed feature → linear.reply.<issueId> with ❌ + error snippet", () => {
+    publishIssueCreated(bus, makeIssuePayload({ title: "Refactor auth", issueId: "issue-BBB" }));
+
+    publishFeatureFailed({
+      featureId: "feat-456",
+      featureTitle: "Refactor auth",
+      projectSlug: "engineering",
+      error: "merge conflict: 47 files in src/auth/* across base and head",
+    });
+
+    expect(linearReplies).toHaveLength(1);
+    expect(linearReplies[0].topic).toBe("linear.reply.issue-BBB");
+    const text = (linearReplies[0].payload as { text: string }).text;
+    expect(text).toContain("❌");
+    expect(text).toContain("merge conflict");
+  });
+
+  test("feature.completed for a feature the bridge didn't file → silently dropped (no Linear reply)", () => {
+    // No publishIssueCreated() — the title cache is empty for this feature.
+    publishFeatureCompleted({
+      featureId: "feat-not-from-linear",
+      featureTitle: "Some non-Linear feature",
+      projectSlug: "engineering",
+    });
+
+    expect(linearReplies).toHaveLength(0);
+  });
+
+  test("feature.completed with missing featureId AND featureTitle → silent no-op (defensive)", () => {
+    publishFeatureCompleted({ projectSlug: "engineering" });
+    expect(linearReplies).toHaveLength(0);
+  });
+});

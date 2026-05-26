@@ -21,7 +21,7 @@ on:
 
 jobs:
   post-release-notes:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-protolabs-linux
     steps:
       - uses: actions/checkout@v4
         with:

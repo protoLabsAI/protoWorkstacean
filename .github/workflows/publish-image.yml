@@ -28,6 +28,7 @@ concurrency:
 jobs:
   publish:
     name: Build and push to GHCR
+    # workspace-config: allow-hosted-runner docker buildx build + registry push
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

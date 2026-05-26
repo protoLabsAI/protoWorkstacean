@@ -25,8 +25,12 @@ name: my-agent
 # Options: orchestrator | qa | devops | content | research | general
 role: general
 
-# LLM model alias recognised by your gateway.
-model: claude-sonnet-4-6
+# LLM model alias recognised by your gateway. `protolabs/reasoning` is
+# the standard fleet default — LiteLLM resolves it to whichever model
+# is currently provisioned for reasoning workloads. Concrete model
+# names (claude-sonnet-4-6 / claude-opus-4-7 / claude-haiku-4-5-…)
+# also work and bypass the gateway-side alias.
+model: protolabs/reasoning
 
 # Full system prompt injected on every turn.
 systemPrompt: |

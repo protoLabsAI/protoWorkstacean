@@ -77,7 +77,7 @@ chat-only Ava:
 ```yaml
 name: ava
 role: general
-model: claude-sonnet-4-6
+model: protolabs/reasoning
 systemPrompt: |
   You are Ava, a conversational protoAgent. You answer questions
   and think out loud with the user. You have no tools — when a

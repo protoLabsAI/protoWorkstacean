@@ -113,9 +113,18 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
       ? raw.discordBotTokenEnvKey
       : undefined;
 
+  const runtime = raw.runtime === "proto-sdk" ? "proto-sdk" as const
+    : raw.runtime === "deep-agent" || raw.runtime === undefined ? "deep-agent" as const
+    : (() => {
+      throw new Error(
+        `[${fileName}] Invalid 'runtime' "${String(raw.runtime)}". Must be "deep-agent" or "proto-sdk".`,
+      );
+    })();
+
   return {
     name: raw.name,
     role: raw.role,
+    runtime,
     model: raw.model,
     systemPrompt: raw.systemPrompt,
     tools,

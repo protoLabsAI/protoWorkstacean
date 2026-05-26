@@ -57,12 +57,47 @@ describe("cooldownMsFor", () => {
 });
 
 describe("cooldownKeyFor", () => {
-  test("bucketed by (skill, owner/repo) when github context present", () => {
+  test("includes #number when github.number present", () => {
     const payload = { github: { owner: "protoLabsAI", repo: "protoMaker", number: 100 } };
-    expect(cooldownKeyFor("bug_triage", payload)).toBe("bug_triage:protoLabsAI/protoMaker");
+    expect(cooldownKeyFor("bug_triage", payload)).toBe("bug_triage:protoLabsAI/protoMaker#100");
   });
 
-  test("different repos get separate buckets (the #556 fix point)", () => {
+  test("repo-only when no number", () => {
+    const payload = { github: { owner: "protoLabsAI", repo: "protoMaker" } };
+    expect(cooldownKeyFor("security_triage", payload)).toBe("security_triage:protoLabsAI/protoMaker");
+  });
+
+  test("includes @sha7 when github.headSha present (PR review case)", () => {
+    const payload = {
+      github: {
+        owner: "protoLabsAI",
+        repo: "protoMaker",
+        number: 200,
+        headSha: "abc1234567890def",
+      },
+    };
+    expect(cooldownKeyFor("pr_review", payload)).toBe("pr_review:protoLabsAI/protoMaker#200@abc1234");
+  });
+
+  test("new commit on same PR gets a different key (the #86 fix point)", () => {
+    const before = cooldownKeyFor("pr_review", { github: { owner: "x", repo: "y", number: 1, headSha: "aaaaaaaaaaaa" } });
+    const after = cooldownKeyFor("pr_review", { github: { owner: "x", repo: "y", number: 1, headSha: "bbbbbbbbbbbb" } });
+    expect(before).not.toBe(after);
+  });
+
+  test("different PRs in the same repo get separate keys", () => {
+    const pr1 = cooldownKeyFor("pr_review", { github: { owner: "x", repo: "y", number: 1, headSha: "aaa" } });
+    const pr2 = cooldownKeyFor("pr_review", { github: { owner: "x", repo: "y", number: 2, headSha: "bbb" } });
+    expect(pr1).not.toBe(pr2);
+  });
+
+  test("repeated webhooks for same PR + same SHA share a key (dedup intact)", () => {
+    const a = cooldownKeyFor("pr_review", { github: { owner: "x", repo: "y", number: 5, headSha: "deadbeef1234" } });
+    const b = cooldownKeyFor("pr_review", { github: { owner: "x", repo: "y", number: 5, headSha: "deadbeef1234" } });
+    expect(a).toBe(b);
+  });
+
+  test("different repos get separate buckets (the #556 fix point — preserved)", () => {
     const a = cooldownKeyFor("bug_triage", { github: { owner: "protoLabsAI", repo: "protoMaker" } });
     const b = cooldownKeyFor("bug_triage", { github: { owner: "protoLabsAI", repo: "protoWorkstacean" } });
     expect(a).not.toBe(b);
@@ -71,6 +106,12 @@ describe("cooldownKeyFor", () => {
   test("different skills on the same repo get separate buckets", () => {
     const ctx = { github: { owner: "x", repo: "y" } };
     expect(cooldownKeyFor("bug_triage", ctx)).not.toBe(cooldownKeyFor("pr_review", ctx));
+  });
+
+  test("different issues in the same repo get separate buckets (no more cross-issue back-pressure)", () => {
+    const issue1 = cooldownKeyFor("bug_triage", { github: { owner: "x", repo: "y", number: 100 } });
+    const issue2 = cooldownKeyFor("bug_triage", { github: { owner: "x", repo: "y", number: 101 } });
+    expect(issue1).not.toBe(issue2);
   });
 
   test("falls back to <skill>:_ when no github context", () => {

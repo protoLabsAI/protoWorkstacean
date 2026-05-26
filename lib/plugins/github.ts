@@ -49,6 +49,13 @@ interface AutoTriageConfig {
   sweepLabel?: string;
   /** Run a sweep 30s after plugin install. Default true. */
   sweepOnStartup?: boolean;
+  /**
+   * Remove the sweep label from an issue once it has been dispatched for triage,
+   * so a later sweep (especially on restart) can't re-dispatch it forever.
+   * Default true. See #3503 — without this, every startup re-triages every open
+   * needs-triage issue and Quinn's own triage children cascade.
+   */
+  consumeSweepLabel?: boolean;
 }
 
 interface GitHubConfig {
@@ -564,7 +571,7 @@ export class GitHubPlugin implements Plugin {
     // verdict. Dedup'd via recentDispatches so a fast-updating branch doesn't
     // flood the bus.
     if (event === "pull_request" && (payload.action === "opened" || payload.action === "synchronize")) {
-      this._handleAutoReview(event, payload, ctx, bus, { skipDedup: false });
+      this._handleAutoReview(event, payload, ctx, bus, getToken, { skipDedup: false });
       return;
     }
 
@@ -576,7 +583,7 @@ export class GitHubPlugin implements Plugin {
       const reviewer = payload.requested_reviewer as Record<string, unknown> | undefined;
       const login = (reviewer?.login as string | undefined)?.toLowerCase();
       if (login === "protoquinn" || login === "protoquinn[bot]") {
-        this._handleAutoReview(event, payload, ctx, bus, { skipDedup: true });
+        this._handleAutoReview(event, payload, ctx, bus, getToken, { skipDedup: true });
       }
       return;
     }
@@ -660,6 +667,7 @@ export class GitHubPlugin implements Plugin {
     payload: Record<string, unknown>,
     ctx: GitHubEventContext,
     bus: EventBus,
+    getToken: (owner: string, repo: string) => Promise<string>,
     opts: { skipDedup: boolean } = { skipDedup: false },
   ): void {
     const action = payload.action as string;
@@ -680,8 +688,22 @@ export class GitHubPlugin implements Plugin {
       return;
     }
 
+    // Head SHA — threaded through to the dispatcher so cooldown keys can
+    // include it. Without this, two pushes to the same PR within the
+    // cooldown window dropped the second silently; with headSha in the
+    // key, a new commit always reviews (only repeated webhooks for the
+    // same SHA dedup). See flow-pr-review.md.
+    const head = pr?.head as Record<string, unknown> | undefined;
+    const headSha = typeof head?.["sha"] === "string" ? (head["sha"] as string) : undefined;
+
     const correlationId = crypto.randomUUID();
     pendingComments.set(correlationId, { owner: ctx.owner, repo: ctx.repo, number: ctx.number });
+
+    // Stamp the webhook-arrival time so skill-dispatcher can compute
+    // webhook→done latency at completion. The /system trace view (D1)
+    // already has per-message timestamps via BusHistoryRecorder; this
+    // gives us a clean one-line summary in workstacean's stdout too.
+    const webhookArrivedAt = Date.now();
 
     const content = [
       `Auto-review — pull_request.${action} on ${ctx.owner}/${ctx.repo}#${ctx.number}`,
@@ -701,7 +723,7 @@ export class GitHubPlugin implements Plugin {
       id: `${event}-${action}-${ctx.owner}-${ctx.repo}-${ctx.number}-${correlationId.slice(0, 8)}`,
       correlationId,
       topic,
-      timestamp: Date.now(),
+      timestamp: webhookArrivedAt,
       payload: {
         sender: ctx.author,
         channel: `${ctx.owner}/${ctx.repo}#${ctx.number}`,
@@ -715,13 +737,38 @@ export class GitHubPlugin implements Plugin {
           number: ctx.number,
           title: ctx.title,
           url: ctx.url,
+          headSha,
         },
+        meta: { webhookArrivedAt },
       },
       source: { interface: "github" as const },
       reply: { topic: replyTopic },
     });
 
     console.log(`[github] Auto-review: ${ctx.owner}/${ctx.repo}#${ctx.number} (${action}) → pr_review`);
+
+    // Leading acknowledgment comment so the PR shows Quinn engagement
+    // immediately, not minutes later when the formal verdict review
+    // lands. GitHub Apps can't be added as requested reviewers
+    // (collaborator-only), so an explicit timeline comment is the
+    // closest equivalent UI signal. Same pattern Renovate / Dependabot
+    // / CodeRabbit use.
+    //
+    // Gated on `opened` only — `synchronize` and `review_requested`
+    // already happen against PRs that have a prior leading comment,
+    // so re-posting would be noise. Best-effort: a failure here must
+    // never block the actual dispatch above.
+    if (action === "opened") {
+      void this._postComment(
+        getToken,
+        { owner: ctx.owner, repo: ctx.repo, number: ctx.number },
+        "👀 Quinn is reviewing — verdict (PASS / WARN / FAIL) + findings to follow.",
+      ).catch((err) => {
+        console.warn(
+          `[github] Auto-review: leading-comment post failed for ${ctx.owner}/${ctx.repo}#${ctx.number}: ${err instanceof Error ? err.message : err}`,
+        );
+      });
+    }
   }
 
   private _handleAutoTriage(
@@ -970,6 +1017,33 @@ export class GitHubPlugin implements Plugin {
             reply: { topic: replyTopic },
           });
           dispatched += 1;
+
+          // #3503: claim the issue by removing the sweep label now that it has
+          // been dispatched for triage. The label is the only persistent
+          // "already dispatched" marker — without removing it the next sweep
+          // (every startup, plus the bus topic) re-dispatches the same issue
+          // forever, and Quinn's own needs-triage children feed the cascade.
+          // Best-effort: a removal failure must not poison the rest of the sweep.
+          if (config.autoTriage.consumeSweepLabel !== false) {
+            try {
+              const del = await withCircuitBreaker("github-api", () =>
+                fetch(`https://api.github.com/repos/${repoSlug}/issues/${number}/labels/${encodeURIComponent(sweepLabel)}`, {
+                  method: "DELETE",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    Accept: "application/vnd.github+json",
+                    "User-Agent": "protoWorkstacean/1.0",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                  },
+                }),
+              );
+              if (!del.ok && del.status !== 404) {
+                console.warn(`[github] triage sweep: failed to remove "${sweepLabel}" from ${repoSlug}#${number}: ${del.status}`);
+              }
+            } catch (err) {
+              console.warn(`[github] triage sweep: label removal error for ${repoSlug}#${number}:`, err instanceof Error ? err.message : err);
+            }
+          }
         }
       } catch (err) {
         console.warn(`[github] triage sweep ${repoSlug} error:`, err instanceof Error ? err.message : err);

@@ -56,8 +56,29 @@ export interface AgentDefinition {
   role: AgentRole;
 
   /**
+   * Which in-process runtime backs this agent.
+   *
+   *   "deep-agent" (default) — LangGraph ReAct loop via @langchain/langgraph,
+   *     workstacean-provided tools registered inline in DeepAgentExecutor.
+   *     Used for Ava / Quinn / protobot — orchestrators + QA + integrations.
+   *
+   *   "proto-sdk" — full coding-agent runtime via @protolabsai/sdk's query().
+   *     Used for proto. The agent has protoCLI's native tools
+   *     (read/write/edit/shell/grep/glob/web_fetch/…) and runs its own
+   *     turn loop — workstacean is just the dispatcher.
+   *
+   * Defaults to "deep-agent" so existing agent yamls don't need touching.
+   */
+  runtime?: "deep-agent" | "proto-sdk";
+
+  /**
    * LLM model alias as recognised by the gateway.
-   * Example: "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"
+   * Fleet default: "protolabs/reasoning" (LiteLLM resolves it to whichever
+   * concrete model is currently provisioned for reasoning workloads).
+   * Concrete names also work — e.g. "claude-opus-4-7", "claude-sonnet-4-6",
+   * "claude-haiku-4-5-20251001" — and bypass the gateway-side alias.
+   * Per-call override: dispatch payload may carry `model: "<alias>"` to
+   * temporarily swap this for one invocation (wired in #613).
    */
   model: string;
 
@@ -116,6 +137,7 @@ export interface AgentDefinition {
 export interface RawAgentYaml {
   name?: unknown;
   role?: unknown;
+  runtime?: unknown;
   model?: unknown;
   systemPrompt?: unknown;
   tools?: unknown;

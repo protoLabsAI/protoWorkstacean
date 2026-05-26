@@ -104,8 +104,10 @@ Per-agent definition for the **in-process** `AgentRuntimePlugin`. One file per a
 name: quinn                         # unique agent key — used in skill routing
 role: qa                            # orchestrator | qa | devops | content | research | general
 
-# LLM model alias — resolved by the gateway (LiteLLM Proxy at LLM_GATEWAY_URL)
-model: claude-sonnet-4-6
+# LLM model alias — resolved by the gateway (LiteLLM Proxy at LLM_GATEWAY_URL).
+# `protolabs/reasoning` is the standard fleet default; concrete names like
+# `claude-sonnet-4-6` / `claude-opus-4-7` also work.
+model: protolabs/reasoning
 
 systemPrompt: |
   You are Quinn, the QA Engineer for protoLabs AI.
