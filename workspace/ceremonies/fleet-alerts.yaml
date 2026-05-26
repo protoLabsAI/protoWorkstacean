@@ -21,6 +21,14 @@ description: >
 
 schedule: "* * * * *"  # every minute
 skill: evaluate_fleet_thresholds
-targets: []
+# CeremonyPlugin's yaml schema requires `targets` to be a non-empty array
+# (ceremonyYamlLoader rejects empty ones). The dispatcher's ExecutorRegistry
+# falls through to skill-name resolution when no registration matches a named
+# target, so "function" here is a schema-satisfying placeholder that lets the
+# FunctionExecutor registered for evaluate_fleet_thresholds pick up the
+# dispatch via skill-name routing. Same pattern as
+# clawpatch-cache-cleanup.yaml.
+targets:
+  - function
 notifyChannel: ""
 enabled: true
