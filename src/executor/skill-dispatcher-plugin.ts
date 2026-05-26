@@ -108,6 +108,7 @@ export class SkillDispatcherPlugin implements Plugin {
     "agent.runtime.activity.skill.start",
     "agent.runtime.activity.skill.complete",
     "agent.runtime.activity.skill.error",
+    "agent.skill.latency",
   ];
 
   private bus?: EventBus;
@@ -458,6 +459,34 @@ export class SkillDispatcherPlugin implements Plugin {
             `[skill-latency] ${skill} webhook→done ${(totalMs / 1000).toFixed(2)}s ` +
               `(queue ${queueMs}ms, execute ${(executeMs / 1000).toFixed(2)}s)${repoRef}`,
           );
+
+          // Structured form of the same data for dashboard tiles + future
+          // alerting subscribers (see all-topics.ts AGENT_SKILL_LATENCY).
+          // Best-effort: a publish failure must not poison the success path
+          // we're already on.
+          if (this.bus) {
+            try {
+              this.bus.publish("agent.skill.latency", {
+                id: crypto.randomUUID(),
+                correlationId,
+                topic: "agent.skill.latency",
+                timestamp: now,
+                payload: {
+                  skill,
+                  totalMs,
+                  queueMs,
+                  executeMs,
+                  github: gh?.owner && gh?.repo && gh?.number
+                    ? { owner: gh.owner, repo: gh.repo, number: gh.number }
+                    : undefined,
+                },
+              });
+            } catch (err) {
+              console.warn(
+                `[skill-dispatcher] failed to publish agent.skill.latency: ${err instanceof Error ? err.message : err}`,
+              );
+            }
+          }
         }
 
         this._publishActivity("skill.complete", {
