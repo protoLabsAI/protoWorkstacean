@@ -36,6 +36,15 @@ if (!existsSync(dataDir)) {
 
 const bus = new InMemoryEventBus();
 
+// --- Bus history recorder — in-memory ring buffer that captures every bus
+//     message for /api/bus/history (D1 skill-trace view). Installed BEFORE
+//     any other plugin so we don't miss early-startup traffic. See
+//     src/event-bus/history-recorder.ts for ring + TTL semantics.
+import { BusHistoryRecorder, BusHistoryRecorderPlugin } from "./event-bus/history-recorder.ts";
+const busHistoryRecorder = new BusHistoryRecorder();
+const busHistoryRecorderPlugin = new BusHistoryRecorderPlugin(busHistoryRecorder);
+busHistoryRecorderPlugin.install(bus);
+
 // --- Context mailbox — mid-execution DM queue for debounced message injection ---
 import { ContextMailbox } from "../lib/dm/context-mailbox.ts";
 const contextMailbox = new ContextMailbox();
@@ -285,6 +294,20 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Registers a FunctionExecutor for `ceremony.clawpatch_cache_cleanup`
+    // (workspace/ceremonies/clawpatch-cache-cleanup.yaml). Pure janitor — calls
+    // CheckoutCache.prune() directly; no agent involved. Same install-order
+    // constraint as alert-skill-executor.
+    name: "clawpatch-cache-cleanup-skill-executor",
+    condition: () => true,
+    factory: async () => {
+      const { ClawpatchCacheCleanupSkillExecutorPlugin } = await import(
+        "./plugins/clawpatch-cache-cleanup-skill-executor-plugin.js"
+      );
+      return new ClawpatchCacheCleanupSkillExecutorPlugin(executorRegistry);
+    },
+  },
+  {
     // Registers FunctionExecutors for the `action.pr_*` /
     // `action.dispatch_backmerge` skills whose handlers live in
     // PrRemediatorPlugin.
@@ -474,6 +497,7 @@ const apiContext: ApiContext = {
   agentKeys,
   mailbox: contextMailbox,
   taskTracker,
+  busHistory: busHistoryRecorder,
 };
 
 const routes = createAllRoutes(apiContext);
