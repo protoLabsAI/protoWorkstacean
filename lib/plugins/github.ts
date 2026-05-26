@@ -49,6 +49,13 @@ interface AutoTriageConfig {
   sweepLabel?: string;
   /** Run a sweep 30s after plugin install. Default true. */
   sweepOnStartup?: boolean;
+  /**
+   * Remove the sweep label from an issue once it has been dispatched for triage,
+   * so a later sweep (especially on restart) can't re-dispatch it forever.
+   * Default true. See #3503 — without this, every startup re-triages every open
+   * needs-triage issue and Quinn's own triage children cascade.
+   */
+  consumeSweepLabel?: boolean;
 }
 
 interface GitHubConfig {
@@ -970,6 +977,33 @@ export class GitHubPlugin implements Plugin {
             reply: { topic: replyTopic },
           });
           dispatched += 1;
+
+          // #3503: claim the issue by removing the sweep label now that it has
+          // been dispatched for triage. The label is the only persistent
+          // "already dispatched" marker — without removing it the next sweep
+          // (every startup, plus the bus topic) re-dispatches the same issue
+          // forever, and Quinn's own needs-triage children feed the cascade.
+          // Best-effort: a removal failure must not poison the rest of the sweep.
+          if (config.autoTriage.consumeSweepLabel !== false) {
+            try {
+              const del = await withCircuitBreaker("github-api", () =>
+                fetch(`https://api.github.com/repos/${repoSlug}/issues/${number}/labels/${encodeURIComponent(sweepLabel)}`, {
+                  method: "DELETE",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    Accept: "application/vnd.github+json",
+                    "User-Agent": "protoWorkstacean/1.0",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                  },
+                }),
+              );
+              if (!del.ok && del.status !== 404) {
+                console.warn(`[github] triage sweep: failed to remove "${sweepLabel}" from ${repoSlug}#${number}: ${del.status}`);
+              }
+            } catch (err) {
+              console.warn(`[github] triage sweep: label removal error for ${repoSlug}#${number}:`, err instanceof Error ? err.message : err);
+            }
+          }
         }
       } catch (err) {
         console.warn(`[github] triage sweep ${repoSlug} error:`, err instanceof Error ? err.message : err);
