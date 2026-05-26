@@ -257,6 +257,20 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Routes Quinn's REQUEST_CHANGES verdicts to Discord. Subscribes to
+    // quinn.review.submitted (published by src/api/pr-inspector.ts after
+    // every review_* action) and republishes blocking verdicts as
+    // message.outbound.discord.alert so the operator sees them in Discord
+    // without refreshing GitHub. APPROVE/COMMENT verdicts are intentionally
+    // silent — only blocking signals get pinged.
+    name: "quinn-review-notifier",
+    condition: () => true,
+    factory: async () => {
+      const { QuinnReviewNotifierPlugin } = await import("./plugins/quinn-review-notifier-plugin.js");
+      return new QuinnReviewNotifierPlugin();
+    },
+  },
+  {
     // Registers FunctionExecutors that bridge `ceremony.*` skills to the
     // matching `ceremony.<id>.execute` bus trigger CeremonyPlugin listens
     // for, so any skill caller (cron, external trigger, agent) can invoke
