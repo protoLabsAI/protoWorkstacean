@@ -10,9 +10,9 @@
 # No secrets live here — only env var NAMES. The actual credentials are
 # provided by Infisical at container startup (homelab-iac/stacks/ai).
 #
-# URLs use the docker-ai network service names (e.g. `quinn`, `protocontent`),
+# URLs use the docker-ai network service names (e.g. `protomaker-server`),
 # which resolve inside the container. For out-of-Docker deployments use
-# ${ENV_VAR} interpolation (see protopen at the bottom).
+# ${ENV_VAR} interpolation.
 #
 # Override the entire list via PROTOLABS_AGENTS_JSON env var if a deploy
 # needs per-environment wiring without editing this file.
