@@ -622,7 +622,17 @@ export class GitHubPlugin implements Plugin {
       if (!res.ok) console.error(`[github] reaction failed ${res.status}: ${await res.text()}`);
     })().catch(err => console.error("[github] reaction error:", err));
 
-    const skillHint = config.skillHints[event];
+    // A top-level comment on a PR arrives as an `issue_comment` event — GitHub
+    // models PR conversation comments as issue comments. The default
+    // issue_comment route is bug_triage, but when the mention is on a PR the
+    // operator wants a review, so route to the pull_request skill (pr_review)
+    // instead. Review-thread replies already arrive as pull_request_review_comment.
+    const isPrComment =
+      event === "issue_comment" &&
+      !!(payload.issue as Record<string, unknown> | undefined)?.pull_request;
+    const skillHint = isPrComment
+      ? (config.skillHints.pull_request ?? config.skillHints[event])
+      : config.skillHints[event];
     const correlationId = crypto.randomUUID();
 
     pendingComments.set(correlationId, { owner: ctx.owner, repo: ctx.repo, number: ctx.number });
