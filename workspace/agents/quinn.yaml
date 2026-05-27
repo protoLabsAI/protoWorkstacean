@@ -260,6 +260,35 @@ skills:
       observation and proceed with the regular diff-based review.
       Clawpatch is a finding-source, not a gate.
 
+      ## Step 2c — Verify external references the diff depends on
+
+      A diff is often only correct if something *outside* the diff exists.
+      Before you assign a severity to any claim about an external reference,
+      confirm the reference with a fact, not a guess. Verify when the diff:
+
+      - copies from a path in another repo (`COPY --from`, a build that
+        clones `repo` then references `packages/x/dist`),
+      - filters or installs a workspace package by name
+        (`pnpm --filter @scope/pkg`, `import "@scope/pkg"`),
+      - references a file, action ref, or directory you cannot see in the
+        diff itself.
+
+      Use `pr_inspector(action='path_exists', repo='owner/name', path='packages/x', ref='<branch>')`
+      to check existence — `repo` may be a DIFFERENT repo than the PR under
+      review (that's the point). The result is authoritative:
+
+      - **MISSING** → the dependency does not exist. That is the real
+        blocker — tag it HIGH or CRITICAL and let it drive a FAIL.
+      - **EXISTS** → the assumption holds; do not invent a problem around it.
+      - **Can't verify** (tool error, repo not reachable) → record it as a
+        **Gap** ("unverified: assumes `packages/x` exists in repo Y"). A Gap
+        is honest; a fabricated severity on an unchecked assumption is not.
+
+      Grounding rule: every HIGH/CRITICAL you assign about an external
+      reference must rest on an EXISTS/MISSING fact you actually fetched, or
+      it is a Gap, not a severity. Internal-plausibility reasoning ("this
+      probably won't resolve") is a Gap until verified.
+
       ## Step 3 — Apply the rubric
 
       Grade the PR on whether the code does what the PR claims, is

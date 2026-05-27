@@ -17,6 +17,8 @@
  *   check_ci               → resolves head SHA, then check-runs API
  *   coderabbit_threads     → GraphQL query for unresolved review threads
  *   diff_summary           → first 200 lines of the unified diff
+ *   path_exists            → GET contents — does `path` exist in `repo`@`ref`?
+ *                            (cross-repo allowed; verifies COPY/package assumptions)
  *   review_comment         → POST review with state=COMMENT
  *   review_approve         → POST review with state=APPROVE
  *   review_request_changes → POST review with state=REQUEST_CHANGES
@@ -60,6 +62,7 @@ type Action =
   | "check_ci"
   | "coderabbit_threads"
   | "diff_summary"
+  | "path_exists"
   | "review_comment"
   | "review_approve"
   | "review_request_changes"
@@ -72,6 +75,15 @@ interface InspectRequest {
   repo: string;
   pr_number?: number;
   body?: string;
+  /**
+   * For `path_exists`: the repo-relative path to check. The `repo` field
+   * may name a DIFFERENT repo than the PR under review — that's the point,
+   * it's for verifying cross-repo assumptions (a COPY-from path, a filtered
+   * workspace package dir) that a diff depends on.
+   */
+  path?: string;
+  /** For `path_exists`: optional git ref (branch/tag/sha). Defaults to the repo's default branch. */
+  ref?: string;
   /**
    * When closing a PR via close_pr / close_pr_as_not_planned, optionally
    * post a comment explaining why before flipping the state. Quinn uses
@@ -109,6 +121,28 @@ async function ghFetch(
       "User-Agent": "protoquinn",
     },
   });
+}
+
+/**
+ * Verify whether a path exists in a repo at a given ref. Read-only, single
+ * GitHub call — used by Quinn to check cross-repo assumptions a diff depends
+ * on (a `COPY --from` source path, a filtered workspace package directory, a
+ * referenced file) before assigning a verdict severity. Existence is fact;
+ * an unverifiable assumption belongs in "Gaps", not a fabricated HIGH. (#3900)
+ */
+async function pathExists(owner: string, name: string, path: string, ref?: string): Promise<string> {
+  const cleanPath = path.replace(/^\/+/, ""); // contents API is repo-relative
+  const url =
+    `https://api.github.com/repos/${owner}/${name}/contents/${cleanPath}` +
+    (ref ? `?ref=${encodeURIComponent(ref)}` : "");
+  const resp = await ghFetch(owner, name, url);
+  const at = ref ? `@${ref}` : "";
+  if (resp.status === 200) return `EXISTS: \`${cleanPath}\` is present in ${owner}/${name}${at}.`;
+  if (resp.status === 404) {
+    return `MISSING: \`${cleanPath}\` does NOT exist in ${owner}/${name}${at}. ` +
+      `A diff that depends on this path (COPY source, package filter, import) is a real blocker.`;
+  }
+  throw new Error(`GitHub API error checking ${owner}/${name}/${cleanPath}: ${resp.status} ${await resp.text()}`);
 }
 
 async function listOpen(owner: string, name: string): Promise<string> {
@@ -453,7 +487,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
           return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 });
         }
 
-        const { action, repo, pr_number, body, comment } = payload;
+        const { action, repo, pr_number, body, comment, path, ref } = payload;
         if (!action || !repo) {
           return Response.json(
             { success: false, error: "action and repo are required" },
@@ -486,12 +520,21 @@ export function createRoutes(ctx: ApiContext): Route[] {
             { status: 400 },
           );
         }
+        if (action === "path_exists" && (typeof path !== "string" || !path.trim())) {
+          return Response.json(
+            { success: false, error: "path is required (non-empty string) for action='path_exists'" },
+            { status: 400 },
+          );
+        }
 
         try {
           let result: string;
           switch (action) {
             case "list_open":
               result = await listOpen(owner, name);
+              break;
+            case "path_exists":
+              result = await pathExists(owner, name, path!, ref);
               break;
             case "check_ci":
               result = await checkCi(owner, name, pr_number!);
