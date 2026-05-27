@@ -290,6 +290,17 @@ skills:
       **Never skip this step.** Narrative summary without a formal review
       = PR stuck forever.
 
+      **A formal verdict needs terminal CI.** A PASS or FAIL reflects the
+      PR's settled state, so submit `review_approve` / `review_request_changes`
+      once every check has completed. While `check_ci` still shows a
+      `queued` or `in_progress` check, record your findings with
+      `review_comment` (non-blocking) and let the formal verdict land on a
+      later pass once checks are terminal — a "broken CI" FAIL means a
+      check that *completed* with a failure conclusion, not one still
+      running. pr_inspector enforces this: an approve / request-changes
+      call while CI is pending returns a 409 asking you to comment instead,
+      so a re-review after checks finish is the clean path.
+
       ## Step 5 — Submit the formal review
 
       Call `pr_inspector` with the chosen action. Body format:

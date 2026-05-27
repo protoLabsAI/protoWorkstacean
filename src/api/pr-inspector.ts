@@ -29,7 +29,31 @@ import type { Route, ApiContext } from "./types.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
 import { REVIEW_TOPICS } from "../event-bus/topics.ts";
 
-const getGithubToken = makeGitHubAuth();
+// Resolve auth lazily + memoized on first use rather than at module load.
+// Module-load capture bound the getter to whatever env existed at import
+// time, which (a) loses credentials injected after import — e.g. a late
+// infisical pass — and (b) made the route untestable since the import order
+// decided whether GITHUB_TOKEN was set. Memoizing on first call preserves
+// the GitHub App's internal token cache (one getter instance reused across
+// requests) while picking up the env present when the first request lands.
+let _authGetter: ((owner: string, repo: string) => Promise<string>) | null | undefined;
+function resolveAuth(): ((owner: string, repo: string) => Promise<string>) | null {
+  if (_authGetter === undefined) _authGetter = makeGitHubAuth();
+  return _authGetter;
+}
+
+/**
+ * Test seam — inject an auth getter (or `null` for the no-credentials path).
+ * Pass `undefined` to reset back to the lazy `makeGitHubAuth()` resolution.
+ * Mirrors clawpatch.ts's `setCheckoutCacheForTesting`. Needed because the
+ * onboarding suite mock.module()s `../lib/github-auth.ts` process-wide, so
+ * a route test can't depend on the real resolver being in place.
+ */
+export function setGithubAuthForTesting(
+  getter: ((owner: string, repo: string) => Promise<string>) | null | undefined,
+): void {
+  _authGetter = getter;
+}
 
 type Action =
   | "list_open"
@@ -71,8 +95,9 @@ async function ghFetch(
   url: string,
   init: RequestInit = {},
 ): Promise<Response> {
-  if (!getGithubToken) throw new Error("no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)");
-  const token = await getGithubToken(owner, name);
+  const getToken = resolveAuth();
+  if (!getToken) throw new Error("no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)");
+  const token = await getToken(owner, name);
   return fetch(url, {
     ...init,
     signal: init.signal ?? AbortSignal.timeout(GH_FETCH_TIMEOUT_MS),
@@ -109,7 +134,23 @@ async function listOpen(owner: string, name: string): Promise<string> {
   return lines.join("\n");
 }
 
-async function checkCi(owner: string, name: string, pr: number): Promise<string> {
+interface CheckRun {
+  name: string;
+  status: string;
+  conclusion: string | null;
+}
+
+/**
+ * Resolve a PR's head SHA and fetch its check-runs. Shared by `check_ci`
+ * (formats the result for Quinn) and the CI-terminal verdict guard (reads
+ * the pending set). Throws on any GitHub error so the caller surfaces it
+ * loudly rather than treating an unknown CI state as "all clear".
+ */
+async function fetchCheckRuns(
+  owner: string,
+  name: string,
+  pr: number,
+): Promise<{ headSha: string; runs: CheckRun[] }> {
   const prResp = await ghFetch(owner, name, `https://api.github.com/repos/${owner}/${name}/pulls/${pr}`);
   if (!prResp.ok) throw new Error(`GitHub API error fetching PR#${pr}: ${prResp.status} ${await prResp.text()}`);
   const { head } = (await prResp.json()) as { head: { sha: string } };
@@ -117,19 +158,83 @@ async function checkCi(owner: string, name: string, pr: number): Promise<string>
   const checksResp = await ghFetch(
     owner,
     name,
-    `https://api.github.com/repos/${owner}/${name}/commits/${head.sha}/check-runs?per_page=50`,
+    `https://api.github.com/repos/${owner}/${name}/commits/${head.sha}/check-runs?per_page=100`,
   );
   if (!checksResp.ok) throw new Error(`GitHub API error fetching check-runs: ${checksResp.status} ${await checksResp.text()}`);
-  const { check_runs } = (await checksResp.json()) as {
-    check_runs: Array<{ name: string; status: string; conclusion: string | null }>;
-  };
-  if (check_runs.length === 0) return `No CI checks found for PR#${pr} (head ${head.sha.slice(0, 7)}).`;
-  const lines = [`**CI Checks for PR#${pr}** (head ${head.sha.slice(0, 7)}):`];
-  for (const c of check_runs) {
+  const { check_runs } = (await checksResp.json()) as { check_runs: CheckRun[] };
+  return { headSha: head.sha, runs: check_runs };
+}
+
+/**
+ * Names of checks that haven't reached a terminal state yet. A check is
+ * terminal once `status === "completed"` (its `conclusion` then carries the
+ * pass/fail outcome). `queued` / `in_progress` / anything else = pending.
+ */
+function pendingCheckNames(runs: CheckRun[]): string[] {
+  return runs.filter((c) => c.status !== "completed").map((c) => c.name);
+}
+
+async function checkCi(owner: string, name: string, pr: number): Promise<string> {
+  const { headSha, runs } = await fetchCheckRuns(owner, name, pr);
+  if (runs.length === 0) return `No CI checks found for PR#${pr} (head ${headSha.slice(0, 7)}).`;
+  const lines = [`**CI Checks for PR#${pr}** (head ${headSha.slice(0, 7)}):`];
+  for (const c of runs) {
     const state = c.conclusion ?? c.status;
     lines.push(`- ${c.name}: ${state}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * Chokepoint invariant (#3886): a formal verdict requires terminal CI.
+ *
+ * APPROVE and REQUEST_CHANGES both lock in a settled judgment — APPROVE
+ * enables auto-merge, REQUEST_CHANGES blocks it (sets reviewDecision).
+ * While any check is still queued/in_progress, that judgment reflects a
+ * timing artifact, not the PR's actual state:
+ *   - a REQUEST_CHANGES "because CI is still queued" wedges the PR on a
+ *     transient (#3886);
+ *   - an APPROVE before CI completes lets auto-merge race a red build
+ *     (#3881 incident).
+ *
+ * So while CI is pending, only COMMENT (non-blocking) is allowed; the
+ * formal PASS/FAIL lands on a later pass once checks are terminal. Repos
+ * with no checks at all are terminal by definition (nothing to wait for).
+ *
+ * Returns a 409 Response to reject the verdict, or null to allow it.
+ * Mirrors the cooldown / target-guard / actor-filter / destructive-verdict
+ * chokepoints (#437 / #444 / #459 / #465).
+ */
+async function guardTerminalCi(
+  owner: string,
+  name: string,
+  pr: number,
+  verdict: "APPROVE" | "REQUEST_CHANGES",
+): Promise<Response | null> {
+  // Throws on a GitHub error — surfaced by the route's try/catch as a 500.
+  // We fail closed: an unknown CI state must never be treated as "terminal"
+  // and let a verdict through (that's the #3881 failure mode).
+  const { runs } = await fetchCheckRuns(owner, name, pr);
+  const pending = pendingCheckNames(runs);
+  if (pending.length === 0) return null;
+
+  console.warn(
+    `[pr-inspector] CI-terminal guard: held ${verdict} on ${owner}/${name}#${pr} — ` +
+      `${pending.length} check(s) still running: ${pending.slice(0, 8).join(", ")}`,
+  );
+  const verb = verdict === "APPROVE" ? "approval" : "change-request";
+  return Response.json(
+    {
+      success: false,
+      error:
+        `CI is still running on PR#${pr} — ${pending.length} check(s) not yet complete ` +
+        `(${pending.slice(0, 5).join(", ")}). A formal ${verb} would lock in a verdict on a ` +
+        `timing artifact, so it is held until checks are terminal. Record interim findings now ` +
+        `with action='review_comment' (non-blocking), then re-run check_ci and submit the formal ` +
+        `verdict once every check has completed.`,
+    },
+    { status: 409 },
+  );
 }
 
 async function coderabbitThreads(owner: string, name: string, pr: number): Promise<string> {
@@ -190,8 +295,9 @@ async function coderabbitThreads(owner: string, name: string, pr: number): Promi
 }
 
 async function diffSummary(owner: string, name: string, pr: number): Promise<string> {
-  if (!getGithubToken) throw new Error("no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)");
-  const token = await getGithubToken(owner, name);
+  const getToken = resolveAuth();
+  if (!getToken) throw new Error("no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)");
+  const token = await getToken(owner, name);
   const resp = await fetch(`https://api.github.com/repos/${owner}/${name}/pulls/${pr}`, {
     signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS),
     headers: {
@@ -403,17 +509,23 @@ export function createRoutes(ctx: ApiContext): Route[] {
               result = await submitReview(owner, name, pr_number!, "COMMENT", body);
               publishReviewSubmitted(ctx, owner, name, pr_number!, "COMMENT", body);
               break;
-            case "review_approve":
+            case "review_approve": {
+              const held = await guardTerminalCi(owner, name, pr_number!, "APPROVE");
+              if (held) return held;
               result = await submitReview(owner, name, pr_number!, "APPROVE", body ?? "");
               publishReviewSubmitted(ctx, owner, name, pr_number!, "APPROVE", body ?? "");
               break;
-            case "review_request_changes":
+            }
+            case "review_request_changes": {
               if (!body) {
                 return Response.json({ success: false, error: "body required for review_request_changes" }, { status: 400 });
               }
+              const held = await guardTerminalCi(owner, name, pr_number!, "REQUEST_CHANGES");
+              if (held) return held;
               result = await submitReview(owner, name, pr_number!, "REQUEST_CHANGES", body);
               publishReviewSubmitted(ctx, owner, name, pr_number!, "REQUEST_CHANGES", body);
               break;
+            }
             case "close_pr":
               result = await setPrState(owner, name, pr_number!, "closed", comment, false);
               break;
