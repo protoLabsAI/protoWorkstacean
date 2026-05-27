@@ -13,6 +13,7 @@ These docs explain the *why* behind protoWorkstacean's architecture. Read them w
 | [Distributed tracing](./distributed-tracing) | How `correlationId` (trace-id) and `parentId` (span-id) flow from the bus through RouterPlugin, A2AExecutor, external agents, and back |
 | [Plugin system](./plugin-system) | The plugin lifecycle, core vs integration vs workspace plugins, ordering guarantees |
 | [Agent identity](./agent-identity) | How agents identify themselves across Discord, GitHub, A2A, and the bus |
+| [Operator flows](./operator-flows) | End-to-end: onboarding a project, a feature's lifecycle + Linear close-the-loop, and PR review with Quinn — who owns each step |
 
 ## Design philosophy
 
