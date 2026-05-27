@@ -96,17 +96,25 @@ describe("ProtomakerProjectRegistryPlugin", () => {
   let server: ReturnType<typeof Bun.serve> | undefined;
   let fakeProjects: Array<{ id: string; name: string; path: string }>;
   let fetchCount: number;
+  let lastApiKeyHeader: string | null;
+  let requireApiKey: string | undefined;
 
   beforeEach(() => {
     bus = new InMemoryEventBus();
     tempDir = mkdtempSync(join(tmpdir(), "wsk-pm-registry-test-"));
     fakeProjects = [];
     fetchCount = 0;
+    lastApiKeyHeader = null;
+    requireApiKey = undefined;
     server = Bun.serve({
       port: 0,
       fetch(req) {
         const url = new URL(req.url);
         if (url.pathname === "/api/settings/global") {
+          lastApiKeyHeader = req.headers.get("X-API-Key");
+          if (requireApiKey && lastApiKeyHeader !== requireApiKey) {
+            return Response.json({ success: false, error: "Authentication required." }, { status: 401 });
+          }
           fetchCount++;
           return Response.json({ success: true, settings: { projects: fakeProjects } });
         }
@@ -125,10 +133,11 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     }
   });
 
-  function newPlugin(): ProtomakerProjectRegistryPlugin {
+  function newPlugin(opts: { apiKey?: string } = {}): ProtomakerProjectRegistryPlugin {
     return new ProtomakerProjectRegistryPlugin({
       apiBase: `http://localhost:${server!.port}`,
       refreshIntervalMs: 50_000,
+      ...opts,
     });
   }
 
@@ -222,6 +231,28 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     expect(plugin.getByGithub("missing/repo")).toBeUndefined();
     expect(plugin.getByPath(a)?.id).toBe("a");
     expect(plugin.getGithubCoords().sort()).toEqual(["org/alpha", "org/beta"]);
+  });
+
+  test("sends X-API-Key header when apiKey is configured", async () => {
+    const projPath = join(tempDir, "x");
+    makeGitRepo(projPath, "foo/x", "main");
+    fakeProjects.push({ id: "p1", name: "x", path: projPath });
+
+    plugin = newPlugin({ apiKey: "my-secret-key" });
+    await plugin.refreshNow();
+
+    expect(lastApiKeyHeader).toBe("my-secret-key");
+    expect(plugin.getProjects()).toHaveLength(1);
+  });
+
+  test("server rejects request without X-API-Key → lastError surfaces 401", async () => {
+    requireApiKey = "expected-key";
+
+    plugin = newPlugin(); // no apiKey configured
+    await plugin.refreshNow();
+
+    expect(plugin.getProjects()).toHaveLength(0);
+    expect(plugin.getLastError()).toContain("HTTP 401");
   });
 
   test("uninstall clears refresh timer + project list", async () => {

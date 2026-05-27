@@ -49,6 +49,14 @@ export interface ProtomakerProjectRegistryOptions {
   apiBase?: string;
   /** Refresh interval. Default: 5 min. */
   refreshIntervalMs?: number;
+  /**
+   * X-API-Key header value. protoMaker requires authentication on every
+   * /api/* route — see protoMaker's `apps/server/src/lib/auth.ts`. The
+   * variable is named `AUTOMAKER_API_KEY` because protoMaker calls its own
+   * auth key that internally (legacy name); the host env in homelab-iac
+   * threads it through unchanged. Without a key, every refresh 401s.
+   */
+  apiKey?: string;
 }
 
 export class ProtomakerProjectRegistryPlugin implements Plugin {
@@ -58,6 +66,7 @@ export class ProtomakerProjectRegistryPlugin implements Plugin {
   readonly capabilities = ["project-registry"];
 
   private readonly apiBase: string;
+  private readonly apiKey: string | undefined;
   private readonly refreshIntervalMs: number;
 
   private projects: RegistryProject[] = [];
@@ -67,6 +76,7 @@ export class ProtomakerProjectRegistryPlugin implements Plugin {
 
   constructor(opts: ProtomakerProjectRegistryOptions = {}) {
     this.apiBase = opts.apiBase ?? process.env["PROTOMAKER_API_BASE"] ?? DEFAULT_PROTOMAKER_BASE;
+    this.apiKey = opts.apiKey ?? process.env["AUTOMAKER_API_KEY"];
     this.refreshIntervalMs = opts.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
   }
 
@@ -78,8 +88,15 @@ export class ProtomakerProjectRegistryPlugin implements Plugin {
     // registry until the first interval tick — that's by design (the
     // host's responsibility), not silent fallback behaviour.
     this.refreshTimer = setInterval(() => void this._refresh(), this.refreshIntervalMs);
+    if (!this.apiKey) {
+      console.warn(
+        `[protomaker-project-registry] AUTOMAKER_API_KEY not set — protoMaker will reject every refresh with 401. ` +
+          `Set the env var (workstacean reads protoMaker's own auth key under that name) or pass apiKey in options.`,
+      );
+    }
     console.log(
       `[protomaker-project-registry] Installed — apiBase=${this.apiBase}, ` +
+        `auth=${this.apiKey ? "configured" : "MISSING"}, ` +
         `refresh=${Math.round(this.refreshIntervalMs / 60_000)}min, ` +
         `${this.projects.length} project(s) loaded`,
     );
@@ -167,7 +184,9 @@ export class ProtomakerProjectRegistryPlugin implements Plugin {
    */
   private async _fetchProjects(): Promise<Array<{ id: string; name: string; path: string }>> {
     const url = `${this.apiBase}/api/settings/global`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const headers: Record<string, string> = {};
+    if (this.apiKey) headers["X-API-Key"] = this.apiKey;
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} from ${url}`);
     }
