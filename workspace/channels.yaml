@@ -65,63 +65,63 @@ channels:
 
   # ── Per-project bindings ──────────────────────────────────────────────────
   # Migrated from the old workspace/projects.yaml `discord.dev` / `discord.release`
-  # blocks. Each entry binds a Discord channel + outbound webhook to a
-  # (projectSlug, kind) pair so feature-notifier, pr-remediator, and
-  # slash-commands can resolve "the dev channel for protomaker" without
-  # any project-level config file. Lookup: ChannelRegistry.getProjectChannel.
+  # blocks. Each entry binds a Discord channel to a (projectSlug, kind) pair so
+  # feature-notifier, pr-remediator, and slash-commands can resolve "the dev
+  # channel for protomaker" without any project-level config file. Lookup:
+  # ChannelRegistry.getProjectChannel.
+  #
+  # Delivery goes through the connected Discord bot (channelId → DiscordPlugin).
+  # The Channel.webhook field still exists as a no-bot fallback, but raw webhook
+  # URLs are NOT committed here — they're secrets. If a webhook fallback is ever
+  # needed, set it via an env var and reference it as `webhook: "${ENV_VAR}"`
+  # (feature-notifier expands ${...}). The URLs that previously lived in
+  # projects.yaml should be treated as exposed (they're in git history) and
+  # rotated in Discord.
 
   - id: project-protoworkstacean-dev
     platform: discord
     project: protoworkstacean
     kind: dev
     channelId: "1490978896911405208"
-    webhook: "https://discord.com/api/webhooks/1491952333087834243/dyUlVYCTsAuFmTVrtNqQU-oUoBryijeV2cJ84OgiPenz8C9yNl4O-2MBFSJeJngJrCZZ"
 
   - id: project-protoworkstacean-release
     platform: discord
     project: protoworkstacean
     kind: release
     channelId: "1490978898568286329"
-    webhook: "https://discord.com/api/webhooks/1491952337567088731/HkkPa15mSNo5-NqUe4PjOQyviA1aPkjlsH36gtZrsb8lWLP3Mp-5iSZfAFeuquWe7vnZ"
 
   - id: project-protomaker-dev
     platform: discord
     project: protomaker
     kind: dev
     channelId: "1469080556720623699"
-    webhook: "https://discord.com/api/webhooks/1491952339295277126/HuCK8CIePPDBiSg4RZgfF5cxeJDv4f334KKjqXyMo_9MEHIPXC03fUAunZZj8RuBNvuX"
 
   - id: project-protomaker-release
     platform: discord
     project: protomaker
     kind: release
     channelId: "1490893509337550859"
-    webhook: "https://discord.com/api/webhooks/1491952340796965005/NW3ZtY14kcF8NPYSHBNsiPEFPmu0-DawIXPakk5bUF7nd_YrLPjHbBqxGzorVSdmaXYf"
 
   - id: project-protocli-dev
     platform: discord
     project: protocli
     kind: dev
     channelId: "1490974556306014290"
-    webhook: "https://discord.com/api/webhooks/1491952343196111049/5bycseg2ED3feT22X_3ezY35Y81ZrjsGod101huZpjKNRHNRVFV-Y0j0_k5OhEA3QS8S"
 
   - id: project-protocli-release
     platform: discord
     project: protocli
     kind: release
     channelId: "1490974557920563312"
-    webhook: "https://discord.com/api/webhooks/1491952344529637546/vb278du2TSW_RvkpwOH5UHcS9d3UCJ5nMDtnj5A92bCG3piTa3o7AQk8GDqForiwZ74O"
 
   - id: project-mythxengine-dev
     platform: discord
     project: mythxengine
     kind: dev
     channelId: "1490978905371312179"
-    webhook: "https://discord.com/api/webhooks/1491952345528144005/2oDZenUiQnz2VhEIDEeNxTRPj3zzhokCY_KR0rtg-K2PHZ_fwcyD2NaBZVyxtTSVlMYg"
 
   - id: project-mythxengine-release
     platform: discord
     project: mythxengine
     kind: release
     channelId: "1490978906419761262"
-    webhook: "https://discord.com/api/webhooks/1491952347100876852/9DpUPDSRurXL18af1caqJY2oc8wflQ6j3xR0Gk9V8udeQWyewGFR-DUmyDLa7NEvM_iF"

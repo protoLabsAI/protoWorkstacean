@@ -285,7 +285,8 @@ export class GitHubPlugin implements Plugin {
    * project registered in protoMaker after startup is resolvable immediately.
    */
   private _projectMetaFor(repoSlug: string): { slug: string; projectPath: string | undefined } | undefined {
-    return projectMetaFromRegistry(this.projectRegistry).get(repoSlug);
+    const p = this.projectRegistry.getByGithub(repoSlug);
+    return p ? { slug: p.slug, projectPath: p.path } : undefined;
   }
 
   install(bus: EventBus): void {

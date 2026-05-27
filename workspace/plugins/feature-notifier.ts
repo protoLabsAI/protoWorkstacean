@@ -47,10 +47,11 @@ function expandEnv(val: string | undefined): string {
 }
 
 // ── Channel registry — one shared instance, hot-reloads on channels.yaml change ─
+// Watching is armed in install() (not here at import) so a plugin reload
+// re-arms it; startWatching() is idempotent.
 
 const workspaceDir = resolve(process.env.WORKSPACE_DIR ?? join(process.cwd(), "workspace"));
 const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));
-channelRegistry.startWatching();
 
 // ── Notification formatting ───────────────────────────────────────────────────
 
@@ -115,6 +116,8 @@ export default {
   capabilities: ["feature.completed", "feature.failed"],
 
   install(bus: EventBus) {
+    channelRegistry.startWatching();
+
     bus.subscribe("feature.completed", "feature-notifier-done", (msg) => {
       handleFeatureEvent(bus, msg, formatCompleted);
     });
