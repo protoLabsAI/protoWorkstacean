@@ -1,6 +1,9 @@
 /**
  * Unit tests for OnboardingPlugin.
  *
+ * Project registration lives in protoMaker — this plugin only handles
+ * the side-effects (GitHub webhook + Drive folder) plus the bus notification.
+ *
  * Strategy:
  *  - mock.module() replaces ES modules before dynamic import
  *  - Real fs writes go to an OS temp dir per test
@@ -8,10 +11,9 @@
  */
 
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage } from "../lib/types.ts";
 
 // ── Minimal EventBus ──────────────────────────────────────────────────────────
@@ -62,15 +64,7 @@ function findComplete(published: BusMessage[]): BusMessage | undefined {
   return published.find(m => m.topic === "message.inbound.onboard.complete");
 }
 
-// ── Mock state (shared across mock.module factories) ──────────────────────────
-//
-// We deliberately do NOT mock `../lib/project-schema.ts`. `mock.module()`
-// replacements in Bun's test runner persist for the entire process and bleed
-// into other test files run in the same `bun test` invocation — when
-// tests/project-schema.test.ts runs after this file in the same process, it
-// would pick up the mocked `validateProjectEntry` (which returned the wrong
-// success shape) and 12 tests would fail intermittently in CI. Tracked as #480.
-// The real schema is fast and pure; tests construct payloads that satisfy it.
+// ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const _mocks = {
   makeGitHubAuth: null as unknown,
@@ -87,7 +81,6 @@ mock.module("../lib/plugins/google.ts", () => ({
   GooglePlugin: class {},
 }));
 
-// Import the plugin AFTER mock.module calls
 const { OnboardingPlugin } = await import("../lib/plugins/onboarding.ts");
 
 // ── Default env setup ─────────────────────────────────────────────────────────
@@ -181,63 +174,14 @@ describe("OnboardingPlugin — Step 1: validate", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "test-proj", title: "Test", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 200));
 
     const reply = findReply(published);
     expect(reply?.success).toBe(true);
   });
 });
 
-describe("OnboardingPlugin — Step 2: idempotency", () => {
-  let workspaceDir: string;
-
-  beforeEach(() => {
-    workspaceDir = mkdtempSync(join(tmpdir(), "onboard-test-"));
-    setEnv();
-    _mocks.makeGitHubAuth = mock(() => () => Promise.resolve("ghp_test"));
-    _mocks.createDriveFolder = mock(() => Promise.resolve(null));
-  });
-
-  afterEach(() => {
-    rmSync(workspaceDir, { recursive: true, force: true });
-    clearEnv();
-  });
-
-  test("skips pipeline if slug already in projects.yaml", async () => {
-    const projectsPath = join(workspaceDir, "projects.yaml");
-    writeFileSync(projectsPath, `projects:\n  - slug: existing-proj\n    title: Existing\n`, "utf8");
-
-    const plugin = new OnboardingPlugin(workspaceDir);
-    const { bus, published } = makeTestBus();
-    plugin.install(bus);
-
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "existing-proj", title: "Existing", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 100));
-
-    const reply = findReply(published);
-    expect(reply?.success).toBe(true);
-    expect(reply?.status).toBe("already_onboarded");
-    expect(reply?.step).toBe("idempotency");
-  });
-
-  test("proceeds if slug not in projects.yaml", async () => {
-    const projectsPath = join(workspaceDir, "projects.yaml");
-    writeFileSync(projectsPath, `projects:\n  - slug: other-proj\n    title: Other\n`, "utf8");
-
-    const plugin = new OnboardingPlugin(workspaceDir);
-    const { bus, published } = makeTestBus();
-    plugin.install(bus);
-
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "new-proj", title: "New", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 2000));
-
-    const reply = findReply(published);
-    expect(reply?.success).toBe(true);
-    expect(reply?.status).toBe("onboarded");
-  });
-});
-
-describe("OnboardingPlugin — Step 3: GitHub webhook", () => {
+describe("OnboardingPlugin — Step 2: GitHub webhook", () => {
   let workspaceDir: string;
 
   beforeEach(() => {
@@ -258,7 +202,7 @@ describe("OnboardingPlugin — Step 3: GitHub webhook", () => {
     const { bus, published } = makeTestBus();
     plugin.install(bus);
 
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p3", title: "P3", github: "owner/repo" }));
+    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p2", title: "P2", github: "owner/repo" }));
     await new Promise(r => setTimeout(r, 100));
 
     const reply = findReply(published);
@@ -286,7 +230,7 @@ describe("OnboardingPlugin — Step 3: GitHub webhook", () => {
     const { bus, published } = makeTestBus();
     plugin.install(bus);
 
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p3", title: "P3", github: "owner/repo" }));
+    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p2", title: "P2", github: "owner/repo" }));
     await new Promise(r => setTimeout(r, 100));
 
     global.fetch = origFetch;
@@ -317,7 +261,7 @@ describe("OnboardingPlugin — Step 3: GitHub webhook", () => {
     const { bus, published } = makeTestBus();
     plugin.install(bus);
 
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p3", title: "P3", github: "owner/repo" }));
+    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p2", title: "P2", github: "owner/repo" }));
     await new Promise(r => setTimeout(r, 100));
 
     global.fetch = origFetch;
@@ -337,7 +281,7 @@ describe("OnboardingPlugin — Step 3: GitHub webhook", () => {
     const { bus, published } = makeTestBus();
     plugin.install(bus);
 
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p3", title: "P3", github: "owner/repo" }));
+    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p2", title: "P2", github: "owner/repo" }));
     await new Promise(r => setTimeout(r, 100));
 
     global.fetch = origFetch;
@@ -348,7 +292,7 @@ describe("OnboardingPlugin — Step 3: GitHub webhook", () => {
   });
 });
 
-describe("OnboardingPlugin — Step 4: Drive folder", () => {
+describe("OnboardingPlugin — Step 3: Drive folder", () => {
   let workspaceDir: string;
 
   beforeEach(() => {
@@ -369,7 +313,7 @@ describe("OnboardingPlugin — Step 4: Drive folder", () => {
     const { bus, published } = makeTestBus();
     plugin.install(bus);
 
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p4", title: "P4", github: "o/r" }));
+    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p3", title: "P3", github: "o/r" }));
     await new Promise(r => setTimeout(r, 100));
 
     const reply = findReply(published);
@@ -391,7 +335,7 @@ describe("OnboardingPlugin — Step 4: Drive folder", () => {
     const { bus, published } = makeTestBus();
     plugin.install(bus);
 
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p4", title: "P4", github: "o/r" }));
+    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p3", title: "P3", github: "o/r" }));
     await new Promise(r => setTimeout(r, 100));
 
     const reply = findReply(published);
@@ -407,13 +351,13 @@ describe("OnboardingPlugin — Step 4: Drive folder", () => {
       GOOGLE_REFRESH_TOKEN: "gc-refresh",
     });
     writeFileSync(join(workspaceDir, "google.yaml"), `drive:\n  orgFolderId: "org-root-folder"\n`, "utf8");
-    _mocks.createDriveFolder = mock(() => Promise.resolve({ id: "new-folder-id", name: "P4" }));
+    _mocks.createDriveFolder = mock(() => Promise.resolve({ id: "new-folder-id", name: "P3" }));
 
     const plugin = new OnboardingPlugin(workspaceDir);
     const { bus, published } = makeTestBus();
     plugin.install(bus);
 
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p4", title: "P4", github: "o/r" }));
+    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p3", title: "P3", github: "o/r" }));
     await new Promise(r => setTimeout(r, 100));
 
     const reply = findReply(published);
@@ -423,93 +367,6 @@ describe("OnboardingPlugin — Step 4: Drive folder", () => {
     const complete = findComplete(published);
     const payload = complete?.payload as Record<string, unknown> | undefined;
     expect(payload?.driveFolderId).toBe("new-folder-id");
-  });
-});
-
-describe("OnboardingPlugin — Step 5: projects.yaml write", () => {
-  let workspaceDir: string;
-
-  beforeEach(() => {
-    workspaceDir = mkdtempSync(join(tmpdir(), "onboard-test-"));
-    setEnv();
-    _mocks.makeGitHubAuth = mock(() => null);
-    _mocks.createDriveFolder = mock(() => Promise.resolve(null));
-  });
-
-  afterEach(() => {
-    rmSync(workspaceDir, { recursive: true, force: true });
-    clearEnv();
-  });
-
-  test("upsert on new — creates projects.yaml and appends entry", async () => {
-    const plugin = new OnboardingPlugin(workspaceDir);
-    const { bus, published } = makeTestBus();
-    plugin.install(bus);
-
-    bus.publish("message.inbound.onboard", makeBusMsg({
-      slug: "new-proj",
-      title: "New Project",
-      github: "org/new-proj",
-    }));
-    await new Promise(r => setTimeout(r, 100));
-
-    const projectsPath = join(workspaceDir, "projects.yaml");
-    expect(existsSync(projectsPath)).toBe(true);
-
-    const content = readFileSync(projectsPath, "utf8");
-    const parsed = parseYaml(content) as { projects: { slug: string }[] };
-    expect(parsed.projects.some(p => p.slug === "new-proj")).toBe(true);
-
-    const reply = findReply(published);
-    const steps = reply?.steps as Record<string, string> | undefined;
-    expect(steps?.projectsYaml).toBe("ok");
-  });
-
-  test("upsert on existing file — appends without duplicate", async () => {
-    const projectsPath = join(workspaceDir, "projects.yaml");
-    writeFileSync(projectsPath, `projects:\n  - slug: existing-proj\n    title: Existing\n`, "utf8");
-
-    const plugin = new OnboardingPlugin(workspaceDir);
-    const { bus, published } = makeTestBus();
-    plugin.install(bus);
-
-    bus.publish("message.inbound.onboard", makeBusMsg({
-      slug: "another-proj",
-      title: "Another",
-      github: "org/another",
-    }));
-    await new Promise(r => setTimeout(r, 100));
-
-    const content = readFileSync(projectsPath, "utf8");
-    const parsed = parseYaml(content) as { projects: { slug: string }[] };
-    expect(parsed.projects.some(p => p.slug === "existing-proj")).toBe(true);
-    expect(parsed.projects.some(p => p.slug === "another-proj")).toBe(true);
-    expect(parsed.projects.filter(p => p.slug === "another-proj").length).toBe(1);
-  });
-
-  test("includes driveFolderId when Drive step succeeded", async () => {
-    setEnv({
-      GOOGLE_CLIENT_ID: "gc-id",
-      GOOGLE_CLIENT_SECRET: "gc-secret",
-      GOOGLE_REFRESH_TOKEN: "gc-refresh",
-    });
-    writeFileSync(join(workspaceDir, "google.yaml"), `drive:\n  orgFolderId: "root-id"\n`, "utf8");
-    _mocks.createDriveFolder = mock(() => Promise.resolve({ id: "drive-folder-456", name: "P5" }));
-
-    const plugin = new OnboardingPlugin(workspaceDir);
-    const { bus, published } = makeTestBus();
-    plugin.install(bus);
-
-    bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p5b", title: "P5B", github: "o/r" }));
-    await new Promise(r => setTimeout(r, 100));
-
-    const projectsPath = join(workspaceDir, "projects.yaml");
-    const content = readFileSync(projectsPath, "utf8");
-    const parsed = parseYaml(content) as {
-      projects: { slug: string; googleWorkspace?: { driveFolderId?: string } }[];
-    };
-    const entry = parsed.projects.find(p => p.slug === "p5b");
-    expect(entry?.googleWorkspace?.driveFolderId).toBe("drive-folder-456");
   });
 });
 
@@ -554,7 +411,6 @@ describe("OnboardingPlugin — Full pipeline", () => {
     const steps = reply?.steps as Record<string, string> | undefined;
     expect(steps?.githubWebhook).toBeDefined();
     expect(steps?.driveFolder).toBeDefined();
-    expect(steps?.projectsYaml).toBeDefined();
   });
 
   test("complete payload includes step summary", async () => {
@@ -571,7 +427,7 @@ describe("OnboardingPlugin — Full pipeline", () => {
   });
 });
 
-describe("OnboardingPlugin — Idempotency (full run twice)", () => {
+describe("OnboardingPlugin — Concurrent run rejection", () => {
   let workspaceDir: string;
 
   beforeEach(() => {
@@ -584,69 +440,6 @@ describe("OnboardingPlugin — Idempotency (full run twice)", () => {
   afterEach(() => {
     rmSync(workspaceDir, { recursive: true, force: true });
     clearEnv();
-  });
-
-  test("second run returns already_onboarded, no duplicate in projects.yaml", async () => {
-    const plugin = new OnboardingPlugin(workspaceDir);
-    const { bus, published } = makeTestBus();
-    plugin.install(bus);
-
-    const msg1 = makeBusMsg({ slug: "idem-proj", title: "Idempotent", github: "o/r" });
-    bus.publish("message.inbound.onboard", msg1);
-    await new Promise(r => setTimeout(r, 100));
-
-    const msg2 = makeBusMsg({ slug: "idem-proj", title: "Idempotent", github: "o/r" });
-    bus.publish("message.inbound.onboard", msg2);
-    await new Promise(r => setTimeout(r, 100));
-
-    const projectsPath = join(workspaceDir, "projects.yaml");
-    const content = readFileSync(projectsPath, "utf8");
-    const parsed = parseYaml(content) as { projects: { slug: string }[] };
-    expect(parsed.projects.filter(p => p.slug === "idem-proj").length).toBe(1);
-
-    const replies = published.filter(m => m.topic === "test.reply");
-    expect(replies.length).toBe(2);
-    const secondReply = replies[1].payload as Record<string, unknown>;
-    expect(secondReply.status).toBe("already_onboarded");
-  });
-});
-
-describe("OnboardingPlugin — Error handling", () => {
-  let workspaceDir: string;
-
-  beforeEach(() => {
-    workspaceDir = mkdtempSync(join(tmpdir(), "onboard-test-"));
-    setEnv();
-    _mocks.makeGitHubAuth = mock(() => null);
-    _mocks.createDriveFolder = mock(() => Promise.resolve(null));
-  });
-
-  afterEach(() => {
-    rmSync(workspaceDir, { recursive: true, force: true });
-    clearEnv();
-  });
-
-  test("fatal step error (projects.yaml schema fail) aborts pipeline", async () => {
-    // Construct a request whose constructed entry will fail the real
-    // ProjectEntrySchema. ProjectDiscordChannelSchema is union(string, object{
-    // channelId, webhook? }); a bare numeric `dev` value satisfies neither
-    // branch, so projects_yaml step rejects with a schema error.
-    const plugin = new OnboardingPlugin(workspaceDir);
-    const { bus, published } = makeTestBus();
-    plugin.install(bus);
-
-    bus.publish("message.inbound.onboard", makeBusMsg({
-      slug: "fatal-test",
-      title: "Fatal",
-      github: "o/r",
-      discord: { dev: 12345 as unknown as string },
-    }));
-    await new Promise(r => setTimeout(r, 150));
-
-    const reply = findReply(published);
-    expect(reply?.success).toBe(false);
-    expect(reply?.step).toBe("projects_yaml");
-    expect(findComplete(published)).toBeUndefined();
   });
 
   test("concurrent duplicate slug is rejected", async () => {

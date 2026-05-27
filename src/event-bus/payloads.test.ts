@@ -83,11 +83,8 @@ describe("InboundMessagePayload", () => {
       _routed: false,
       projectSlug: "my-project",
       discordChannels: {
-        general: "111",
-        updates: "222",
         dev: "333",
-        alerts: "444",
-        releases: "555",
+        release: "444",
       },
       github: {
         owner: "protoLabsAI",

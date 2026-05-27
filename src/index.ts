@@ -83,6 +83,20 @@ import { ChannelRegistry } from "../lib/channels/channel-registry.js";
 const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));
 channelRegistry.startWatching();
 
+// --- ProjectRegistry — source of truth for project metadata. Constructed
+//     before consumer plugins so they can read from a populated registry on
+//     install. We await an initial refresh to avoid the first-N-second window
+//     where consumers would see empty project state. If protoMaker is
+//     unreachable, the registry stays empty and re-tries every 5 min —
+//     consumers degrade gracefully (no project enrichment, empty allowlists).
+import { ProjectRegistry } from "./plugins/project-registry.js";
+const projectRegistry = new ProjectRegistry();
+await projectRegistry.refreshNow();
+console.log(
+  `[startup] ProjectRegistry: ${projectRegistry.getProjects().length} project(s) loaded` +
+    (projectRegistry.getLastError() ? ` (error: ${projectRegistry.getLastError()})` : ""),
+);
+
 // --- Telemetry: per-skill counters persisted to knowledge.db ---
 // Exposed via /api/telemetry/* endpoints. Skill counters are bumped by
 // SkillDispatcherPlugin on every dispatch outcome.
@@ -139,7 +153,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { RouterPlugin } = await import("./router/router-plugin.js");
-      return new RouterPlugin({ workspaceDir, channelRegistry });
+      return new RouterPlugin({ workspaceDir, channelRegistry, projectRegistry });
     },
   },
   {
@@ -151,6 +165,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
         workspaceDir,
         dataDir,
         channelRegistry,
+        projectRegistry,
         mailbox: contextMailbox,
         isExecutionActive: (correlationId: string) => {
           const dispatcher = registeredPlugins.find(p => p.name === "skill-dispatcher");
@@ -164,7 +179,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => !!(process.env.GITHUB_TOKEN || process.env.GITHUB_APP_ID),
     factory: async () => {
       const { GitHubPlugin } = await import("../lib/plugins/github");
-      return new GitHubPlugin(workspaceDir);
+      return new GitHubPlugin(workspaceDir, projectRegistry);
     },
   },
   {
@@ -367,7 +382,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => !!(process.env.QUINN_APP_PRIVATE_KEY || process.env.GITHUB_TOKEN),
     factory: async () => {
       const { PrRemediatorPlugin } = await import("../lib/plugins/pr-remediator.js");
-      return new PrRemediatorPlugin();
+      return new PrRemediatorPlugin({ projectRegistry });
     },
   },
   {
@@ -419,21 +434,6 @@ const pluginRegistry: PluginRegistryEntry[] = [
       return new DispatchDropEscalatorPlugin();
     },
   },
-  {
-    // Phase 1: fetches the canonical project list from protoMaker
-    // (GET /api/settings/global → settings.projects[]) and exposes it
-    // alongside workspace/projects.yaml. Logs parity warnings between
-    // the two sources so we get telemetry on drift before flipping
-    // consumers to read from protoMaker exclusively. See task #88.
-    name: "protomaker-project-registry",
-    condition: () => true,
-    factory: async () => {
-      const { ProtomakerProjectRegistryPlugin } = await import(
-        "./plugins/protomaker-project-registry-plugin.js"
-      );
-      return new ProtomakerProjectRegistryPlugin({ workspaceDir });
-    },
-  },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
   {
     name: "echo",
@@ -457,6 +457,12 @@ const operatorIdentityRegistry = new IdentityRegistry(workspaceDir);
 const operatorRoutingPlugin = new OperatorRoutingPlugin(operatorIdentityRegistry);
 operatorRoutingPlugin.install(bus);
 registeredPlugins.push(operatorRoutingPlugin);
+
+// ProjectRegistry — a plain shared object (like channelRegistry above), not a
+// plugin. The initial fetch already ran (await refreshNow, before consumer
+// construction) so consumers see a populated registry from their first read;
+// start() only arms the 5-min background refresh.
+projectRegistry.start();
 
 for (const entry of pluginRegistry) {
   if (entry.condition()) {
@@ -564,6 +570,8 @@ const apiContext: ApiContext = {
   mailbox: contextMailbox,
   taskTracker,
   busHistory: busHistoryRecorder,
+  projectRegistry,
+  channelRegistry,
 };
 
 const routes = createAllRoutes(apiContext);

@@ -6,12 +6,12 @@ import { stringify as stringifyYaml } from "yaml";
 import { InMemoryEventBus } from "../../../lib/bus.ts";
 import type { BusMessage } from "../../../lib/types.ts";
 import { RouterPlugin } from "../router-plugin.ts";
+import type { ProjectRegistry, RegistryProject } from "../../plugins/project-registry.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeWorkspace(opts: {
   agents?: Record<string, object>;
-  projects?: object[];
 } = {}): { workspaceDir: string; cleanup: () => void } {
   const workspaceDir = join(tmpdir(), `router-test-${crypto.randomUUID()}`);
   const agentsDir = join(workspaceDir, "agents");
@@ -21,17 +21,27 @@ function makeWorkspace(opts: {
     writeFileSync(join(agentsDir, file), stringifyYaml(data));
   }
 
-  if (opts.projects) {
-    writeFileSync(
-      join(workspaceDir, "projects.yaml"),
-      stringifyYaml({ projects: opts.projects }),
-    );
-  }
-
   return {
     workspaceDir,
     cleanup: () => rmSync(workspaceDir, { recursive: true, force: true }),
   };
+}
+
+/**
+ * Build a stub project registry exposing only the accessors RouterPlugin
+ * exercises. Cast to the plugin type so the router accepts it without
+ * pulling in the real fetch + interval machinery in tests.
+ */
+function makeStubProjectRegistry(projects: RegistryProject[]): ProjectRegistry {
+  return {
+    getProjects: () => projects,
+    getBySlug: (slug: string) => projects.find(p => p.slug === slug),
+    getByGithub: (coord: string) =>
+      projects.find(p => p.github && `${p.github.owner}/${p.github.repo}` === coord),
+    getByPath: (path: string) => projects.find(p => p.path === path),
+    getGithubCoords: () =>
+      projects.filter(p => p.github).map(p => `${p.github!.owner}/${p.github!.repo}`),
+  } as unknown as ProjectRegistry;
 }
 
 const quinnAgent = {
@@ -283,20 +293,20 @@ describe("RouterPlugin", () => {
   });
 
   describe("GitHub enrichment", () => {
-    test("enriches GitHub message with projectSlug", async () => {
+    test("enriches GitHub message with projectSlug from project registry", async () => {
       const { workspaceDir, cleanup } = makeWorkspace({
         agents: { "quinn.yaml": quinnAgent },
-        projects: [{
-          slug: "my-project",
-          github: "myorg/myrepo",
-          status: "active",
-          discord: { dev: "channel-123" },
-        }],
       });
       try {
-        // RouterPlugin imported statically at top of file
+        const projectRegistry = makeStubProjectRegistry([{
+          id: "p1",
+          name: "my-project",
+          slug: "my-project",
+          path: "/tmp/my-project",
+          github: { owner: "myorg", repo: "myrepo" },
+        }]);
         const bus = new InMemoryEventBus();
-        const plugin = new RouterPlugin({ workspaceDir });
+        const plugin = new RouterPlugin({ workspaceDir, projectRegistry });
         plugin.install(bus);
 
         const requestPromise = waitForSkillRequest(bus);
@@ -313,6 +323,7 @@ describe("RouterPlugin", () => {
         const p = req!.payload as Record<string, unknown>;
         expect(p.skill).toBe("pr_review");
         expect(p.projectSlug).toBe("my-project");
+        expect(p.projectPath).toBe("/tmp/my-project");
 
         plugin.uninstall();
       } finally {

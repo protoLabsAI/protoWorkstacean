@@ -61,6 +61,30 @@ export interface Channel {
    */
   conversation?: ConversationConfig;
 
+  /**
+   * Optional binding to a project slug. When set, the channel is
+   * addressable via `ChannelRegistry.getProjectChannel(slug, kind)` and
+   * is the workstacean replacement for the old per-project `discord:`
+   * block in `workspace/projects.yaml`. Both `project` and `kind` must
+   * be set for the binding to be indexed.
+   */
+  project?: string;
+
+  /**
+   * Project channel role — what this channel is *for* within the
+   * project. The set is open-ended; current consumers use:
+   *   - "dev"     — feature-notifier ✅/❌ updates, pr-remediator alerts
+   *   - "release" — release announcements
+   */
+  kind?: string;
+
+  /**
+   * Optional outbound webhook URL — used by feature-notifier as a direct
+   * POST when the Discord bot client isn't connected to the channel.
+   * Supports `${ENV_VAR}` interpolation.
+   */
+  webhook?: string;
+
   // ── Discord ──────────────────────────────────────────────────────────────────
 
   /**

@@ -110,15 +110,12 @@ export interface InboundMessagePayload {
   isDM?: boolean;
   /** Internal router flag: skip re-routing if already dispatched. */
   _routed?: boolean;
-  /** Project slug stamped by ProjectEnricher for GitHub messages. */
+  /** Project slug stamped by RouterPlugin for GitHub messages. */
   projectSlug?: string;
-  /** Discord channel IDs stamped by ProjectEnricher for GitHub messages. */
+  /** Project Discord channel IDs stamped by RouterPlugin for GitHub messages. */
   discordChannels?: {
-    general?: string;
-    updates?: string;
     dev?: string;
-    alerts?: string;
-    releases?: string;
+    release?: string;
   };
   /** GitHub-specific metadata (present on message.inbound.github.*). */
   github?: {

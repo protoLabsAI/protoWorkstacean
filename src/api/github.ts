@@ -3,9 +3,6 @@
  * All poll GitHub REST API, subject to rate limits.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import type { Route, ApiContext } from "./types.ts";
 import { HttpClient } from "../services/http-client.ts";
 
@@ -19,15 +16,6 @@ const ghHttp = new HttpClient({
     "X-GitHub-Api-Version": "2022-11-28",
   },
 });
-
-function loadProjectRepos(workspaceDir: string): string[] {
-  const projectsPath = join(workspaceDir, "projects.yaml");
-  if (!existsSync(projectsPath)) return [];
-  try {
-    const parsed = parseYaml(readFileSync(projectsPath, "utf8")) as { projects?: Array<{ github?: string }> };
-    return (parsed.projects ?? []).map(p => p.github).filter((g): g is string => !!g);
-  } catch { return []; }
-}
 
 async function ghApi(path: string): Promise<unknown> {
   if (!GITHUB_TOKEN) throw new Error("GITHUB_TOKEN not set");
@@ -59,7 +47,7 @@ export function normalizeIssueTitle(title: string): string {
 }
 
 export function createRoutes(ctx: ApiContext): Route[] {
-  const repos = () => loadProjectRepos(ctx.workspaceDir);
+  const repos = () => ctx.projectRegistry?.getGithubCoords() ?? [];
 
   async function handleGetCiHealth(): Promise<Response> {
     const repoList = repos();
@@ -457,7 +445,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
     const managed = repos();
     if (!managed.includes(repo)) {
       return Response.json(
-        { success: false, error: `Repo "${repo}" is not in projects.yaml` },
+        { success: false, error: `Repo "${repo}" is not in the project registry` },
         { status: 403 },
       );
     }

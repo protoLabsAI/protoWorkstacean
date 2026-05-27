@@ -5,20 +5,20 @@
  *   feature.completed   → posts a ✅ embed to the project's dev channel
  *   feature.failed      → posts a ❌ embed to the project's dev channel
  *
- * Channel routing: looks up `discord.dev` from workspace/projects.yaml by projectSlug.
- * Posts via the bus topic `message.outbound.discord.push.{channelId}` — handled by
- * DiscordPlugin which routes to the correct bot client.
- *
- * Config: workspace/projects.yaml (hot-reloaded on change)
+ * Channel routing: looks up `(projectSlug, "dev")` in workspace/channels.yaml
+ * via the in-process ChannelRegistry. Posts via the bus topic
+ * `message.outbound.discord.push.{channelId}` — handled by DiscordPlugin which
+ * routes to the correct bot client. When the bot isn't connected to the
+ * channel, falls back to a direct webhook POST using `webhook:` from the
+ * same channels.yaml entry.
  *
  * Called by protoMaker via POST /publish:
  *   { topic: "feature.completed", payload: { projectSlug, featureId, featureTitle, branchName, prNumber? } }
  *   { topic: "feature.failed",    payload: { projectSlug, featureId, featureTitle, error? } }
  */
 
-import { readFileSync, existsSync, watchFile } from "node:fs";
 import { resolve, join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -39,22 +39,6 @@ interface EventBus {
   ): string;
 }
 
-interface ProjectEntry {
-  slug: string;
-  title?: string;
-  discord?: {
-    dev?: string;
-    devWebhook?: string;
-    [key: string]: string | undefined;
-  };
-}
-
-interface ProjectRecord {
-  title: string;
-  devChannelId: string;
-  devWebhook: string;
-}
-
 // ── Env var expansion ─────────────────────────────────────────────────────────
 
 function expandEnv(val: string | undefined): string {
@@ -62,34 +46,12 @@ function expandEnv(val: string | undefined): string {
   return val.replace(/\$\{(\w+)\}/g, (_, k) => process.env[k] ?? "");
 }
 
-// ── Project index ─────────────────────────────────────────────────────────────
+// ── Channel registry — one shared instance, hot-reloads on channels.yaml change ─
+// Watching is armed in install() (not here at import) so a plugin reload
+// re-arms it; startWatching() is idempotent.
 
-function buildIndex(workspaceDir: string): Map<string, ProjectRecord> {
-  const index = new Map<string, ProjectRecord>();
-  const path = join(workspaceDir, "projects.yaml");
-  if (!existsSync(path)) return index;
-
-  try {
-    const raw = readFileSync(path, "utf8");
-    const { projects = [] } = parseYaml(raw) as { projects?: ProjectEntry[] };
-    for (const p of projects) {
-      const devChannelId = p.discord?.dev ?? "";
-      const devWebhook = expandEnv(p.discord?.devWebhook ?? "");
-      if (devChannelId || devWebhook) {
-        index.set(p.slug, {
-          title: p.title ?? p.slug,
-          devChannelId,
-          devWebhook,
-        });
-      }
-    }
-    console.log(`[feature-notifier] Loaded ${index.size} project(s) with dev channel`);
-  } catch (err) {
-    console.error("[feature-notifier] Failed to load projects.yaml:", err);
-  }
-
-  return index;
-}
+const workspaceDir = resolve(process.env.WORKSPACE_DIR ?? join(process.cwd(), "workspace"));
+const channelRegistry = new ChannelRegistry(join(workspaceDir, "channels.yaml"));
 
 // ── Notification formatting ───────────────────────────────────────────────────
 
@@ -106,24 +68,12 @@ function formatFailed(payload: Record<string, unknown>): string {
   return `❌ **Feature failed:** ${title}${err}`;
 }
 
-// ── Plugin ────────────────────────────────────────────────────────────────────
-
-const workspaceDir = resolve(process.env.WORKSPACE_DIR ?? join(process.cwd(), "workspace"));
-let projectIndex = buildIndex(workspaceDir);
-
-// Hot-reload on projects.yaml change
-const projectsPath = join(workspaceDir, "projects.yaml");
-if (existsSync(projectsPath)) {
-  watchFile(projectsPath, { interval: 5_000 }, () => {
-    console.log("[feature-notifier] projects.yaml changed — reloading");
-    projectIndex = buildIndex(workspaceDir);
-  });
-}
+// ── Handler ───────────────────────────────────────────────────────────────────
 
 function handleFeatureEvent(
   bus: EventBus,
   msg: BusMessage,
-  formatter: (p: Record<string, unknown>) => string
+  formatter: (p: Record<string, unknown>) => string,
 ): void {
   const payload = (msg.payload ?? {}) as Record<string, unknown>;
   const slug = String(payload.projectSlug ?? "");
@@ -133,28 +83,30 @@ function handleFeatureEvent(
     return;
   }
 
-  const project = projectIndex.get(slug);
-  if (!project) {
-    console.warn(`[feature-notifier] No dev channel configured for project "${slug}"`);
+  const channel = channelRegistry.getProjectChannel(slug, "dev");
+  if (!channel) {
+    console.warn(`[feature-notifier] No dev channel binding for project "${slug}" in channels.yaml — skipping`);
     return;
   }
 
   const content = formatter(payload);
+  const channelId = channel.channelId;
+  const webhook = expandEnv(channel.webhook);
 
-  if (project.devChannelId) {
-    bus.publish(`message.outbound.discord.push.${project.devChannelId}`, {
+  if (channelId) {
+    bus.publish(`message.outbound.discord.push.${channelId}`, {
       correlationId: msg.correlationId,
-      payload: { content, channel: project.devChannelId },
+      payload: { content, channel: channelId },
     });
-    console.log(`[feature-notifier] Posted to ${project.title} dev channel (${project.devChannelId})`);
-  } else if (project.devWebhook) {
+    console.log(`[feature-notifier] Posted to ${slug} dev channel (${channelId})`);
+  } else if (webhook) {
     // Fallback: direct webhook POST (used when bot not available)
-    fetch(project.devWebhook, {
+    fetch(webhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content }),
     }).catch((err) => console.error("[feature-notifier] Webhook POST failed:", err));
-    console.log(`[feature-notifier] Webhook POST to ${project.title} dev channel`);
+    console.log(`[feature-notifier] Webhook POST to ${slug} dev channel`);
   }
 }
 
@@ -164,6 +116,8 @@ export default {
   capabilities: ["feature.completed", "feature.failed"],
 
   install(bus: EventBus) {
+    channelRegistry.startWatching();
+
     bus.subscribe("feature.completed", "feature-notifier-done", (msg) => {
       handleFeatureEvent(bus, msg, formatCompleted);
     });
@@ -175,5 +129,7 @@ export default {
     console.log("[feature-notifier] Installed — watching feature.completed + feature.failed");
   },
 
-  uninstall(_bus: EventBus) {},
+  uninstall(_bus: EventBus) {
+    channelRegistry.stopWatching();
+  },
 };

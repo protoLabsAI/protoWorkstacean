@@ -2,7 +2,7 @@
  * CheckoutCache — content-addressed source-tree cache for clawpatch.
  *
  * Backs `src/api/clawpatch.ts` so structural review works against every
- * repo in workspace/projects.yaml — including the ones that used to be
+ * repo in the project registry — including the ones that used to be
  * bind-mounted into the container. Source of truth is GitHub's tarball
  * endpoint (`GET /repos/{owner}/{repo}/tarball/{ref}`); a successful fetch
  * lands at `${CHECKOUT_ROOT}/<owner>-<repo>/<sha>/`.
@@ -15,7 +15,7 @@
  *     over the 24h heuristic the doc originally biased toward.
  *   - Per-(repo, sha) extraction mutex: simultaneous reviews on the same PR
  *     head queue rather than racing.
- *   - Security: projects.yaml allowlist (enforced by the caller) plus
+ *   - Security: project-registry allowlist (enforced by the caller) plus
  *     tarball entry filter — reject `..`, absolute paths, and symlinks.
  *
  * Eviction lives in `prune()`, invoked from a daily ceremony (C3). The hot
@@ -116,7 +116,7 @@ export class CheckoutCache {
    * security / IO failure — never returns null.
    *
    * `repo` is "owner/name". Caller is responsible for enforcing the
-   * projects.yaml allowlist before calling — this layer trusts its input.
+   * project-registry allowlist before calling — this layer trusts its input.
    */
   async resolve(repo: string, sha: string): Promise<string> {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {

@@ -27,6 +27,8 @@ export class ChannelRegistry {
   private bySlackChannel = new Map<string, Channel>();
   // Index: gmail label-slug → Channel (slug = lowercase, non-alphanum → "-")
   private byGoogleGmailLabel = new Map<string, Channel>();
+  // Index: "<projectSlug>:<kind>" → Channel (per-project bindings).
+  private byProjectKind = new Map<string, Channel>();
 
   private filePath: string;
   private watching = false;
@@ -85,6 +87,21 @@ export class ChannelRegistry {
   /** All enabled Discord channel entries. */
   getDiscordChannels(): Channel[] {
     return this.channels.filter(c => c.platform === "discord" && c.enabled !== false && c.channelId);
+  }
+
+  /**
+   * Look up a project-bound channel by slug + kind. Returns the channel
+   * (any platform) registered with matching `project:` and `kind:` fields,
+   * or undefined when no such binding exists. Used by feature-notifier,
+   * pr-remediator, and slash-commands to resolve "dev channel for project X".
+   */
+  getProjectChannel(projectSlug: string, kind: string): Channel | undefined {
+    return this.byProjectKind.get(`${projectSlug}:${kind}`);
+  }
+
+  /** All channels with a `project:` binding (any platform, any kind). */
+  getProjectChannels(): Channel[] {
+    return this.channels.filter(c => c.enabled !== false && c.project && c.kind);
   }
 
   /**
@@ -196,9 +213,25 @@ export class ChannelRegistry {
     this.bySignalGroup.clear();
     this.bySlackChannel.clear();
     this.byGoogleGmailLabel.clear();
+    this.byProjectKind.clear();
 
     for (const ch of channels) {
       if (ch.enabled === false) continue;
+      if (ch.project && ch.kind) {
+        const key = `${ch.project}:${ch.kind}`;
+        const existing = this.byProjectKind.get(key);
+        if (existing) {
+          // A duplicate (project, kind) means notifications could route to
+          // either channel depending on file order — surface it loudly rather
+          // than silently overwriting. Keep the first; operator fixes the dup.
+          console.warn(
+            `[channel-registry] duplicate project binding "${key}" — channel "${existing.id}" already owns it; ` +
+              `ignoring "${ch.id}". Remove one from channels.yaml.`,
+          );
+        } else {
+          this.byProjectKind.set(key, ch);
+        }
+      }
       switch (ch.platform) {
         case "discord":
           if (ch.channelId) this.byDiscordChannel.set(ch.channelId, ch);

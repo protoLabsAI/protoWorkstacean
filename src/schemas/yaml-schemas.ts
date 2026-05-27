@@ -202,15 +202,23 @@ export const ChannelSchema = z.object({
   id: z.string().min(1),
   platform: ChannelPlatformSchema,
   agent: z.string().optional(),
+  enabled: z.boolean().optional(),
+  description: z.string().optional(),
+  // Project binding (optional; both project + kind required for it to index).
+  project: z.string().optional(),
+  kind: z.string().optional(),
+  webhook: z.string().optional(),
   // Discord-specific
   channelId: z.string().optional(),
   guildId: z.string().optional(),
+  agentBotTokenEnv: z.string().optional(),
   // GitHub-specific
   repo: z.string().optional(),
   // Signal-specific
   groupId: z.string().optional(),
   // Slack-specific
   slackChannelId: z.string().optional(),
+  agentSlackTokenEnv: z.string().optional(),
   conversation: ConversationConfigSchema.optional(),
 });
 
@@ -219,33 +227,3 @@ export const ChannelsFileSchema = z.object({
 });
 
 export type ChannelInput = z.input<typeof ChannelSchema>;
-
-// ── workspace/projects.yaml ──────────────────────────────────────────────────
-
-const ProjectDiscordChannelsSchema = z.object({
-  general: z.string().optional(),
-  updates: z.string().optional(),
-  dev: z.string().optional(),
-  alerts: z.string().optional(),
-  releases: z.string().optional(),
-});
-
-export const ProjectSchema = z.object({
-  slug: z.string().min(1, "Project slug must not be empty"),
-  title: z.string().optional(),
-  github: z.string().regex(/^[^/]+\/[^/]+$/, "github must be 'owner/repo' format"),
-  defaultBranch: z.string().default("main"),
-  status: z.enum(["active", "inactive", "archived", "suspended"]).default("active"),
-  agents: z.array(z.string()).optional(),
-  discord: z.union([
-    ProjectDiscordChannelsSchema,
-    z.object({ channels: ProjectDiscordChannelsSchema }),
-  ]).optional(),
-});
-
-export const ProjectsFileSchema = z.object({
-  projects: z.array(ProjectSchema),
-});
-
-export type ProjectInput = z.input<typeof ProjectSchema>;
-export type ProjectOutput = z.output<typeof ProjectSchema>;

@@ -1,29 +1,33 @@
 /**
- * ProtomakerProjectRegistryPlugin — pulls the canonical list of projects from
- * protoMaker (`GET /api/settings/global` → `settings.projects[]: ProjectRef[]`)
- * and exposes it as the source of truth for workstacean's project metadata.
+ * ProjectRegistry — the source of truth for project metadata.
  *
- * Phase 1 (this PR): the plugin runs in PARALLEL with `workspace/projects.yaml`.
- * Consumers still read from yaml; this plugin logs parity warnings between
- * the two sources so we get telemetry on drift before flipping. Phase 2 will
- * refactor the 13 consumer files to read from `getProjects()` instead, and
- * Phase 3 deletes `projects.yaml` + `lib/project-schema.ts`.
+ * A plain shared class (NOT a Plugin), in the same shape as ChannelRegistry /
+ * ExecutorRegistry / IdentityRegistry: constructed once at startup and handed
+ * to whichever plugins + routes need to read project metadata. Consumers hold
+ * a reference to this *registry object*, not to another plugin — which is the
+ * registrar exemption the plugin contract explicitly allows. (#633 review.)
+ *
+ * Pulls the canonical project list from protoMaker
+ * (`GET /api/settings/global` → `settings.projects[]: ProjectRef[]`).
+ * `workspace/projects.yaml` no longer exists — this replaced it in #631 + the
+ * consumer refactor in this PR.
  *
  * protoMaker's `ProjectRef` is intentionally lean (id, name, path, UI prefs).
  * For workstacean's routing + cache needs we additionally derive:
  *
- *   - `github: { owner, repo }` — from `<path>/.git/config` `[remote "origin"]`
- *   - `defaultBranch`            — from `<path>/.git/refs/remotes/origin/HEAD`
+ *   - `slug`          — `name.toLowerCase().replace(/[^a-z0-9]+/g, "-")`
+ *   - `github`        — `{ owner, repo }` from `<path>/.git/config` origin url
+ *   - `defaultBranch` — from `<path>/.git/refs/remotes/origin/HEAD` symref
  *
  * If those fields ever land natively on `ProjectRef`, the derivation drops
- * to a fallback. See protoMaker issue (filed alongside this PR) for the
- * native-field proposal.
+ * to a fallback. See protoMaker#3883 for the native-field proposal.
+ *
+ * Startup contract: `refreshNow()` is awaited by the host (src/index.ts)
+ * before consumers are constructed; `start()` then arms the 5-min refresh.
  */
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-import type { Plugin, EventBus } from "../../lib/types.ts";
 
 const DEFAULT_PROTOMAKER_BASE = "http://protomaker-server:3008";
 const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60_000;
@@ -33,70 +37,104 @@ export interface RegistryProject {
   id: string;
   /** ProjectRef.name from protoMaker (human-readable). */
   name: string;
+  /** Topic-safe slug derived from name (lowercase, non-alphanum → "-"). */
+  slug: string;
   /** Absolute filesystem path to the project directory (ProjectRef.path). */
   path: string;
   /** Derived from `<path>/.git/config` `[remote "origin"]` url. */
   github?: { owner: string; repo: string };
   /** Derived from `<path>/.git/refs/remotes/origin/HEAD` symref. */
   defaultBranch?: string;
-  /** Provenance marker — distinguishes this from yaml-sourced records during parity logging. */
-  source: "protomaker";
 }
 
-export interface ProtomakerProjectRegistryOptions {
+export interface ProjectRegistryOptions {
   /** protoMaker HTTP base URL. Default: `http://protomaker-server:3008`. */
   apiBase?: string;
-  /** Workspace directory (for parity check against projects.yaml). */
-  workspaceDir: string;
   /** Refresh interval. Default: 5 min. */
   refreshIntervalMs?: number;
-  /** When true, log parity warnings vs. workspace/projects.yaml on every refresh. */
-  parityCheck?: boolean;
+  /**
+   * X-API-Key header value. protoMaker requires authentication on every
+   * /api/* route — see protoMaker's `apps/server/src/lib/auth.ts`. The
+   * variable is named `AUTOMAKER_API_KEY` because that's protoMaker's own
+   * server-side auth-key env (legacy name from before the Automaker →
+   * protoMaker rename); the host env in homelab-iac threads it through
+   * unchanged. Without a key, every refresh 401s.
+   */
+  apiKey?: string;
 }
 
-export class ProtomakerProjectRegistryPlugin implements Plugin {
-  readonly name = "protomaker-project-registry";
-  readonly description =
-    "Fetches the canonical project list from protoMaker + derives git metadata; logs parity vs. projects.yaml";
-  readonly capabilities = ["project-registry"];
-
+export class ProjectRegistry {
   private readonly apiBase: string;
-  private readonly workspaceDir: string;
+  private readonly apiKey: string | undefined;
   private readonly refreshIntervalMs: number;
-  private readonly parityCheck: boolean;
 
   private projects: RegistryProject[] = [];
   private refreshTimer?: ReturnType<typeof setInterval>;
   private lastRefreshAt = 0;
   private lastError: string | undefined;
 
-  constructor(opts: ProtomakerProjectRegistryOptions) {
+  constructor(opts: ProjectRegistryOptions = {}) {
     this.apiBase = opts.apiBase ?? process.env["PROTOMAKER_API_BASE"] ?? DEFAULT_PROTOMAKER_BASE;
-    this.workspaceDir = opts.workspaceDir;
+    this.apiKey = opts.apiKey ?? process.env["AUTOMAKER_API_KEY"];
     this.refreshIntervalMs = opts.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
-    this.parityCheck = opts.parityCheck ?? true;
   }
 
-  install(_bus: EventBus): void {
-    // Fire-and-forget initial refresh — must not block install.
-    void this._refresh();
+  /**
+   * Arm the periodic background refresh. The first fetch is expected to have
+   * already happened via `await registry.refreshNow()` before consumers read
+   * the registry — `start()` only schedules subsequent refreshes.
+   */
+  start(): void {
+    if (this.refreshTimer) return;
     this.refreshTimer = setInterval(() => void this._refresh(), this.refreshIntervalMs);
+    if (!this.apiKey) {
+      console.warn(
+        `[project-registry] AUTOMAKER_API_KEY not set — protoMaker will reject every refresh with 401. ` +
+          `Set the env var (workstacean reads protoMaker's own auth key under that name) or pass apiKey in options.`,
+      );
+    }
     console.log(
-      `[protomaker-project-registry] Installed — apiBase=${this.apiBase}, ` +
+      `[project-registry] Started — apiBase=${this.apiBase}, ` +
+        `auth=${this.apiKey ? "configured" : "MISSING"}, ` +
         `refresh=${Math.round(this.refreshIntervalMs / 60_000)}min, ` +
-        `parityCheck=${this.parityCheck}`,
+        `${this.projects.length} project(s) loaded`,
     );
   }
 
-  uninstall(): void {
+  stop(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     this.refreshTimer = undefined;
     this.projects = [];
   }
 
-  /** Snapshot of currently-known projects. Phase 2 consumers will read this. */
+  /** Snapshot of currently-known projects. */
   getProjects(): readonly RegistryProject[] {
     return this.projects;
+  }
+
+  /** Lookup by derived slug. */
+  getBySlug(slug: string): RegistryProject | undefined {
+    return this.projects.find((p) => p.slug === slug);
+  }
+
+  /** Lookup by `owner/repo` string (case-insensitive — GitHub coords are). */
+  getByGithub(ownerRepo: string): RegistryProject | undefined {
+    const needle = ownerRepo.toLowerCase();
+    return this.projects.find(
+      (p) => p.github && `${p.github.owner}/${p.github.repo}`.toLowerCase() === needle,
+    );
+  }
+
+  /** Lookup by absolute filesystem path. */
+  getByPath(path: string): RegistryProject | undefined {
+    return this.projects.find((p) => p.path === path);
+  }
+
+  /** All known `owner/repo` coordinates (for monitored-repo lists / allowlists). */
+  getGithubCoords(): string[] {
+    return this.projects
+      .filter((p) => p.github)
+      .map((p) => `${p.github!.owner}/${p.github!.repo}`);
   }
 
   /** Last refresh timestamp (0 if never). */
@@ -109,25 +147,30 @@ export class ProtomakerProjectRegistryPlugin implements Plugin {
     return this.lastError;
   }
 
+  /**
+   * Force a synchronous-style refresh — used by the host at startup to
+   * populate the registry before consumers read it. Surfaces fetch errors
+   * via `getLastError()`; never throws.
+   */
+  async refreshNow(): Promise<void> {
+    await this._refresh();
+  }
+
   private async _refresh(): Promise<void> {
     try {
       const raw = await this._fetchProjects();
-      this.projects = raw.map((p) => this._enrichWithGit(p));
+      this.projects = dedupeBySlug(raw.map((p) => this._enrichProject(p)));
       this.lastRefreshAt = Date.now();
       this.lastError = undefined;
       console.log(
-        `[protomaker-project-registry] Refreshed: ${this.projects.length} project(s) — ` +
-          this.projects.map((p) => p.name).join(", "),
+        `[project-registry] Refreshed: ${this.projects.length} project(s) — ` +
+          this.projects.map((p) => p.slug).join(", "),
       );
-
-      if (this.parityCheck) {
-        this._logParityVsYaml();
-      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.lastError = msg;
       console.warn(
-        `[protomaker-project-registry] Refresh failed (${this.apiBase}): ${msg} — ` +
+        `[project-registry] Refresh failed (${this.apiBase}): ${msg} — ` +
           `keeping ${this.projects.length} stale project(s) in memory`,
       );
     }
@@ -140,7 +183,9 @@ export class ProtomakerProjectRegistryPlugin implements Plugin {
    */
   private async _fetchProjects(): Promise<Array<{ id: string; name: string; path: string }>> {
     const url = `${this.apiBase}/api/settings/global`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const headers: Record<string, string> = {};
+    if (this.apiKey) headers["X-API-Key"] = this.apiKey;
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} from ${url}`);
     }
@@ -154,12 +199,12 @@ export class ProtomakerProjectRegistryPlugin implements Plugin {
     return body.settings?.projects ?? [];
   }
 
-  private _enrichWithGit(p: { id: string; name: string; path: string }): RegistryProject {
+  private _enrichProject(p: { id: string; name: string; path: string }): RegistryProject {
     const enriched: RegistryProject = {
       id: p.id,
       name: p.name,
+      slug: deriveSlug(p.name),
       path: p.path,
-      source: "protomaker",
     };
     const gitConfigPath = join(p.path, ".git", "config");
     if (existsSync(gitConfigPath)) {
@@ -183,70 +228,41 @@ export class ProtomakerProjectRegistryPlugin implements Plugin {
     }
     return enriched;
   }
-
-  /**
-   * Compare protoMaker-sourced projects vs. workspace/projects.yaml.
-   * Logs warnings for: extra projects on either side, github mismatches.
-   * Purely observational — does not mutate either source.
-   */
-  private _logParityVsYaml(): void {
-    const yamlPath = join(this.workspaceDir, "projects.yaml");
-    if (!existsSync(yamlPath)) {
-      // No yaml side to compare — nothing to log (yaml-less is the target state).
-      return;
-    }
-
-    let yamlProjects: Array<{ slug: string; github?: string; path?: string }> = [];
-    try {
-      const parsed = parseYaml(readFileSync(yamlPath, "utf8")) as {
-        projects?: Array<{ slug?: string; github?: string; projectPath?: string }>;
-      };
-      yamlProjects = (parsed.projects ?? [])
-        .filter((p) => typeof p.slug === "string")
-        .map((p) => ({ slug: p.slug as string, github: p.github, path: p.projectPath }));
-    } catch (err) {
-      console.warn(
-        `[protomaker-project-registry] parity-check: failed to parse projects.yaml: ` +
-          (err instanceof Error ? err.message : String(err)),
-      );
-      return;
-    }
-
-    const pmByPath = new Map(this.projects.map((p) => [p.path, p]));
-    const yamlByPath = new Map(yamlProjects.filter((p) => p.path).map((p) => [p.path!, p]));
-
-    const onlyInPm = this.projects.filter((p) => !yamlByPath.has(p.path));
-    const onlyInYaml = yamlProjects.filter((p) => p.path && !pmByPath.has(p.path));
-
-    if (onlyInPm.length > 0) {
-      console.warn(
-        `[protomaker-project-registry] parity: ${onlyInPm.length} project(s) only in protoMaker (not in projects.yaml) — ` +
-          onlyInPm.map((p) => `${p.name}@${p.path}`).join(", "),
-      );
-    }
-    if (onlyInYaml.length > 0) {
-      console.warn(
-        `[protomaker-project-registry] parity: ${onlyInYaml.length} project(s) only in projects.yaml (not in protoMaker) — ` +
-          onlyInYaml.map((p) => `${p.slug}@${p.path}`).join(", "),
-      );
-    }
-
-    // GitHub-field comparison for projects present on both sides.
-    for (const [path, pm] of pmByPath) {
-      const yaml = yamlByPath.get(path);
-      if (!yaml) continue;
-      const pmGithub = pm.github ? `${pm.github.owner}/${pm.github.repo}` : undefined;
-      if (pmGithub && yaml.github && pmGithub !== yaml.github) {
-        console.warn(
-          `[protomaker-project-registry] parity: github mismatch for ${path} — ` +
-            `protoMaker derived "${pmGithub}", yaml says "${yaml.github}"`,
-        );
-      }
-    }
-  }
 }
 
 // ── Exported helpers (pure, testable) ────────────────────────────────────────
+
+/**
+ * Drop projects whose derived slug collides with an earlier one — `getBySlug`
+ * must be deterministic, and a collision would make project-channel resolution
+ * silently pick whichever entry happened to sort first. Keep the first
+ * occurrence and warn loudly so the operator can rename one in protoMaker.
+ */
+export function dedupeBySlug(projects: RegistryProject[]): RegistryProject[] {
+  const seen = new Set<string>();
+  const out: RegistryProject[] = [];
+  for (const p of projects) {
+    if (seen.has(p.slug)) {
+      console.warn(
+        `[project-registry] duplicate slug "${p.slug}" — keeping the first project, ` +
+          `dropping "${p.name}" (${p.path}). Rename one in protoMaker to disambiguate.`,
+      );
+      continue;
+    }
+    seen.add(p.slug);
+    out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Derive a topic-safe slug from a project name. Matches the slug shape
+ * the old `workspace/projects.yaml` used (lowercase repo name with dots
+ * replaced by dashes — e.g. `rabbit-hole.io` → `rabbit-hole-io`).
+ */
+export function deriveSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
 
 /**
  * Parse the `[remote "origin"]` url from a git config file and extract
@@ -257,9 +273,6 @@ export class ProtomakerProjectRegistryPlugin implements Plugin {
 export function parseGithubFromGitConfig(
   config: string,
 ): { owner: string; repo: string } | undefined {
-  // Find the [remote "origin"] section's url line.
-  // Sections are delimited by [...] headers; we look only inside the origin
-  // section to avoid picking up a non-origin remote that happens to be GH.
   const lines = config.split("\n");
   let inOriginSection = false;
   let originUrl: string | undefined;
@@ -278,11 +291,9 @@ export function parseGithubFromGitConfig(
   }
   if (!originUrl) return undefined;
 
-  // SSH: git@github.com:OWNER/REPO(.git)?
   const sshMatch = originUrl.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/);
   if (sshMatch) return { owner: sshMatch[1]!, repo: sshMatch[2]! };
 
-  // HTTPS: https://github.com/OWNER/REPO(.git)?
   const httpsMatch = originUrl.match(/^https?:\/\/github\.com\/([^/]+)\/(.+?)(?:\.git)?$/);
   if (httpsMatch) return { owner: httpsMatch[1]!, repo: httpsMatch[2]! };
 
@@ -295,8 +306,6 @@ export function parseGithubFromGitConfig(
  * `ref: refs/remotes/origin/main`.
  */
 export function parseDefaultBranchFromHead(headContent: string): string | undefined {
-  // Trim before matching — file usually ends with \n which the regex below
-  // (no /m flag) won't cross because `.` doesn't match newline.
   const match = headContent.trim().match(/^ref:\s*refs\/remotes\/origin\/(.+)$/);
   return match ? match[1]! : undefined;
 }

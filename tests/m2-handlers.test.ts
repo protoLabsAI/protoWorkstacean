@@ -7,50 +7,38 @@
  */
 
 import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { GitHubPlugin } from "../lib/plugins/github.ts";
+import type {
+  ProjectRegistry,
+  RegistryProject,
+} from "../src/plugins/project-registry.ts";
 import type { EventBus, BusMessage } from "../lib/types.ts";
 
-// ── Shared fixture data ──────────────────────────────────────────────────────
-
-const PROJECTS_YAML = `
-projects:
-  - slug: protolabsai-protoworkstacean
-    title: protoWorkstacean
-    github: protolabsai/protoworkstacean
-    status: active
-    discord:
-      dev: "111222333"
-  - slug: protolabsai-quinn
-    title: Quinn
-    github: protolabsai/quinn
-    status: active
-  - slug: protolabsai-protoui
-    title: protoUI
-    github: protolabsai/protoui
-    status: active
-    discord:
-      dev: "444555666"
-  - slug: protolabsai-archived
-    title: ArchivedProject
-    github: protolabsai/archived
-    status: archived
-`;
-
-// Create a real temp workspace with fake YAML so file-loading helpers work
+// Create a real temp workspace so the plugin can resolve github.yaml (absent → defaults).
 let workspaceDir: string;
 
 beforeAll(() => {
   workspaceDir = mkdtempSync(join(tmpdir(), "workstacean-m2-test-"));
-  writeFileSync(join(workspaceDir, "projects.yaml"), PROJECTS_YAML);
-  // github.yaml not required — plugin falls back to defaults
 });
 
 afterAll(() => {
   rmSync(workspaceDir, { recursive: true, force: true });
 });
+
+function makeStubProjectRegistry(projects: RegistryProject[] = []): ProjectRegistry {
+  return {
+    getProjects: () => projects,
+    getBySlug: (slug: string) => projects.find(p => p.slug === slug),
+    getByGithub: (coord: string) =>
+      projects.find(p => p.github && `${p.github.owner}/${p.github.repo}` === coord),
+    getByPath: (path: string) => projects.find(p => p.path === path),
+    getGithubCoords: () =>
+      projects.filter(p => p.github).map(p => `${p.github!.owner}/${p.github!.repo}`),
+  } as unknown as ProjectRegistry;
+}
 
 // ── Mock EventBus factory ────────────────────────────────────────────────────
 
@@ -241,7 +229,7 @@ describe("GitHub plugin — repository.created handler", () => {
 
   test("publishes message.inbound.onboard for repository.created", () => {
     const { bus, publishCalls } = makeMockBus();
-    const plugin = new GitHubPlugin(workspaceDir);
+    const plugin = new GitHubPlugin(workspaceDir, makeStubProjectRegistry());
 
     const payload = makePayload("protolabsai/new-repo");
     (plugin as unknown as { _handleEvent: Function })._handleEvent(
@@ -258,7 +246,7 @@ describe("GitHub plugin — repository.created handler", () => {
 
   test("published message has correct topic and payload shape", () => {
     const { bus, publishCalls } = makeMockBus();
-    const plugin = new GitHubPlugin(workspaceDir);
+    const plugin = new GitHubPlugin(workspaceDir, makeStubProjectRegistry());
 
     const payload = makePayload("protolabsai/protoworkstacean");
     (plugin as unknown as { _handleEvent: Function })._handleEvent(
@@ -290,7 +278,7 @@ describe("GitHub plugin — repository.created handler", () => {
 
   test("non-repository.created event (issues) does not publish", () => {
     const { bus, publishCalls } = makeMockBus();
-    const plugin = new GitHubPlugin(workspaceDir);
+    const plugin = new GitHubPlugin(workspaceDir, makeStubProjectRegistry());
 
     // An 'issues' event without @mention — should not publish
     const payload = {
@@ -322,7 +310,7 @@ describe("GitHub plugin — repository.created handler", () => {
 
   test("repository event with action other than 'created' does not publish to onboard", () => {
     const { bus, publishCalls } = makeMockBus();
-    const plugin = new GitHubPlugin(workspaceDir);
+    const plugin = new GitHubPlugin(workspaceDir, makeStubProjectRegistry());
 
     const payload = {
       action: "deleted",
@@ -349,7 +337,7 @@ describe("GitHub plugin — repository.created handler", () => {
 
   test("published message id includes the repo full_name", () => {
     const { bus, publishCalls } = makeMockBus();
-    const plugin = new GitHubPlugin(workspaceDir);
+    const plugin = new GitHubPlugin(workspaceDir, makeStubProjectRegistry());
 
     const payload = makePayload("protolabsai/protoworkstacean");
     (plugin as unknown as { _handleEvent: Function })._handleEvent(
