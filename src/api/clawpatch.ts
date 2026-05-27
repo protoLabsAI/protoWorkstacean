@@ -36,7 +36,7 @@ import { join } from "node:path";
 import { CheckoutCache } from "../../lib/checkout-cache.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
 import type { Route, ApiContext } from "./types.ts";
-import type { ProtomakerProjectRegistryPlugin } from "../plugins/protomaker-project-registry-plugin.ts";
+import type { ProjectRegistry } from "../plugins/project-registry.ts";
 
 /**
  * Where clawpatch persists `.clawpatch/` (features, findings, runs, reports,
@@ -124,7 +124,7 @@ export function setCheckoutCacheForTesting(cache: CheckoutCache | null): void {
  * agents can't point clawpatch at arbitrary GitHub repos.
  */
 function loadProjectAllowlist(
-  projectRegistry: ProtomakerProjectRegistryPlugin | undefined,
+  projectRegistry: ProjectRegistry | undefined,
 ): Set<string> {
   return new Set(projectRegistry?.getGithubCoords() ?? []);
 }
@@ -151,7 +151,7 @@ function loadProjectAllowlist(
 async function resolveRepoPath(
   repo: string,
   since: string | undefined,
-  projectRegistry: ProtomakerProjectRegistryPlugin | undefined,
+  projectRegistry: ProjectRegistry | undefined,
 ): Promise<{ ok: true; path: string } | { ok: false; error: string; status: number }> {
   const devOverride = resolveDevOverridePath(repo);
   if (devOverride) return { ok: true, path: devOverride };

@@ -12,9 +12,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { GitHubPlugin } from "../lib/plugins/github.ts";
 import type {
-  ProtomakerProjectRegistryPlugin,
+  ProjectRegistry,
   RegistryProject,
-} from "../src/plugins/protomaker-project-registry-plugin.ts";
+} from "../src/plugins/project-registry.ts";
 import type { EventBus, BusMessage } from "../lib/types.ts";
 
 // Create a real temp workspace so the plugin can resolve github.yaml (absent → defaults).
@@ -28,7 +28,7 @@ afterAll(() => {
   rmSync(workspaceDir, { recursive: true, force: true });
 });
 
-function makeStubProjectRegistry(projects: RegistryProject[] = []): ProtomakerProjectRegistryPlugin {
+function makeStubProjectRegistry(projects: RegistryProject[] = []): ProjectRegistry {
   return {
     getProjects: () => projects,
     getBySlug: (slug: string) => projects.find(p => p.slug === slug),
@@ -37,7 +37,7 @@ function makeStubProjectRegistry(projects: RegistryProject[] = []): ProtomakerPr
     getByPath: (path: string) => projects.find(p => p.path === path),
     getGithubCoords: () =>
       projects.filter(p => p.github).map(p => `${p.github!.owner}/${p.github!.repo}`),
-  } as unknown as ProtomakerProjectRegistryPlugin;
+  } as unknown as ProjectRegistry;
 }
 
 // ── Mock EventBus factory ────────────────────────────────────────────────────

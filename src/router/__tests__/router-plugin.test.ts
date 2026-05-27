@@ -6,7 +6,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { InMemoryEventBus } from "../../../lib/bus.ts";
 import type { BusMessage } from "../../../lib/types.ts";
 import { RouterPlugin } from "../router-plugin.ts";
-import type { ProtomakerProjectRegistryPlugin, RegistryProject } from "../../plugins/protomaker-project-registry-plugin.ts";
+import type { ProjectRegistry, RegistryProject } from "../../plugins/project-registry.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -32,7 +32,7 @@ function makeWorkspace(opts: {
  * exercises. Cast to the plugin type so the router accepts it without
  * pulling in the real fetch + interval machinery in tests.
  */
-function makeStubProjectRegistry(projects: RegistryProject[]): ProtomakerProjectRegistryPlugin {
+function makeStubProjectRegistry(projects: RegistryProject[]): ProjectRegistry {
   return {
     getProjects: () => projects,
     getBySlug: (slug: string) => projects.find(p => p.slug === slug),
@@ -41,7 +41,7 @@ function makeStubProjectRegistry(projects: RegistryProject[]): ProtomakerProject
     getByPath: (path: string) => projects.find(p => p.path === path),
     getGithubCoords: () =>
       projects.filter(p => p.github).map(p => `${p.github!.owner}/${p.github!.repo}`),
-  } as unknown as ProtomakerProjectRegistryPlugin;
+  } as unknown as ProjectRegistry;
 }
 
 const quinnAgent = {

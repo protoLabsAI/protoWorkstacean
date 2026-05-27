@@ -89,8 +89,8 @@ channelRegistry.startWatching();
 //     where consumers would see empty project state. If protoMaker is
 //     unreachable, the registry stays empty and re-tries every 5 min —
 //     consumers degrade gracefully (no project enrichment, empty allowlists).
-import { ProtomakerProjectRegistryPlugin } from "./plugins/protomaker-project-registry-plugin.js";
-const projectRegistry = new ProtomakerProjectRegistryPlugin();
+import { ProjectRegistry } from "./plugins/project-registry.js";
+const projectRegistry = new ProjectRegistry();
 await projectRegistry.refreshNow();
 console.log(
   `[startup] ProjectRegistry: ${projectRegistry.getProjects().length} project(s) loaded` +
@@ -458,11 +458,11 @@ const operatorRoutingPlugin = new OperatorRoutingPlugin(operatorIdentityRegistry
 operatorRoutingPlugin.install(bus);
 registeredPlugins.push(operatorRoutingPlugin);
 
-// ProjectRegistry — installed here so its 5-min refresh interval starts. The
-// initial fetch already ran (above, before plugin construction) so consumers
-// see a populated registry from their first install() call.
-projectRegistry.install(bus);
-registeredPlugins.push(projectRegistry);
+// ProjectRegistry — a plain shared object (like channelRegistry above), not a
+// plugin. The initial fetch already ran (await refreshNow, before consumer
+// construction) so consumers see a populated registry from their first read;
+// start() only arms the 5-min background refresh.
+projectRegistry.start();
 
 for (const entry of pluginRegistry) {
   if (entry.condition()) {

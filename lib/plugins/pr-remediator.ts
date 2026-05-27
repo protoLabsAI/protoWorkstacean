@@ -46,7 +46,7 @@
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import type { WorldState } from "../types/world-state.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
-import type { ProtomakerProjectRegistryPlugin } from "../../src/plugins/protomaker-project-registry-plugin.ts";
+import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
 
 const AUTO_MERGE_ENABLED = process.env.PR_REMEDIATOR_AUTO_MERGE === "1";
 // Resolved at install() time — null when no GitHub credentials are present.
@@ -541,12 +541,12 @@ export class PrRemediatorPlugin implements Plugin {
   readonly capabilities = ["pr-merge", "pr-feedback-dispatch", "hitl-emit"];
 
   private readonly fetchLiveCiStatus: LiveCiStatusFetcher;
-  private readonly projectRegistry?: ProtomakerProjectRegistryPlugin;
+  private readonly projectRegistry?: ProjectRegistry;
 
   constructor(
     options: {
       fetchLiveCiStatus?: LiveCiStatusFetcher;
-      projectRegistry?: ProtomakerProjectRegistryPlugin;
+      projectRegistry?: ProjectRegistry;
     } = {},
   ) {
     this.fetchLiveCiStatus = options.fetchLiveCiStatus ?? defaultFetchLiveCiStatus;

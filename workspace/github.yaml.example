@@ -1,8 +1,8 @@
 # ── GitHub integration config ────────────────────────────────────────────────
 #
 # Copy this to workspace/github.yaml and edit. Read by lib/plugins/github.ts
-# on install and hot-reloaded on file change. monitoredRepos is derived from
-# the project registry automatically — never listed here.
+# on install and hot-reloaded on file change. The set of monitored repos is
+# read live from the project registry (protoMaker) — never listed here.
 
 # The bot handle admins use to mention in issue/PR comments. Case-insensitive.
 # Use a dedicated handle (e.g. @protoquinn) to avoid colliding with real
@@ -43,7 +43,8 @@ autoTriage:
   events:
     - issues
   skillHint: bug_triage
-  monitoredRepos: [] # populated from the project registry at load time
+  # Monitored repos come from the project registry (protoMaker) at runtime —
+  # no list here.
   # Startup sweep: walk every monitored repo's open issues with the sweep
   # label on plugin install and dispatch any as synthetic inbound events.
   # Closes the "webhooks don't replay history" hole. Can also be triggered

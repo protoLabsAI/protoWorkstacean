@@ -34,7 +34,7 @@ import { sanitizeIssueBody } from "../sanitize.ts";
 import type { SanitizationConfig } from "../sanitize.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
 import { withCircuitBreaker } from "./circuit-breaker.ts";
-import type { ProtomakerProjectRegistryPlugin } from "../../src/plugins/protomaker-project-registry-plugin.ts";
+import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -43,8 +43,6 @@ interface AutoTriageConfig {
   orgName: string;
   events: string[];
   skillHint: string;
-  /** Derived at runtime from the project registry — not read from github.yaml. */
-  monitoredRepos: string[];
   sanitization: SanitizationConfig;
   /** Label that identifies "needs triage" issues during sweep (default: "status: needs-triage"). */
   sweepLabel?: string;
@@ -113,7 +111,7 @@ export function isAgentBotActor(login: string | undefined | null): boolean {
  * inbound event payload.
  */
 function projectMetaFromRegistry(
-  registry: ProtomakerProjectRegistryPlugin,
+  registry: ProjectRegistry,
 ): Map<string, { slug: string; projectPath: string | undefined }> {
   const map = new Map<string, { slug: string; projectPath: string | undefined }>();
   for (const p of registry.getProjects()) {
@@ -123,10 +121,7 @@ function projectMetaFromRegistry(
   return map;
 }
 
-function loadConfig(
-  workspaceDir: string,
-  registry: ProtomakerProjectRegistryPlugin,
-): GitHubConfig {
+function loadConfig(workspaceDir: string): GitHubConfig {
   const configPath = join(workspaceDir, "github.yaml");
   let config: GitHubConfig;
 
@@ -142,12 +137,6 @@ function loadConfig(
     };
   } else {
     config = parseYaml(readFileSync(configPath, "utf8")) as GitHubConfig;
-  }
-
-  // monitoredRepos is always derived from the project registry at runtime so
-  // that newly-registered projects take effect on the next refresh cycle.
-  if (config.autoTriage) {
-    config.autoTriage.monitoredRepos = registry.getGithubCoords();
   }
 
   return config;
@@ -282,13 +271,21 @@ export class GitHubPlugin implements Plugin {
 
   private server: ReturnType<typeof Bun.serve> | null = null;
   private workspaceDir: string;
-  private projectRegistry: ProtomakerProjectRegistryPlugin;
+  private projectRegistry: ProjectRegistry;
   private config!: GitHubConfig;
-  private projectMeta = new Map<string, { slug: string; projectPath: string | undefined }>();
 
-  constructor(workspaceDir: string, projectRegistry: ProtomakerProjectRegistryPlugin) {
+  constructor(workspaceDir: string, projectRegistry: ProjectRegistry) {
     this.workspaceDir = workspaceDir;
     this.projectRegistry = projectRegistry;
+  }
+
+  /**
+   * Live per-repo project metadata (slug + projectPath) for the triage path.
+   * Read from the registry on each call rather than a cached snapshot so a
+   * project registered in protoMaker after startup is resolvable immediately.
+   */
+  private _projectMetaFor(repoSlug: string): { slug: string; projectPath: string | undefined } | undefined {
+    return projectMetaFromRegistry(this.projectRegistry).get(repoSlug);
   }
 
   install(bus: EventBus): void {
@@ -301,8 +298,7 @@ export class GitHubPlugin implements Plugin {
     const usingApp = !!(process.env.QUINN_APP_ID && process.env.QUINN_APP_PRIVATE_KEY);
     console.log(`[github] Auth: ${usingApp ? "GitHub App (quinn[bot])" : "PAT (GITHUB_TOKEN)"}`);
 
-    this.config = loadConfig(this.workspaceDir, this.projectRegistry);
-    this.projectMeta = projectMetaFromRegistry(this.projectRegistry);
+    this.config = loadConfig(this.workspaceDir);
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? "";
     const port = parseInt(process.env.GITHUB_WEBHOOK_PORT ?? "8082", 10);
 
@@ -315,9 +311,8 @@ export class GitHubPlugin implements Plugin {
     const reloadConfig = () => {
       if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer);
       reloadDebounceTimer = setTimeout(() => {
-        this.config = loadConfig(this.workspaceDir, this.projectRegistry);
-        this.projectMeta = projectMetaFromRegistry(this.projectRegistry);
-        const repoCount = this.config.autoTriage?.monitoredRepos?.length ?? 0;
+        this.config = loadConfig(this.workspaceDir);
+        const repoCount = this.projectRegistry.getGithubCoords().length;
         console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
       }, 300);
     };
@@ -532,7 +527,11 @@ export class GitHubPlugin implements Plugin {
       !ctx.body.toLowerCase().includes(config.mentionHandle.toLowerCase())
     ) {
       const repoSlug = `${ctx.owner}/${ctx.repo}`;
-      if (config.autoTriage.monitoredRepos?.includes(repoSlug)) {
+      // Read the monitored set live from the registry rather than the
+      // config-load snapshot — the registry refreshes every 5 min, so a
+      // project registered in protoMaker after startup is picked up on the
+      // next webhook without a restart or github.yaml edit.
+      if (this.projectRegistry.getGithubCoords().includes(repoSlug)) {
         this._handleAutoTriage(event, payload, ctx, config.autoTriage, bus, getToken);
         return;
       }
@@ -821,7 +820,7 @@ export class GitHubPlugin implements Plugin {
         const topic = `message.inbound.github.${ctx.owner}.${ctx.repo}.${event}.${ctx.number}`;
         const replyTopic = `message.outbound.github.${ctx.owner}.${ctx.repo}.${ctx.number}`;
         const repoSlug = `${ctx.owner}/${ctx.repo}`;
-        const meta = this.projectMeta.get(repoSlug);
+        const meta = this._projectMetaFor(repoSlug);
 
         bus.publish(topic, {
           id: `${event}-${action}-${ctx.owner}-${ctx.repo}-${ctx.number}-${correlationId.slice(0, 8)}`,
@@ -879,7 +878,9 @@ export class GitHubPlugin implements Plugin {
       return;
     }
 
-    const repos = config.autoTriage.monitoredRepos ?? [];
+    // Live registry read — sweep covers whatever protoMaker currently lists,
+    // not a config-load snapshot.
+    const repos = this.projectRegistry.getGithubCoords();
     const sweepLabel = config.autoTriage.sweepLabel ?? "status: needs-triage";
     const projectMeta = projectMetaFromRegistry(this.projectRegistry);
     console.log(`[github] triage sweep starting — ${repos.length} repo(s), label="${sweepLabel}"`);

@@ -218,7 +218,19 @@ export class ChannelRegistry {
     for (const ch of channels) {
       if (ch.enabled === false) continue;
       if (ch.project && ch.kind) {
-        this.byProjectKind.set(`${ch.project}:${ch.kind}`, ch);
+        const key = `${ch.project}:${ch.kind}`;
+        const existing = this.byProjectKind.get(key);
+        if (existing) {
+          // A duplicate (project, kind) means notifications could route to
+          // either channel depending on file order — surface it loudly rather
+          // than silently overwriting. Keep the first; operator fixes the dup.
+          console.warn(
+            `[channel-registry] duplicate project binding "${key}" — channel "${existing.id}" already owns it; ` +
+              `ignoring "${ch.id}". Remove one from channels.yaml.`,
+          );
+        } else {
+          this.byProjectKind.set(key, ch);
+        }
       }
       switch (ch.platform) {
         case "discord":

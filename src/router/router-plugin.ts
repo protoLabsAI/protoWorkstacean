@@ -24,7 +24,7 @@ import type { InboundMessagePayload, CronPayload } from "../event-bus/payloads.t
 import { SkillResolver } from "./skill-resolver.ts";
 import { loadAgentDefinitions } from "../agent-runtime/agent-definition-loader.ts";
 import type { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
-import type { ProtomakerProjectRegistryPlugin } from "../plugins/protomaker-project-registry-plugin.ts";
+import type { ProjectRegistry } from "../plugins/project-registry.ts";
 import { TTLCache } from "../../lib/ttl-cache.ts";
 import { TOPICS } from "../event-bus/topics.ts";
 
@@ -43,7 +43,7 @@ export interface RouterConfig {
    * Source of truth for project metadata. When provided, inbound GitHub
    * messages are stamped with `projectSlug` resolved by `owner/repo`.
    */
-  projectRegistry?: ProtomakerProjectRegistryPlugin;
+  projectRegistry?: ProjectRegistry;
 }
 
 function extractLinearEvent(topic: string): string | undefined {
@@ -158,9 +158,12 @@ export class RouterPlugin implements Plugin {
     const dev = channelRegistry?.getProjectChannel(project.slug, "dev")?.channelId;
     const release = channelRegistry?.getProjectChannel(project.slug, "release")?.channelId;
 
+    // Keep the original message id: this enriched copy is consumed inline
+    // (it's never re-published), and the dispatched skill request uses
+    // `msg.id` as its parentId — a fresh id here would break trace/history
+    // linkage back to the real inbound GitHub event.
     return {
       ...msg,
-      id: crypto.randomUUID(),
       payload: {
         ...payload,
         projectSlug: project.slug,

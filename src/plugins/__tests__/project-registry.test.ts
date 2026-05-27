@@ -1,20 +1,21 @@
 /**
- * ProtomakerProjectRegistryPlugin tests — covers the pure helpers
- * (git-config parsing, slug derivation) and the plugin's refresh + accessor
- * behavior against a fake protoMaker HTTP server.
+ * ProjectRegistry tests — pure helpers (git-config parsing, slug derivation,
+ * slug de-dup) plus the registry's refresh + accessor behavior against a fake
+ * protoMaker HTTP server.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { InMemoryEventBus } from "../../../lib/bus.ts";
 import {
-  ProtomakerProjectRegistryPlugin,
+  ProjectRegistry,
+  type RegistryProject,
+  dedupeBySlug,
   parseGithubFromGitConfig,
   parseDefaultBranchFromHead,
   deriveSlug,
-} from "../protomaker-project-registry-plugin.ts";
+} from "../project-registry.ts";
 
 describe("deriveSlug", () => {
   test("lowercases and dashes non-alphanum", () => {
@@ -25,6 +26,18 @@ describe("deriveSlug", () => {
 
   test("trims leading/trailing dashes", () => {
     expect(deriveSlug(".myproject.")).toBe("myproject");
+  });
+});
+
+describe("dedupeBySlug", () => {
+  test("keeps the first occurrence and drops later slug collisions", () => {
+    const projects: RegistryProject[] = [
+      { id: "1", name: "Proto Maker", slug: "proto-maker", path: "/a" },
+      { id: "2", name: "proto.maker", slug: "proto-maker", path: "/b" },
+      { id: "3", name: "other", slug: "other", path: "/c" },
+    ];
+    const out = dedupeBySlug(projects);
+    expect(out.map((p) => p.id)).toEqual(["1", "3"]);
   });
 });
 
@@ -89,9 +102,8 @@ describe("parseDefaultBranchFromHead", () => {
   });
 });
 
-describe("ProtomakerProjectRegistryPlugin", () => {
-  let bus: InMemoryEventBus;
-  let plugin: ProtomakerProjectRegistryPlugin | undefined;
+describe("ProjectRegistry", () => {
+  let registry: ProjectRegistry | undefined;
   let tempDir: string;
   let server: ReturnType<typeof Bun.serve> | undefined;
   let fakeProjects: Array<{ id: string; name: string; path: string }>;
@@ -100,7 +112,6 @@ describe("ProtomakerProjectRegistryPlugin", () => {
   let requireApiKey: string | undefined;
 
   beforeEach(() => {
-    bus = new InMemoryEventBus();
     tempDir = mkdtempSync(join(tmpdir(), "wsk-pm-registry-test-"));
     fakeProjects = [];
     fetchCount = 0;
@@ -124,7 +135,7 @@ describe("ProtomakerProjectRegistryPlugin", () => {
   });
 
   afterEach(() => {
-    plugin?.uninstall();
+    registry?.stop();
     server?.stop();
     try {
       rmSync(tempDir, { recursive: true, force: true });
@@ -133,8 +144,8 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     }
   });
 
-  function newPlugin(opts: { apiKey?: string } = {}): ProtomakerProjectRegistryPlugin {
-    return new ProtomakerProjectRegistryPlugin({
+  function newRegistry(opts: { apiKey?: string } = {}): ProjectRegistry {
+    return new ProjectRegistry({
       apiBase: `http://localhost:${server!.port}`,
       refreshIntervalMs: 50_000,
       ...opts,
@@ -158,11 +169,11 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     makeGitRepo(projPath, "protoLabsAI/myProject", "main");
     fakeProjects.push({ id: "p1", name: "myProject", path: projPath });
 
-    plugin = newPlugin();
-    await plugin.refreshNow();
-    plugin.install(bus);
+    registry = newRegistry();
+    await registry.refreshNow();
+    registry.start();
 
-    const projects = plugin.getProjects();
+    const projects = registry.getProjects();
     expect(projects).toHaveLength(1);
     expect(projects[0]!.id).toBe("p1");
     expect(projects[0]!.name).toBe("myProject");
@@ -178,23 +189,23 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     mkdirSync(projPath, { recursive: true });
     fakeProjects.push({ id: "p2", name: "no-git", path: projPath });
 
-    plugin = newPlugin();
-    await plugin.refreshNow();
+    registry = newRegistry();
+    await registry.refreshNow();
 
-    const p = plugin.getProjects()[0]!;
+    const p = registry.getProjects()[0]!;
     expect(p.github).toBeUndefined();
     expect(p.defaultBranch).toBeUndefined();
   });
 
-  test("unreachable protoMaker server → plugin stays empty, lastError set", async () => {
-    plugin = new ProtomakerProjectRegistryPlugin({
+  test("unreachable protoMaker server → registry stays empty, lastError set", async () => {
+    registry = new ProjectRegistry({
       apiBase: "http://localhost:1",
       refreshIntervalMs: 50_000,
     });
-    await plugin.refreshNow();
+    await registry.refreshNow();
 
-    expect(plugin.getProjects()).toHaveLength(0);
-    expect(plugin.getLastError()).toBeDefined();
+    expect(registry.getProjects()).toHaveLength(0);
+    expect(registry.getLastError()).toBeDefined();
   });
 
   test("server returns success=false → lastError surfaces it", async () => {
@@ -206,31 +217,32 @@ describe("ProtomakerProjectRegistryPlugin", () => {
       },
     });
 
-    plugin = newPlugin();
-    await plugin.refreshNow();
+    registry = newRegistry();
+    await registry.refreshNow();
 
-    expect(plugin.getProjects()).toHaveLength(0);
-    expect(plugin.getLastError()).toBeDefined();
-    expect(plugin.getLastError()!).toContain("success=false");
+    expect(registry.getProjects()).toHaveLength(0);
+    expect(registry.getLastError()).toBeDefined();
+    expect(registry.getLastError()!).toContain("success=false");
   });
 
-  test("accessors: getBySlug / getByGithub / getByPath / getGithubCoords", async () => {
+  test("accessors: getBySlug / getByGithub (case-insensitive) / getByPath / getGithubCoords", async () => {
     const a = join(tempDir, "alpha");
     const b = join(tempDir, "beta");
     makeGitRepo(a, "org/alpha", "main");
-    makeGitRepo(b, "org/beta", "dev");
+    makeGitRepo(b, "org/Beta", "dev");
     fakeProjects.push({ id: "a", name: "alpha", path: a });
     fakeProjects.push({ id: "b", name: "beta", path: b });
 
-    plugin = newPlugin();
-    await plugin.refreshNow();
+    registry = newRegistry();
+    await registry.refreshNow();
 
-    expect(plugin.getBySlug("alpha")?.id).toBe("a");
-    expect(plugin.getBySlug("missing")).toBeUndefined();
-    expect(plugin.getByGithub("org/beta")?.id).toBe("b");
-    expect(plugin.getByGithub("missing/repo")).toBeUndefined();
-    expect(plugin.getByPath(a)?.id).toBe("a");
-    expect(plugin.getGithubCoords().sort()).toEqual(["org/alpha", "org/beta"]);
+    expect(registry.getBySlug("alpha")?.id).toBe("a");
+    expect(registry.getBySlug("missing")).toBeUndefined();
+    expect(registry.getByGithub("org/beta")?.id).toBe("b"); // git config says org/Beta
+    expect(registry.getByGithub("ORG/ALPHA")?.id).toBe("a"); // case-insensitive
+    expect(registry.getByGithub("missing/repo")).toBeUndefined();
+    expect(registry.getByPath(a)?.id).toBe("a");
+    expect(registry.getGithubCoords().sort()).toEqual(["org/Beta", "org/alpha"]);
   });
 
   test("sends X-API-Key header when apiKey is configured", async () => {
@@ -238,35 +250,52 @@ describe("ProtomakerProjectRegistryPlugin", () => {
     makeGitRepo(projPath, "foo/x", "main");
     fakeProjects.push({ id: "p1", name: "x", path: projPath });
 
-    plugin = newPlugin({ apiKey: "my-secret-key" });
-    await plugin.refreshNow();
+    registry = newRegistry({ apiKey: "my-secret-key" });
+    await registry.refreshNow();
 
     expect(lastApiKeyHeader).toBe("my-secret-key");
-    expect(plugin.getProjects()).toHaveLength(1);
+    expect(registry.getProjects()).toHaveLength(1);
   });
 
   test("server rejects request without X-API-Key → lastError surfaces 401", async () => {
     requireApiKey = "expected-key";
 
-    plugin = newPlugin(); // no apiKey configured
-    await plugin.refreshNow();
+    registry = newRegistry(); // no apiKey configured
+    await registry.refreshNow();
 
-    expect(plugin.getProjects()).toHaveLength(0);
-    expect(plugin.getLastError()).toContain("HTTP 401");
+    expect(registry.getProjects()).toHaveLength(0);
+    expect(registry.getLastError()).toContain("HTTP 401");
   });
 
-  test("uninstall clears refresh timer + project list", async () => {
+  test("duplicate derived slug → first wins, second dropped", async () => {
+    const a = join(tempDir, "a");
+    const b = join(tempDir, "b");
+    makeGitRepo(a, "org/proto-maker", "main");
+    makeGitRepo(b, "org/proto-maker2", "main");
+    // Two distinct protoMaker names that normalize to the same slug.
+    fakeProjects.push({ id: "a", name: "Proto Maker", path: a });
+    fakeProjects.push({ id: "b", name: "proto.maker", path: b });
+
+    registry = newRegistry();
+    await registry.refreshNow();
+
+    const matches = registry.getProjects().filter((p) => p.slug === "proto-maker");
+    expect(matches).toHaveLength(1);
+    expect(matches[0]!.id).toBe("a");
+  });
+
+  test("stop() clears refresh timer + project list", async () => {
     const projPath = join(tempDir, "x");
     makeGitRepo(projPath, "foo/x", "main");
     fakeProjects.push({ id: "p1", name: "x", path: projPath });
 
-    plugin = newPlugin();
-    await plugin.refreshNow();
-    plugin.install(bus);
-    expect(plugin.getProjects()).toHaveLength(1);
+    registry = newRegistry();
+    await registry.refreshNow();
+    registry.start();
+    expect(registry.getProjects()).toHaveLength(1);
 
-    plugin.uninstall();
-    expect(plugin.getProjects()).toHaveLength(0);
-    plugin = undefined; // prevent afterEach double-uninstall
+    registry.stop();
+    expect(registry.getProjects()).toHaveLength(0);
+    registry = undefined; // prevent afterEach double-stop
   });
 });
