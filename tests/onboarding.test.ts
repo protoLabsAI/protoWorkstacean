@@ -64,6 +64,27 @@ function findComplete(published: BusMessage[]): BusMessage | undefined {
   return published.find(m => m.topic === "message.inbound.onboard.complete");
 }
 
+/**
+ * Poll until the onboarding pipeline publishes its reply (the reply is the
+ * last thing the pipeline emits), instead of racing a fixed sleep. Fixed
+ * `setTimeout` waits flaked under CPU contention — the 200ms one failed
+ * ~1/3 of runs. Returns once the reply is present, or after the timeout
+ * (assertion then fails, same as before, but only on a real hang).
+ */
+async function waitForReply(
+  published: BusMessage[],
+  topic = "test.reply",
+  timeoutMs = 3000,
+): Promise<Record<string, unknown> | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = findReply(published, topic);
+    if (r) return r;
+    await new Promise(res => setTimeout(res, 5));
+  }
+  return findReply(published, topic);
+}
+
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const _mocks = {
@@ -134,7 +155,7 @@ describe("OnboardingPlugin — Step 1: validate", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ title: "Test", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 50));
+    await waitForReply(published);
 
     const reply = findReply(published);
     expect(reply?.success).toBe(false);
@@ -147,7 +168,7 @@ describe("OnboardingPlugin — Step 1: validate", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "test-proj", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 50));
+    await waitForReply(published);
 
     const reply = findReply(published);
     expect(reply?.success).toBe(false);
@@ -160,7 +181,7 @@ describe("OnboardingPlugin — Step 1: validate", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "test-proj", title: "Test", github: "badformat" }));
-    await new Promise(r => setTimeout(r, 50));
+    await waitForReply(published);
 
     const reply = findReply(published);
     expect(reply?.success).toBe(false);
@@ -174,7 +195,7 @@ describe("OnboardingPlugin — Step 1: validate", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "test-proj", title: "Test", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 200));
+    await waitForReply(published);
 
     const reply = findReply(published);
     expect(reply?.success).toBe(true);
@@ -203,7 +224,7 @@ describe("OnboardingPlugin — Step 2: GitHub webhook", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p2", title: "P2", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 100));
+    await waitForReply(published);
 
     const reply = findReply(published);
     const steps = reply?.steps as Record<string, string> | undefined;
@@ -231,7 +252,7 @@ describe("OnboardingPlugin — Step 2: GitHub webhook", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p2", title: "P2", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 100));
+    await waitForReply(published);
 
     global.fetch = origFetch;
 
@@ -262,7 +283,7 @@ describe("OnboardingPlugin — Step 2: GitHub webhook", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p2", title: "P2", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 100));
+    await waitForReply(published);
 
     global.fetch = origFetch;
 
@@ -282,7 +303,7 @@ describe("OnboardingPlugin — Step 2: GitHub webhook", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p2", title: "P2", github: "owner/repo" }));
-    await new Promise(r => setTimeout(r, 100));
+    await waitForReply(published);
 
     global.fetch = origFetch;
 
@@ -314,7 +335,7 @@ describe("OnboardingPlugin — Step 3: Drive folder", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p3", title: "P3", github: "o/r" }));
-    await new Promise(r => setTimeout(r, 100));
+    await waitForReply(published);
 
     const reply = findReply(published);
     const steps = reply?.steps as Record<string, string> | undefined;
@@ -336,7 +357,7 @@ describe("OnboardingPlugin — Step 3: Drive folder", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p3", title: "P3", github: "o/r" }));
-    await new Promise(r => setTimeout(r, 100));
+    await waitForReply(published);
 
     const reply = findReply(published);
     const steps = reply?.steps as Record<string, string> | undefined;
@@ -358,7 +379,7 @@ describe("OnboardingPlugin — Step 3: Drive folder", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "p3", title: "P3", github: "o/r" }));
-    await new Promise(r => setTimeout(r, 100));
+    await waitForReply(published);
 
     const reply = findReply(published);
     const steps = reply?.steps as Record<string, string> | undefined;
@@ -398,7 +419,7 @@ describe("OnboardingPlugin — Full pipeline", () => {
       agents: ["ava", "quinn"],
       discord: { dev: "C12345" },
     }));
-    await new Promise(r => setTimeout(r, 150));
+    await waitForReply(published);
 
     const complete = findComplete(published);
     expect(complete).toBeDefined();
@@ -419,7 +440,7 @@ describe("OnboardingPlugin — Full pipeline", () => {
     plugin.install(bus);
 
     bus.publish("message.inbound.onboard", makeBusMsg({ slug: "fp2", title: "FP2", github: "o/r" }));
-    await new Promise(r => setTimeout(r, 150));
+    await waitForReply(published);
 
     const reply = findReply(published);
     expect(typeof reply?.summary).toBe("string");
@@ -452,7 +473,7 @@ describe("OnboardingPlugin — Concurrent run rejection", () => {
 
     bus.publish("message.inbound.onboard", msg1);
     bus.publish("message.inbound.onboard", msg2);
-    await new Promise(r => setTimeout(r, 200));
+    await waitForReply(published, "reply2");
 
     const reply2 = findReply(published, "reply2");
     expect(reply2?.success).toBe(false);
