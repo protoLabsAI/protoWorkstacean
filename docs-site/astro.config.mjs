@@ -27,6 +27,10 @@ export default defineConfig({
           autogenerate: { directory: 'guides' },
         },
         {
+          label: 'How-to',
+          autogenerate: { directory: 'how-to' },
+        },
+        {
           label: 'Integrations',
           autogenerate: { directory: 'integrations' },
         },
