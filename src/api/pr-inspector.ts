@@ -175,9 +175,25 @@ interface CheckRun {
 }
 
 /**
+ * Raised when GitHub returns 403 on the CI read — the reviewer's token lacks
+ * access to this repo/PR's checks (fork PR, repo outside the app installation,
+ * secondary rate limit). This is a reviewer-side *access* gap, NOT a CI
+ * failure, so callers treat it as an unverified-CI Gap rather than a defect or
+ * a hard error: `check_ci` reports it plainly, `guardTerminalCi` holds the
+ * formal verdict to COMMENT. Other GitHub errors still throw loudly.
+ */
+class CiAccessError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = "CiAccessError";
+  }
+}
+
+/**
  * Resolve a PR's head SHA and fetch its check-runs. Shared by `check_ci`
  * (formats the result for Quinn) and the CI-terminal verdict guard (reads
- * the pending set). Throws on any GitHub error so the caller surfaces it
+ * the pending set). Throws `CiAccessError` on a 403 (reviewer can't see CI);
+ * throws a generic Error on any other GitHub error so the caller surfaces it
  * loudly rather than treating an unknown CI state as "all clear".
  */
 async function fetchCheckRuns(
@@ -186,6 +202,7 @@ async function fetchCheckRuns(
   pr: number,
 ): Promise<{ headSha: string; runs: CheckRun[] }> {
   const prResp = await ghFetch(owner, name, `https://api.github.com/repos/${owner}/${name}/pulls/${pr}`);
+  if (prResp.status === 403) throw new CiAccessError(403, `GitHub 403 fetching PR#${pr} in ${owner}/${name} — reviewer token lacks access`);
   if (!prResp.ok) throw new Error(`GitHub API error fetching PR#${pr}: ${prResp.status} ${await prResp.text()}`);
   const { head } = (await prResp.json()) as { head: { sha: string } };
 
@@ -194,6 +211,7 @@ async function fetchCheckRuns(
     name,
     `https://api.github.com/repos/${owner}/${name}/commits/${head.sha}/check-runs?per_page=100`,
   );
+  if (checksResp.status === 403) throw new CiAccessError(403, `GitHub 403 fetching check-runs for ${owner}/${name}#${pr} — reviewer token lacks access`);
   if (!checksResp.ok) throw new Error(`GitHub API error fetching check-runs: ${checksResp.status} ${await checksResp.text()}`);
   const { check_runs } = (await checksResp.json()) as { check_runs: CheckRun[] };
   return { headSha: head.sha, runs: check_runs };
@@ -209,7 +227,21 @@ function pendingCheckNames(runs: CheckRun[]): string[] {
 }
 
 async function checkCi(owner: string, name: string, pr: number): Promise<string> {
-  const { headSha, runs } = await fetchCheckRuns(owner, name, pr);
+  let result: { headSha: string; runs: CheckRun[] };
+  try {
+    result = await fetchCheckRuns(owner, name, pr);
+  } catch (err) {
+    if (err instanceof CiAccessError) {
+      return (
+        `CI checks are not accessible for PR#${pr} in ${owner}/${name} (HTTP 403). ` +
+        `This is a reviewer-side access limitation (fork PR, repo outside the reviewer's ` +
+        `app installation, or rate limit) — NOT a CI failure. Record it as an unverified-CI ` +
+        `Gap; do not treat inaccessible CI as a broken-CI finding.`
+      );
+    }
+    throw err;
+  }
+  const { headSha, runs } = result;
   if (runs.length === 0) return `No CI checks found for PR#${pr} (head ${headSha.slice(0, 7)}).`;
   const lines = [`**CI Checks for PR#${pr}** (head ${headSha.slice(0, 7)}):`];
   for (const c of runs) {
@@ -248,7 +280,32 @@ async function guardTerminalCi(
   // Throws on a GitHub error — surfaced by the route's try/catch as a 500.
   // We fail closed: an unknown CI state must never be treated as "terminal"
   // and let a verdict through (that's the #3881 failure mode).
-  const { runs } = await fetchCheckRuns(owner, name, pr);
+  let runs: CheckRun[];
+  try {
+    ({ runs } = await fetchCheckRuns(owner, name, pr));
+  } catch (err) {
+    if (err instanceof CiAccessError) {
+      // Reviewer can't see CI (403). We can't confirm it's terminal, so a
+      // formal APPROVE/REQUEST_CHANGES would lock in a verdict on unverified
+      // CI. Hold to COMMENT — same non-blocking outcome as pending CI — rather
+      // than failing closed with a 500 (which the agent reads as a defect and
+      // escalates to a blocking REQUEST_CHANGES).
+      const verb = verdict === "APPROVE" ? "approval" : "change-request";
+      return Response.json(
+        {
+          success: false,
+          error:
+            `CI is not accessible on PR#${pr} (HTTP 403) — a reviewer-side access limitation ` +
+            `(fork PR, repo outside the app installation, or rate limit), not a CI failure. ` +
+            `A formal ${verb} would lock in a verdict on unverified CI, so it is held. Record ` +
+            `your findings with action='review_comment' (non-blocking) and note the CI-access ` +
+            `Gap; do not treat inaccessible CI as a broken-CI FAIL.`,
+        },
+        { status: 409 },
+      );
+    }
+    throw err;
+  }
   const pending = pendingCheckNames(runs);
   if (pending.length === 0) return null;
 
