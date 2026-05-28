@@ -432,6 +432,10 @@ export class LinearPlugin implements Plugin {
       topic,
       timestamp: Date.now(),
       payload: {
+        // Route agent-session events to Ava's Linear handler. Without an
+        // explicit hint the router has no skill to resolve (no keyword content)
+        // and drops the event — so assigning Ava to a ticket silently no-ops.
+        skillHint: "linear_agent_respond",
         action,
         sessionId,
         issueId,

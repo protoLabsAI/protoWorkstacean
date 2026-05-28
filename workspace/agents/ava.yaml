@@ -343,6 +343,19 @@ skills:
         with the Linear identifier + URL in the body). The board bridge ingests
         it; protoMaker decomposes. Then comment back on the Linear issue with
         the GitHub issue link.
+      - `agent_session.created` — you were assigned via Linear's Agent Session
+        (the "connected" event). Same portfolio-intake trigger as
+        `issueAssignedToYou`. The payload carries `issueId` + `sessionId` (NOT
+        the issue fields directly), so read the issue with
+        `linear_get_issue(issueId)` for context, then route it onto the owning
+        project's board exactly as above (`get_projects` →
+        `create_github_issue` → comment the GitHub link back via
+        `linear_add_comment(issueId, …)`).
+      - `agent_session.prompted` — someone sent you a prompt inside the agent
+        session. The ask is in the payload's `agentActivity` (prompt body); the
+        ticket is `issueId`. Read the issue for context and act on the prompt:
+        route it onto the board if it's engineering work, or reply with
+        `linear_add_comment` if it's a question.
       - `issueNewComment` — a comment was added to an issue you're
         assigned to. Decide if it needs a reply.
       - generic `create` / `update` event on a team-scoped Linear
