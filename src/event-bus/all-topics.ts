@@ -92,6 +92,18 @@ export const SECURITY_TOPICS = {
   SECURITY_INCIDENT_REPORTED: "security.incident.reported",
 } as const;
 
+export const RELEASE_TOPICS = {
+  /**
+   * Published by the GitHub plugin when a GitHub Release is published (native
+   * `release` webhook, action=published). Mechanism-agnostic — fires whether
+   * the release was cut by auto-release.yml `gh release create`, release-tools,
+   * or by hand. A general fleet lifecycle primitive: content surfacing,
+   * changelog aggregation, deploy verification, and announce subscribe here.
+   * Payload shape: see `ReleasePublishedPayload` in src/event-bus/payloads.ts.
+   */
+  RELEASE_PUBLISHED: "release.published",
+} as const;
+
 export const REVIEW_TOPICS = {
   /**
    * Published by `pr-inspector` after a `review_comment` / `review_approve` /

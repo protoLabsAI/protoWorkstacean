@@ -35,6 +35,7 @@ import type { SanitizationConfig } from "../sanitize.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
 import { withCircuitBreaker } from "./circuit-breaker.ts";
 import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
+import type { ReleasePublishedPayload } from "../../src/event-bus/payloads.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -162,6 +163,38 @@ interface GitHubEventContext {
   url: string;
   body: string;
   author: string;
+}
+
+/**
+ * Normalize a GitHub `release` webhook payload into a ReleasePublishedPayload,
+ * or null when it isn't a published release worth surfacing (wrong action,
+ * missing owner/repo/tag). Exported for unit testing; called from
+ * `_handleEvent` for `event === "release"`.
+ */
+export function parseReleasePublished(
+  payload: Record<string, unknown>,
+): ReleasePublishedPayload | null {
+  if (payload.action !== "published") return null;
+  const release = payload.release as Record<string, unknown> | undefined;
+  const repo = payload.repository as Record<string, unknown> | undefined;
+  if (!release || !repo) return null;
+
+  const owner = ((repo.owner as Record<string, unknown> | undefined)?.login as string) ?? "";
+  const repoName = (repo.name as string) ?? "";
+  const version = (release.tag_name as string) ?? "";
+  if (!owner || !repoName || !version) return null;
+
+  return {
+    owner,
+    repo: repoName,
+    version,
+    name: (release.name as string | null) ?? version,
+    body: (release.body as string | null) ?? "",
+    url: (release.html_url as string) ?? "",
+    author: ((release.author as Record<string, unknown> | undefined)?.login as string) ?? "",
+    prerelease: Boolean(release.prerelease),
+    publishedAt: (release.published_at as string | null) ?? new Date().toISOString(),
+  };
 }
 
 function extractContext(event: string, payload: Record<string, unknown>): GitHubEventContext | null {
@@ -443,6 +476,29 @@ export class GitHubPlugin implements Plugin {
         });
 
         console.log(`[github] repository.created: ${fullName} → ${topic}`);
+      }
+      return;
+    }
+
+    // ── Release published → release.published (fleet lifecycle primitive) ─────
+    // GitHub fires `release` on publish regardless of how the release was cut
+    // (auto-release.yml `gh release create`, release-tools, or by hand). We
+    // surface one canonical bus topic; content surfacing, changelog
+    // aggregation, deploy verification, and announce subscribe without knowing
+    // the mechanism. Requires the GitHub App to subscribe to `release` events.
+    if (event === "release") {
+      const rel = parseReleasePublished(payload);
+      if (rel) {
+        const correlationId = crypto.randomUUID();
+        bus.publish("release.published", {
+          id: `release-${rel.owner}-${rel.repo}-${rel.version}-${correlationId.slice(0, 8)}`,
+          correlationId,
+          topic: "release.published",
+          timestamp: Date.now(),
+          payload: rel,
+          source: { interface: "github" as const },
+        });
+        console.log(`[github] release.published: ${rel.owner}/${rel.repo} ${rel.version} → release.published`);
       }
       return;
     }
