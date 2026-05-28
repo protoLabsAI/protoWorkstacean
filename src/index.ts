@@ -197,19 +197,6 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
-    // Linear → protoMaker board feature bridge. No-op when
-    // workspace/linear-board-mappings.yaml is absent or empty, so it's
-    // safe to install unconditionally.
-    name: "linear-protomaker-bridge",
-    condition: () => true,
-    factory: async () => {
-      const { LinearProtoMakerBridgePlugin } = await import(
-        "../lib/plugins/linear-protomaker-bridge"
-      );
-      return new LinearProtoMakerBridgePlugin(workspaceDir);
-    },
-  },
-  {
     // GitHub issue → protoMaker board bridge. workstacean receives every
     // project repo's webhook + owns the registry, so it resolves the project
     // and POSTs to protoMaker's HTTP board intake (ADR-0001/0002). No-op for

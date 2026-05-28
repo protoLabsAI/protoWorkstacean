@@ -24,7 +24,7 @@
  *   channels.yaml maps (platform, channelId) → agent. The Linear platform
  *   has team-key channels but no per-label gate. A label-triggered dispatch
  *   needs to inspect the issue payload — that's bridge logic, not router
- *   logic. Matches the linear-protomaker-bridge pattern (#481).
+ *   logic. Same label-gated-bridge pattern (#481).
  */
 
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
@@ -84,8 +84,7 @@ export class LinearProtoBridgePlugin implements Plugin {
 
     const labels = payload.labels ?? [];
     if (!labels.includes(this.triggerLabel)) {
-      // Quiet drop — the rest of the bridge ecosystem (linear-protomaker-
-      // bridge, RouterPlugin's chat path) may legitimately handle this
+      // Quiet drop — RouterPlugin's chat path may legitimately handle this
       // same event for its own purposes. Logging every non-matching
       // event would spam the dev channel.
       return;
