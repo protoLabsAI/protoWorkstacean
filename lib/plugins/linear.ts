@@ -39,9 +39,12 @@
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { join } from "node:path";
 import { z } from "zod";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { LinearClient, type LinearPriority } from "../linear-client.ts";
+import { getLinearAvaTokenManager } from "../linear/ava-oauth-token-manager.ts";
+import { LinearAgentActivityClient } from "../linear/agent-activity-client.ts";
 
 // ── Limits ───────────────────────────────────────────────────────────────────
 
@@ -232,6 +235,18 @@ export class LinearPlugin implements Plugin {
 
     if (client) this._wireOutbound(bus, client);
     else console.warn("[linear] LINEAR_API_KEY not set — outbound Linear mutations disabled");
+
+    // Ava agent-session activities — post AS Ava via her actor=app OAuth token
+    // (independent of the personal LINEAR_API_KEY above). Wired whenever the
+    // OAuth app is configured; getAccessToken() throws at call time until the
+    // one-time authorize dance is done, which the handlers catch + log.
+    const dataDir = process.env.DATA_DIR || join(process.cwd(), "data");
+    const tokenManager = getLinearAvaTokenManager(dataDir);
+    if (tokenManager.isConfigured()) {
+      this._wireAgentActivity(bus, new LinearAgentActivityClient(tokenManager));
+    } else {
+      console.warn("[linear] LINEAR_AVA_CLIENT_ID/_SECRET not set — agent-session activity (post as Ava) disabled");
+    }
 
     try {
       this.server = Bun.serve({
@@ -442,8 +457,55 @@ export class LinearPlugin implements Plugin {
         agentSession,
         agentActivity,
       },
+      // Ava's dispatch result rounds back here → a `response` agent-activity in
+      // the session (posted AS Ava), not a comment. Only when we have a
+      // sessionId to target.
+      ...(sessionId
+        ? { reply: { topic: `linear.agent_activity.${sessionId}`, format: "markdown" as const } }
+        : {}),
     });
     console.log(`[linear] agent_session.${action}${sessionId ? ` session=${sessionId}` : ""}`);
+  }
+
+  // ── Agent-session activities (post AS Ava via actor=app OAuth) ──────────────
+  //
+  // Two halves:
+  //   1. On agent_session.created, emit a `thought` within 10s so Linear
+  //      doesn't mark the session unresponsive (the agent's full run is slower).
+  //   2. linear.agent_activity.{sessionId} (the reply.topic set on agent-session
+  //      dispatches) → emit Ava's final text as a `response` activity.
+  private _wireAgentActivity(bus: EventBus, activity: LinearAgentActivityClient): void {
+    // 1. 10-second thought ack on session start.
+    bus.subscribe("message.inbound.linear.agent_session.created", "linear-agent-activity", (msg: BusMessage) => {
+      const sessionId = (msg.payload as { sessionId?: string })?.sessionId;
+      if (!sessionId) return;
+      void activity.thought(sessionId, "On it — taking a look and routing this.").catch((err) => {
+        console.error(`[linear] agent-activity thought ack failed (session ${sessionId}): ${err instanceof Error ? err.message : String(err)}`);
+      });
+    });
+
+    // 2. Ava's dispatch result → a `response` activity.
+    bus.subscribe("linear.agent_activity.#", "linear-agent-activity", (msg: BusMessage) => {
+      const topic = msg.topic ?? "";
+      if (topic.startsWith("linear.agent_activity.result.")) return; // don't re-enter on our own result
+      const sessionId = topic.startsWith("linear.agent_activity.")
+        ? topic.slice("linear.agent_activity.".length)
+        : "";
+      if (!sessionId) return;
+      const payload = (msg.payload ?? {}) as { text?: string; content?: string; summary?: string };
+      const body = payload.text ?? payload.content ?? payload.summary ?? "";
+      if (!body) return;
+      void activity.response(sessionId, body)
+        .then(() => {
+          publishResult(bus, msg.correlationId, "linear.agent_activity.result", { success: true, sessionId });
+          console.log(`[linear] response activity posted to session ${sessionId}`);
+        })
+        .catch((err) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          publishResult(bus, msg.correlationId, "linear.agent_activity.result", { success: false, sessionId, error: errMsg });
+          console.error(`[linear] response activity failed (session ${sessionId}): ${errMsg}`);
+        });
+    });
   }
 
   private _publishIssue(issue: LinearIssueData, action: string, bus: EventBus): void {

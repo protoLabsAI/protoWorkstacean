@@ -259,6 +259,10 @@ describe("LinearPlugin — inbound webhooks", () => {
     // Must carry the skill hint so the router routes it to Ava (assigning Ava
     // to a ticket otherwise drops at "no skill match").
     expect(p.skillHint).toBe("linear_agent_respond");
+    // reply.topic routes Ava's result to a `response` agent-activity (as Ava),
+    // not a comment.
+    expect(msg.reply?.topic).toBe("linear.agent_activity.session-1");
+    expect(msg.reply?.format).toBe("markdown");
   });
 
   test("AgentSessionEvent.prompted carries agentActivity through to the payload", async () => {
