@@ -106,7 +106,7 @@ describe("ProjectRegistry", () => {
   let registry: ProjectRegistry | undefined;
   let tempDir: string;
   let server: ReturnType<typeof Bun.serve> | undefined;
-  let fakeProjects: Array<{ id: string; name: string; path: string }>;
+  let fakeProjects: Array<{ id: string; name: string; path: string; github?: { owner: string; repo: string }; defaultBranch?: string }>;
   let fetchCount: number;
   let lastApiKeyHeader: string | null;
   let requireApiKey: string | undefined;
@@ -195,6 +195,43 @@ describe("ProjectRegistry", () => {
     const p = registry.getProjects()[0]!;
     expect(p.github).toBeUndefined();
     expect(p.defaultBranch).toBeUndefined();
+  });
+
+  test("prefers protoMaker's native github/defaultBranch over .git derivation (rename-safe)", async () => {
+    // The clone's remote still says the OLD repo name (contentMachine), but
+    // protoMaker carries the renamed truth (protoContent). Native field wins.
+    const projPath = join(tempDir, "contentmachine");
+    makeGitRepo(projPath, "protoLabsAI/contentMachine", "master");
+    fakeProjects.push({
+      id: "p3",
+      name: "contentMachine",
+      path: projPath,
+      github: { owner: "protoLabsAI", repo: "protoContent" },
+      defaultBranch: "main",
+    });
+
+    registry = newRegistry();
+    await registry.refreshNow();
+
+    const p = registry.getProjects()[0]!;
+    expect(p.github).toEqual({ owner: "protoLabsAI", repo: "protoContent" });
+    expect(p.defaultBranch).toBe("main");
+    // getByGithub resolves on the live name, not the stale derived one.
+    expect(registry.getByGithub("protoLabsAI/protoContent")?.slug).toBe("contentmachine");
+    expect(registry.getByGithub("protoLabsAI/contentMachine")).toBeUndefined();
+  });
+
+  test("falls back to .git derivation when protoMaker omits github/defaultBranch", async () => {
+    const projPath = join(tempDir, "legacy");
+    makeGitRepo(projPath, "protoLabsAI/legacyRepo", "main");
+    fakeProjects.push({ id: "p4", name: "legacyRepo", path: projPath }); // no native fields
+
+    registry = newRegistry();
+    await registry.refreshNow();
+
+    const p = registry.getProjects()[0]!;
+    expect(p.github).toEqual({ owner: "protoLabsAI", repo: "legacyRepo" });
+    expect(p.defaultBranch).toBe("main");
   });
 
   test("unreachable protoMaker server → registry stays empty, lastError set", async () => {
