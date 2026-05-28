@@ -82,6 +82,16 @@ export const EnvSchema = z
     LINEAR_API_KEY:        z.string().optional(),
     LINEAR_WEBHOOK_SECRET: z.string().optional(),
     LINEAR_WEBHOOK_PORT:   z.string().optional(),
+    // Ava's Linear agent OAuth app (actor=app). Backs posting AS Ava via the
+    // Agent Activity API. Access tokens expire in 24h (Linear refresh-token
+    // system since 2026-04-01), so we hold client creds + a refresh token and
+    // mint short-lived access tokens. The refresh token is captured once via
+    // the /api/linear/oauth/callback dance.
+    LINEAR_AVA_CLIENT_ID:     z.string().optional(),
+    LINEAR_AVA_CLIENT_SECRET: z.string().optional(),
+    LINEAR_AVA_REDIRECT_URI:  z.string().optional(),
+    /** Comma-separated OAuth scopes. Default covers read/write + agent app actor. */
+    LINEAR_AVA_SCOPES:        z.string().optional(),
 
     // LLM gateway
     LLM_GATEWAY_URL:   z.string().optional(),
