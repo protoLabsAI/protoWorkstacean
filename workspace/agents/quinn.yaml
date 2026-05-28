@@ -330,6 +330,16 @@ skills:
       call while CI is pending returns a 409 asking you to comment instead,
       so a re-review after checks finish is the clean path.
 
+      **CI you cannot access is a Gap, not a broken-CI FAIL.** When
+      `check_ci` reports CI as inaccessible (HTTP 403 — a fork PR, a repo
+      outside your app installation, or a rate limit), that means *you*
+      can't see the checks, which says nothing about whether they pass.
+      Treat it exactly like the Step 2c grounding rule: record an
+      unverified-CI Gap ("CI not accessible to reviewer") and submit
+      `review_comment` (non-blocking) based on the evidence you do have.
+      A broken-CI FAIL rests on a check that completed with a failure
+      conclusion you actually read — reserve it for that.
+
       ## Step 5 — Submit the formal review
 
       Call `pr_inspector` with the chosen action. Body format:
