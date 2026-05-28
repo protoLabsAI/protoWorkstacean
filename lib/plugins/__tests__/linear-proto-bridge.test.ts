@@ -157,10 +157,8 @@ describe("LinearProtoBridgePlugin", () => {
     plugin.uninstall();
 
     // Bus owns the subscription lifecycle — uninstall clears local state
-    // but doesn't proactively unsubscribe. This mirrors how the
-    // linear-protomaker-bridge tests check uninstall: dispatches still
-    // fire while the subscription lives. If we ever decide that's wrong,
-    // both bridges need the same fix.
+    // but doesn't proactively unsubscribe: dispatches still fire while the
+    // subscription lives.
     publishIssueCreated(bus, makeIssuePayload());
 
     // Documented behavior: uninstall is a no-op for already-active
