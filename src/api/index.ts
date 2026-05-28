@@ -23,6 +23,7 @@ import { createRoutes as operatorRoutes } from "./operator.ts";
 import { createRoutes as openaiCompatRoutes } from "./openai-compat.ts";
 import { createRoutes as googleRoutes } from "./google.ts";
 import { createRoutes as linearRoutes } from "./linear.ts";
+import { createRoutes as linearOAuthRoutes } from "./linear-oauth.ts";
 import { createRoutes as busTopologyRoutes } from "./bus-topology.ts";
 import { createRoutes as prInspectorRoutes } from "./pr-inspector.ts";
 import { createRoutes as clawpatchRoutes } from "./clawpatch.ts";
@@ -50,6 +51,7 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...openaiCompatRoutes(ctx),
     ...googleRoutes(ctx),
     ...linearRoutes(ctx),
+    ...linearOAuthRoutes(ctx),
     ...busTopologyRoutes(ctx),
     ...prInspectorRoutes(ctx),
     ...clawpatchRoutes(ctx),
