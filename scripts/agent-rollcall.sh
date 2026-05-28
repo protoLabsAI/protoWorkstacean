@@ -23,13 +23,13 @@ FAILURES=0
 # ─── Agent definitions ────────────────────────────────────────────
 # Format: container:host_port:check_type:display_name
 # check_type: a2a (has /.well-known/agent.json), http (just check response), health (/health)
-AGENTS=(
-  # Ava + protoBot are in-process DeepAgents inside workstacean — checked separately below.
-  "quinn:7873:a2a:Quinn (QA Engineer)"
-  "protocontent:18791:a2a:protoContent / Jon (Content Pipeline)"
-  "researcher:7874:a2a:Researcher (rabbit-hole.io)"
-  "workstacean:8081:http:Workstacean (Orchestrator — hosts Ava + protoBot + Tuner DeepAgents)"
-)
+# A2A external agents (from workspace/agents.yaml). Currently none serve a
+# live A2A endpoint: quinn/ava/protobot/proto are all in-process DeepAgents
+# (checked above), protomaker is HTTP-only (no /a2a route), and protopen
+# (steamdeck) + frank are commented out until deployed. protoContent/Jon and
+# the standalone Researcher service were retired. Add an entry here only when
+# a real A2A endpoint comes online.
+AGENTS=()
 
 # Remote agents — not Docker containers, accessed over Tailscale
 # Format: host:port:display_name
@@ -38,8 +38,9 @@ REMOTE_AGENTS=(
 )
 
 INFRA=(
-  "automaker-server:3008:http:Automaker Server"
-  "automaker-ui:3009:http:Automaker UI"
+  "workstacean:8081:http:Workstacean (Orchestrator — hosts the in-process DeepAgents)"
+  "protomaker-server:3008:http:protoMaker Server"
+  "protomaker-ui:3009:http:protoMaker UI"
   "gateway:4000:http:LiteLLM Gateway"
   "gateway-db::container:Gateway Postgres"
   "graphiti::container:Graphiti (Knowledge Graph)"
@@ -136,9 +137,11 @@ check_remote_agent() {
   local host port display_name
   IFS=: read -r host port display_name <<< "$1"
 
-  local card
-  card=$(curl -s --max-time 5 "http://${host}:${port}/.well-known/agent.json" 2>/dev/null)
-  local card_code=$?
+  local card card_code
+  # `|| card_code=$?` keeps an unreachable remote agent from tripping
+  # `set -e` and aborting the whole roll call (e.g. steamdeck offline → curl 28).
+  card_code=0
+  card=$(curl -s --max-time 5 "http://${host}:${port}/.well-known/agent.json" 2>/dev/null) || card_code=$?
 
   if [[ $card_code -ne 0 ]] || [[ -z "$card" ]]; then
     fail "${display_name}: unreachable (${host}:${port})"
@@ -158,18 +161,30 @@ echo -e "${DIM}$(docker ps --format '{{.Names}}' | wc -l) containers running${NC
 header "Agents (In-process DeepAgents)"
 # These live inside workstacean, registered from workspace/agents/*.yaml.
 # Parse from the latest log line showing registration.
-DEEP_AGENT_LINE=$(docker logs workstacean 2>&1 | grep "Registered.*deep agent" | tail -1 || true)
+# Real line: "[agent-runtime] Registered 4 agent(s) [deep-agent: 3, proto-sdk: 1]:
+# quinn(deep-agent), ava(deep-agent), proto(proto-sdk), protobot(deep-agent)".
+DEEP_AGENT_LINE=$(docker logs workstacean 2>&1 | grep -E "Registered [0-9]+ agent\(s\)" | tail -1 || true)
 if [[ -n "$DEEP_AGENT_LINE" ]]; then
-  DEEP_AGENTS=$(echo "$DEEP_AGENT_LINE" | sed -n 's/.*agent(s): \(.*\)$/\1/p')
-  for agent in ${DEEP_AGENTS//,/}; do
-    pass "${agent}: DeepAgent running in workstacean"
+  # Summary bracket "[deep-agent: 3, proto-sdk: 1]" + the "name(runtime)" list
+  # after the final "]: ".
+  SUMMARY=$(echo "$DEEP_AGENT_LINE" | sed -n 's/.*Registered \([0-9]\+ agent(s) \[[^]]*\]\).*/\1/p')
+  [[ -n "$SUMMARY" ]] && echo -e "  ${DIM}${SUMMARY}${NC}"
+  AGENT_LIST=$(echo "$DEEP_AGENT_LINE" | sed -n 's/.*\]: \(.*\)$/\1/p')
+  IFS=',' read -ra _agents <<< "$AGENT_LIST"
+  for a in "${_agents[@]}"; do
+    a=$(echo "$a" | xargs)
+    [[ -n "$a" ]] && pass "${a} — in-process, running in workstacean"
   done
 else
-  warn "Could not parse deep-agent list from workstacean logs"
+  warn "Could not parse agent registration from workstacean logs"
 fi
 
 header "Agents (A2A — external services)"
-for svc in "${AGENTS[@]}"; do check_service "$svc"; done
+if [[ ${#AGENTS[@]} -eq 0 ]]; then
+  echo -e "  ${DIM}none registered — all agents run in-process (see above)${NC}"
+else
+  for svc in "${AGENTS[@]}"; do check_service "$svc"; done
+fi
 
 header "Agents (Remote)"
 for svc in "${REMOTE_AGENTS[@]}"; do check_remote_agent "$svc"; done
