@@ -48,34 +48,49 @@ export class LinearAgentActivityClient {
     return this.tokens.isAuthorized();
   }
 
+  /** POST a GraphQL op authenticated AS Ava (actor=app token). Throws loudly. */
+  private async _gql(opName: string, query: string, variables: unknown): Promise<Record<string, unknown>> {
+    const accessToken = await this.tokens.getAccessToken();
+    const res = await this.fetchImpl(GRAPHQL_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      throw new Error(`${opName} HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    }
+    const json = (await res.json()) as { data?: Record<string, unknown>; errors?: Array<{ message?: string }> };
+    if (json.errors?.length) {
+      throw new Error(`${opName} GraphQL error: ${json.errors.map(e => e.message).join("; ")}`);
+    }
+    return json.data ?? {};
+  }
+
   /**
    * Post an activity into the session. Throws on auth/transport/GraphQL error so
    * callers surface it (fire-and-forget callers catch + log).
    */
   async createActivity(sessionId: string, content: AgentActivityContent): Promise<void> {
-    const accessToken = await this.tokens.getAccessToken();
-    const res = await this.fetchImpl(GRAPHQL_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ query: MUTATION, variables: buildActivityVariables(sessionId, content) }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      throw new Error(`agentActivityCreate HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    }
-    const json = (await res.json()) as {
-      data?: { agentActivityCreate?: { success?: boolean } };
-      errors?: Array<{ message?: string }>;
-    };
-    if (json.errors?.length) {
-      throw new Error(`agentActivityCreate GraphQL error: ${json.errors.map(e => e.message).join("; ")}`);
-    }
-    if (!json.data?.agentActivityCreate?.success) {
-      throw new Error("agentActivityCreate returned success=false");
-    }
+    const data = await this._gql("agentActivityCreate", MUTATION, buildActivityVariables(sessionId, content));
+    const ok = (data.agentActivityCreate as { success?: boolean } | undefined)?.success;
+    if (!ok) throw new Error("agentActivityCreate returned success=false");
+  }
+
+  /**
+   * Post a normal issue comment AS Ava (actor=app), independent of any agent
+   * session. This is what makes Ava's Linear replies show up authored by her
+   * instead of by the operator's personal LINEAR_API_KEY — on the reliable
+   * issue/comment path, not the flaky agent-session path.
+   */
+  async createComment(issueId: string, body: string): Promise<void> {
+    const data = await this._gql(
+      "commentCreate",
+      "mutation($input: CommentCreateInput!){ commentCreate(input: $input){ success } }",
+      { input: { issueId, body } },
+    );
+    const ok = (data.commentCreate as { success?: boolean } | undefined)?.success;
+    if (!ok) throw new Error("commentCreate returned success=false");
   }
 
   thought(sessionId: string, body: string): Promise<void> {

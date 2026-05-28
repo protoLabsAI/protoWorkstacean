@@ -233,20 +233,21 @@ export class LinearPlugin implements Plugin {
     const dedup = new DeliveryDedup();
     const client: LinearClient | null = apiKey ? new LinearClient(apiKey) : null;
 
-    if (client) this._wireOutbound(bus, client);
-    else console.warn("[linear] LINEAR_API_KEY not set — outbound Linear mutations disabled");
-
-    // Ava agent-session activities — post AS Ava via her actor=app OAuth token
-    // (independent of the personal LINEAR_API_KEY above). Wired whenever the
-    // OAuth app is configured; getAccessToken() throws at call time until the
-    // one-time authorize dance is done, which the handlers catch + log.
+    // Ava's actor=app client — posts AS Ava (agent activities + plain comments)
+    // via her OAuth token, independent of the personal LINEAR_API_KEY. Wired
+    // whenever the OAuth app is configured; getAccessToken() throws at call time
+    // until the one-time authorize dance is done, which callers catch + log.
     const dataDir = process.env.DATA_DIR || join(process.cwd(), "data");
     const tokenManager = getLinearAvaTokenManager(dataDir);
-    if (tokenManager.isConfigured()) {
-      this._wireAgentActivity(bus, new LinearAgentActivityClient(tokenManager));
-    } else {
-      console.warn("[linear] LINEAR_AVA_CLIENT_ID/_SECRET not set — agent-session activity (post as Ava) disabled");
-    }
+    const avaClient = tokenManager.isConfigured() ? new LinearAgentActivityClient(tokenManager) : null;
+    if (!avaClient) console.warn("[linear] LINEAR_AVA_CLIENT_ID/_SECRET not set — post-as-Ava disabled (replies fall back to personal key)");
+
+    // Outbound comments prefer Ava's identity; create/update still use the
+    // personal-key client (team/state resolution lives there).
+    if (client || avaClient) this._wireOutbound(bus, client, avaClient);
+    else console.warn("[linear] no LINEAR_API_KEY and no Ava OAuth — outbound Linear mutations disabled");
+
+    if (avaClient) this._wireAgentActivity(bus, avaClient);
 
     try {
       this.server = Bun.serve({
@@ -621,9 +622,11 @@ export class LinearPlugin implements Plugin {
   // so callers (agents) can confirm their action landed instead of silently
   // assuming success.
 
-  private _wireOutbound(bus: EventBus, client: LinearClient): void {
+  private _wireOutbound(bus: EventBus, client: LinearClient | null, avaClient: LinearAgentActivityClient | null): void {
     // linear.reply.{issueId} — post a comment using the standard
-    // reply-on-topic convention agents already know.
+    // reply-on-topic convention agents already know. Prefer Ava's actor=app
+    // token so the comment is authored AS Ava; fall back to the personal-key
+    // client if she isn't authorized or her post fails.
     bus.subscribe("linear.reply.#", "linear-outbound", async (msg: BusMessage) => {
       const topic = msg.topic ?? "";
       // Result topics from this family must not re-enter this subscriber.
@@ -646,14 +649,35 @@ export class LinearPlugin implements Plugin {
         });
         return;
       }
+      // 1) As Ava (actor=app token) when authorized.
+      if (avaClient?.isReady()) {
+        try {
+          await avaClient.createComment(issueId, body);
+          publishResult(bus, msg.correlationId, "linear.reply.result", { success: true, issueId, as: "ava" });
+          console.log(`[linear] Comment posted AS Ava on issue ${issueId}`);
+          return;
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.warn(`[linear] post-as-Ava comment failed on ${issueId} (${errMsg}) — falling back to personal key`);
+        }
+      }
+      // 2) Fall back to the personal-key client.
+      if (!client) {
+        publishResult(bus, msg.correlationId, "linear.reply.result", {
+          success: false, issueId, error: "no Ava token and no LINEAR_API_KEY — cannot post comment",
+        });
+        console.error(`[linear] cannot post comment on ${issueId} — no Ava token and no personal key`);
+        return;
+      }
       try {
         const ok = await client.addComment(issueId, body);
         publishResult(bus, msg.correlationId, "linear.reply.result", {
           success: ok,
           issueId,
+          as: "personal-key",
           error: ok ? undefined : "client.addComment returned false",
         });
-        if (ok) console.log(`[linear] Comment posted on issue ${issueId}`);
+        if (ok) console.log(`[linear] Comment posted (personal key) on issue ${issueId}`);
         else console.warn(`[linear] Failed to post comment on issue ${issueId}`);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -672,6 +696,12 @@ export class LinearPlugin implements Plugin {
       // Result topics are linear.update.issue.result.{correlationId} — skip
       // to avoid re-entering this subscriber.
       if (topic.startsWith("linear.update.issue.result.")) return;
+      if (!client) {
+        publishResult(bus, msg.correlationId, "linear.update.issue.result", {
+          success: false, error: "LINEAR_API_KEY not set — issue mutations disabled",
+        });
+        return;
+      }
       const issueId = topic.startsWith("linear.update.issue.")
         ? topic.slice("linear.update.issue.".length)
         : "";
@@ -715,6 +745,12 @@ export class LinearPlugin implements Plugin {
     // issue id back on linear.create.issue.result.{correlationId} so agents
     // can await their own creations.
     bus.subscribe("linear.create.issue", "linear-outbound", async (msg: BusMessage) => {
+      if (!client) {
+        publishResult(bus, msg.correlationId, "linear.create.issue.result", {
+          success: false, error: "LINEAR_API_KEY not set — issue creation disabled",
+        });
+        return;
+      }
       const payload = (msg.payload ?? {}) as {
         teamKey?: string;
         title?: string;

@@ -63,6 +63,22 @@ describe("LinearAgentActivityClient", () => {
     expect(calls[0]!.body.variables.input.content).toEqual({ type: "response", body: "done — filed PROJ-12" });
   });
 
+  test("createComment posts commentCreate AS Ava (Bearer token) with issueId+body", async () => {
+    nextResponse = () => new Response(JSON.stringify({ data: { commentCreate: { success: true } } }), { status: 200 });
+    const c = new LinearAgentActivityClient(fakeTokens("ava-token"), mockFetch());
+    await c.createComment("issue-7", "routed to protocli — PROTO-12");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.auth).toBe("Bearer ava-token");
+    expect(calls[0]!.body.query).toContain("commentCreate");
+    expect(calls[0]!.body.variables).toEqual({ input: { issueId: "issue-7", body: "routed to protocli — PROTO-12" } });
+  });
+
+  test("createComment throws on success=false", async () => {
+    nextResponse = () => new Response(JSON.stringify({ data: { commentCreate: { success: false } } }), { status: 200 });
+    const c = new LinearAgentActivityClient(fakeTokens("t"), mockFetch());
+    await expect(c.createComment("i", "x")).rejects.toThrow(/success=false/);
+  });
+
   test("throws on GraphQL errors", async () => {
     nextResponse = () => new Response(JSON.stringify({ errors: [{ message: "no access to session" }] }), { status: 200 });
     const c = new LinearAgentActivityClient(fakeTokens("t"), mockFetch());
