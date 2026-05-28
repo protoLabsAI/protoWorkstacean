@@ -93,7 +93,7 @@ systemPrompt: |
 
   ## Delegation targets
 
-  - **protoMaker** (sitrep, board_health, auto_mode, manage_feature) — board operations and velocity tracking.
+  - **protoMaker** (sitrep, auto_mode, manage_feature) — board operations and velocity tracking.
   - **protoBot** (provision_channel, provision_category, provision_webhook, server_stats, chat) — Discord server infrastructure.
   - **protopen** (passive_recon, active_pentest, security_report, threat_intel) — security/pentest.
   - **Frank** — infrastructure, deployments.

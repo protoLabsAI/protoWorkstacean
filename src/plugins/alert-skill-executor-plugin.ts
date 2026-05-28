@@ -54,8 +54,6 @@ export const ALERT_SKILLS: ReadonlyArray<{
   { skill: "alert.no_agents",                 severity: "high",   headline: "No agents registered" },
   { skill: "alert.ci_failures",               severity: "medium", headline: "CI failure rate elevated" },
   { skill: "alert.pr_stale",                  severity: "low",    headline: "Stale PRs accumulating" },
-  { skill: "alert.protomaker_board_blocked",  severity: "medium", headline: "protoMaker board has excessive blocked features" },
-  { skill: "alert.protomaker_backlog_piling", severity: "low",    headline: "protoMaker backlog growing" },
   { skill: "alert.memory_down",               severity: "high",   headline: "Graphiti memory healthcheck failed" },
   { skill: "alert.memory_search_broken",      severity: "high",   headline: "Graphiti search probe failed" },
   { skill: "alert.fleet_agent_stuck",         severity: "high",   headline: "Agent failure rate >50% over 1h" },
