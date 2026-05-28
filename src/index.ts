@@ -210,6 +210,20 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // GitHub issue → protoMaker board bridge. workstacean receives every
+    // project repo's webhook + owns the registry, so it resolves the project
+    // and POSTs to protoMaker's HTTP board intake (ADR-0001/0002). No-op for
+    // issues on unregistered repos. Safe to install unconditionally.
+    name: "protomaker-board-bridge",
+    condition: () => true,
+    factory: async () => {
+      const { ProtoMakerBoardBridgePlugin } = await import(
+        "../lib/plugins/protomaker-board-bridge"
+      );
+      return new ProtoMakerBoardBridgePlugin(projectRegistry);
+    },
+  },
+  {
     // Linear → proto code.execute bridge. Label-gated (default
     // "proto-task", override via LINEAR_PROTO_BRIDGE_LABEL). No yaml
     // config needed; safe to install unconditionally.

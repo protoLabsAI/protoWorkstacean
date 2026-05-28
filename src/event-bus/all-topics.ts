@@ -104,6 +104,17 @@ export const RELEASE_TOPICS = {
   RELEASE_PUBLISHED: "release.published",
 } as const;
 
+export const GITHUB_TOPICS = {
+  /**
+   * Published by the GitHub plugin for every opened/reopened issue the webhook
+   * covers — additive, independent of the @mention / auto-triage paths. The
+   * ProtoMakerBoardBridge subscribes and forwards issues on registered project
+   * repos into protoMaker's board intake (workstacean owns repo→project
+   * resolution). Payload shape: see `GithubIssueOpenedPayload`.
+   */
+  GITHUB_ISSUE_OPENED: "github.issue.opened",
+} as const;
+
 export const REVIEW_TOPICS = {
   /**
    * Published by `pr-inspector` after a `review_comment` / `review_approve` /

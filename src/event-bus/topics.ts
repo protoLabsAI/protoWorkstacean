@@ -12,6 +12,7 @@ export {
   ACTION_TOPICS,
   SECURITY_TOPICS,
   RELEASE_TOPICS,
+  GITHUB_TOPICS,
   REVIEW_TOPICS,
 } from "./all-topics.ts";
 
@@ -20,6 +21,7 @@ import {
   ACTION_TOPICS,
   SECURITY_TOPICS,
   RELEASE_TOPICS,
+  GITHUB_TOPICS,
   REVIEW_TOPICS,
 } from "./all-topics.ts";
 
@@ -28,6 +30,7 @@ export const TOPICS = {
   ...ACTION_TOPICS,
   ...SECURITY_TOPICS,
   ...RELEASE_TOPICS,
+  ...GITHUB_TOPICS,
   ...REVIEW_TOPICS,
 } as const;
 
