@@ -47,6 +47,17 @@ export interface RegistryProject {
   defaultBranch?: string;
 }
 
+/** A project as protoMaker returns it from `/api/settings/global`. `github` +
+ *  `defaultBranch` are native ProjectRef fields (protoMaker#3883) — present for
+ *  current protoMaker, optional so we can still derive from .git as a fallback. */
+interface RawProtoMakerProject {
+  id: string;
+  name: string;
+  path: string;
+  github?: { owner: string; repo: string };
+  defaultBranch?: string;
+}
+
 export interface ProjectRegistryOptions {
   /** protoMaker HTTP base URL. Default: `http://protomaker-server:3008`. */
   apiBase?: string;
@@ -181,7 +192,7 @@ export class ProjectRegistry {
    *   { success: true, settings: { projects: ProjectRef[] } }
    * Per protoMaker `apps/server/src/routes/settings/index.ts:14` (GET /global).
    */
-  private async _fetchProjects(): Promise<Array<{ id: string; name: string; path: string }>> {
+  private async _fetchProjects(): Promise<RawProtoMakerProject[]> {
     const url = `${this.apiBase}/api/settings/global`;
     const headers: Record<string, string> = {};
     if (this.apiKey) headers["X-API-Key"] = this.apiKey;
@@ -191,7 +202,7 @@ export class ProjectRegistry {
     }
     const body = (await res.json()) as {
       success?: boolean;
-      settings?: { projects?: Array<{ id: string; name: string; path: string }> };
+      settings?: { projects?: RawProtoMakerProject[] };
     };
     if (!body.success) {
       throw new Error(`protoMaker returned success=false`);
@@ -199,33 +210,47 @@ export class ProjectRegistry {
     return body.settings?.projects ?? [];
   }
 
-  private _enrichProject(p: { id: string; name: string; path: string }): RegistryProject {
+  private _enrichProject(p: RawProtoMakerProject): RegistryProject {
     const enriched: RegistryProject = {
       id: p.id,
       name: p.name,
       slug: deriveSlug(p.name),
       path: p.path,
     };
-    const gitConfigPath = join(p.path, ".git", "config");
-    if (existsSync(gitConfigPath)) {
-      try {
-        const config = readFileSync(gitConfigPath, "utf8");
-        const github = parseGithubFromGitConfig(config);
-        if (github) enriched.github = github;
-      } catch {
-        // Silent — non-essential enrichment.
+
+    // Prefer protoMaker's native github/defaultBranch (ProjectRef, protoMaker#3883).
+    // It's the source of truth and survives GitHub repo renames — deriving from
+    // the local clone's .git/config drifts on rename (e.g. contentMachine →
+    // protoContent silently broke board routing until the remote was re-pointed).
+    // Fall back to .git derivation only when protoMaker omits the field.
+    if (p.github?.owner && p.github?.repo) {
+      enriched.github = { owner: p.github.owner, repo: p.github.repo };
+    } else {
+      const gitConfigPath = join(p.path, ".git", "config");
+      if (existsSync(gitConfigPath)) {
+        try {
+          const github = parseGithubFromGitConfig(readFileSync(gitConfigPath, "utf8"));
+          if (github) enriched.github = github;
+        } catch {
+          // Silent — non-essential enrichment.
+        }
       }
     }
-    const headRefPath = join(p.path, ".git", "refs", "remotes", "origin", "HEAD");
-    if (existsSync(headRefPath)) {
-      try {
-        const ref = readFileSync(headRefPath, "utf8").trim();
-        const branch = parseDefaultBranchFromHead(ref);
-        if (branch) enriched.defaultBranch = branch;
-      } catch {
-        // Silent — non-essential enrichment.
+
+    if (p.defaultBranch) {
+      enriched.defaultBranch = p.defaultBranch;
+    } else {
+      const headRefPath = join(p.path, ".git", "refs", "remotes", "origin", "HEAD");
+      if (existsSync(headRefPath)) {
+        try {
+          const branch = parseDefaultBranchFromHead(readFileSync(headRefPath, "utf8").trim());
+          if (branch) enriched.defaultBranch = branch;
+        } catch {
+          // Silent — non-essential enrichment.
+        }
       }
     }
+
     return enriched;
   }
 }
