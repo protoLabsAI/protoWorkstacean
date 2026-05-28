@@ -34,6 +34,18 @@ export interface BoardIngestSignal {
     issueNumber: number;
     repository: string;
   };
+  /**
+   * Cross-system Langfuse trace linkage. `traceId` is the originating
+   * correlationId (the trace id for this issue's flow). protoMaker sets it as
+   * the trace id / `caller_trace_id` on its signal→FeatureLoader→PMAgent spans
+   * so the whole GitHub→board→PRD flow is one trace. Mirrors the `a2a.trace`
+   * convention used for cross-agent A2A linking.
+   */
+  trace: {
+    traceId: string;
+    caller: "workstacean";
+    source: "github.issue.opened";
+  };
 }
 
 /**
@@ -43,6 +55,7 @@ export interface BoardIngestSignal {
 export function buildBoardIngestSignal(
   issue: GithubIssueOpenedPayload,
   projectPath: string,
+  traceId: string,
 ): BoardIngestSignal {
   const repository = `${issue.owner}/${issue.repo}`;
   const title = issue.title || `Issue #${issue.number}`;
@@ -51,6 +64,7 @@ export function buildBoardIngestSignal(
     source: "github",
     content,
     channelContext: { projectPath, issueNumber: issue.number, repository },
+    trace: { traceId, caller: "workstacean", source: "github.issue.opened" },
   };
 }
 
@@ -101,7 +115,10 @@ export class ProtoMakerBoardBridgePlugin implements Plugin {
       return;
     }
 
-    const signal = buildBoardIngestSignal(issue, project.path);
+    // correlationId is the trace id for this issue's flow (set when the github
+    // plugin published github.issue.opened) — propagate it so protoMaker links.
+    const traceId = msg.correlationId || crypto.randomUUID();
+    const signal = buildBoardIngestSignal(issue, project.path, traceId);
     const resp = await fetch(`${this.baseUrl}/api/engine/signal/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-Key": this.apiKey },

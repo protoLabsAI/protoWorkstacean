@@ -30,7 +30,7 @@ function fakeRegistry(known: Record<string, { slug: string; path: string }>): Pr
 
 describe("buildBoardIngestSignal", () => {
   test("source=github, content=title+body, channelContext carries projectPath + dedup keys", () => {
-    expect(buildBoardIngestSignal(ISSUE, "/home/josh/dev/contentMachine")).toEqual({
+    expect(buildBoardIngestSignal(ISSUE, "/home/josh/dev/contentMachine", "trace-abc")).toEqual({
       source: "github",
       content: "feat: content-idea intake endpoint\n\nPOST a ContentIdea → idea stage.",
       channelContext: {
@@ -38,11 +38,12 @@ describe("buildBoardIngestSignal", () => {
         issueNumber: 12,
         repository: "protoLabsAI/protoContent",
       },
+      trace: { traceId: "trace-abc", caller: "workstacean", source: "github.issue.opened" },
     });
   });
 
   test("falls back to a title when body is empty", () => {
-    const out = buildBoardIngestSignal({ ...ISSUE, body: "" }, "/p");
+    const out = buildBoardIngestSignal({ ...ISSUE, body: "" }, "/p", "trace-x");
     expect(out.content).toBe("feat: content-idea intake endpoint");
   });
 });
@@ -85,7 +86,19 @@ describe("ProtoMakerBoardBridge — forward", () => {
       source: "github",
       content: "feat: content-idea intake endpoint\n\nPOST a ContentIdea → idea stage.",
       channelContext: { projectPath: "/home/josh/dev/contentMachine", issueNumber: 12, repository: "protoLabsAI/protoContent" },
+      trace: { traceId: "t", caller: "workstacean", source: "github.issue.opened" },
     });
+  });
+
+  test("propagates the inbound correlationId as the trace id", async () => {
+    const bus = new InMemoryEventBus();
+    const registry = fakeRegistry({ "protolabsai/protocontent": { slug: "contentmachine", path: "/p" } });
+    new ProtoMakerBoardBridgePlugin(registry, { baseUrl: "http://x", apiKey: "k" }).install(bus);
+    bus.publish("github.issue.opened", {
+      id: "i", correlationId: "trace-9f3", topic: "github.issue.opened", timestamp: Date.now(), payload: ISSUE,
+    });
+    await Bun.sleep(15);
+    expect((calls[0]!.body as { trace: { traceId: string } }).trace.traceId).toBe("trace-9f3");
   });
 
   test("unregistered repo → no POST (workstacean triage owns it)", async () => {
