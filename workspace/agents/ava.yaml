@@ -372,14 +372,18 @@ skills:
         `issueAssignedToYou`. The payload carries `issueId` + `sessionId` (NOT
         the issue fields directly), so read the issue with
         `linear_get_issue(issueId)` for context, then route it onto the owning
-        project's board exactly as above (`get_projects` →
-        `create_github_issue` → comment the GitHub link back via
-        `linear_add_comment(issueId, …)`).
+        project's board (`get_projects` → `create_github_issue`).
+        **Your final reply text IS your response in the Linear session** — it
+        posts back as an agent activity AS you, automatically. So end with a
+        concise summary (what you did + the GitHub issue link). Do NOT also call
+        `linear_add_comment` for an agent session — that double-posts and from
+        the wrong identity.
       - `agent_session.prompted` — someone sent you a prompt inside the agent
         session. The ask is in the payload's `agentActivity` (prompt body); the
-        ticket is `issueId`. Read the issue for context and act on the prompt:
-        route it onto the board if it's engineering work, or reply with
-        `linear_add_comment` if it's a question.
+        ticket is `issueId`. Read the issue for context and act on the prompt
+        (route it onto the board if it's engineering work). As with
+        `created`, your final reply text becomes your session response — don't
+        `linear_add_comment`.
       - `issueNewComment` — a comment was added to an issue you're
         assigned to. Decide if it needs a reply.
       - generic `create` / `update` event on a team-scoped Linear
