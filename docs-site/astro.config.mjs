@@ -39,6 +39,10 @@ export default defineConfig({
           autogenerate: { directory: 'explanation' },
         },
         {
+          label: 'Decisions',
+          autogenerate: { directory: 'decisions' },
+        },
+        {
           label: 'Contributing',
           autogenerate: { directory: 'contributing' },
         },
