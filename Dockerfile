@@ -117,8 +117,14 @@ COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=clawpatch-build /opt/clawpatch /opt/clawpatch
 ENV PATH="/opt/clawpatch/bin:${PATH}"
 ENV NODE_ENV=production
+# Vendored fleet skills → protoCLI's global skills dir. proto (the proto-sdk
+# executor) auto-loads ~/.proto/skills/* regardless of its per-dispatch cwd,
+# so the rabbit-hole skill (how to drive `rh` for search/research/ingest) is
+# available to it everywhere. Container runs as root → HOME=/root.
+COPY skills/ /root/.proto/skills/
 RUN bun test
 RUN clawpatch --version
 RUN rh --version
+RUN test -f /root/.proto/skills/rabbit-hole/SKILL.md
 RUN mkdir -p data
 CMD ["bun", "run", "src/index.ts"]
