@@ -14,6 +14,7 @@ These docs explain the *why* behind protoWorkstacean's architecture. Read them w
 | [Plugin system](./plugin-system) | The plugin lifecycle, core vs integration vs workspace plugins, ordering guarantees |
 | [Agent identity](./agent-identity) | How agents identify themselves across Discord, GitHub, A2A, and the bus |
 | [Operator flows](./operator-flows) | End-to-end: onboarding a project, a feature's lifecycle + Linear close-the-loop, and PR review with Quinn — who owns each step |
+| [Decisions (ADRs)](../decisions/) | The locked, load-bearing direction: the org→execution pipeline, the protoMaker integration boundary, and content surfacing. Where the fleet is heading. |
 
 ## Design philosophy
 
