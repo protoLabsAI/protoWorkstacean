@@ -224,6 +224,29 @@ export interface IncidentReportedPayload {
   };
 }
 
+// ── github.issue.opened ──────────────────────────────────────────────────────
+
+/**
+ * Payload for `github.issue.opened` — a GitHub issue was opened or reopened on
+ * any repo the webhook covers. Additive signal published by the GitHub plugin
+ * independent of the @mention / auto-triage paths. The ProtoMakerBoardBridge
+ * subscribes and forwards issues on *registered project repos* into protoMaker's
+ * board intake (workstacean owns the repo→project resolution).
+ */
+export interface GithubIssueOpenedPayload {
+  owner: string;
+  repo: string;
+  number: number;
+  /** "opened" | "reopened". */
+  action: string;
+  title: string;
+  /** Issue body (markdown). Empty string when none. */
+  body: string;
+  /** Login of the issue author. */
+  author: string;
+  url: string;
+}
+
 // ── release.published ────────────────────────────────────────────────────────
 
 /**

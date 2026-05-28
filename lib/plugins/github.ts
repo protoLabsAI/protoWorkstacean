@@ -503,6 +503,40 @@ export class GitHubPlugin implements Plugin {
       return;
     }
 
+    // ── Issue opened/reopened → github.issue.opened (board-ingestion signal) ──
+    // Additive, fires for EVERY opened/reopened issue regardless of @mention or
+    // auto-triage routing (those member-no-mention issues otherwise produce no
+    // bus event). The ProtoMakerBoardBridge subscribes and forwards issues on
+    // registered project repos into protoMaker's board intake. Falls through —
+    // the @mention / auto-triage handling below still runs.
+    if (event === "issues" && (payload.action === "opened" || payload.action === "reopened")) {
+      const issue = payload.issue as Record<string, unknown> | undefined;
+      const repo = payload.repository as Record<string, unknown> | undefined;
+      if (issue && repo) {
+        const owner = ((repo.owner as Record<string, unknown> | undefined)?.login as string) ?? "";
+        const repoName = (repo.name as string) ?? "";
+        const number = issue.number as number;
+        const correlationId = crypto.randomUUID();
+        bus.publish("github.issue.opened", {
+          id: `github-issue-${owner}-${repoName}-${number}-${correlationId.slice(0, 8)}`,
+          correlationId,
+          topic: "github.issue.opened",
+          timestamp: Date.now(),
+          payload: {
+            owner,
+            repo: repoName,
+            number,
+            action: payload.action as string,
+            title: (issue.title as string) ?? "",
+            body: (issue.body as string | null) ?? "",
+            author: ((issue.user as Record<string, unknown> | undefined)?.login as string) ?? "",
+            url: (issue.html_url as string) ?? "",
+          },
+          source: { interface: "github" as const },
+        });
+      }
+    }
+
     // ── PR lifecycle → flow.item.* (independent of @mention) ─────────────────
     if (event === "pull_request") {
       const action = payload.action as string;

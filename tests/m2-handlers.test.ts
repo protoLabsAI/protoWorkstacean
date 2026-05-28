@@ -276,11 +276,10 @@ describe("GitHub plugin — repository.created handler", () => {
     expect(typeof msg.timestamp).toBe("number");
   });
 
-  test("non-repository.created event (issues) does not publish", () => {
+  test("issues event publishes github.issue.opened (board signal), never the onboard topic", () => {
     const { bus, publishCalls } = makeMockBus();
     const plugin = new GitHubPlugin(workspaceDir, makeStubProjectRegistry());
 
-    // An 'issues' event without @mention — should not publish
     const payload = {
       action: "opened",
       issue: {
@@ -305,7 +304,11 @@ describe("GitHub plugin — repository.created handler", () => {
       mockGetToken,
     );
 
-    expect(publishCalls).toHaveLength(0);
+    const topics = publishCalls.map((c) => c.topic);
+    // The additive board-ingestion signal fires for every opened issue …
+    expect(topics).toContain("github.issue.opened");
+    // … but the repository.created onboard path must NOT.
+    expect(topics).not.toContain("message.inbound.onboard");
   });
 
   test("repository event with action other than 'created' does not publish to onboard", () => {
