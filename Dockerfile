@@ -71,6 +71,14 @@ RUN pnpm add -g @protolabsai/protopatch@^0.6.1 && \
 RUN pnpm add -g @protolabsai/proto@latest acpx@latest && \
     proto --version && \
     acpx --version
+# rabbit-hole CLI (`rh`) — deep external research (search / research / ingest)
+# + media processing that fleet agents shell out to. proto has native shell
+# access, so installing the binary makes `rh` available to it (and any skill
+# that shells out). Same self-contained /opt/clawpatch install root + npm
+# version-pin pattern as the CLIs above (published to npm 2026-05-27,
+# rabbit-hole.io#299).
+RUN pnpm add -g @protolabsai/rabbit-hole-cli@^0.1.2 && \
+    rh --version
 
 # build the dashboard Astro static site
 FROM oven/bun:1 AS dashboard-build
@@ -104,12 +112,19 @@ COPY . .
 COPY --from=dashboard-build /dashboard/dist dashboard/dist
 # clawpatch + a minimal Node runtime to run it (the JS CLI is shebanged
 # `#!/usr/bin/env node`). PATH puts /opt/clawpatch/bin first so the
-# `clawpatch` / `protopatch` binaries resolve.
+# `clawpatch` / `protopatch` / `proto` / `acpx` / `rh` binaries resolve.
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=clawpatch-build /opt/clawpatch /opt/clawpatch
 ENV PATH="/opt/clawpatch/bin:${PATH}"
 ENV NODE_ENV=production
+# Vendored fleet skills → protoCLI's global skills dir. proto (the proto-sdk
+# executor) auto-loads ~/.proto/skills/* regardless of its per-dispatch cwd,
+# so the rabbit-hole skill (how to drive `rh` for search/research/ingest) is
+# available to it everywhere. Container runs as root → HOME=/root.
+COPY skills/ /root/.proto/skills/
 RUN bun test
 RUN clawpatch --version
+RUN rh --version
+RUN test -f /root/.proto/skills/rabbit-hole/SKILL.md
 RUN mkdir -p data
 CMD ["bun", "run", "src/index.ts"]
