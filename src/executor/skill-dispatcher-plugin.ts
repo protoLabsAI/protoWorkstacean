@@ -18,6 +18,7 @@ import type { ExecutorRegistry } from "./executor-registry.ts";
 import type { SkillRequest } from "./types.ts";
 import type {
   AgentSkillRequestPayload,
+  AgentSkillResponsePayload,
   AutonomousOutcomePayload,
   FlowItemPayload,
   AgentActivityPayload,
@@ -318,6 +319,10 @@ export class SkillDispatcherPlugin implements Plugin {
       prompt: typeof payload.prompt === "string" ? payload.prompt : undefined,
       correlationId,
       parentId,
+      // Conversation continuity: when the caller supplies a contextId (chat
+      // turns), thread it through so the executor keeps one conversation
+      // instead of starting fresh on every correlationId.
+      contextId: typeof payload.contextId === "string" ? payload.contextId : undefined,
       replyTopic,
       payload,
     };
@@ -582,6 +587,19 @@ export class SkillDispatcherPlugin implements Plugin {
         correlationId,
         result.isError ? undefined : result.text,
         result.isError ? result.text || "Executor error" : undefined,
+        {
+          taskState: (typeof result.data?.taskState === "string"
+            ? result.data.taskState
+            : (result.isError ? "failed" : "completed")),
+          ...(typeof result.data?.taskId === "string" ? { taskId: result.data.taskId } : {}),
+          ...(typeof result.data?.contextId === "string" ? { contextId: result.data.contextId } : {}),
+          ...(result.data?.usage ? { usage: result.data.usage as AgentSkillResponsePayload["usage"] } : {}),
+          ...(typeof result.data?.costUsd === "number" ? { costUsd: result.data.costUsd } : {}),
+          ...(typeof result.data?.confidence === "number" ? { confidence: result.data.confidence } : {}),
+          ...(typeof result.data?.confidenceExplanation === "string"
+            ? { confidenceExplanation: result.data.confidenceExplanation } : {}),
+          durationMs: Date.now() - dispatchedAt,
+        },
       );
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -808,6 +826,7 @@ export class SkillDispatcherPlugin implements Plugin {
     correlationId: string,
     result: string | undefined,
     error: string | undefined,
+    extra?: Omit<Partial<AgentSkillResponsePayload>, "content" | "error" | "correlationId">,
   ): void {
     if (!this.bus) return;
     this.bus.publish(replyTopic, {
@@ -815,7 +834,7 @@ export class SkillDispatcherPlugin implements Plugin {
       correlationId,
       topic: replyTopic,
       timestamp: Date.now(),
-      payload: { content: result, error, correlationId },
+      payload: { content: result, error, correlationId, ...extra },
     });
   }
 
