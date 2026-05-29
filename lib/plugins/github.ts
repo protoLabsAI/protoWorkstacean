@@ -30,8 +30,6 @@ import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
-import { sanitizeIssueBody } from "../sanitize.ts";
-import type { SanitizationConfig } from "../sanitize.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
 import { withCircuitBreaker } from "./circuit-breaker.ts";
 import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
@@ -39,30 +37,10 @@ import type { ReleasePublishedPayload } from "../../src/event-bus/payloads.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
-interface AutoTriageConfig {
-  enabled: boolean;
-  orgName: string;
-  events: string[];
-  skillHint: string;
-  sanitization: SanitizationConfig;
-  /** Label that identifies "needs triage" issues during sweep (default: "status: needs-triage"). */
-  sweepLabel?: string;
-  /** Run a sweep 30s after plugin install. Default true. */
-  sweepOnStartup?: boolean;
-  /**
-   * Remove the sweep label from an issue once it has been dispatched for triage,
-   * so a later sweep (especially on restart) can't re-dispatch it forever.
-   * Default true. See #3503 — without this, every startup re-triages every open
-   * needs-triage issue and Quinn's own triage children cascade.
-   */
-  consumeSweepLabel?: boolean;
-}
-
 interface GitHubConfig {
   mentionHandle: string;
   skillHints: Record<string, string>;
   admins?: string[];
-  autoTriage?: AutoTriageConfig;
 }
 
 /**
@@ -103,23 +81,6 @@ function agentBotLogins(): Set<string> {
 export function isAgentBotActor(login: string | undefined | null): boolean {
   if (!login) return false;
   return agentBotLogins().has(login.toLowerCase());
-}
-
-/**
- * Build a per-repo metadata map (slug + absolute projectPath) for the
- * triage sweep. Ava's bug_triage skill refuses to run without an
- * authoritative projectPath; the sweep threads it into the synthetic
- * inbound event payload.
- */
-function projectMetaFromRegistry(
-  registry: ProjectRegistry,
-): Map<string, { slug: string; projectPath: string | undefined }> {
-  const map = new Map<string, { slug: string; projectPath: string | undefined }>();
-  for (const p of registry.getProjects()) {
-    if (!p.github) continue;
-    map.set(`${p.github.owner}/${p.github.repo}`, { slug: p.slug, projectPath: p.path });
-  }
-  return map;
 }
 
 function loadConfig(workspaceDir: string): GitHubConfig {
@@ -299,7 +260,6 @@ export class GitHubPlugin implements Plugin {
   ];
   readonly subscribes = [
     "message.outbound.github.#",
-    "github.triage.sweep",
   ];
 
   private server: ReturnType<typeof Bun.serve> | null = null;
@@ -353,34 +313,6 @@ export class GitHubPlugin implements Plugin {
 
     // watchFile works even if the file doesn't exist yet — it will fire on creation.
     watchFile(configPath, { interval: 5_000 }, reloadConfig);
-
-    // ── Triage sweep: on-demand + startup ────────────────────────────────────
-    //
-    // Webhooks only fire for new events, so issues opened before the plugin
-    // was running (or before autoTriage was enabled) never get triaged. This
-    // handler walks every monitored repo's open issues and dispatches any
-    // with the `status: needs-triage` label as synthetic inbound events —
-    // the same shape the webhook handler produces. The bug_triage skill is
-    // idempotent on Ava's side (it checks for existing board features by
-    // issue number), so re-sweeping is safe.
-    //
-    // Invoke from the bus with `github.triage.sweep` (any payload) or it
-    // fires automatically on plugin install when autoTriage.enabled is true
-    // and autoTriage.sweepOnStartup !== false.
-    bus.subscribe("github.triage.sweep", "github", () => {
-      void this._runTriageSweep(bus, getToken).catch(err =>
-        console.error("[github] triage sweep error:", err),
-      );
-    });
-
-    if (this.config.autoTriage?.enabled && this.config.autoTriage?.sweepOnStartup !== false) {
-      // Small delay so Ava has time to connect before the sweep fires
-      setTimeout(() => {
-        void this._runTriageSweep(bus, getToken).catch(err =>
-          console.error("[github] startup triage sweep error:", err),
-        );
-      }, 30_000);
-    }
 
     // ── Outbound: post comment back to GitHub ────────────────────────────────
     bus.subscribe("message.outbound.github.#", "github-outbound", async (msg: BusMessage) => {
@@ -608,25 +540,12 @@ export class GitHubPlugin implements Plugin {
       return;
     }
 
-    // ── Auto-triage path: issues.opened/reopened in monitored repos ───────────
-    // Fires when autoTriage is enabled and the issue body does NOT contain an
-    // @mention (issues with @mention from admins continue via the mention path).
-    if (
-      config.autoTriage?.enabled &&
-      event === "issues" &&
-      (payload.action === "opened" || payload.action === "reopened") &&
-      !ctx.body.toLowerCase().includes(config.mentionHandle.toLowerCase())
-    ) {
-      const repoSlug = `${ctx.owner}/${ctx.repo}`;
-      // Read the monitored set live from the registry rather than the
-      // config-load snapshot — the registry refreshes every 5 min, so a
-      // project registered in protoMaker after startup is picked up on the
-      // next webhook without a restart or github.yaml edit.
-      if (this.projectRegistry.getGithubCoords().includes(repoSlug)) {
-        this._handleAutoTriage(event, payload, ctx, config.autoTriage, bus, getToken);
-        return;
-      }
-    }
+    // Issues on registered project repos are owned by protoMaker, not
+    // workstacean: ProtoMakerBoardBridge forwards github.issue.opened into
+    // protoMaker's board intake (ADR-0001). Workstacean does not auto-triage
+    // issues — that single ownership boundary (registry membership) is what
+    // keeps an issue from being double-handled (see JOSH-392). Admins who want
+    // workstacean to act on a specific issue still use the @mention path below.
 
     // ── Auto-review path: pull_request opened/synchronize ─────────────────────
     // Every opened/synchronized PR triggers Quinn's pr_review skill — no
@@ -843,348 +762,6 @@ export class GitHubPlugin implements Plugin {
         );
       });
     }
-  }
-
-  private _handleAutoTriage(
-    event: string,
-    payload: Record<string, unknown>,
-    ctx: GitHubEventContext,
-    autoTriage: AutoTriageConfig,
-    bus: EventBus,
-    getToken: (owner: string, repo: string) => Promise<string>,
-  ): void {
-    const dedupKey = `${ctx.owner}/${ctx.repo}#${ctx.number}`;
-    const lastDispatched = this.recentDispatches.get(dedupKey);
-    if (lastDispatched && Date.now() - lastDispatched < GitHubPlugin.DEDUP_WINDOW_MS) {
-      console.log(`[github] Auto-triage: skipping duplicate ${dedupKey} (dispatched ${Date.now() - lastDispatched}ms ago)`);
-      return;
-    }
-    this.recentDispatches.set(dedupKey, Date.now());
-
-    (async () => {
-      try {
-        const token = await getToken(ctx.owner, ctx.repo);
-        const action = payload.action as string;
-
-        // Check org membership → assign trust tier
-        const isMember = await this._checkOrgMembership(autoTriage.orgName, ctx.author, token);
-        const trustTier = isMember ? 3 : 1;
-
-        let body = ctx.body;
-        let quarantine: { sanitized: boolean; patternsFound: string[] } = {
-          sanitized: false,
-          patternsFound: [],
-        };
-
-        if (trustTier < 3) {
-          const result = sanitizeIssueBody(body, autoTriage.sanitization);
-          body = result.body;
-          quarantine = {
-            sanitized: result.patternsFound.length > 0,
-            patternsFound: result.patternsFound,
-          };
-
-          // Close as spam if injection pattern count meets threshold
-          if (result.patternsFound.length >= autoTriage.sanitization.spamThreshold) {
-            console.log(
-              `[github] Auto-triage: ${ctx.owner}/${ctx.repo}#${ctx.number} flagged as spam ` +
-              `(${result.patternsFound.length} patterns) — closing`,
-            );
-            await this._closeIssueAsSpam(ctx.owner, ctx.repo, ctx.number, token);
-            return;
-          }
-        }
-
-        // Route to agent via bus
-        const correlationId = crypto.randomUUID();
-        pendingComments.set(correlationId, { owner: ctx.owner, repo: ctx.repo, number: ctx.number });
-
-        const content = [
-          `Auto-triage — ${event}.${action} on ${ctx.owner}/${ctx.repo}#${ctx.number}`,
-          `Title: ${ctx.title}`,
-          `Author: @${ctx.author} (trust tier: ${trustTier})`,
-          `URL: ${ctx.url}`,
-          ``,
-          body,
-        ].join("\n");
-
-        const topic = `message.inbound.github.${ctx.owner}.${ctx.repo}.${event}.${ctx.number}`;
-        const replyTopic = `message.outbound.github.${ctx.owner}.${ctx.repo}.${ctx.number}`;
-        const repoSlug = `${ctx.owner}/${ctx.repo}`;
-        const meta = this._projectMetaFor(repoSlug);
-
-        bus.publish(topic, {
-          id: `${event}-${action}-${ctx.owner}-${ctx.repo}-${ctx.number}-${correlationId.slice(0, 8)}`,
-          correlationId,
-          topic,
-          timestamp: Date.now(),
-          payload: {
-            sender: ctx.author,
-            channel: `${ctx.owner}/${ctx.repo}#${ctx.number}`,
-            content,
-            skillHint: autoTriage.skillHint,
-            trustTier,
-            quarantine,
-            ...(meta?.projectPath ? { projectPath: meta.projectPath } : {}),
-            ...(meta?.slug ? { projectSlug: meta.slug } : {}),
-            github: {
-              event,
-              action,
-              owner: ctx.owner,
-              repo: ctx.repo,
-              number: ctx.number,
-              title: ctx.title,
-              url: ctx.url,
-            },
-          },
-          reply: { topic: replyTopic },
-        });
-
-        console.log(
-          `[github] Auto-triage: ${event}.${action} on ${ctx.owner}/${ctx.repo}#${ctx.number} ` +
-          `→ ${autoTriage.skillHint} (tier ${trustTier})`,
-        );
-      } catch (err) {
-        console.error("[github] Auto-triage error:", err);
-      }
-    })();
-  }
-
-  /**
-   * Walk every monitored repo's open issues and re-dispatch any with the
-   * sweep label as synthetic inbound events. Runs on install and on the
-   * `github.triage.sweep` bus topic. Idempotent on the Ava side — the
-   * bug_triage skill checks for existing board features by issue number.
-   *
-   * Per-repo failures are swallowed with a warn so one broken repo can't
-   * poison the sweep for the others.
-   */
-  private async _runTriageSweep(
-    bus: EventBus,
-    getToken: (owner: string, repo: string) => Promise<string>,
-  ): Promise<void> {
-    const config = this.config;
-    if (!config.autoTriage?.enabled) {
-      console.log("[github] triage sweep skipped — autoTriage disabled");
-      return;
-    }
-
-    // Live registry read — sweep covers whatever protoMaker currently lists,
-    // not a config-load snapshot.
-    const repos = this.projectRegistry.getGithubCoords();
-    const sweepLabel = config.autoTriage.sweepLabel ?? "status: needs-triage";
-    const projectMeta = projectMetaFromRegistry(this.projectRegistry);
-    console.log(`[github] triage sweep starting — ${repos.length} repo(s), label="${sweepLabel}"`);
-
-    let dispatched = 0;
-    let scanned = 0;
-
-    for (const repoSlug of repos) {
-      const [owner, repo] = repoSlug.split("/");
-      if (!owner || !repo) continue;
-
-      let token: string;
-      try {
-        token = await getToken(owner, repo);
-      } catch (err) {
-        console.warn(`[github] triage sweep: no token for ${repoSlug}: ${err instanceof Error ? err.message : err}`);
-        continue;
-      }
-
-      try {
-        const qs = new URLSearchParams({
-          state: "open",
-          labels: sweepLabel,
-          per_page: "100",
-        });
-        const res = await withCircuitBreaker("github-api", () =>
-          fetch(`https://api.github.com/repos/${repoSlug}/issues?${qs}`, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              Accept: "application/vnd.github+json",
-              "User-Agent": "protoWorkstacean/1.0",
-              "X-GitHub-Api-Version": "2022-11-28",
-            },
-          }),
-        );
-        if (!res.ok) {
-          console.warn(`[github] triage sweep: ${repoSlug} list failed ${res.status}`);
-          continue;
-        }
-        const items = (await res.json()) as Array<{
-          number: number;
-          title: string;
-          body: string | null;
-          user?: { login?: string };
-          html_url: string;
-          pull_request?: unknown;
-          labels?: Array<{ name: string }>;
-        }>;
-
-        const issues = items.filter(i => !i.pull_request);
-        scanned += issues.length;
-
-        const meta = projectMeta.get(repoSlug);
-        for (const issue of issues) {
-          const number = issue.number;
-          const author = issue.user?.login ?? "unknown";
-          // Sanitize untrusted submissions the same way _handleAutoTriage does.
-          // Trust tier is pessimistic for sweeps — we re-check org membership.
-          const isMember = await this._checkOrgMembership(
-            config.autoTriage.orgName,
-            author,
-            token,
-          );
-          const trustTier = isMember ? 3 : 1;
-
-          let body = issue.body ?? "";
-          if (trustTier < 3) {
-            const sanitized = sanitizeIssueBody(body, config.autoTriage.sanitization);
-            body = sanitized.body;
-            if (sanitized.patternsFound.length >= config.autoTriage.sanitization.spamThreshold) {
-              console.log(`[github] triage sweep: ${repoSlug}#${number} flagged as spam — skipping dispatch`);
-              continue;
-            }
-          }
-
-          const content = [
-            `Auto-triage sweep — issues.opened on ${repoSlug}#${number}`,
-            `Title: ${issue.title}`,
-            `Author: @${author} (trust tier: ${trustTier})`,
-            `URL: ${issue.html_url}`,
-            ``,
-            body.slice(0, 4000),
-          ].join("\n");
-
-          const topic = `message.inbound.github.${owner}.${repo}.issues.${number}`;
-          const replyTopic = `message.outbound.github.${owner}.${repo}.${number}`;
-
-          bus.publish(topic, {
-            id: `sweep-${repoSlug}-${number}-${Date.now()}`,
-            correlationId: crypto.randomUUID(),
-            topic,
-            timestamp: Date.now(),
-            payload: {
-              sender: author,
-              channel: `${repoSlug}#${number}`,
-              content,
-              skillHint: config.autoTriage.skillHint,
-              trustTier,
-              quarantine: { sanitized: false, patternsFound: [] },
-              meta: {
-                agentId: "protomaker",
-                skillHint: config.autoTriage.skillHint,
-                systemActor: "auto-triage-sweep",
-              },
-              projectSlug: meta?.slug,
-              projectRepo: repoSlug,
-              projectPath: meta?.projectPath,
-              prNumber: number,
-              github: {
-                event: "issues",
-                action: "opened",
-                owner,
-                repo,
-                number,
-                title: issue.title,
-                url: issue.html_url,
-              },
-            },
-            reply: { topic: replyTopic },
-          });
-          dispatched += 1;
-
-          // #3503: claim the issue by removing the sweep label now that it has
-          // been dispatched for triage. The label is the only persistent
-          // "already dispatched" marker — without removing it the next sweep
-          // (every startup, plus the bus topic) re-dispatches the same issue
-          // forever, and Quinn's own needs-triage children feed the cascade.
-          // Best-effort: a removal failure must not poison the rest of the sweep.
-          if (config.autoTriage.consumeSweepLabel !== false) {
-            try {
-              const del = await withCircuitBreaker("github-api", () =>
-                fetch(`https://api.github.com/repos/${repoSlug}/issues/${number}/labels/${encodeURIComponent(sweepLabel)}`, {
-                  method: "DELETE",
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    Accept: "application/vnd.github+json",
-                    "User-Agent": "protoWorkstacean/1.0",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                  },
-                }),
-              );
-              if (!del.ok && del.status !== 404) {
-                console.warn(`[github] triage sweep: failed to remove "${sweepLabel}" from ${repoSlug}#${number}: ${del.status}`);
-              }
-            } catch (err) {
-              console.warn(`[github] triage sweep: label removal error for ${repoSlug}#${number}:`, err instanceof Error ? err.message : err);
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(`[github] triage sweep ${repoSlug} error:`, err instanceof Error ? err.message : err);
-      }
-    }
-
-    console.log(`[github] triage sweep complete — scanned ${scanned} issue(s), dispatched ${dispatched}`);
-  }
-
-  private async _checkOrgMembership(
-    orgName: string,
-    username: string,
-    token: string,
-  ): Promise<boolean> {
-    try {
-      const res = await withCircuitBreaker("github-api", () =>
-        fetch(
-          `https://api.github.com/orgs/${orgName}/members/${username}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "User-Agent": "protoWorkstacean/1.0",
-              "X-GitHub-Api-Version": "2022-11-28",
-            },
-          },
-        ),
-      );
-      // 204 = member, 302/404 = not a member or org is private
-      return res.status === 204;
-    } catch {
-      return false;
-    }
-  }
-
-  private async _closeIssueAsSpam(
-    owner: string,
-    repo: string,
-    number: number,
-    token: string,
-  ): Promise<void> {
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "User-Agent": "protoWorkstacean/1.0",
-      "X-GitHub-Api-Version": "2022-11-28",
-    };
-
-    const commentBody =
-      "This issue has been automatically closed because it appears to contain content " +
-      "that violates our submission guidelines. If you believe this is an error, please " +
-      "open a new issue without the flagged content.";
-
-    await withCircuitBreaker("github-api", () =>
-      fetch(
-        `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments`,
-        { method: "POST", headers, body: JSON.stringify({ body: commentBody }) },
-      ),
-    );
-
-    await withCircuitBreaker("github-api", () =>
-      fetch(
-        `https://api.github.com/repos/${owner}/${repo}/issues/${number}`,
-        { method: "PATCH", headers, body: JSON.stringify({ state: "closed", state_reason: "not_planned" }) },
-      ),
-    );
   }
 
   private async _postComment(

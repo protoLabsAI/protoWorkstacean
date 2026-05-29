@@ -324,16 +324,16 @@ describe("AgentFleetHealthPlugin", () => {
       expect(snap.systemActors).toHaveLength(0);
     });
 
-    test("outcome from auto-triage-sweep does NOT pollute agents[]", async () => {
+    test("outcome from outcome-analysis does NOT pollute agents[]", async () => {
       wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
-        systemActor: "auto-triage-sweep", skill: "bug_triage", success: false, durationMs: 200,
+        systemActor: "outcome-analysis", skill: "analyze", success: false, durationMs: 200,
       }));
       await new Promise(r => setTimeout(r, 10));
 
       const snap = wlPlugin.getFleetHealth();
       expect(snap.agents).toHaveLength(0);
       expect(snap.systemActors).toHaveLength(1);
-      expect(snap.systemActors[0].systemActor).toBe("auto-triage-sweep");
+      expect(snap.systemActors[0].systemActor).toBe("outcome-analysis");
       expect(snap.systemActors[0].failureCount).toBe(1);
     });
 
@@ -362,7 +362,7 @@ describe("AgentFleetHealthPlugin", () => {
         systemActor: "pr-remediator", skill: "bug_triage", success: false, durationMs: 100,
       }));
       wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
-        systemActor: "auto-triage-sweep", skill: "bug_triage", success: false, durationMs: 100,
+        systemActor: "outcome-analysis", skill: "analyze", success: false, durationMs: 100,
       }));
       wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
         systemActor: "user", skill: "chat", success: false, durationMs: 100,
@@ -374,7 +374,7 @@ describe("AgentFleetHealthPlugin", () => {
       expect(new Set(snap.agents.map(a => a.agentName))).toEqual(new Set(["ava", "quinn"]));
       expect(snap.systemActors).toHaveLength(3);
       expect(new Set(snap.systemActors.map(s => s.systemActor))).toEqual(
-        new Set(["pr-remediator", "auto-triage-sweep", "user"]),
+        new Set(["pr-remediator", "outcome-analysis", "user"]),
       );
     });
 

@@ -178,7 +178,7 @@ PrRemediatorSkillExecutorPlugin maps skill→topic; PrRemediatorPlugin subscribe
 
 Lives at [AgentFleetHealthPlugin._record:281–334](../../src/plugins/agent-fleet-health-plugin.ts). Detail in [chokepoint-invariants](chokepoint-invariants.md).
 
-Summary: `pr-remediator`, `auto-triage-sweep`, `goap`, `user` are recognized synthetic actors. Their outcomes go into `systemActors[]` bucket (not `agents[]`) so they don't inflate `agentCount` or skew `maxFailureRate1h`.
+Summary: `pr-remediator`, `goap`, `user` are recognized synthetic actors. Their outcomes go into `systemActors[]` bucket (not `agents[]`) so they don't inflate `agentCount` or skew `maxFailureRate1h`.
 
 ---
 

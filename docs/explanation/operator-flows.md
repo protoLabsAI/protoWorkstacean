@@ -27,7 +27,7 @@ Everything below is config-light by design: you act in protoMaker / Linear / Git
 
 `ProjectRegistry` is a plain shared object (like `ChannelRegistry`), not a plugin — consumers hold a reference to the registry, never to another plugin, which keeps the bus-is-the-contract rule intact.
 
-> **Known limitation.** `github`/`defaultBranch` are derived by reading the repo's `.git/` *inside the container*, so they only resolve for repos bind-mounted at their protoMaker path. A project that isn't mounted is still registered and routable, but its GitHub-derived behaviours (auto-triage, auto-review, clawpatch) stay dormant until the coordinates resolve. The durable fix is native `github`/`defaultBranch` fields on protoMaker's `ProjectRef` (tracked upstream); until then, mount the repo or expect those features to no-op for it.
+> **Known limitation.** `github`/`defaultBranch` are derived by reading the repo's `.git/` *inside the container*, so they only resolve for repos bind-mounted at their protoMaker path. A project that isn't mounted is still registered and routable, but its GitHub-derived behaviours (auto-review, clawpatch) stay dormant until the coordinates resolve. The durable fix is native `github`/`defaultBranch` fields on protoMaker's `ProjectRef` (tracked upstream); until then, mount the repo or expect those features to no-op for it.
 
 ## Flow 2 — Feature lifecycle and the Linear close-the-loop
 

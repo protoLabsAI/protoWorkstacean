@@ -114,7 +114,7 @@ on autonomous.outcome.{actor}.{skill}:
         → logged once-per-distinct-actor at warn level
 ```
 
-**Known synthetic actors:** `pr-remediator`, `auto-triage-sweep`, `goap`, `user`.
+**Known synthetic actors:** `pr-remediator`, `goap`, `user`.
 
 **On trip:** one-time `console.warn` per actor, no escalation. The point is bucketing, not blocking.
 
