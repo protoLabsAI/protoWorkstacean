@@ -11,6 +11,8 @@ schedule: "0 10 * * 1-5"
 skill: portfolio_check_in
 targets:
   - ava
-notifyChannel: "1469195643590541353"
+# Routes to the Discord webhook in env DISCORD_WEBHOOK_UPDATES (a "fleet
+# updates" channel). The CeremonyNotifier maps the slug → DISCORD_WEBHOOK_<SLUG>.
+notifyChannel: "updates"
 timeoutMs: 300000
 enabled: true
