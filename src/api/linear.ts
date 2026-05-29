@@ -17,6 +17,32 @@
 
 import type { Route, ApiContext } from "./types.ts";
 import { LinearClient, type LinearPriority } from "../../lib/linear-client.ts";
+import { getLinearAvaTokenManager } from "../../lib/linear/ava-oauth-token-manager.ts";
+import { LinearAgentActivityClient } from "../../lib/linear/agent-activity-client.ts";
+
+/**
+ * Post a comment authored AS Ava (actor=app token) when she's authorized,
+ * falling back to the personal-key client otherwise. Mirrors the
+ * linear.reply.{issueId} bus path so every comment Ava makes — via this tool
+ * endpoint or via a dispatch reply — shows up authored by her, not the
+ * operator's personal key.
+ */
+async function postComment(dataDir: string, issueId: string, body: string): Promise<{ as: "ava" | "personal-key" }> {
+  const ava = new LinearAgentActivityClient(getLinearAvaTokenManager(dataDir));
+  if (ava.isReady()) {
+    try {
+      await ava.createComment(issueId, body);
+      return { as: "ava" };
+    } catch (err) {
+      console.warn(`[api/linear] post-as-Ava comment failed on ${issueId} (${err instanceof Error ? err.message : String(err)}) — falling back to personal key`);
+    }
+  }
+  const client = getClient();
+  if (!client) throw new Error("no Ava token and no LINEAR_API_KEY — cannot post comment");
+  const ok = await client.addComment(issueId, body);
+  if (!ok) throw new Error("addComment returned false");
+  return { as: "personal-key" };
+}
 
 let cachedClient: LinearClient | null = null;
 function getClient(): LinearClient | null {
@@ -47,7 +73,8 @@ async function withClient<T>(handler: (c: LinearClient) => Promise<T>): Promise<
 
 const VALID_PRIORITIES: ReadonlySet<LinearPriority> = new Set(["urgent", "high", "medium", "low", "none"]);
 
-export function createRoutes(_ctx: ApiContext): Route[] {
+export function createRoutes(ctx: ApiContext): Route[] {
+  const dataDir = ctx.dataDir ?? "./data";
   return [
     {
       method: "GET",
@@ -167,11 +194,14 @@ export function createRoutes(_ctx: ApiContext): Route[] {
         if (!input.body?.trim()) {
           return Response.json({ success: false, error: "missing body" }, { status: 400 });
         }
-        return withClient(async (c) => {
-          const ok = await c.addComment(id, input.body!);
-          if (!ok) throw new Error("addComment returned false");
-          return { issueId: id, posted: true };
-        });
+        try {
+          const { as } = await postComment(dataDir, id, input.body);
+          return Response.json({ success: true, data: { issueId: id, posted: true, as } });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const status = msg.includes("cannot post comment") ? 503 : 500;
+          return Response.json({ success: false, error: msg }, { status });
+        }
       },
     },
   ];
