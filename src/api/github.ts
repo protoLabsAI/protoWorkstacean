@@ -427,16 +427,6 @@ export function createRoutes(ctx: ApiContext): Route[] {
     const issueBody = body.body as string | undefined;
     const labels = body.labels as string[] | undefined;
 
-    // #3503: an agent-created issue must never carry the triage-sweep label.
-    // bug_triage files follow-up issues; if they are born "status: needs-triage"
-    // the sweep re-triages them, spawning more follow-ups — an unbounded cascade.
-    // Anything Quinn files has already been reasoned about, so strip any
-    // needs-triage label at the boundary regardless of what the caller passed.
-    const triageSafeLabels = (labels ?? []).filter(l => !/needs-triage/i.test(l));
-    if (labels && triageSafeLabels.length !== labels.length) {
-      console.log(`[github] create_github_issue: stripped needs-triage label from new "${title}" (#3503 cascade guard)`);
-    }
-
     if (!repo || !title) {
       return Response.json({ success: false, error: "repo and title are required" }, { status: 400 });
     }
@@ -515,7 +505,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
         body: JSON.stringify({
           title,
           body: issueBody ?? "",
-          labels: triageSafeLabels,
+          labels: labels ?? [],
         }),
       });
 

@@ -161,7 +161,7 @@ The following workspace config files are watched at runtime (polled every 5 seco
 
 | File | Watched by | What reloads |
 |------|-----------|-------------|
-| `workspace/github.yaml` | `GithubPlugin` | Monitored repos, org webhook config, mention handle, auto-triage settings |
+| `workspace/github.yaml` | `GithubPlugin` | Mention handle, admins, per-event skill hints |
 | `workspace/projects.yaml` | `GithubPlugin`, `A2aPlugin` | Monitored repo list (GithubPlugin), project routing table (A2aPlugin) |
 | `workspace/discord.yaml` | `DiscordPlugin` | Channel config, slash command list (re-registers commands on change) |
 | `workspace/agents.yaml` | `DiscordPlugin` | Agent identity list (bot → agent mapping) |
