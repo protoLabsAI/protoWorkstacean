@@ -102,4 +102,27 @@ describe("LinearAgentActivityClient", () => {
     await expect(c.thought("s", "x")).rejects.toThrow(/not authorized/);
     expect(calls).toHaveLength(0); // never hit the network
   });
+
+  test("getViewerId queries viewer { id } and caches the result", async () => {
+    nextResponse = () => new Response(JSON.stringify({ data: { viewer: { id: "ava-123" } } }), { status: 200 });
+    const c = new LinearAgentActivityClient(fakeTokens("t"), mockFetch());
+    expect(await c.getViewerId()).toBe("ava-123");
+    expect(await c.getViewerId()).toBe("ava-123");
+    expect(calls).toHaveLength(1); // second call served from cache
+  });
+
+  test("isAssignedToAva is true only when the issue's assignee is Ava", async () => {
+    // mockFetch returns the same combined body to both the viewer + issue queries.
+    nextResponse = () => new Response(JSON.stringify({ data: { viewer: { id: "ava-123" }, issue: { assignee: { id: "ava-123" } } } }), { status: 200 });
+    const c = new LinearAgentActivityClient(fakeTokens("t"), mockFetch());
+    expect(await c.isAssignedToAva("issue-1")).toBe(true);
+  });
+
+  test("isAssignedToAva is false when assignee differs or is unset", async () => {
+    nextResponse = () => new Response(JSON.stringify({ data: { viewer: { id: "ava-123" }, issue: { assignee: { id: "someone-else" } } } }), { status: 200 });
+    expect(await new LinearAgentActivityClient(fakeTokens("t"), mockFetch()).isAssignedToAva("i")).toBe(false);
+
+    nextResponse = () => new Response(JSON.stringify({ data: { viewer: { id: "ava-123" }, issue: { assignee: null } } }), { status: 200 });
+    expect(await new LinearAgentActivityClient(fakeTokens("t"), mockFetch()).isAssignedToAva("i")).toBe(false);
+  });
 });

@@ -20,7 +20,10 @@
  *     docs, a stale session is recoverable by sending an activity.
  */
 
+import { join } from "node:path";
 import type { EventBus, Plugin } from "../types.ts";
+import { LinearAgentActivityClient } from "../linear/agent-activity-client.ts";
+import { getLinearAvaTokenManager } from "../linear/ava-oauth-token-manager.ts";
 
 const GRAPHQL_URL = "https://api.linear.app/graphql";
 const POLL_INTERVAL_MS = 20_000;
@@ -68,11 +71,24 @@ export class LinearAgentSessionPoller implements Plugin {
   private timer?: ReturnType<typeof setInterval>;
   /** key = `${sessionId}:${updatedAt}` → handled-at ms. */
   private handled = new Map<string, number>();
+  /** Gate: only recover a stale session if its issue is assigned to Ava. When
+   *  undefined (Ava OAuth not configured), gating is disabled — recover all. */
+  private readonly assignedToAva?: (issueId: string) => Promise<boolean>;
 
-  constructor(opts: { apiKey?: string; fetchImpl?: typeof fetch; intervalMs?: number } = {}) {
+  constructor(opts: { apiKey?: string; fetchImpl?: typeof fetch; intervalMs?: number; assignedToAva?: (issueId: string) => Promise<boolean> } = {}) {
     this.apiKey = opts.apiKey ?? process.env.LINEAR_API_KEY;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.intervalMs = opts.intervalMs ?? POLL_INTERVAL_MS;
+    if (opts.assignedToAva) {
+      this.assignedToAva = opts.assignedToAva;
+    } else {
+      const dataDir = process.env.DATA_DIR || join(process.cwd(), "data");
+      const tokenManager = getLinearAvaTokenManager(dataDir);
+      if (tokenManager.isConfigured()) {
+        const client = new LinearAgentActivityClient(tokenManager);
+        this.assignedToAva = (issueId) => client.isAssignedToAva(issueId);
+      }
+    }
   }
 
   install(bus: EventBus): void {
@@ -103,6 +119,26 @@ export class LinearAgentSessionPoller implements Plugin {
     for (const s of sessions) {
       const key = `${s.id}:${s.updatedAt}`;
       if (this.handled.has(key)) continue;
+
+      // Only recover sessions for issues assigned to Ava — a stale session on
+      // an unassigned/abandoned issue is noise, not a missed assignment.
+      if (this.assignedToAva) {
+        if (!s.issueId) continue; // no issue → nothing to verify; leave it
+        let assigned: boolean;
+        try {
+          assigned = await this.assignedToAva(s.issueId);
+        } catch (err) {
+          // Transient/auth error — don't mark handled, retry next sweep.
+          console.warn(`[linear-session-poller] assignee check failed for session ${s.id} — retry next sweep: ${err instanceof Error ? err.message : String(err)}`);
+          continue;
+        }
+        if (!assigned) {
+          this.handled.set(key, Date.now()); // mark so we don't re-check this stale state every sweep
+          console.log(`[linear-session-poller] stale session ${s.id}${s.issueIdentifier ? ` (${s.issueIdentifier})` : ""} not assigned to Ava — skipping recovery`);
+          continue;
+        }
+      }
+
       this.handled.set(key, Date.now());
       bus.publish("message.inbound.linear.agent_session.created", {
         id: crypto.randomUUID(),

@@ -211,6 +211,8 @@ export class LinearPlugin implements Plugin {
   readonly capabilities = ["linear-inbound", "linear-outbound"];
 
   private server: ReturnType<typeof Bun.serve> | null = null;
+  /** Ava's actor=app client — also used to gate responses on assignee==Ava. */
+  private _avaClient: LinearAgentActivityClient | null = null;
 
   install(bus: EventBus): void {
     const webhookSecret = process.env.LINEAR_WEBHOOK_SECRET ?? "";
@@ -240,6 +242,7 @@ export class LinearPlugin implements Plugin {
     const dataDir = process.env.DATA_DIR || join(process.cwd(), "data");
     const tokenManager = getLinearAvaTokenManager(dataDir);
     const avaClient = tokenManager.isConfigured() ? new LinearAgentActivityClient(tokenManager) : null;
+    this._avaClient = avaClient;
     if (!avaClient) console.warn("[linear] LINEAR_AVA_CLIENT_ID/_SECRET not set — post-as-Ava disabled (replies fall back to personal key)");
 
     // Outbound comments prefer Ava's identity; create/update still use the
@@ -401,7 +404,7 @@ export class LinearPlugin implements Plugin {
     if (payload.type === "AgentSessionEvent") {
       // Linear's newer Agent Session API. Body is in `agentSession` plus
       // optionally `agentActivity` (for prompted events).
-      this._publishAgentSession(payload.action, payload.agentSession ?? {}, payload.agentActivity, bus);
+      void this._publishAgentSession(payload.action, payload.agentSession ?? {}, payload.agentActivity, bus);
       return;
     }
     // Unknown envelope type — log loudly + drop. Linear adds new resource
@@ -416,32 +419,61 @@ export class LinearPlugin implements Plugin {
     const commentId = (notification.commentId as string | undefined)
       ?? ((notification.comment as { id?: string } | undefined)?.id);
     const correlationId = issueId ? `linear-${issueId}` : crypto.randomUUID();
+
+    // A direct @mention of Ava is the OTHER way (besides assignment) she may act
+    // on Linear. Route only mention actions to her handler; assignment is
+    // handled via the agent-session path, and ambient verbs (issueNewComment,
+    // issueAssignedToYou, …) intentionally have no skill hint so the router
+    // drops them — Ava doesn't chase activity she wasn't pulled into.
+    const isMention = action === "issueMention" || action === "issueCommentMention";
+
     bus.publish(topic, {
       id: crypto.randomUUID(),
       correlationId,
       topic,
       timestamp: Date.now(),
       payload: {
+        ...(isMention ? { skillHint: "linear_agent_respond" } : {}),
         action,
         notification,
         issueId,
         commentId,
       },
     });
-    console.log(`[linear] agent.${action}${issueId ? ` on issue ${issueId}` : ""}`);
+    console.log(`[linear] agent.${action}${issueId ? ` on issue ${issueId}` : ""}${isMention ? " → Ava (mention)" : ""}`);
   }
 
-  private _publishAgentSession(
+  private async _publishAgentSession(
     action: string,
     agentSession: Record<string, unknown>,
     agentActivity: Record<string, unknown> | undefined,
     bus: EventBus,
-  ): void {
+  ): Promise<void> {
     const topic = `message.inbound.linear.agent_session.${action}`;
     const sessionId = agentSession.id as string | undefined;
     const issueId = (agentSession.issueId as string | undefined)
       ?? ((agentSession.issue as { id?: string } | undefined)?.id);
     const correlationId = sessionId ?? (issueId ? `linear-${issueId}` : crypto.randomUUID());
+
+    // Ava acts on Linear only for issues assigned to her. Linear creates a
+    // session on assignment; @mentions arrive separately as
+    // issue{,Comment}Mention notifications (wired in _publishAgentNotification).
+    // Gating here drops ambient/stale sessions on issues that aren't hers.
+    // Fail OPEN on a check error — a transient Linear API hiccup must not
+    // silently mute a legitimate assignment.
+    if (issueId && this._avaClient) {
+      let assigned = true;
+      try {
+        assigned = await this._avaClient.isAssignedToAva(issueId);
+      } catch (err) {
+        console.warn(`[linear] assignee check failed for issue ${issueId} — allowing (fail-open): ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (!assigned) {
+        console.log(`[linear] agent_session.${action} on issue ${issueId} — not assigned to Ava, dropping (no response)`);
+        return;
+      }
+    }
+
     bus.publish(topic, {
       id: crypto.randomUUID(),
       correlationId,

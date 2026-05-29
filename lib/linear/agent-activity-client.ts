@@ -93,6 +93,31 @@ export class LinearAgentActivityClient {
     if (!ok) throw new Error("commentCreate returned success=false");
   }
 
+  /** Ava's own Linear user id (the actor=app identity), cached. */
+  private _viewerId?: string;
+  async getViewerId(): Promise<string> {
+    if (this._viewerId) return this._viewerId;
+    const data = await this._gql("viewer", "{ viewer { id } }", {});
+    const id = (data.viewer as { id?: string } | undefined)?.id;
+    if (!id) throw new Error("viewer query returned no id");
+    this._viewerId = id;
+    return id;
+  }
+
+  /**
+   * True iff the issue is currently assigned to Ava (this app's actor). Used to
+   * gate linear_agent_respond so Ava only acts on Linear issues that are hers —
+   * not ambient activity or stale sessions on issues she was never assigned.
+   */
+  async isAssignedToAva(issueId: string): Promise<boolean> {
+    const [viewerId, data] = await Promise.all([
+      this.getViewerId(),
+      this._gql("issueAssignee", "query($id:String!){ issue(id:$id){ assignee{ id } } }", { id: issueId }),
+    ]);
+    const assigneeId = ((data.issue as { assignee?: { id?: string } } | undefined)?.assignee)?.id;
+    return !!assigneeId && assigneeId === viewerId;
+  }
+
   thought(sessionId: string, body: string): Promise<void> {
     return this.createActivity(sessionId, { type: "thought", body });
   }
