@@ -301,61 +301,50 @@ describe("ceremony execute EventBus", () => {
     expect(payload.context.runId).toBeTruthy();
   });
 
-  test("ceremony completed EventBus: publishes ceremony.{id}.completed after execution", async () => {
-    const completedMessages: BusMessage[] = [];
+  test("ceremony reply: skill result on payload.content lands in the outcome (regression — CeremonyPlugin read .result, dispatcher publishes .content)", async () => {
+    const completed: BusMessage[] = [];
+    bus.subscribe("ceremony.#", "test-completed", (msg: BusMessage) => {
+      if (msg.topic.endsWith(".completed")) completed.push(msg);
+    });
 
-    bus.subscribe("ceremony.#", "test", (msg: BusMessage) => {
-      if (msg.topic.endsWith(".completed")) {
-        completedMessages.push(msg);
-      }
+    // Reply the way SkillDispatcher._publishResponse actually does: the skill
+    // output is on payload.content (the field a2a-server / openai-compat /
+    // linear all read). If CeremonyPlugin reads payload.result it sees nothing.
+    bus.subscribe("agent.skill.request", "test-agent", (msg: BusMessage) => {
+      const replyTopic = msg.reply?.topic;
+      if (!replyTopic) return;
+      bus.publish(replyTopic, {
+        id: crypto.randomUUID(),
+        correlationId: msg.correlationId,
+        topic: replyTopic,
+        timestamp: Date.now(),
+        payload: { content: "DIGEST: 2 blocked, 1 needs attention", correlationId: msg.correlationId },
+      });
     });
 
     const pluginAny = plugin as unknown as {
       _fireCeremony(ceremony: {
-        id: string;
-        name: string;
-        schedule: string;
-        skill: string;
-        targets: string[];
-        enabled: boolean;
+        id: string; name: string; schedule: string; skill: string;
+        targets: string[]; enabled: boolean; timeoutMs?: number;
       }): void;
     };
 
-    // Fire the ceremony
     pluginAny._fireCeremony({
-      id: "board.test",
-      name: "Test Ceremony",
+      id: "board.reply",
+      name: "Reply Contract Test",
       schedule: "*/30 * * * *",
-      skill: "board_health",
-      targets: ["all"],
+      skill: "portfolio_check_in",
+      targets: ["ava"],
       enabled: true,
+      timeoutMs: 5_000, // defined so the old bug would have mislabeled this "timeout"
     });
 
-    // Publish a mock skill response to simulate agent completing
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 30));
 
-    // Find the runId from execute message
-    const executeMsg: BusMessage[] = [];
-    bus.subscribe("ceremony.#", "test-exec", (msg: BusMessage) => {
-      if (msg.topic.endsWith(".execute")) executeMsg.push(msg);
-    });
-
-    // Fire again to capture execute
-    pluginAny._fireCeremony({
-      id: "board.test2",
-      name: "Test Ceremony 2",
-      schedule: "*/30 * * * *",
-      skill: "board_health",
-      targets: ["all"],
-      enabled: true,
-    });
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    // completed will be fired after timeout (120s) unless we simulate agent response
-    // For this test, verify completed is eventually published (will timeout)
-    // Just verify the flow starts correctly
-    expect(true).toBe(true);
+    expect(completed.length).toBeGreaterThan(0);
+    const { outcome } = completed[0]!.payload as { outcome: { status: string; result?: string } };
+    expect(outcome.status).toBe("success");
+    expect(outcome.result).toBe("DIGEST: 2 blocked, 1 needs attention");
   });
 });
 
