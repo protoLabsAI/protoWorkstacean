@@ -29,6 +29,10 @@ export interface AgentSkillRequestPayload {
   runId?: string;
   /** Project slug for multi-project routing. */
   projectSlug?: string;
+  /** Conversation/context id for multi-turn continuity. The dispatcher
+   *  propagates this onto SkillRequest.contextId so executors keep one
+   *  conversation across turns instead of starting fresh each correlationId. */
+  contextId?: string;
   /** Explicit skill hint set by surface plugins before inbound routing. */
   skillHint?: string;
   /** Whether this message originated from a direct message conversation. */
@@ -55,7 +59,10 @@ export interface AgentSkillRequestPayload {
 
 // ── agent.skill.response.* ───────────────────────────────────────────────────
 
-/** Payload for `agent.skill.response.*` — published by SkillDispatcherPlugin. */
+/** Payload for `agent.skill.response.*` — published by SkillDispatcherPlugin
+ * (inline-complete executors) and TaskTracker (long-running A2A tasks). Both
+ * sites populate the same shape so a reply-topic subscriber sees the full
+ * executor result regardless of which path produced it. */
 export interface AgentSkillResponsePayload {
   /** Successful result text (undefined on error). */
   content?: string;
@@ -63,6 +70,23 @@ export interface AgentSkillResponsePayload {
   error?: string;
   /** Propagated trace ID. */
   correlationId: string;
+  /** Terminal A2A task state ("completed" | "failed" | "canceled" | "rejected"),
+   *  or "completed"/"failed" inferred for non-task executors. */
+  taskState?: string;
+  /** Remote A2A task id, when the executor created one. */
+  taskId?: string;
+  /** Conversation/context id for multi-turn continuity. */
+  contextId?: string;
+  /** Token usage, when the sub-agent emitted it. */
+  usage?: { input_tokens?: number; output_tokens?: number; [k: string]: unknown };
+  /** Delegation cost in USD (cost-v1 extension), when emitted. */
+  costUsd?: number;
+  /** Sub-agent self-reported confidence 0..1 (confidence-v1 extension), when emitted. */
+  confidence?: number;
+  /** Free-text rationale for the confidence score, when emitted. */
+  confidenceExplanation?: string;
+  /** Wall-clock execution time in ms, when known. */
+  durationMs?: number;
 }
 
 // ── agent.skill.progress.* ───────────────────────────────────────────────────
