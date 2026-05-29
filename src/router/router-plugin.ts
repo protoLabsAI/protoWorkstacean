@@ -203,7 +203,16 @@ export class RouterPlugin implements Plugin {
     const conversationId = workingMsg.correlationId;
     const storedSession = isDM ? this.dmSessions.get(conversationId) : undefined;
 
-    let match = this.resolver.resolve(skillHint, content);
+    // Linear is Ava's surface: Linear inbound events dispatch ONLY via an
+    // explicit skillHint (set by LinearPlugin's gated agent-session / mention
+    // paths → linear_agent_respond). Never keyword-match Linear content — that
+    // pulls GitHub-domain skills onto Linear (e.g. a comment mentioning "code
+    // reviewer" matching pr_review → Quinn replying on a Linear ticket, and a
+    // delete→re-comment loop). No hint on a Linear event → drop.
+    const isLinearEvent = extractLinearEvent(msg.topic) !== undefined;
+    let match = (isLinearEvent && !skillHint)
+      ? null
+      : this.resolver.resolve(skillHint, content);
 
     if (isDM && !match && !storedSession) {
       // No keyword match and no active session — check DM default fallback.
