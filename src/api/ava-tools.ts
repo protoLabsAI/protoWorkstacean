@@ -218,13 +218,14 @@ export function createRoutes(ctx: ApiContext): Route[] {
 
   /**
    * GET /api/a2a/task/:correlationId — fetch the result of a dispatch that a
-   * chat caller stopped awaiting (timed out). Reads TaskTracker's terminal-result
-   * cache, falling back to the live tracked state.
+   * chat caller stopped awaiting (timed out). Reads the SkillResponseCache
+   * (covers both in-process and A2A results), falling back to TaskTracker's
+   * live tracked state for "still working".
    *
    * Returns one of:
    *   { done: true, response, error?, taskState, … }   — terminal result available
    *   { pending: true, taskState: "working", taskId }  — still running
-   *   { pending: false, taskState: "unknown" }         — never tracked / aged out
+   *   { pending: false, taskState: "unknown" }         — never seen / aged out
    */
   function handleTaskPoll(req: Request, params: Record<string, string>): Response {
     if (ctx.apiKey && req.headers.get("X-API-Key") !== ctx.apiKey) {
@@ -235,7 +236,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
       return Response.json({ success: false, error: "correlationId required" }, { status: 400 });
     }
 
-    const result = ctx.taskTracker?.getResult(correlationId);
+    const result = ctx.skillResponseCache?.get(correlationId);
     if (result) {
       return Response.json({
         success: true,

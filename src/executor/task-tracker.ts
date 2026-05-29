@@ -58,8 +58,6 @@ export interface TaskTrackerOptions {
   defaultPollIntervalMs?: number;
   /** Max time to track a task before giving up (ms). Default: 1hr. */
   maxTrackingMs?: number;
-  /** How long a terminal result stays retrievable via getResult (ms). Default: 5min. */
-  resultTtlMs?: number;
 }
 
 export class TaskTracker {
@@ -68,21 +66,15 @@ export class TaskTracker {
   private readonly sweepIntervalMs: number;
   private readonly defaultPollIntervalMs: number;
   private readonly maxTrackingMs: number;
-  private readonly resultTtlMs: number;
   private readonly sweepTimer: ReturnType<typeof setInterval>;
   /** Tracks task IDs for which world.state.delta events have already been published. */
   private readonly publishedDeltaTaskIds = new Set<string>();
-  /** Terminal results retained briefly so a caller that stopped awaiting the
-   *  reply topic (e.g. a chat request that hit its timeout) can still fetch the
-   *  final outcome by correlationId. TTL-evicted in the sweep. */
-  private readonly recentResults = new Map<string, { payload: AgentSkillResponsePayload; at: number }>();
 
   constructor(opts: TaskTrackerOptions) {
     this.bus = opts.bus;
     this.sweepIntervalMs = opts.sweepIntervalMs ?? 10_000;
     this.defaultPollIntervalMs = opts.defaultPollIntervalMs ?? 30_000;
     this.maxTrackingMs = opts.maxTrackingMs ?? 60 * 60_000;
-    this.resultTtlMs = opts.resultTtlMs ?? 5 * 60_000;
     this.sweepTimer = setInterval(() => { void this._sweep(); }, this.sweepIntervalMs);
     this.sweepTimer.unref?.();
   }
@@ -208,7 +200,6 @@ export class TaskTracker {
   destroy(): void {
     clearInterval(this.sweepTimer);
     this.tasks.clear();
-    this.recentResults.clear();
   }
 
   /**
@@ -218,11 +209,6 @@ export class TaskTracker {
    */
   private async _sweep(): Promise<void> {
     const now = Date.now();
-
-    // Evict aged-out terminal results.
-    for (const [correlationId, entry] of this.recentResults) {
-      if (now - entry.at > this.resultTtlMs) this.recentResults.delete(correlationId);
-    }
 
     for (const task of this.tasks.values()) {
       // Age-out: task has been working for too long
@@ -338,7 +324,9 @@ export class TaskTracker {
       ...(typeof data?.confidenceExplanation === "string"
         ? { confidenceExplanation: data.confidenceExplanation } : {}),
     };
-    this.recentResults.set(task.correlationId, { payload, at: Date.now() });
+    // Terminal result is cached downstream by SkillResponseCache, which
+    // subscribes to agent.skill.response.# (covers both this A2A path and the
+    // dispatcher's inline-complete path uniformly). We just publish.
     this.bus.publish(task.replyTopic, {
       id: crypto.randomUUID(),
       correlationId: task.correlationId,
@@ -346,21 +334,5 @@ export class TaskTracker {
       timestamp: Date.now(),
       payload,
     });
-  }
-
-  /**
-   * Fetch a recently-terminal task's result by correlationId. Returns undefined
-   * if the task is still running, never existed, or its result has aged past
-   * resultTtlMs. Backs GET /api/a2a/task/:correlationId so a chat caller that
-   * timed out can still retrieve the final outcome.
-   */
-  getResult(correlationId: string): AgentSkillResponsePayload | undefined {
-    const entry = this.recentResults.get(correlationId);
-    if (!entry) return undefined;
-    if (Date.now() - entry.at > this.resultTtlMs) {
-      this.recentResults.delete(correlationId);
-      return undefined;
-    }
-    return entry.payload;
   }
 }
