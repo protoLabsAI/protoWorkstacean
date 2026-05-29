@@ -15,6 +15,7 @@ import type { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "../executor/task-tracker.ts";
 import type { AgentKeyRegistry } from "../../lib/auth/agent-keys.ts";
 import type { BusHistoryRecorder } from "../event-bus/history-recorder.ts";
+import type { SkillResponseCache } from "../event-bus/skill-response-cache.ts";
 import type { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
 import type { ProjectRegistry } from "../plugins/project-registry.ts";
 
@@ -54,6 +55,13 @@ export interface ApiContext {
    * when the bus-history-recorder plugin is installed.
    */
   busHistory?: BusHistoryRecorder;
+  /**
+   * Terminal skill-response cache keyed by correlationId. Backs
+   * GET /api/a2a/task/:correlationId so a caller that stopped awaiting a
+   * dispatch can still fetch the final outcome — covers both in-process
+   * (dispatcher inline) and A2A (TaskTracker) results. Wired in src/index.ts.
+   */
+  skillResponseCache?: SkillResponseCache;
   /** Source of truth for project metadata (slug, path, github coordinates). */
   projectRegistry?: ProjectRegistry;
   /** Channels registry — used by routes that need per-project channel lookups. */

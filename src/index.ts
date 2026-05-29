@@ -45,6 +45,12 @@ const busHistoryRecorder = new BusHistoryRecorder();
 const busHistoryRecorderPlugin = new BusHistoryRecorderPlugin(busHistoryRecorder);
 busHistoryRecorderPlugin.install(bus);
 
+// --- Skill-response cache — terminal results by correlationId for /api/a2a/task ---
+import { SkillResponseCache, SkillResponseCachePlugin } from "./event-bus/skill-response-cache.ts";
+const skillResponseCache = new SkillResponseCache();
+const skillResponseCachePlugin = new SkillResponseCachePlugin(skillResponseCache);
+skillResponseCachePlugin.install(bus);
+
 // --- Context mailbox — mid-execution DM queue for debounced message injection ---
 import { ContextMailbox } from "../lib/dm/context-mailbox.ts";
 const contextMailbox = new ContextMailbox();
@@ -582,6 +588,7 @@ const apiContext: ApiContext = {
   mailbox: contextMailbox,
   taskTracker,
   busHistory: busHistoryRecorder,
+  skillResponseCache,
   projectRegistry,
   channelRegistry,
 };

@@ -132,12 +132,16 @@ describe("/api/a2a/chat (bus round-trip)", () => {
 describe("/api/a2a/task/:correlationId (poll)", () => {
   test("returns the cached terminal result when present", async () => {
     const bus = new InMemoryEventBus();
-    const taskTracker = {
-      getResult: (id: string) =>
+    // Terminal results now come from the SkillResponseCache (covers in-process
+    // + A2A); TaskTracker only reports the live "still working" state.
+    const skillResponseCache = {
+      get: (id: string) =>
         id === "c-done" ? { content: "finished output", taskState: "completed", correlationId: id, taskId: "t9" } : undefined,
+    } as unknown as ApiContext["skillResponseCache"];
+    const taskTracker = {
       getAll: () => [{ correlationId: "c-working", taskId: "t1", agentName: "protopen" }],
     } as unknown as ApiContext["taskTracker"];
-    const { poll } = routesFor({ bus, executorRegistry: fakeRegistry(["protopen"]), taskTracker });
+    const { poll } = routesFor({ bus, executorRegistry: fakeRegistry(["protopen"]), taskTracker, skillResponseCache });
 
     const done = await poll(new Request("http://x/api/a2a/task/c-done"), { correlationId: "c-done" });
     const dj = (await done.json()) as { data: Record<string, unknown> };
