@@ -23,13 +23,11 @@ FAILURES=0
 # ─── Agent definitions ────────────────────────────────────────────
 # Format: container:host_port:check_type:display_name
 # check_type: a2a (has /.well-known/agent.json), http (just check response), health (/health)
-# A2A external agents (from workspace/agents.yaml). Currently none serve a
-# live A2A endpoint: quinn/ava/protobot/proto are all in-process DeepAgents
-# (checked above), protomaker is HTTP-only (no /a2a route), and protopen
-# (steamdeck) + frank are commented out until deployed. protoContent/Jon and
-# the standalone Researcher service were retired. Add an entry here only when
-# a real A2A endpoint comes online.
-AGENTS=()
+# A2A external agents are read LIVE from workstacean's /api/agents registry (in
+# the "A2A — external services" section below) instead of a static list, so a
+# remote agent shows up the moment the SkillBroker registers it (e.g. protopen
+# once steamdeck is online + reinstated in workspace/agents.yaml). Tailnet-only
+# remotes also get a direct card-health check in the "Remote" section.
 
 # Remote agents — not Docker containers, accessed over Tailscale
 # Format: host:port:display_name
@@ -180,10 +178,34 @@ else
 fi
 
 header "Agents (A2A — external services)"
-if [[ ${#AGENTS[@]} -eq 0 ]]; then
-  echo -e "  ${DIM}none registered — all agents run in-process (see above)${NC}"
+# Live A2A executor registry from workstacean (the SkillBroker registers these
+# from workspace/agents.yaml + card discovery). This is the dispatchable view —
+# a card being reachable (see "Remote") doesn't mean workstacean has registered
+# it as an executor.
+A2A_JSON=$(docker exec workstacean sh -c 'curl -s -H "X-API-Key: $WORKSTACEAN_API_KEY" http://localhost:3000/api/agents' 2>/dev/null || true)
+A2A_REGISTERED=$(echo "$A2A_JSON" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin).get("data", []) or []
+except Exception:
+    data = []
+for a in data:
+    name = a.get("name", "?")
+    skills = a.get("skills") or a.get("skillNames") or []
+    n = len(skills) if isinstance(skills, list) else 0
+    print(f"{name}\t{n}")
+' 2>/dev/null)
+if [[ -z "$A2A_REGISTERED" ]]; then
+  echo -e "  ${DIM}none registered in workstacean${NC}"
 else
-  for svc in "${AGENTS[@]}"; do check_service "$svc"; done
+  while IFS=$'\t' read -r _a2a_name _a2a_nskills; do
+    [[ -z "$_a2a_name" ]] && continue
+    if [[ "$_a2a_nskills" =~ ^[0-9]+$ && "$_a2a_nskills" -gt 0 ]]; then
+      pass "${_a2a_name} — registered A2A executor in workstacean (${_a2a_nskills} skill(s))"
+    else
+      pass "${_a2a_name} — registered A2A executor in workstacean"
+    fi
+  done <<< "$A2A_REGISTERED"
 fi
 
 header "Agents (Remote)"
