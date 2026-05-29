@@ -372,14 +372,19 @@ export class CeremonyPlugin implements Plugin {
         const subId = this.bus!.subscribe(replyTopic, this.name, (msg: BusMessage) => {
           if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
           this.bus?.unsubscribe(subId);
-          const payload = msg.payload as { result?: string; error?: string };
+          // The SkillDispatcher publishes the skill output under `content`
+          // (see _publishResponse) — the same field a2a-server / openai-compat /
+          // linear read. Reading `result` here silently dropped every ceremony
+          // skill result: with timeoutMs set the null read mislabels as
+          // "timeout"; without it, the outcome records "success" but empty.
+          const payload = msg.payload as { content?: string; error?: string };
           if (payload?.error) {
             error = payload.error;
             status = "failure";
           } else {
-            result = payload?.result;
+            result = payload?.content;
           }
-          resolve(payload?.result ?? null);
+          resolve(payload?.content ?? null);
         });
 
         // Set up per-ceremony timeout only if configured
