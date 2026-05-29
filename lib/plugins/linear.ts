@@ -471,16 +471,25 @@ export class LinearPlugin implements Plugin {
   // ── Agent-session activities (post AS Ava via actor=app OAuth) ──────────────
   //
   // Two halves:
-  //   1. On agent_session.created, emit a `thought` within 10s so Linear
-  //      doesn't mark the session unresponsive (the agent's full run is slower).
+  //   1. On agent_session.created AND .prompted, emit a `thought` within 10s so
+  //      Linear doesn't mark the session unresponsive (the agent's full run is
+  //      slower than 10s). Linear sends `created` on assignment and `prompted`
+  //      on every follow-up comment — both need the fast ack, or the session
+  //      shows "did not respond" on each comment whose run runs long.
   //   2. linear.agent_activity.{sessionId} (the reply.topic set on agent-session
   //      dispatches) → emit Ava's final text as a `response` activity.
   private _wireAgentActivity(bus: EventBus, activity: LinearAgentActivityClient): void {
-    // 1. 10-second thought ack on session start.
-    bus.subscribe("message.inbound.linear.agent_session.created", "linear-agent-activity", (msg: BusMessage) => {
+    // 1. 10-second thought ack on session start AND every follow-up prompt.
+    bus.subscribe("message.inbound.linear.agent_session.#", "linear-agent-activity", (msg: BusMessage) => {
+      const topic = msg.topic ?? "";
+      // created → assignment; prompted → a follow-up comment. Both need the ack.
+      if (!topic.endsWith(".created") && !topic.endsWith(".prompted")) return;
       const sessionId = (msg.payload as { sessionId?: string })?.sessionId;
       if (!sessionId) return;
-      void activity.thought(sessionId, "On it — taking a look and routing this.").catch((err) => {
+      const ack = topic.endsWith(".created")
+        ? "On it — taking a look and routing this."
+        : "Got it — looking at that now.";
+      void activity.thought(sessionId, ack).catch((err) => {
         console.error(`[linear] agent-activity thought ack failed (session ${sessionId}): ${err instanceof Error ? err.message : String(err)}`);
       });
     });
