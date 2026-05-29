@@ -9,5 +9,8 @@ schedule: "0 9 * * 1-5"
 skill: board_audit
 targets:
   - quinn
-notifyChannel: "1469195643590541353"
+# Routes to the Discord webhook in env DISCORD_WEBHOOK_UPDATES (the slug maps
+# to DISCORD_WEBHOOK_<SLUG>). The prior numeric channel id resolved to no
+# webhook env var, so the standup digest fell through to console.
+notifyChannel: "updates"
 enabled: true
