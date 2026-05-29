@@ -64,6 +64,7 @@ const avaAgent = {
   tools: [],
   skills: [
     { name: "sitrep", keywords: ["status", "sitrep", "/sitrep"] },
+    { name: "linear_agent_respond", keywords: ["linear", "issue", "ticket", "mention", "assigned", "comment"] },
   ],
 };
 
@@ -438,17 +439,63 @@ describe("RouterPlugin", () => {
             "message.inbound.linear.agent.issueCommentMention",
             makeInbound("message.inbound.linear.agent.issueCommentMention", {
               content: "this is a bug in the auth flow",
+              // LinearPlugin stamps this on genuine @mentions; it's the ONLY way
+              // a Linear event dispatches — via the explicit hint to Ava's
+              // handler, never keyword-matched to another agent's skill.
+              skillHint: "linear_agent_respond",
             }),
           );
-          await requestPromise;
+          const req = await requestPromise;
+          // Dispatches the hinted skill; the executor registry resolves it to
+          // Ava (no agent attached at the router for hint matches).
+          expect((req!.payload as Record<string, unknown>).skill).toBe("linear_agent_respond");
         } finally {
           console.log = origLog;
         }
 
         const linearLine = logs.find(l => l.includes("[linear] event=agent.issueCommentMention"));
         expect(linearLine).toBeDefined();
-        expect(linearLine).toContain("delivered to quinn");
-        expect(linearLine).toContain("skill=bug_triage");
+        expect(linearLine).toContain("skill=linear_agent_respond");
+
+        plugin.uninstall();
+      } finally { cleanup(); }
+    });
+
+    test("does NOT keyword-route a Linear event without a skillHint (Quinn stays off Linear)", async () => {
+      // Regression: a Linear comment whose text matches a GitHub-domain skill's
+      // keywords (e.g. "PR review", "code reviewer" → pr_review) must NOT pull
+      // that skill onto Linear. Without an explicit skillHint, a Linear event is
+      // dropped — preventing the deletion→comment.removed→pr_review→re-comment loop.
+      const { workspaceDir, cleanup } = makeWorkspace({
+        agents: { "quinn.yaml": quinnAgent, "ava.yaml": avaAgent },
+      });
+      try {
+        const bus = new InMemoryEventBus();
+        const plugin = new RouterPlugin({ workspaceDir });
+        plugin.install(bus);
+
+        const dispatched: BusMessage[] = [];
+        bus.subscribe("agent.skill.request", "spy", (m) => { dispatched.push(m); });
+
+        const logs: string[] = [];
+        const origLog = console.log;
+        console.log = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
+        try {
+          bus.publish(
+            "message.inbound.linear.comment.removed",
+            makeInbound("message.inbound.linear.comment.removed", {
+              content: "not a GitHub PR. I'm Quinn, a code reviewer.",
+            }),
+          );
+          await new Promise(r => setTimeout(r, 20));
+        } finally {
+          console.log = origLog;
+        }
+
+        expect(dispatched).toHaveLength(0); // nothing dispatched
+        const linearLine = logs.find(l => l.includes("[linear] event=comment.removed"));
+        expect(linearLine).toBeDefined();
+        expect(linearLine).toContain("delivered to none");
 
         plugin.uninstall();
       } finally { cleanup(); }
