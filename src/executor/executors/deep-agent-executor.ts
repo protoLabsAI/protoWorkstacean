@@ -18,6 +18,17 @@ import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
 
 const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
 
+/** Sleep used by chat_with_agent's pending-result poller. */
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** chat_with_agent polls a pending A2A result this often, up to this budget,
+ *  before handing back the pending marker. Slow skills (recon, pentest) finish
+ *  well inside this; it just bounds the wait so a stuck task can't pin the tool.
+ *  Interval is env-overridable (DEEP_AGENT_CHAT_POLL_INTERVAL_MS). */
+const CHAT_POLL_BUDGET_MS = 240_000;
+function chatPollIntervalMs(): number {
+  return Number(process.env.DEEP_AGENT_CHAT_POLL_INTERVAL_MS) || 5_000;
+}
+
 /**
  * Extract the assistant's text output from a LangChain AIMessage's `content`.
  * Reasoning-style models (e.g. protolabs/reasoning, o3, claude with extended
@@ -95,7 +106,7 @@ export interface DeepAgentConfig {
 // These are all StructuredToolInterface at runtime, but TS can't unify them into a single
 // Record type because tool()'s zod v3/v4 interop overloads produce SchemaOutputT params
 // that don't widen back to the base interface defaults. Record stays loose; return is typed.
-function createLangChainTools(toolNames: string[], http: HttpClient, correlationId?: string, agentName?: string): StructuredToolInterface[] {
+export function createLangChainTools(toolNames: string[], http: HttpClient, correlationId?: string, agentName?: string): StructuredToolInterface[] {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const all: Record<string, any> = {
     chat_with_agent: tool(
@@ -103,7 +114,44 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
         console.log(`[deep-agent:tool] chat_with_agent called: agent=${input.agent}, skill=${input.skill ?? "auto"}, msg="${input.message.slice(0, 80)}"`);
         try {
           const body = agentName ? { ...input, dispatcherAgent: agentName } : input;
-          const result = await http.post("/api/a2a/chat", body);
+          const result = await http.post("/api/a2a/chat", body) as { success?: boolean; data?: Record<string, unknown> };
+
+          // Slow A2A skills return { pending: true, pollUrl } after the chat
+          // endpoint's wait window. Poll it to completion so chat_with_agent
+          // presents a synchronous result instead of leaking the pending stub.
+          const data = result?.data;
+          if (data?.pending === true && typeof data.pollUrl === "string") {
+            const deadline = Date.now() + CHAT_POLL_BUDGET_MS;
+            while (Date.now() < deadline) {
+              await sleep(chatPollIntervalMs());
+              const polled = await http.get(data.pollUrl) as { data?: Record<string, unknown> };
+              const pd = polled?.data;
+              if (!pd) continue;
+              if (pd.done === true) {
+                const merged = {
+                  success: !pd.error,
+                  data: {
+                    response: pd.response ?? null,
+                    taskState: pd.taskState,
+                    correlationId: pd.correlationId,
+                    agent: input.agent,
+                    ...(pd.taskId ? { taskId: pd.taskId } : {}),
+                    ...(pd.contextId ? { contextId: pd.contextId } : {}),
+                    ...(pd.error ? { error: pd.error } : {}),
+                    ...(pd.usage ? { usage: pd.usage } : {}),
+                    ...(pd.costUsd !== undefined ? { costUsd: pd.costUsd } : {}),
+                    ...(pd.confidence !== undefined ? { confidence: pd.confidence } : {}),
+                  },
+                };
+                console.log(`[deep-agent:tool] chat_with_agent resolved pending ${input.agent} task: taskState=${pd.taskState}`);
+                return JSON.stringify(merged);
+              }
+              if (pd.taskState === "unknown") break; // never tracked / aged out
+            }
+            console.log(`[deep-agent:tool] chat_with_agent ${input.agent} still pending after budget`);
+            return JSON.stringify(result);
+          }
+
           console.log(`[deep-agent:tool] chat_with_agent returned: ${JSON.stringify(result).slice(0, 200)}`);
           return JSON.stringify(result);
         } catch (e) {
@@ -114,9 +162,11 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
       {
         name: "chat_with_agent",
         description:
-          "Multi-turn conversation with another agent. " +
-          "Pass contextId+taskId from prior response to continue. " +
-          "Set done=true on final message. Response includes taskState.",
+          "Multi-turn conversation with another agent. Reaches ANY registered agent — " +
+          "call list_agents to see the live fleet. Pass contextId+taskId from a prior " +
+          "response to continue; set done=true on your final message. Long-running skills " +
+          "are polled to completion automatically, so the response carries the agent's real " +
+          "output plus taskState.",
         schema: z.object({
           agent: z.string(),
           message: z.string(),
@@ -134,13 +184,36 @@ function createLangChainTools(toolNames: string[], http: HttpClient, correlation
       },
       {
         name: "delegate_task",
-        description: "Fire-and-forget: dispatch work to an agent.",
+        description:
+          "Fire-and-forget: dispatch work to an agent without waiting. Reaches ANY " +
+          "registered agent (see list_agents). Returns a correlationId + pollUrl.",
         schema: z.object({
           agent: z.string(),
           skill: z.string(),
           message: z.string(),
           projectSlug: z.string().optional(),
         }),
+      },
+    ),
+    list_agents: tool(
+      async () => {
+        const res = await http.get("/api/agents/runtime") as {
+          data?: { agents?: Array<{ name: string; type: string; skills: string[]; pendingDiscovery?: boolean }> };
+        };
+        // Exclude self and the synthetic function-executor cluster (alert.*,
+        // ceremony.*, pr.* — plugin infra, not a conversational delegate target).
+        const agents = (res?.data?.agents ?? []).filter((a) => a.name !== agentName && a.type !== "function");
+        return JSON.stringify({ success: true, agents });
+      },
+      {
+        name: "list_agents",
+        description:
+          "List the live agent fleet you can reach via chat_with_agent / delegate_task — " +
+          "each registered agent with its type (deep-agent | a2a) and the skills it serves. " +
+          "This registry is the source of truth; call it to discover who's available rather " +
+          "than assuming a fixed roster. Agents with pendingDiscovery=true are configured but " +
+          "not currently reachable (e.g. an A2A host that's offline).",
+        schema: z.object({}),
       },
     ),
     manage_board: tool(
