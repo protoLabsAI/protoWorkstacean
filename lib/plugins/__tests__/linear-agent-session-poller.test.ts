@@ -81,4 +81,44 @@ describe("LinearAgentSessionPoller._poll", () => {
     await p._poll(bus); await Bun.sleep(5);
     expect(got).toHaveLength(0);
   });
+
+  describe("assignee gating", () => {
+    function gatedPoller(
+      nodes: Array<{ id: string; status: string; updatedAt: string; issue?: { id: string; identifier: string } }>,
+      assignedToAva: (issueId: string) => Promise<boolean>,
+    ) {
+      const fetchImpl = (async () => sessionsResponse(nodes)) as unknown as typeof fetch;
+      return new LinearAgentSessionPoller({ apiKey: "k", fetchImpl, assignedToAva });
+    }
+
+    test("recovers a stale session when the issue is assigned to Ava", async () => {
+      const p = gatedPoller(
+        [{ id: "s1", status: "stale", updatedAt: "t1", issue: { id: "i1", identifier: "JOSH-9" } }],
+        async () => true,
+      );
+      await p._poll(bus); await Bun.sleep(5);
+      expect(got).toHaveLength(1);
+    });
+
+    test("skips a stale session when the issue is NOT assigned to Ava", async () => {
+      const p = gatedPoller(
+        [{ id: "s1", status: "stale", updatedAt: "t1", issue: { id: "i1", identifier: "JOSH-403" } }],
+        async () => false,
+      );
+      await p._poll(bus); await Bun.sleep(5);
+      expect(got).toHaveLength(0);
+    });
+
+    test("does not recover or mark-handled on a check error — retries next sweep", async () => {
+      let calls = 0;
+      const p = gatedPoller(
+        [{ id: "s1", status: "stale", updatedAt: "t1", issue: { id: "i1", identifier: "JOSH-9" } }],
+        async () => { calls += 1; if (calls === 1) throw new Error("transient"); return true; },
+      );
+      await p._poll(bus); await Bun.sleep(5);
+      expect(got).toHaveLength(0); // first sweep errored → skipped, not handled
+      await p._poll(bus); await Bun.sleep(5);
+      expect(got).toHaveLength(1); // retried, now assigned → recovered
+    });
+  });
 });
