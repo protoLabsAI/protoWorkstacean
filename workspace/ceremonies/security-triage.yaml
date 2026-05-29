@@ -1,7 +1,12 @@
 id: security-triage
 name: "Security Incident Triage"
+description: "On-demand: triggered by the ceremony.security_triage action when an open security incident is detected. Disabled as a scheduled cron — fired via the action, not the hourly schedule."
 schedule: "0 * * * *"
 skill: bug_triage
-targets: []
+# bug_triage is Quinn's deep-agent skill (same target shape as daily-standup's
+# board_audit → quinn). A non-empty targets array is required by the loader;
+# an empty one was rejected on every scan, spamming the log.
+targets:
+  - quinn
 notifyChannel: ""
 enabled: false
