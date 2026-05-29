@@ -197,6 +197,17 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // Recovers Linear agent sessions Linear failed to deliver a webhook for
+    // (their delivery is intermittent). Polls for `stale` sessions and re-drives
+    // them through the same agent-session pipeline. Safety net for the webhook.
+    name: "linear-agent-session-poller",
+    condition: () => Boolean(process.env.LINEAR_API_KEY),
+    factory: async () => {
+      const { LinearAgentSessionPoller } = await import("../lib/plugins/linear-agent-session-poller");
+      return new LinearAgentSessionPoller();
+    },
+  },
+  {
     // GitHub issue → protoMaker board bridge. workstacean receives every
     // project repo's webhook + owns the registry, so it resolves the project
     // and POSTs to protoMaker's HTTP board intake (ADR-0001/0002). No-op for
