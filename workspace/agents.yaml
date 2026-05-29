@@ -47,22 +47,21 @@ agents:
 
   # protopen — security/pentest/RF recon. Remote via Tailscale
   # (PROTOPEN_BASE_URL defaults to http://steamdeck:7870 in homelab-iac).
-  # Serves the legacy /.well-known/agent.json path; advertises streaming:true.
+  # Serves both /.well-known/agent-card.json and the legacy /.well-known/agent.json;
+  # advertises streaming:true. Skills: passive_recon, active_pentest,
+  # security_report, threat_intel, summarize.
   #
-  # COMMENTED OUT 2026-05-26 — `steamdeck` tailnet node is offline (last seen
-  # 10d ago per `tailscale status`), so card discovery 404'd silently for
-  # the whole fleet. Same rationale as the `frank` entry above: don't
-  # register a dead executor + spam card-discovery 404s every 10 min while
-  # the host is down. Reinstate this block when steamdeck comes back online
-  # (verify with `tailscale status | grep steamdeck` shows `active`, not
-  # `offline`).
-  #
-  # - name: protopen
-  #   url: ${PROTOPEN_BASE_URL}/a2a
-  #   auth:
-  #     scheme: apiKey
-  #     credentialsEnv: PROTOPEN_API_KEY
-  #   streaming: true
-  #   external: true
-  #   subscribesTo:
-  #     - message.inbound.discord.#
+  # Reinstated 2026-05-29 — steamdeck is back online and protopen.service is
+  # serving on :7870. (Its Infisical service token had been deleted, crash-looping
+  # the unit; re-minted a never-expire read token scoped to ai/prod.) If steamdeck
+  # goes offline again, card discovery 404s every 10 min for the whole fleet —
+  # comment this block back out until `tailscale status | grep steamdeck` is active.
+  - name: protopen
+    url: ${PROTOPEN_BASE_URL}/a2a
+    auth:
+      scheme: apiKey
+      credentialsEnv: PROTOPEN_API_KEY
+    streaming: true
+    external: true
+    subscribesTo:
+      - message.inbound.discord.#
