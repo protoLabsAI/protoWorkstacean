@@ -38,26 +38,23 @@ tools:
   - publish_event
   - manage_cron
   - run_ceremony
+  - list_agents
   # Observation
-  - get_world_state
   - get_projects
   - get_ci_health
   - get_pr_pipeline
   - get_branch_drift
-  - get_outcomes
   - get_incidents
-  - get_cost_summary
-  - get_confidence_summary
-  - web_search
+  - get_ceremonies
+  - searxng_search
   # Write / Act
   - manage_board
   - create_github_issue
   - report_incident
-  - propose_config_change
+  - pr_inspector
   # Conversation
   - react
   - send_update
-  - msg_operator
 
 maxTurns: 25
 
@@ -68,12 +65,6 @@ skills:
     description: Operational helm — the user's single control interface.
     keywords: []
 
-  - name: goal_proposal
-    description: Draft goals.yaml entries from chronic failure clusters.
-    keywords: [goal, proposal, cluster, outcome]
-    systemPromptOverride: |
-      You are Ava performing a goal proposal analysis...
-
   - name: debug_ci_failures
     description: Investigate CI failures, delegate to Quinn, file issues.
     keywords: [ci, failure, build, pipeline]
@@ -81,13 +72,15 @@ skills:
 
 ### Skill-level `systemPromptOverride`
 
-When a skill declares `systemPromptOverride`, the executor uses it instead of the agent's main `systemPrompt` for that specific invocation. This allows structured-output skills (like `goal_proposal` and `diagnose_pr_stuck`) to use narrow, format-enforcing prompts while operational skills use the full conversational prompt.
+When a skill declares `systemPromptOverride`, the executor uses it instead of the agent's main `systemPrompt` for that specific invocation. This allows structured-output skills (like `diagnose_pr_stuck`) to use narrow, format-enforcing prompts while operational skills use the full conversational prompt.
 
 See [Agent Skills Reference](../../../reference/agent-skills) for the full YAML schema and available tools.
 
 ## Available tools
 
 Tools are defined as LangChain tools with zod schemas in `DeepAgentExecutor`. Each wraps an HTTP call to workstacean's own API. Agents only get the tools listed in their `tools:` array — unlisted tools are not available.
+
+The tables below are a representative selection. The canonical, complete tool list is the set of `name:` entries in [`src/executor/executors/deep-agent-executor.ts`](../../../src/executor/executors/deep-agent-executor.ts).
 
 ### Orchestration
 
@@ -109,9 +102,7 @@ Tools are defined as LangChain tools with zod schemas in `DeepAgentExecutor`. Ea
 | `get_branch_drift` | `GET /api/branch-drift` | Dev vs main divergence per project |
 | `get_incidents` | `GET /api/incidents` | Open security/operational incidents |
 | `get_ceremonies` | `GET /api/ceremonies` | List ceremony definitions |
-| `get_cost_summary` | `GET /api/cost-summaries` | Per-agent/skill cost: tokens, duration, dollars |
-| `get_confidence_summary` | `GET /api/confidence-summaries` | Per-agent/skill calibration metrics |
-| `web_search` | SearXNG `/search` | Quick web search (5 results) |
+| `searxng_search` | SearXNG `/search` | Quick web search (5 results) |
 
 ### Write / Act
 
@@ -120,7 +111,6 @@ Tools are defined as LangChain tools with zod schemas in `DeepAgentExecutor`. Ea
 | `manage_board` | `POST /api/board/features/*` | Create or update board features |
 | `create_github_issue` | `POST /api/github/issues` | File GitHub issues on managed repos |
 | `report_incident` | `POST /api/incidents` | File a security/operational incident |
-| `propose_config_change` | `POST /api/config-change/propose` | Propose YAML changes (goals, actions, agent configs) — requires human approval via Discord |
 
 ### Conversation feedback
 
@@ -128,7 +118,6 @@ Tools are defined as LangChain tools with zod schemas in `DeepAgentExecutor`. Ea
 |------|-------------|---------|
 | `react` | `POST /api/discord/react` | Add emoji reaction to triggering message |
 | `send_update` | `POST /api/discord/progress` | Send progress update during long work |
-| `msg_operator` | `POST /api/operator/message` | Direct message to human operator with urgency |
 
 ### Discord operations (protoBot agent)
 

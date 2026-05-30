@@ -387,7 +387,7 @@ Example body for `create`:
 
 ## Gold-standard checklist
 
-A protoAgent that ticks all of these is a first-class fleet citizen — routing, streaming, scheduling, observability, and planner ranking all work without any Workstacean-side tailoring:
+A protoAgent that ticks all of these is a first-class fleet citizen — routing, streaming, scheduling, and observability all work without any Workstacean-side tailoring:
 
 ### Transport & lifecycle
 - [ ] `GET /.well-known/agent-card.json` + `/.well-known/agent.json` both serve the card
@@ -419,8 +419,8 @@ A protoAgent that ticks all of these is a first-class fleet citizen — routing,
 - [ ] Consumer disconnect does not cancel the producer
 
 ### Extensions (cards + runtime)
-- [ ] [`effect-domain-v1`](../extensions/effect-domain-v1) declared on the card for every state-mutating skill (enables L1 planner ranking)
-- [ ] [`worldstate-delta-v1`](../extensions/worldstate-delta-v1) DataPart emitted on the terminal task whenever a tool with known effects succeeds (declared effects must agree with observed deltas — a drift test is cheap)
+- [ ] [`effect-domain-v1`](../extensions/effect-domain-v1) — emit a `worldstate-delta` artifact on terminal tasks so workstacean re-publishes `world.state.delta` for observability
+- [ ] [`worldstate-delta-v1`](../extensions/worldstate-delta-v1) DataPart emitted on the terminal task whenever a state-mutating tool succeeds
 - [ ] [`cost-v1`](../extensions/cost-v1) `{usage, durationMs, costUsd?}` DataPart on every terminal task that ran an LLM. Capture token usage from your model events (LangChain: `on_chat_model_end` → `output.usage_metadata`); compute `durationMs` from `created_at`/`updated_at`; emit only when usage was actually tracked. `costUsd` is optional — derive from per-model rates or capture from the gateway response. Reference: Quinn `_terminal_artifact_parts` + `store.add_usage` (PR #56).
 - [ ] [`confidence-v1`](../extensions/confidence-v1) `{confidence, explanation}` populated when the agent can self-assess
 - [ ] Success contract: `state: completed` means the agent actually achieved the goal, not just that the skill returned without crashing
@@ -439,4 +439,4 @@ A protoAgent that ticks all of these is a first-class fleet citizen — routing,
 - [A2A Streaming (SSE)](./a2a-streaming) — SSE event protocol in detail
 - [Create a Ceremony](./create-a-ceremony) — ceremony YAML schema
 - [Workspace files reference](../../reference/workspace-files)
-- [`effect-domain-v1`](../extensions/effect-domain-v1), [`worldstate-delta-v1`](../extensions/worldstate-delta-v1), [`cost-v1`](../extensions/cost-v1), [`confidence-v1`](../extensions/confidence-v1) — the four A2A extensions covered by the planner's ranking model
+- [`effect-domain-v1`](../extensions/effect-domain-v1), [`worldstate-delta-v1`](../extensions/worldstate-delta-v1), [`cost-v1`](../extensions/cost-v1), [`confidence-v1`](../extensions/confidence-v1) — the A2A observability extensions

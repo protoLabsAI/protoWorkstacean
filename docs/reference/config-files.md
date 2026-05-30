@@ -92,7 +92,7 @@ Each has a `.example` counterpart — copy it to bootstrap a new deployment:
 | `workspace/a2a.yaml` | `workspace/a2a.yaml.example` — outbound A2A delivery targets for the scheduler |
 | `workspace/incidents.yaml` | `workspace/incidents.yaml.example` |
 
-Schema/behavior files (`actions.yaml`, `goals.yaml`, `ceremonies/`) are tracked and committed as-is.
+Behavior files under `ceremonies/` are tracked and committed as-is.
 
 ---
 
@@ -114,11 +114,11 @@ systemPrompt: |
   ...
 
 # Workstacean bus tools this agent may call.
-# Available: publish_event, get_world_state, get_incidents, report_incident,
+# Available: publish_event, get_projects, get_incidents, report_incident,
 #            get_ceremonies, run_ceremony
 tools:
   - publish_event
-  - get_world_state
+  - get_projects
   - report_incident
 
 # Agents this agent may delegate to (orchestrator role only, DeepAgent pattern)

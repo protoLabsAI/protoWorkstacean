@@ -2,7 +2,7 @@
 title: Dashboard
 ---
 
-The Workstacean dashboard is a static Astro + Preact site at `dashboard/` that replaces the legacy event viewer. It is the primary operational UI for the world engine, covering system health, world state, live events, goals, and project CI.
+The Workstacean dashboard is a static Astro + Preact site at `dashboard/` that replaces the legacy event viewer. It is the primary operational UI, covering system health, the fleet, live events, outcomes, cost, project CI, and skill traces.
 
 ## Quick facts
 
@@ -23,10 +23,15 @@ All pages live under `dashboard/src/pages/`. Each one renders a `DashboardLayout
 | Route | Component | Polls | Notes |
 |---|---|---|---|
 | `/` | `OverviewGrid` | 30 s | Health cards for services, agents, CI, PRs, flow efficiency, security, HITL pending |
-| `/world-state` | `WorldStateViewer` | on demand | Live world-state snapshot with domain cards + JSON tree |
+| `/agents` | `AgentsView` | 30 s | Fleet roster with per-agent health + skill coverage |
 | `/events` | `EventStream` | WebSocket | Real-time bus event feed with filter, tabs, sticky header |
-| `/goals` | `GoalStatus` + `OutcomesTable` | 30 s | Declarative goal pass/fail + action dispatch history |
+| `/fleet-cost` | `FleetCostView` | 60 s | Per-agent LLM token/cost rollups |
+| `/outcomes` | `UnifiedOutcomesView` | 15 s | Skill/action dispatch outcome history |
 | `/projects` | `ProjectsView` | 60 s | Per-project CI health bars + PR pipeline badges |
+| `/system` | `SystemGraph` | WebSocket | Live plugin/agent topology graph |
+| `/trace` | `SkillTrace` | on demand | Per-correlationId skill dispatch trace |
+
+Plugin widget pages are generated at build time by the `[dynamic].astro` catch-all from `/api/widgets`.
 
 The sidebar nav is declared in `dashboard/src/layouts/DashboardLayout.astro`. The header WebSocket dot connects to `/ws` for a live/disconnected indicator, independent of the page-level polling.
 
@@ -44,7 +49,7 @@ Cache TTLs (defined in `api.ts`):
 
 | Endpoint | TTL |
 |---|---|
-| `/api/services`, `/api/agent-health`, `/api/flow-metrics` | 30 s |
+| `/api/services`, `/api/agent-health` | 30 s |
 | `/api/security-summary` | 60 s |
 | `/api/pr-pipeline` | 2 min |
 | `/api/ci-health` | 5 min |
@@ -99,5 +104,4 @@ The dashboard itself has no env vars — it's a static build. All runtime config
 ## Related docs
 
 - [HTTP API](./http-api) — every endpoint the dashboard consumes
-- [scheduler + ceremonies](./world-engine) — what the world-state viewer is showing
 - [Bus topics](./bus-topics) — events streamed to `/events`

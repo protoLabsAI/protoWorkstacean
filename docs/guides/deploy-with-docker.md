@@ -91,12 +91,10 @@ The `workspace/` directory is mounted read-write so configuration changes can be
     frank.yaml
   agents.yaml
   projects.yaml
-  goals.yaml
-  actions.yaml
+  channels.yaml
   ceremonies/
     daily-standup.yaml
     security-triage.yaml
-  domains.yaml
 ```
 
 After editing any workspace file, restart the container:
@@ -120,7 +118,6 @@ Expected startup output:
 [agent-runtime] loaded agent: ava (general, 1 skill)           ← in-process chat agent
 [skill-broker] Registered 3 A2A agent(s)                       ← protomaker, quinn, etc.
 [ceremony-plugin] loaded 5 ceremonies
-[world-state] domain discovery: 3 domains registered
 [http] listening on :3000
 [workstacean] ready
 ```

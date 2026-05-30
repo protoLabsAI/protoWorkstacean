@@ -72,7 +72,7 @@ role: orchestrator | qa | devops | content | research | general
 model: string                   # LLM model alias (e.g. "protolabs/reasoning", "claude-sonnet-4-6")
 systemPrompt: string            # Full system prompt
 tools:                          # Workstacean bus tools this agent may call
-  - string                      # publish_event | get_world_state | get_incidents |
+  - string                      # publish_event | get_projects | get_incidents |
                                 # report_incident | get_ceremonies | run_ceremony
                                 # — or [] for a tool-less chat agent
 canDelegate?:                   # Agent names this agent may delegate to (2 levels max)

@@ -36,14 +36,15 @@ Both are `FunctionExecutor`-backed (no LLM at the executor itself; LLM lives one
    │   • maxFailureRate1h     │
    └──────────────┬───────────┘
                   │ exposed via getFleetHealth() collector
-                  ▼  (called by WorldStateEngine every 60s)
+                  ▼  (called by FleetAlertsEvaluatorPlugin)
    ┌──────────────────────────┐
-   │  world-state domain:     │
-   │  agent_fleet_health      │
+   │ fleet_alerts ceremony     │
+   │   (evaluate_fleet_        │
+   │    thresholds, every 60s) │
+   │   trips thresholds →      │
+   │   agent.skill.request     │
    └──────────────┬───────────┘
                   │
-                  ▼   (?) threshold evaluation
-                  │       fleet_alerts ceremony polls every 60s
                   ▼
    ┌──────────────────────────┐  ┌──────────────────────────┐
    │ alert.fleet_agent_stuck  │  │ action.pr_update_branch  │
@@ -64,7 +65,7 @@ Both are `FunctionExecutor`-backed (no LLM at the executor itself; LLM lives one
                                                  ▼
                                   ┌──────────────────────────┐
                                   │ PrRemediatorPlugin       │
-                                  │  reads pr_pipeline state │
+                                  │  in-memory inFlight Map  │
                                   │  publishes GitHub mut.   │
                                   │  or HITL escalation      │
                                   └──────────────────────────┘
@@ -79,9 +80,7 @@ sequenceDiagram
     autonumber
     participant SD as SkillDispatcher
     participant FH as AgentFleetHealth
-    participant WSE as WorldStateEngine<br/>(60s tick)
-    participant TE as Threshold evaluator<br/>(external)
-    participant AD as ActionDispatcher
+    participant TE as FleetAlertsEvaluator<br/>(fleet_alerts ceremony, 60s)
     participant AE as AlertSkillExecutor
     participant Bus as Bus
     participant DP as DiscordPlugin
@@ -91,11 +90,9 @@ sequenceDiagram
     Bus->>FH: deliver
     FH->>FH: _record(): rolling window + synthetic-actor filter
 
-    Note over WSE,FH: every 60s
-    WSE->>FH: getFleetHealth()
-    FH-->>WSE: FleetHealthSnapshot
-
-    Note over TE: FleetAlertsEvaluatorPlugin<br/>(fleet_alerts ceremony, every 60s)
+    Note over TE,FH: every 60s (fleet_alerts ceremony)
+    TE->>FH: getFleetHealth()
+    FH-->>TE: FleetHealthSnapshot
     TE->>Bus: agent.skill.request<br/>(skill=alert.fleet_agent_stuck)
     Bus->>SD: deliver
     SD->>AE: execute(req)
@@ -122,7 +119,7 @@ sequenceDiagram
     PRE->>Bus: pr.remediate.update_branch
     Bus->>PR: deliver
 
-    PR->>PR: read pr_pipeline world state
+    PR->>PR: look up / create inFlight entry
     PR->>GH: PATCH /repos/{o}/{r}/pulls/{n}/branch
     GH-->>PR: response
 
@@ -147,7 +144,6 @@ sequenceDiagram
 | Topic | Published by | Subscribed by | File:line |
 |---|---|---|---|
 | `autonomous.outcome.#` | SkillDispatcher | AgentFleetHealthPlugin | `src/plugins/agent-fleet-health-plugin.ts:159` |
-| `agent_fleet_health` (world-state) | FleetHealth.getFleetHealth() collector | WorldStateEngine | `src/plugins/agent-fleet-health-plugin.ts:180` |
 
 ### Alerts (20 skills total — sample)
 
@@ -156,7 +152,7 @@ sequenceDiagram
 | `alert.fleet_agent_stuck` | high | `message.outbound.discord.alert` |
 | `alert.fleet_skill_orphaned` | medium | `message.outbound.discord.alert` |
 | `alert.fleet_cost_over_budget` | high | `message.outbound.discord.alert` |
-| … (full list in `AlertSkillExecutorPlugin.ALERT_SKILLS`, [line 39–67](../../src/plugins/AlertSkillExecutorPlugin.ts)) | | |
+| … (full list in `ALERT_SKILLS`, [line 39–67](../../src/plugins/alert-skill-executor-plugin.ts)) | | |
 
 All 20 are `FunctionExecutor` registrations with priority=5, fire-and-forget, no LLM.
 
@@ -242,7 +238,6 @@ Key transitions ([pr-remediator.ts:604+](../../lib/plugins/pr-remediator.ts)):
 - **Alert thresholds are hard-coded in source** — `WINDOW_MS = 24h`, `MAX_RECENT_FAILURES = 10`. No env override. Changing these requires a rebuild.
 - **Cost calculation depends on `MODEL_RATES`** ([lib/types/budget.ts](../../lib/types/budget.ts)) — hard-coded model price table. When LiteLLM gateway adds a new model, this table must be updated or `costUsd` is zero for that model.
 - **Outcome attribution is write-time, not read-time** ([line 281](../../src/plugins/agent-fleet-health-plugin.ts)) — `systemActor` is bucketed *as outcomes arrive*. If `ExecutorRegistry` enrolls a new agent later, prior outcomes for that name stay in `systemActors[]`. Restart required to re-bucket.
-- **`agent.runtime.activity.tool.call` and `agent.skill.latency` topics are referenced in some commentary but NOT in source** ([all-topics.ts](../../src/event-bus/all-topics.ts)) — see [flow-agent-runtime-telemetry](flow-agent-runtime-telemetry.md). If a tile or alert depends on them, it's broken today.
 
 ---
 

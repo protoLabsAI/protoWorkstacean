@@ -2,7 +2,7 @@
 title: "Extension: x-protolabs/cost-v1"
 ---
 
-`x-protolabs/cost-v1` records per-(agent, skill) token + wall-time actuals for every A2A dispatch, feeds a rolling in-memory store, and publishes `autonomous.cost.*` observability events. The planner reads from the store to rank candidate skills by observed success rate + cost-per-call.
+`x-protolabs/cost-v1` records per-(agent, skill) token + wall-time actuals for every A2A dispatch, feeds a rolling in-memory store, and publishes `autonomous.cost.*` observability events. The store surfaces observed success rate + cost-per-call for dashboards and fleet-health.
 
 **Extension URI**: `https://proto-labs.ai/a2a/ext/cost-v1`
 
@@ -10,12 +10,12 @@ title: "Extension: x-protolabs/cost-v1"
 
 ## Purpose
 
-Two signals the planner needs but couldn't get from the agent card alone:
+Two signals that the agent card alone can't provide:
 
 - **Success rate** — how often this (agent, skill) combination actually succeeds, independent of the agent's self-declared confidence
 - **Wall-time cost** — how long a call takes end-to-end, including retries and HITL round-trips
 
-Without observations, the planner falls back to the card's confidence field (what the agent claims about itself). cost-v1 replaces self-advertisement with measurement once ≥ 5 samples exist per key.
+These are *measured* rather than self-advertised: the store accumulates per-key actuals so dashboards and fleet-health reflect observed behavior once samples exist.
 
 ---
 
@@ -111,6 +111,6 @@ Quinn currently emits `usage` + `durationMs` only — `costUsd` capture from the
 
 ## Related
 
-- [`confidence-v1`](confidence-v1) — companion extension for agent-reported confidence, read alongside cost in the same planner ranking
-- [`effect-domain-v1`](effect-domain-v1) — card-side effect declarations; Arc 6.4 ranking layers observed cost/confidence on top
+- [`confidence-v1`](confidence-v1) — companion extension for agent-reported confidence, surfaced alongside cost
+- [`effect-domain-v1`](effect-domain-v1) — after-hook that re-publishes agent-reported `world.state.delta` for observability
 - [`worldstate-delta-v1`](worldstate-delta-v1) — artifact format for observed mutations

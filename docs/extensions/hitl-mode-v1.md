@@ -143,4 +143,3 @@ if (decl && HITL_MODE_ORDER[decl.mode] >= HITL_MODE_ORDER.gated) {
 
 - [blast-v1](blast-v1) — per-skill scope declaration; compose with hitl-mode to gate high-impact skills
 - [Build an A2A Agent](../guides/build-an-a2a-agent) — agent-author recipe for the A2A spec surface
-- [self-improving-loop](../explanation/self-improving-loop) — how observations feed back into planner + goal proposals
