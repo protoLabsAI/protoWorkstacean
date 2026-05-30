@@ -75,6 +75,7 @@ Fine-grained PAT scoped to the target repo:
 |-------|-----------|-------------|
 | `message.inbound.github.{owner}.{repo}.{event}.{number}` | Inbound | @mention received |
 | `message.outbound.github.{owner}.{repo}.{number}` | Outbound | Reply to post as comment |
+| `github.issue.opened` | Inbound (additive) | Every issue opened/reopened — feeds the protoMaker board bridge (see below) |
 
 ## Inbound Payload
 
@@ -114,6 +115,25 @@ Match `correlationId` from the inbound message — the plugin uses it to look up
 | `pull_request_review_comment` | Review comment containing `@mention` | `pr_review` |
 | `pull_request` | PR opened/updated with `@mention` in body | `pr_review` |
 | `repository` (created) | New repository created in the org | `message.inbound.onboard` |
+
+## GitHub issue → protoMaker board
+
+Independent of the @mention triage path, every opened or reopened issue is forwarded to protoMaker's board as a backlog idea — but only for repos in the project registry.
+
+**Topic.** On `issues` with action `opened` or `reopened`, `GitHubPlugin` publishes `github.issue.opened` (additive — it fires for every such issue regardless of @mention or skill routing). `ProtoMakerBoardBridgePlugin` (`lib/plugins/protomaker-board-bridge.ts`) is the sole subscriber.
+
+**Registry-gating.** The bridge resolves the repo against the project registry (`registry.getByGithub("{owner}/{repo}")`). If the repo is not a managed project, the issue is ignored — workstacean's own triage path owns those independently.
+
+**Forward.** For a managed repo, the bridge POSTs to `{PROTOMAKER_API_BASE}/api/engine/signal/submit` (default `http://protomaker-server:3008`) with header `X-API-Key`. The signal body carries `source: "github"`, the issue title+body as `content`, a `channelContext` with the resolved `projectPath` / `issueNumber` / `repository`, and an `a2a`-style `trace` block (the dispatch `correlationId` as `traceId`) so the GitHub→board→PRD flow links into one Langfuse trace.
+
+**Env.**
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `PROTOMAKER_API_BASE` | protoMaker board-intake base URL | `http://protomaker-server:3008` |
+| `AUTOMAKER_API_KEY` | Value sent as the `X-API-Key` header | (none — if unset, the bridge logs a warning and skips forwarding) |
+
+**Dedup.** protoMaker's `SignalIntakeService.submitSignal` dedups on `github:{repository}#{issueNumber}`, so a reopened or redelivered issue does not double-create a board idea.
 
 ## Org Webhook: repository.created
 

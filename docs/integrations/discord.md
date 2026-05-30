@@ -210,6 +210,8 @@ For replies to @mentions and slash commands, match `correlationId` from the inbo
 
 Reacting to any message with 📋 triggers a `bug_triage` skill request using the message content. Useful for quick bug filing from a chat log.
 
+The reaction is **admin-gated** (`lib/plugins/discord/inbound.ts`): the reactor must be in the bot's configured `admins` list, otherwise the reaction is ignored. (If no `admins` list is configured, every reactor is allowed.)
+
 ## Cron Integration
 
 Cron events routed through RouterPlugin that include a `channel` in their payload are delivered to Discord via push:

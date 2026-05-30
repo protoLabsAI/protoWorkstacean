@@ -2,7 +2,7 @@
 title: "Extension: x-protolabs/cost-v1"
 ---
 
-`x-protolabs/cost-v1` records per-(agent, skill) token + wall-time actuals for every A2A dispatch, feeds a rolling in-memory store, and publishes `autonomous.cost.*` observability events. The store surfaces observed success rate + cost-per-call for dashboards and fleet-health.
+`x-protolabs/cost-v1` records per-(agent, skill) token + wall-time actuals for every A2A dispatch, feeds a rolling in-memory store, and publishes `autonomous.cost.*` observability events. The store surfaces observed success rate + cost-per-call for the observability API's cost-summary dashboards.
 
 **Extension URI**: `https://proto-labs.ai/a2a/ext/cost-v1`
 
@@ -15,7 +15,7 @@ Two signals that the agent card alone can't provide:
 - **Success rate** — how often this (agent, skill) combination actually succeeds, independent of the agent's self-declared confidence
 - **Wall-time cost** — how long a call takes end-to-end, including retries and HITL round-trips
 
-These are *measured* rather than self-advertised: the store accumulates per-key actuals so dashboards and fleet-health reflect observed behavior once samples exist.
+These are *measured* rather than self-advertised: the store accumulates per-key actuals so dashboards reflect observed behavior once samples exist.
 
 ---
 
@@ -75,15 +75,17 @@ const summary = defaultCostStore.summary("quinn", "pr_review");
 // }
 ```
 
-`allSummaries()` returns one entry per (agent, skill) pair seen — drives the fleet cost-per-outcome dashboard view.
+`allSummaries()` returns one entry per (agent, skill) pair seen — read by the observability API (`GET /api/cost-summaries`) to drive the cost-per-outcome dashboard view.
 
 **Intentionally in-memory.** Cost tracking here is observational telemetry, not billing. A durable persistence layer can subscribe to `autonomous.cost.#` and ingest samples independently.
 
 ---
 
-## Fleet-health integration
+## Consumers
 
-`defaultCostStore` is read by `AgentFleetHealthPlugin` to compute per-(agent, skill) success rate, average wall time, and dollar cost. The same data feeds health-weighted dispatch inside `ExecutorRegistry`: when multiple agents serve the same skill, the registry selects probabilistically by `successRate × (1 / (1 + costPerSuccessfulOutcome))`. Cold candidates (< 5 samples) fall back to neutral weight 1.0 so new agents get tried.
+`defaultCostStore` is read by the **observability API** (`src/api/observability.ts`, `GET /api/cost-summaries`), which surfaces per-(agent, skill) success rate, average wall time, and dollar cost for dashboards.
+
+Health-weighted dispatch inside `ExecutorRegistry` is a **separate** path — it sources its metrics from `AgentFleetHealthPlugin` (which aggregates `autonomous.outcome.#` events over a rolling window), not from this cost store. When multiple agents serve the same skill, the registry selects probabilistically **per agent** by `successRate × (1 / (1 + costPerSuccessfulOutcome))` (`_healthWeight` in `executor-registry.ts`). The cold-start gate is on observed outcomes: an agent with **zero recorded outcomes** (`totalOutcomes === 0`) falls back to neutral weight 1.0 so new agents still get tried.
 
 ---
 

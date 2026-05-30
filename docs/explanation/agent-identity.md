@@ -76,9 +76,9 @@ If a message hits the shared protoBot client (guild @-mention, DM to protoBot di
 
 The `onboard_project` skill is owned by the protoMaker team, but the `provision_discord` skill that creates Discord channels is owned by Quinn. This is a chain: protoMaker calls Quinn via `chain[onboard_project]: quinn/provision_discord`.
 
-The reason is that Quinn has the Discord API client code and the knowledge of the standard channel structure (dev, alerts, releases). The protoMaker team handles the broader project provisioning logic (GitHub scaffold, write-back to `projects.yaml`). The chain keeps these responsibilities separate.
+The reason is that Quinn has the Discord API client code and the knowledge of the standard channel structure (dev, alerts, releases). The protoMaker team handles the broader project provisioning logic (GitHub scaffold, write-back to the protoMaker project registry — the source of truth for project metadata). The chain keeps these responsibilities separate.
 
-When the channel IDs come back from Discord, they are written to both `settings.json` in the target repo and `projects.yaml` in the protoWorkstacean repo. This makes the IDs available to both the agent running in the target repo context and the workstacean routing layer.
+When the channel IDs come back from Discord, they are written to `settings.json` in the target repo and recorded in the protoMaker project registry. This makes the IDs available to both the agent running in the target repo context and the workstacean routing layer.
 
 ---
 
