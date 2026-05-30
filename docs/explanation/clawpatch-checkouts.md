@@ -2,7 +2,7 @@
 title: Clawpatch checkouts — on-demand source for any repo
 ---
 
-_RFC + design for the checkout cache that lets Quinn's `clawpatch_review` work against every repo in `workspace/projects.yaml`, not just the three currently mounted into the container._
+_RFC + design for the checkout cache that lets Quinn's `clawpatch_review` work against every repo in the protoMaker project registry, not just the few that used to be bind-mounted into the container. Shipped: `src/api/clawpatch.ts` now resolves repos through a `CheckoutCache` gated by the project registry — there is no `BUILT_IN_REPO_PATHS` and no `projects.yaml`._
 
 ---
 
@@ -15,7 +15,7 @@ _RFC + design for the checkout cache that lets Quinn's `clawpatch_review` work a
 
 A repo without an entry — or with an entry whose mount the operator forgot to add to the compose file — gets a hard error: _"repo 'X' is not mounted in this container — only mapped+mounted repos work today (…). On-demand PR checkouts are not implemented."_
 
-That ceiling is everywhere Quinn touches a repo she didn't grow up with. As we keep onboarding repos (every entry in `workspace/projects.yaml` is a candidate), the gap widens: edit compose, redeploy, then she can review it. Worse, the mount is a snapshot of the operator's local checkout, not the PR's actual code — Quinn was technically reviewing whatever ref happened to be checked out on the host, not the PR head.
+That ceiling is everywhere Quinn touches a repo she didn't grow up with. As we keep onboarding repos (every entry in the protoMaker project registry is a candidate), the gap widens: edit compose, redeploy, then she can review it. Worse, the mount is a snapshot of the operator's local checkout, not the PR's actual code — Quinn was technically reviewing whatever ref happened to be checked out on the host, not the PR head.
 
 We want a self-service checkout cache: when Quinn asks to review a PR on a repo she's never seen, the API fetches the exact ref from GitHub, extracts it locally, hands the path to clawpatch, and caches the extracted tree for the next call.
 
@@ -75,7 +75,7 @@ Eviction lives in a daily ceremony, **not** inline on each request — see [C3](
 
 Three guards, all enforced before the extract:
 
-1. **Allowlist gate**: `repo` must match an entry in `workspace/projects.yaml`. Same registry that `create_github_issue` checks. No arbitrary `owner/name` from a tool call extracts code into our data volume — Quinn can only review repos we've already declared we manage.
+1. **Allowlist gate**: `repo` must match a GitHub coordinate in the protoMaker **project registry** (`projectRegistry.getGithubCoords()` in `src/api/clawpatch.ts`). Same registry boundary that `create_github_issue` checks. No arbitrary `owner/name` from a tool call extracts code into our data volume — Quinn can only review repos we've already declared we manage.
 2. **Tarball entry sanitization**: every entry path is rejected if it
    * starts with `/`,
    * contains `..` segments,
@@ -108,7 +108,7 @@ export interface CheckoutCache {
    * the new path. Touches last-access on hit.
    *
    * Throws if:
-   *   - repo is not in the projects.yaml allowlist
+   *   - repo is not in the project-registry allowlist
    *   - the GitHub API returns non-2xx
    *   - tarball validation fails (oversize, traversal, symlink)
    */
@@ -122,19 +122,18 @@ export interface CheckoutCache {
 }
 ```
 
-`src/api/clawpatch.ts:resolveRepoPath()` becomes:
+As shipped, `src/api/clawpatch.ts:resolveRepoPath()` (now `resolveRepoPath`) routes every repo through the project-registry allowlist gate and then the `CheckoutCache` — there is no `BUILT_IN_REPO_PATHS` bind-mount fast path (see the sign-off decision below). The only local-dev escape hatch is the `CLAWPATCH_REPO_PATH_MAP` override; everything else extracts the PR head SHA on demand:
 
 ```ts
-async function resolveRepoPath(repo: string, sha: string): Promise<string | null> {
-  const override = readOverrideMap()[repo];
-  if (override && existsSync(override)) return override;            // fast path for dev
-  const builtIn = BUILT_IN_REPO_PATHS[repo];
-  if (builtIn && existsSync(builtIn)) return builtIn;               // fast path for mounted repos
-  return await checkoutCache.resolve(repo, sha);                    // on-demand path
-}
+// roughly:
+const allow = new Set(projectRegistry?.getGithubCoords() ?? []);
+if (!allow.has(repo)) { /* reject — not a managed repo */ }
+const override = readOverrideMap()[repo];
+if (override && existsSync(override)) return override;            // local-dev only
+return await getCheckoutCache().resolve(repo, since);             // on-demand checkout
 ```
 
-Note: the function gets a new `sha` parameter, so the route handler now requires `since` (the PR head SHA) when the repo isn't mounted. That's already what clawpatch is given for diff anchoring — no new caller-side change, we just route it through the resolver. Existing built-in callers that don't pass a SHA still hit the fast path because the override / built-in check happens first.
+The handler requires `since` (the PR head SHA) so the cache is content-addressed by ref — that's already what clawpatch is given for diff anchoring, so there's no new caller-side change.
 
 ---
 

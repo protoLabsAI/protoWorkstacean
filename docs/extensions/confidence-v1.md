@@ -92,9 +92,9 @@ Agents that don't implement the extension return normal A2A responses — the in
 
 ---
 
-## Dashboard + fleet-health integration
+## Dashboard integration
 
-`defaultConfidenceStore` is read by `AgentFleetHealthPlugin` to surface per-(agent, skill) calibration metrics in the fleet view: `highConfFailures`, `avgConfidenceOnSuccess`, calibration-inversion detection. External consumers can pull `GET /api/confidence-summaries` for the same data.
+`defaultConfidenceStore` is read by the **observability API** (`src/api/observability.ts`, `GET /api/confidence-summaries`) to surface per-(agent, skill) calibration metrics: `highConfFailures`, `avgConfidenceOnSuccess`, calibration-inversion detection. (It is not consumed by `AgentFleetHealthPlugin`, which sources its metrics from `autonomous.outcome.#` events.)
 
 `avgConfidenceOnSuccess` (not the overall average) is the more informative metric — it answers "when this agent succeeds at this skill, how sure is it?" — useful for calibration analysis.
 
@@ -112,5 +112,5 @@ Payload is the raw `ConfidenceSample`. Subscribers: dashboard calibration view, 
 
 ## Related
 
-- [`cost-v1`](cost-v1) — companion metric; surfaced alongside confidence in fleet-health
+- [`cost-v1`](cost-v1) — companion metric; surfaced alongside confidence in the observability API
 - [`effect-domain-v1`](effect-domain-v1) — card-side declaration of effects; observed confidence overrides the declared prior once warm

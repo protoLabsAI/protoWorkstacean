@@ -98,7 +98,7 @@ When someone @mentions the bot on this repo, RouterPlugin injects `targets: ["qu
     description: Ops escalation channel
 ```
 
-Requires SignalPlugin to be fully wired (currently a stub — see `lib/plugins/signal.ts`).
+SignalPlugin (`lib/plugins/signal.ts`) is fully wired — a WebSocket listener for inbound messages plus an outbound sender. Configure it with `SIGNAL_URL` + `SIGNAL_NUMBER`.
 
 ### Slack
 
@@ -110,34 +110,21 @@ Requires SignalPlugin to be fully wired (currently a stub — see `lib/plugins/s
     agent: quinn
 ```
 
-Requires SlackPlugin (not yet implemented).
+The channel registry accepts `platform: slack` entries, but **no SlackPlugin exists yet** — there is nothing to deliver or receive Slack messages. The schema is registry-ready; the plugin is not implemented.
 
 ---
 
 ## Adding a channel at runtime
 
-No restart required. Use the API:
+Edit `workspace/channels.yaml` directly — the file hot-reloads every 5 seconds, so no restart is required. There is **no** `POST /api/channels` write endpoint; channels are managed through the YAML file.
+
+A read endpoint exists but is currently a **hardcoded empty stub**:
 
 ```bash
-curl -X POST http://localhost:3000/api/channels \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "frank-infra",
-    "platform": "discord",
-    "channelId": "1122334455667788",
-    "agent": "frank",
-    "agentBotTokenEnv": "FRANK_DISCORD_TOKEN",
-    "description": "Infrastructure and deployments"
-  }'
+curl http://localhost:3000/api/channels   # GET — always returns { "success": true, "data": [] }
 ```
 
-The entry is written to `workspace/channels.yaml` and the registry reloads within 5 seconds.
-
-List all channels:
-
-```bash
-curl http://localhost:3000/api/channels
-```
+It is wired in `src/api/operations.ts` and does not yet reflect the live registry.
 
 ---
 

@@ -54,9 +54,9 @@ a2a_handler → _submit_task(caller_trace=) → chat_stream_fn_factory(caller_tr
 
 Quinn's Langfuse trace now carries `caller_trace_id` and `caller_span_id` in its metadata. An operator can filter Langfuse by `metadata.caller_trace_id = <uuid>` to find all agent traces spawned from a single Workstacean dispatch.
 
-### Sending side (Workstacean — TODO)
+### Sending side (Workstacean — implemented)
 
-`a2a-executor.ts` needs to stamp the current Langfuse trace context into outbound `params.metadata["a2a.trace"]`. The extension interceptor hook at line 221 is the natural injection point — extensions' metadata is already merged into outbound params.
+`src/index.ts` registers `registerLangfuseTraceExtension()` (`src/executor/extensions/langfuse-trace.ts`), an A2A extension whose `before` hook stamps the trace context onto outbound `params.metadata["a2a.trace"]`. The dispatch's `correlationId` serves as the `traceId` (it uniquely identifies the whole skill-dispatch chain); the extension also stamps `callerAgent`, `skill`, and `project: "protolabs"`. Extensions' metadata is merged into outbound params by `A2AExecutor`, so no per-call wiring is needed.
 
 ## Cross-referencing in Langfuse
 

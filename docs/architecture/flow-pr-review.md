@@ -18,7 +18,18 @@ Quinn's executor (DeepAgent) executes `pr_review` and decides one of three verdi
 | `review_comment` | COMMENTED |
 | `review_request_changes` | CHANGES_REQUESTED |
 
-The verdict tool call publishes to `message.outbound.github.{owner}.{repo}.{number}` and GitHubPlugin posts to the GitHub API.
+These tool calls land on the PR-inspector HTTP backend (`POST /api/pr/inspect`, implemented in [`src/api/pr-inspector.ts`](../../src/api/pr-inspector.ts)), which authenticates as `@protoquinn[bot]` and POSTs the review to the GitHub REST API. On success it publishes `quinn.review.submitted` on the bus for any verdict-reactive subscriber (dashboards, embeds).
+
+### Chokepoint invariant: terminal-CI guard
+
+`pr-inspector.ts` enforces `guardTerminalCi` before a **formal** verdict (`APPROVE` / `REQUEST_CHANGES`) is posted. A formal verdict locks in a settled judgment — APPROVE enables auto-merge, REQUEST_CHANGES sets `reviewDecision` and blocks it — so it must not land while CI is still in flight:
+
+- If any CI check is not yet terminal (`status !== "completed"`), the verdict is **held to COMMENT** (non-blocking). The formal PASS/FAIL lands on a later pass once every check is terminal. Repos with no checks at all are terminal by definition.
+- The guard **fails closed**: an unknown CI state is never treated as terminal.
+
+This is the same chokepoint-invariant shape as cooldown / target-guard / actor-filter / destructive-verdict (see [chokepoint-invariants](chokepoint-invariants.md)).
+
+**CI-access (403) gap.** If the reviewer's token gets a `403` reading check-runs (an App-scope / reviewer-side access gap, surfaced as `CiAccessError`), the guard cannot confirm CI is terminal, so it also holds the verdict to COMMENT rather than locking one in on unverified CI. `check_ci` reports the 403 plainly; the formal verdict waits until CI is actually readable and terminal.
 
 ---
 
@@ -59,19 +70,20 @@ The verdict tool call publishes to `message.outbound.github.{owner}.{repo}.{numb
    │                          │             review_comment /
    │                          │             review_request_changes."
    └──────────────┬───────────┘
-                  │ tool call
+                  │ tool call → POST /api/pr/inspect
                   ▼
    ┌──────────────────────────┐
-   │ message.outbound.github. │  payload: { type: "review_approve" | … ,
-   │   {owner}.{repo}.{n}     │             body, event }
+   │ pr-inspector.ts          │  guardTerminalCi:
+   │  (auth @protoquinn[bot]) │   APPROVE/REQUEST_CHANGES held to
+   │                          │   COMMENT unless every CI check terminal
    └──────────────┬───────────┘
-                  ▼
-            GitHubPlugin._postComment()
-                  │
+                  │ also publishes quinn.review.submitted
                   ▼
             GitHub REST API
         POST /repos/{owner}/{repo}/pulls/{n}/reviews
 ```
+
+The chat-reply path (Quinn answering a comment, no verdict) still flows through `message.outbound.github.{o}.{r}.{n}` → `GitHubPlugin._postComment`. Only the formal verdict tools use the `pr-inspector.ts` backend.
 
 ---
 
@@ -129,7 +141,8 @@ sequenceDiagram
 | `message.inbound.github.{o}.{r}.pull_request.{n}` | GitHubPlugin._handleAutoReview | RouterPlugin | `lib/plugins/github.ts:697,632` |
 | `agent.skill.request` (skill=pr_review) | RouterPlugin (re-emits with target) | SkillDispatcher | `src/router/router-plugin.ts:272` |
 | `agent.skill.response.{correlationId}` | SkillDispatcher | GitHubPlugin (pendingComments match) | `src/executor/skill-dispatcher-plugin.ts:96,182,195` |
-| `message.outbound.github.{o}.{r}.{n}` | Quinn (via tool call) | GitHubPlugin._postComment | `lib/plugins/github.ts:298,375` |
+| `message.outbound.github.{o}.{r}.{n}` | Quinn (chat-reply path, via tool call) | GitHubPlugin._postComment | `lib/plugins/github.ts:298,375` |
+| `quinn.review.submitted` | PR-inspector backend (after a verdict posts) | dashboards / verdict-reactive subscribers | `src/api/pr-inspector.ts` |
 | `flow.item.{created,updated,completed}` | SkillDispatcher | telemetry / dashboard PR-1/2/3 tiles | `src/executor/skill-dispatcher-plugin.ts:275,370,418` |
 
 ---
@@ -178,7 +191,7 @@ Note this is separate from #437 cooldown (which is per-skill-per-repo and 30s) �
 
 - **Cooldown silently drops review #2 within 30s** — if a PR is opened and immediately rebased, the second event hits dispatcher cooldown and silently drops. Operator sees no review for the second push. Visible only in `console.warn`. See [chokepoint-invariants](chokepoint-invariants.md) re: missing dispatch-drop telemetry.
 - **No timeout on Quinn's execution** — same as the general dispatcher gap; Quinn could hang indefinitely on a large diff. Mitigation: DeepAgent has its own `maxTurns` limit and per-tool timeouts.
-- **Verdict tool calls are advisory** — Quinn could in principle issue no verdict (just a chat reply). The PR-review prompt instructs the verdict, but it's an LLM, not a formal contract. If no verdict is issued, GitHubPlugin posts the text response as a comment (default outbound path) and no formal review event is created on GitHub.
+- **Formal verdicts are guarded, not unconditional** — a `review_approve` / `review_request_changes` tool call does **not** unconditionally post that GitHub review. `guardTerminalCi` (in `pr-inspector.ts`) downgrades it to COMMENT whenever CI is still pending or unreadable (403). So a verdict tool call carries a real contract: it posts the formal review only once every CI check is terminal. Quinn may also issue no verdict at all (just a chat reply), in which case no formal review event is created.
 - **Self-cascade guard does NOT apply to PRs** — by design. Quinn-authored PRs *should* be reviewed. If Quinn ever starts auto-resolving its own reviews (approving her own PR), it would loop. Watch for that.
 
 ---
