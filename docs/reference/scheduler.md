@@ -197,7 +197,7 @@ When this fires at 9am on weekdays, Workstacean POSTs to `http://gina-personal:7
 }
 ```
 
-For the protoAgent end-to-end wiring, see the [A2A scheduler bridge guide](../guides/a2a-scheduler-bridge/).
+For the protoAgent end-to-end wiring, see the [A2A scheduler bridge guide](../guides/a2a-scheduler-bridge).
 
 ## One-Shot Schedules
 

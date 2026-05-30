@@ -215,7 +215,7 @@ Workstacean itself is an A2A agent too. It exposes:
 - `GET /.well-known/agent-card.json` — lists every skill registered in `ExecutorRegistry`
 - `POST /a2a` — JSON-RPC 2.0 endpoint (supports `message/send`, `message/stream`, `tasks/*`)
 
-External agents can call workstacean by resolving the card and dispatching skills with a `skillHint` in the message metadata. Auth is the same `WORKSTACEAN_API_KEY` via `Authorization: Bearer <key>` or `X-API-Key`. See [HTTP API reference — POST /a2a](../../reference/http-api#post-a2a) for full details.
+External agents can call workstacean by resolving the card and dispatching skills with a `skillHint` in the message metadata. Auth is the same `WORKSTACEAN_API_KEY` via `Authorization: Bearer <key>` or `X-API-Key`. See [HTTP API reference — POST /a2a](../reference/http-api#post-a2a) for full details.
 
 ---
 
@@ -240,4 +240,4 @@ Returns:
 
 ## Related
 
-- [Workspace files reference](../../reference/workspace-files)
+- [Workspace files reference](../reference/workspace-files)

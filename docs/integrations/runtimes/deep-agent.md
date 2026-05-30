@@ -74,7 +74,7 @@ skills:
 
 When a skill declares `systemPromptOverride`, the executor uses it instead of the agent's main `systemPrompt` for that specific invocation. This allows structured-output skills (like `diagnose_pr_stuck`) to use narrow, format-enforcing prompts while operational skills use the full conversational prompt.
 
-See [Agent Skills Reference](../../../reference/agent-skills) for the full YAML schema and available tools.
+See [Agent Skills Reference](../../reference/agent-skills) for the full YAML schema and available tools.
 
 ## Available tools
 

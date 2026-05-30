@@ -178,4 +178,4 @@ If `GITHUB_WEBHOOK_SECRET` is not set, signature validation is skipped (not reco
 
 ## Quinn PR Review
 
-The GitHub plugin is the entry point for Quinn's PR review pipeline. See [Quinn Reference](../reference/quinn) for the full review pipeline, vector context system, and configuration.
+The GitHub plugin is the entry point for Quinn's PR review pipeline. See [Use Quinn PR review](../how-to/use-quinn-pr-review) for the full review pipeline, vector context system, and configuration.

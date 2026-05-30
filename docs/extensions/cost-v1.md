@@ -117,4 +117,4 @@ Consumers tolerate a missing `costUsd` and can derive it from per-model rates if
 
 - [`confidence-v1`](confidence-v1) — companion extension for agent-reported confidence, surfaced alongside cost
 - [`effect-domain-v1`](effect-domain-v1) — after-hook that re-publishes agent-reported `world.state.delta` for observability
-- [`worldstate-delta-v1`](worldstate-delta-v1) — artifact format for observed mutations
+- [`worldstate-delta-v1`](effect-domain-v1#worldstate-delta-artifact) — artifact format for observed mutations

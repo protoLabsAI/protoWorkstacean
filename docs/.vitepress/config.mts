@@ -67,9 +67,7 @@ export default defineConfig({
   description:
     'The switchboard for the protoLabs agent ecosystem — trigger → router → dispatcher → executor over a typed event bus.',
   cleanUrls: true,
-  // Migrated from Astro Starlight (70+ cross-linked pages); links are tightened
-  // incrementally, so dead-link checking stays off until the first link sweep.
-  ignoreDeadLinks: true,
+  ignoreDeadLinks: false,
   themeConfig: {
     search: { provider: 'local' },
     nav: [

@@ -5,7 +5,7 @@ description: Use Workstacean as the scheduler for remote A2A agents like protoAg
 
 Workstacean can act as a shared scheduler for one or more remote A2A agents — useful when you have N [protoAgent](https://github.com/protoLabsAI/protoAgent) forks (e.g. `gina-personal`, `gina-work`) and want a single source of truth for when each one fires its scheduled jobs.
 
-The transport is the `a2a` delivery channel on the [Scheduler](/reference/scheduler/#a2a-delivery-channel). When a schedule with `payload.channel: "a2a"` fires, `A2ADeliveryPlugin` looks up the configured target and POSTs a JSON-RPC `message/send` to that endpoint.
+The transport is the `a2a` delivery channel on the [Scheduler](/reference/scheduler#a2a-delivery-channel). When a schedule with `payload.channel: "a2a"` fires, `A2ADeliveryPlugin` looks up the configured target and POSTs a JSON-RPC `message/send` to that endpoint.
 
 ## End-to-end wiring
 

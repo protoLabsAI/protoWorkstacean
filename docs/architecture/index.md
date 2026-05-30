@@ -2,7 +2,7 @@
 title: Architecture — Flow Reference
 ---
 
-_Architectural deep-dives for every flow in protoWorkstacean. The complement to [CLAUDE.md](../../CLAUDE.md): CLAUDE.md tells you what the system **is**; this section tells you what it **does**, one flow at a time._
+_Architectural deep-dives for every flow in protoWorkstacean. The complement to [CLAUDE.md](https://github.com/protoLabsAI/protoWorkstacean/blob/main/CLAUDE.md): CLAUDE.md tells you what the system **is**; this section tells you what it **does**, one flow at a time._
 
 ---
 

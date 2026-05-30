@@ -51,7 +51,7 @@ AVA_BASE_URL=http://localhost:3008
 AVA_API_KEY=your-protomaker-team-key
 ```
 
-For a full list of variables, see [reference/env-vars.md](../../reference/env-vars).
+For a full list of variables, see [reference/env-vars.md](../reference/env-vars).
 
 ## 3. Bootstrap the workspace
 
@@ -144,6 +144,6 @@ sqlite3 data/events.db \
 
 ## Next steps
 
-- [Add an agent](../../guides/add-an-agent) — register in-process or A2A agents
-- [Create a ceremony](../../guides/create-a-ceremony) — schedule recurring agent work
-- [Reference: HTTP API](../../reference/http-api) — all endpoints
+- [Add an agent](../guides/add-an-agent) — register in-process or A2A agents
+- [Create a ceremony](../guides/create-a-ceremony) — schedule recurring agent work
+- [Reference: HTTP API](../reference/http-api) — all endpoints
