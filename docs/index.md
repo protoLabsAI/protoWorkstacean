@@ -1,37 +1,36 @@
 ---
-title: protoWorkstacean Docs
+layout: home
+hero:
+  name: protoWorkstacean
+  text: The switchboard for the protoLabs agent ecosystem
+  tagline: "trigger → router → dispatcher → executor, over a typed event bus."
+  actions:
+    - theme: brand
+      text: Get started
+      link: /tutorials/
+    - theme: alt
+      text: Reference
+      link: /reference/
+    - theme: alt
+      text: GitHub
+      link: https://github.com/protoLabsAI/protoWorkstacean
+features:
+  - title: Tutorials
+    details: Learn protoWorkstacean from scratch — configure, deploy, and trigger your first skill execution.
+    link: /tutorials/
+  - title: Guides
+    details: Task-oriented how-tos — add an agent, create a ceremony, build an A2A agent, deploy with Docker.
+    link: /guides/
+  - title: Integrations
+    details: Discord, GitHub, Linear, Google Workspace, Signal — connect the outside world to the bus.
+    link: /integrations/
+  - title: Reference
+    details: Env vars, HTTP API, bus topics, workspace config schemas, and executor type signatures.
+    link: /reference/
+  - title: Explanation
+    details: How the executor layer, plugin lifecycle, agent identity, and distributed tracing work — and why.
+    link: /explanation/
+  - title: Contributing
+    details: Architecture deep-dives, development workflow, merge policy, and extension guides.
+    link: /contributing/
 ---
-
-**protoWorkstacean** is a switchboard for the protoLabs agent ecosystem. It schedules things, receives events from the outside world (Discord, GitHub, Linear, Google), and routes both into the right agent — wherever that agent lives (in-process DeepAgent, remote A2A on another machine, or a function handler). Plugins extend its reach to new tools and infrastructure.
-
-## Where to start
-
-| I want to… | Go to… |
-|---|---|
-| Install and run my first skill execution | [Tutorials → Getting Started](./tutorials/getting-started) |
-| Add an agent or ceremony | [Guides](./guides/) |
-| Look up env vars, HTTP API, bus topics, or config schemas | [Reference](./reference/) |
-| Understand how the executor layer works | [Explanation](./explanation/) |
-| Contribute code or extend the platform | [Contributing](./contributing/) |
-
-## Documentation sections
-
-### [Tutorials](./tutorials/getting-started)
-
-Step-by-step walkthroughs for learning protoWorkstacean from scratch. Follow along to configure, deploy, and trigger your first skill execution.
-
-### [Guides](./guides/)
-
-Task-oriented how-tos for specific goals — adding agents, configuring ceremonies, building A2A agents, and deploying to production.
-
-### [Reference](./reference/)
-
-Exact, complete reference material: all environment variables, HTTP API endpoints, bus topics, workspace file schemas, and executor type signatures.
-
-### [Explanation](./explanation/)
-
-Conceptual documentation explaining how protoWorkstacean's subsystems work and why they are designed the way they are.
-
-### [Contributing](./contributing/)
-
-Architecture deep-dives, development workflow, and extension guides for contributors.
