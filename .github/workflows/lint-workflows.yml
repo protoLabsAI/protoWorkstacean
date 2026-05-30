@@ -54,7 +54,8 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Run zizmor
-        env:
-          GH_TOKEN: ${{ github.token }}
+        # --offline keeps the gate deterministic: it runs the static audits
+        # (template-injection, excessive-permissions, artipacked, unpinned-uses)
+        # without network-dependent checks that can flake on rate limits.
         run: |
-          uvx zizmor@1.25.2 --min-severity=medium .github/workflows/
+          uvx zizmor@1.25.2 --offline --min-severity=medium .github/workflows/
