@@ -133,11 +133,11 @@ async def sse_generator(req):
 
 ```yaml
 agents:
-  - name: researcher
-    url: "http://protoresearcher:7870/a2a"
+  - name: protopen
+    url: "${PROTOPEN_BASE_URL}/a2a"
     streaming: true    # ← enables SSE client
     skills:
-      - name: deep_research
+      - name: passive_recon
 ```
 
 ### 2. Discord o11y (optional)
@@ -149,7 +149,7 @@ The `SkillBrokerPlugin` wires the `onStreamUpdate` callback automatically when t
 ## How it works end-to-end
 
 ```
-Inbound message: "research full-duplex voice AI"
+Inbound message: "run passive recon on example.com"
   → RouterPlugin → agent.skill.request (bus)
     → SkillDispatcherPlugin
       → ExecutorRegistry → A2AExecutor (streaming: true)
@@ -263,4 +263,4 @@ Same task lifecycle, real-time visibility into what the agent is doing.
 
 ## Push-notification configs survive restart
 
-Inbound A2A clients can register a webhook callback via `tasks/pushNotificationConfig/set` so workstacean POSTs them when long-running work terminates. Those configs are persisted to `${DATA_DIR}/push-notifications.db` (SQLite, WAL journal) so they survive container restarts — important on `:dev` where watchtower auto-pulls multiple times per day. Each config carries a 24-hour TTL by default; expired rows are filtered from `load()` and opportunistically purged on subsequent `save()` calls. Falls back to the SDK's in-memory store when `DATA_DIR` is unset (tests + ephemeral setups).
+Inbound A2A clients can register a webhook callback via `tasks/pushNotificationConfig/set` so workstacean POSTs them when long-running work terminates. Those configs are persisted to `${DATA_DIR}/push-notifications.db` (SQLite, WAL journal) so they survive container restarts — important on `:main` where watchtower auto-pulls multiple times per day. Each config carries a 24-hour TTL by default; expired rows are filtered from `load()` and opportunistically purged on subsequent `save()` calls. Falls back to the SDK's in-memory store when `DATA_DIR` is unset (tests + ephemeral setups).

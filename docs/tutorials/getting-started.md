@@ -64,7 +64,9 @@ The `workspace/` directory holds all runtime configuration. Start from the bundl
 cp workspace/agents/ava.yaml.example   workspace/agents/ava.yaml
 cp workspace/agents/frank.yaml.example workspace/agents/frank.yaml
 
-# External A2A agent registry — list the protoMaker team, quinn, etc.
+# External A2A agent registry — the only live A2A agent is protopen
+# (security/pentest, remote). Quinn, proto, and protobot are in-process
+# DeepAgents, defined in workspace/agents/, NOT here.
 cp workspace/agents.yaml.example workspace/agents.yaml
 ```
 
@@ -81,7 +83,7 @@ systemPrompt: |
   You are Ava, a conversational protoAgent. You answer questions
   and think out loud with the user. You have no tools — when a
   request needs action, suggest which agent is best suited:
-  protoMaker team for board ops, Quinn for PR review, Frank for infra.
+  Quinn (in-process) for PR review, proto (in-process) for code tasks.
 tools: []
 maxTurns: 6
 skills:

@@ -12,6 +12,8 @@ Discord/GitHub/Linear/Google webhooks land as `message.inbound.*` topics. [Route
 
 No LLM in the routing layer. Routing is keyword/channel YAML; LLM-driven decisions happen *inside* executors.
 
+**Linear inbound is a special case.** RouterPlugin dispatches a Linear event **only via an explicit `skillHint`** — Linear content is never keyword-matched. `LinearPlugin` stamps `skillHint: linear_agent_respond` on @mention notifications (`issueMention`/`issueCommentMention`) and on agent-session events for issues **assigned to Ava** (`isAssignedToAva`, fail-open). Everything else on Linear is un-hinted and dropped. So Ava responds on Linear only when @mentioned or assigned. The `proto-task` label path is handled separately by `linear-proto-bridge` (see [flow-linear-bridges](flow-linear-bridges.md)).
+
 ---
 
 ## ASCII spine
@@ -47,10 +49,10 @@ No LLM in the routing layer. Routing is keyword/channel YAML; LLM-driven decisio
                   │
         ┌─────────┼─────────┐
         ▼         ▼         ▼
-    DeepAgent  ProtoSdk   A2A   FunctionExecutor
-    Executor   Executor   Exec  (alert/ceremony/pr-r)
-        │         │         │         │
-        └─────────┴─────────┴─────────┘
+    DeepAgent    A2A    FunctionExecutor
+    Executor     Exec   (alert/ceremony/pr-r)
+        │         │         │
+        └─────────┴─────────┘
                   │
                   ▼
    ┌──────────────────────────┐
@@ -118,8 +120,8 @@ sequenceDiagram
 |---|---|---|---|
 | `message.inbound.discord.{channelId}` | DiscordPlugin | RouterPlugin | `lib/plugins/discord/inbound.ts:130,247,283` |
 | `message.inbound.github.{owner}.{repo}.{event}.{n}` | GitHubPlugin | RouterPlugin, PR-review handler | `lib/plugins/github.ts:635,700,795,939` |
-| `message.inbound.linear.{event}` | LinearPlugin | RouterPlugin, linear-protomaker-bridge, linear-proto-bridge | `lib/plugins/linear.ts` |
-| `agent.skill.request` | RouterPlugin, bridges, ActionDispatcher, SkillDispatcher (drain) | **SkillDispatcherPlugin (sole)** | `src/router/router-plugin.ts:272,322`; `src/executor/skill-dispatcher-plugin.ts:507` |
+| `message.inbound.linear.{event}` | LinearPlugin | RouterPlugin (skillHint-only), linear-proto-bridge | `lib/plugins/linear.ts` |
+| `agent.skill.request` | RouterPlugin, linear-proto-bridge, SkillDispatcher (mailbox drain) | **SkillDispatcherPlugin (sole)** | `src/router/router-plugin.ts:272,322`; `src/executor/skill-dispatcher-plugin.ts:507` |
 | `flow.item.created` | SkillDispatcher | telemetry / dashboard | `src/executor/skill-dispatcher-plugin.ts:275` |
 | `flow.item.updated` | SkillDispatcher (running / error) | telemetry / dashboard | `src/executor/skill-dispatcher-plugin.ts:370,385,457` |
 | `agent.skill.progress.{correlationId}` | executor (opt-in) | dashboard / streaming | `src/event-bus/payloads.ts:86-95` |
@@ -161,7 +163,7 @@ The dispatcher enforces invariants in this order ([skill-dispatcher-plugin.ts:16
 
 ## Related flows
 
-- [flow-linear-bridges](flow-linear-bridges.md) — Linear inbound bypasses RouterPlugin for label-triggered dispatches.
+- [flow-linear-bridges](flow-linear-bridges.md) — the `proto-task` label bridge builds its own `agent.skill.request` instead of routing through RouterPlugin.
 - [flow-pr-review](flow-pr-review.md) — GitHub PR events follow this flow but with a fixed `skillHint=pr_review`.
 - [chokepoint-invariants](chokepoint-invariants.md) — the four invariants that sit inside the dispatcher.
 - [flow-agent-runtime-telemetry](flow-agent-runtime-telemetry.md) — what the dispatcher's outcome topics feed.
