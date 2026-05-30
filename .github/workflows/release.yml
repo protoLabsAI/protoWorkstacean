@@ -19,6 +19,10 @@ on:
         type: string
         required: false
 
+# Read-only: this workflow only reads git history and posts to a Discord webhook.
+permissions:
+  contents: read
+
 jobs:
   post-release-notes:
     runs-on: namespace-profile-protolabs-linux
@@ -27,12 +31,16 @@ jobs:
         with:
           fetch-depth: 0 # full history for git log
           ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
 
       - name: Resolve tag pair
         id: tags
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           # Inputs.tag overrides; otherwise use the tag the workflow ran on.
-          TAG="${{ inputs.tag || github.ref_name }}"
+          TAG="${INPUT_TAG:-$REF_NAME}"
           PREV=$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -1)
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
           echo "previous=$PREV" >> "$GITHUB_OUTPUT"

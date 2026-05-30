@@ -28,6 +28,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -99,6 +101,8 @@ jobs:
 
       - name: Fail if any repo drifts
         if: ${{ steps.audit.outputs.drift_count != '0' }}
+        env:
+          DRIFT: ${{ steps.audit.outputs.drift_count }}
         run: |
-          echo "::error::${{ steps.audit.outputs.drift_count }} repo(s) drifting from the workspace-config standard — see job summary."
+          echo "::error::${DRIFT} repo(s) drifting from the workspace-config standard — see job summary."
           exit 1

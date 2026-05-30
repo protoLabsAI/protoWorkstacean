@@ -32,6 +32,9 @@ jobs:
 
     steps:
       - name: Checkout main
+        # zizmor: ignore[artipacked] — credentials are required: this job pushes
+        # the release tag with the checked-out token. No artifact upload here, so
+        # there is no credential-leak vector to mitigate by dropping them.
         uses: actions/checkout@v4
         with:
           ref: main
@@ -59,15 +62,17 @@ jobs:
 
       - name: Create tag
         if: steps.version.outputs.already_tagged != 'true' || inputs.force == true
+        env:
+          VERSION_NUM: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="v${{ steps.version.outputs.version }}"
+          VERSION="v${VERSION_NUM}"
           git tag -a -f "$VERSION" -m "$VERSION"
           git push origin "$VERSION" --force-with-lease
 
       - name: Create GitHub Release
         if: steps.version.outputs.already_tagged != 'true' || inputs.force == true
         run: |
-          VERSION="v${{ steps.version.outputs.version }}"
+          VERSION="v${VERSION_NUM}"
 
           # Skip if release already exists (e.g. after a force-retag)
           if gh release view "$VERSION" >/dev/null 2>&1; then
@@ -77,7 +82,7 @@ jobs:
 
           # Generate notes from auto-notes API; filter chore commits out unless
           # they're the only entries.
-          RAW_NOTES=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+          RAW_NOTES=$(gh api "repos/${REPO}/releases/generate-notes" \
             -f tag_name="$VERSION" --jq '.body')
 
           ALL_LINES=$(echo "$RAW_NOTES" | grep '^\* ' || true)
@@ -92,11 +97,17 @@ jobs:
           gh release create "$VERSION" --title "$VERSION" --notes "$FILTERED"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_NUM: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
 
       - name: Summary
+        env:
+          VERSION_NUM: ${{ steps.version.outputs.version }}
+          ALREADY_TAGGED: ${{ steps.version.outputs.already_tagged }}
+          FORCE: ${{ inputs.force }}
         run: |
-          VERSION="v${{ steps.version.outputs.version }}"
-          if [ "${{ steps.version.outputs.already_tagged }}" = "true" ] && [ "${{ inputs.force }}" != "true" ]; then
+          VERSION="v${VERSION_NUM}"
+          if [ "$ALREADY_TAGGED" = "true" ] && [ "$FORCE" != "true" ]; then
             echo "Skipped: $VERSION already tagged."
           else
             echo "Tagged $VERSION. release.yml will post Discord notes from the tag push."

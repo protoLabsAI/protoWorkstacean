@@ -19,10 +19,9 @@ on:
       - '.github/workflows/docs-deploy.yml'
   workflow_dispatch:
 
+# Least-privilege default; only the deploy job needs Pages write + OIDC.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # Only one deployment at a time; cancel in-progress runs on new push
 concurrency:
@@ -35,6 +34,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -72,6 +73,9 @@ jobs:
     needs: build
     # workspace-config: allow-hosted-runner GitHub Pages deploy requires the hosted Pages environment
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

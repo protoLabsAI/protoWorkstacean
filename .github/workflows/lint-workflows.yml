@@ -1,0 +1,60 @@
+name: Lint Workflows
+
+# Static analysis gate for GitHub Actions workflows (#611).
+#   - actionlint: syntax, expression, and shellcheck-of-run-blocks linting.
+#   - zizmor:     security audits (template-injection, excessive-permissions,
+#                 artipacked credential persistence, etc.).
+#
+# Both tools FAIL the job on findings — this is a real gate, not advisory.
+#
+# Gate severity: zizmor runs at --min-severity=medium, so the CWE-94
+# template-injection class (High) and broad-permissions/credential-persistence
+# (Medium) all block. Informational findings (e.g. step-output interpolation,
+# which is workflow-controlled, not attacker-controllable) are advisory.
+#
+# Policy notes:
+#   - unpinned-uses is configured to `ref-pin` in .github/zizmor.yml: the org
+#     pins actions to release tags (@v4), not commit SHAs. Blanket SHA-pinning
+#     is a separate org-wide decision, out of scope here.
+#   - The release-tools workflow *template* propagation to new repos is tracked
+#     separately (protoMaker#3821).
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint.yaml'
+      - '.github/zizmor.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint.yaml'
+      - '.github/zizmor.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install and run actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
+      - name: Install uv (for zizmor)
+        uses: astral-sh/setup-uv@v5
+
+      - name: Run zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uvx zizmor@1.25.2 --min-severity=medium .github/workflows/

@@ -33,6 +33,9 @@ jobs:
 
     steps:
       - name: Checkout main
+        # zizmor: ignore[artipacked] — credentials are required: this job pushes
+        # the release branch and opens a PR with the checked-out token. No
+        # artifact upload here, so there is no credential-leak vector.
         uses: actions/checkout@v4
         with:
           ref: main
@@ -46,9 +49,10 @@ jobs:
 
       - name: Compute next version
         id: version
+        env:
+          BUMP: ${{ inputs.bump }}
         run: |
           CURRENT=$(node -p "require('./package.json').version")
-          BUMP="${{ inputs.bump }}"
 
           case "$BUMP" in
             patch|minor|major)
@@ -77,8 +81,9 @@ jobs:
 
       - name: Apply version bump
         if: steps.version.outputs.current != steps.version.outputs.next
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
         run: |
-          NEXT="${{ steps.version.outputs.next }}"
           node -e "
             const fs = require('fs');
             for (const path of ['package.json', 'dashboard/package.json']) {
@@ -91,8 +96,10 @@ jobs:
 
       - name: Commit version bump + open PR to main
         if: steps.version.outputs.current != steps.version.outputs.next && inputs.dry_run != true
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
         run: |
-          NEXT="${{ steps.version.outputs.next }}"
           BRANCH="chore/release-v${NEXT}"
 
           # Main has branch protection requiring CodeRabbit — direct pushes
@@ -113,23 +120,26 @@ jobs:
             gh pr merge "$PR_NUM" --merge --auto
             echo "Enabled auto-merge for #${PR_NUM}"
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Dry run summary
         if: inputs.dry_run == true
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
         run: |
           echo "DRY RUN — would have committed:"
           git diff --stat
           echo ""
-          echo "Next version: v${{ steps.version.outputs.next }}"
-          echo "Would open PR on branch chore/release-v${{ steps.version.outputs.next }}"
+          echo "Next version: v${NEXT}"
+          echo "Would open PR on branch chore/release-v${NEXT}"
 
       - name: Summary
         if: inputs.dry_run != true
+        env:
+          CURRENT: ${{ steps.version.outputs.current }}
+          NEXT_RAW: ${{ steps.version.outputs.next }}
         run: |
-          NEXT="v${{ steps.version.outputs.next }}"
-          if [ "${{ steps.version.outputs.current }}" = "${{ steps.version.outputs.next }}" ]; then
+          NEXT="v${NEXT_RAW}"
+          if [ "$CURRENT" = "$NEXT_RAW" ]; then
             echo "No version change (already at $NEXT)."
           else
             echo "Release $NEXT PR opened with auto-merge enabled."
