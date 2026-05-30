@@ -59,6 +59,12 @@ const contextMailbox = new ContextMailbox();
 import { TaskTracker } from "./executor/task-tracker.ts";
 const taskTracker = new TaskTracker({ bus });
 
+// Handle to the dispatcher's in-flight check — assigned when its (lazy) factory
+// runs below. Read via a closure in apiContext so the poll endpoint can report
+// a "working" state for in-process dispatches still executing (not yet in the
+// SkillResponseCache and not tracked by TaskTracker — that path only covers A2A).
+let skillDispatcher: { isActive(correlationId: string): boolean } | undefined;
+
 // --- Agent key registry — resolves per-agent X-API-Key headers to identities
 //     so ceremony / cron endpoints (and any future per-agent permission gates)
 //     can enforce ownership. Falls back to admin-only mode when
@@ -384,7 +390,9 @@ const pluginRegistry: PluginRegistryEntry[] = [
     condition: () => true,
     factory: async () => {
       const { SkillDispatcherPlugin } = await import("./executor/skill-dispatcher-plugin.js");
-      return new SkillDispatcherPlugin(executorRegistry, workspaceDir, contextMailbox, taskTracker);
+      const dispatcher = new SkillDispatcherPlugin(executorRegistry, workspaceDir, contextMailbox, taskTracker);
+      skillDispatcher = dispatcher;
+      return dispatcher;
     },
   },
   {
@@ -589,6 +597,8 @@ const apiContext: ApiContext = {
   taskTracker,
   busHistory: busHistoryRecorder,
   skillResponseCache,
+  // Lazy in-flight check — true while a dispatch (in-process or A2A) is executing.
+  activeDispatchCheck: (correlationId: string) => skillDispatcher?.isActive(correlationId) ?? false,
   projectRegistry,
   channelRegistry,
 };

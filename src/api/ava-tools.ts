@@ -218,13 +218,15 @@ export function createRoutes(ctx: ApiContext): Route[] {
 
   /**
    * GET /api/a2a/task/:correlationId — fetch the result of a dispatch that a
-   * chat caller stopped awaiting (timed out). Reads the SkillResponseCache
-   * (covers both in-process and A2A results), falling back to TaskTracker's
-   * live tracked state for "still working".
+   * chat caller stopped awaiting (timed out). Resolves in this order:
+   *   1. SkillResponseCache — terminal result (in-process or A2A)        → done
+   *   2. TaskTracker — a tracked, in-flight long-running A2A task        → working (+taskId)
+   *   3. activeDispatchCheck — an in-flight in-process dispatch          → working
+   *   4. none of the above                                              → unknown
    *
    * Returns one of:
    *   { done: true, response, error?, taskState, … }   — terminal result available
-   *   { pending: true, taskState: "working", taskId }  — still running
+   *   { pending: true, taskState: "working", taskId? } — still running (taskId only for A2A)
    *   { pending: false, taskState: "unknown" }         — never seen / aged out
    */
   function handleTaskPoll(req: Request, params: Record<string, string>): Response {
@@ -264,13 +266,23 @@ export function createRoutes(ctx: ApiContext): Route[] {
       });
     }
 
+    // In-flight in-process dispatch: no cached result yet, and TaskTracker only
+    // covers A2A. The dispatcher knows it's still executing — report "working"
+    // so the caller can keep polling instead of mistaking it for "unknown".
+    if (ctx.activeDispatchCheck?.(correlationId)) {
+      return Response.json({
+        success: true,
+        data: { pending: true, taskState: "working", correlationId },
+      });
+    }
+
     return Response.json({
       success: true,
       data: {
         pending: false,
         taskState: "unknown",
         correlationId,
-        note: "No tracked task and no cached result — it may never have been dispatched, or its result aged out.",
+        note: "No in-flight dispatch, tracked task, or cached result — it may never have been dispatched, or its result aged out.",
       },
     });
   }
