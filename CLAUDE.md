@@ -63,7 +63,7 @@ Auto-merge captures the head SHA when you enable it. If you force-push afterward
 - Runtime: Bun
 - Language: TypeScript (strict)
 - Tests: `bun test` — unit tests against in-memory bus, no mocks, no LLM calls
-- Docs: Astro Starlight at `docs-site/`, source at `docs/` (symlinked)
+- Docs: VitePress at `docs/` (config in `docs/.vitepress/`), Diátaxis layout. `cd docs && bun run dev|build`. Sidebar auto-generated per section; matches the fleet docs standard.
 - In-process agent runtime: `DeepAgentExecutor` (LangGraph ReAct, LiteLLM-routed Claude calls)
 - Remote agent runtime: `A2AExecutor` over HTTP JSON-RPC 2.0
 

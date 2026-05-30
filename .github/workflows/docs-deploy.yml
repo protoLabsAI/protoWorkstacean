@@ -6,7 +6,6 @@ on:
       - main
     paths:
       - 'docs/**'
-      - 'docs-site/**'
   workflow_dispatch:
 
 permissions:
@@ -35,11 +34,11 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        working-directory: docs-site
+        working-directory: docs
         run: bun install
 
-      - name: Build static site
-        working-directory: docs-site
+      - name: Build static site (VitePress)
+        working-directory: docs
         run: bun run build
         env:
           BASE_PATH: /protoWorkstacean
@@ -47,7 +46,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs-site/out
+          path: docs/.vitepress/dist
 
   deploy:
     needs: build
