@@ -109,7 +109,7 @@ Quinn responds with a review comment posted as `protoquinn[bot]`.
 /quinn review
 ```
 
-With the `pr_review` skillHint, A2APlugin routes to Quinn's `pr_review` skill.
+With the `pr_review` skillHint, `RouterPlugin` publishes an `agent.skill.request` that `SkillDispatcherPlugin` routes to Quinn's `pr_review` skill on its in-process `DeepAgentExecutor`. Quinn runs inside the workstacean process — there is no A2A hop.
 
 ---
 

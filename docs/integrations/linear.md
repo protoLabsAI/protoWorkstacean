@@ -2,15 +2,17 @@
 title: Linear
 ---
 
-Linear is an optional communication interface for users to talk to agents and supply context about projects, issues, and work. A user writes a Linear issue or comments on one, Workstacean's `LinearPlugin` publishes the event to the internal bus, `RouterPlugin` routes it to the agent configured in `workspace/channels.yaml`, and the agent's reply comes back as a Linear comment.
+Linear is an optional communication interface for users to talk to Ava and supply context about projects, issues, and work. Ava acts on Linear **only when she is @mentioned or the issue is assigned to her** — she does not chase ambient activity. When that gate passes, `LinearPlugin` publishes the event with an explicit `skillHint: linear_agent_respond`, `RouterPlugin` dispatches it to Ava, and her reply comes back as a Linear agent-activity or comment (posted **as Ava** when her OAuth token is wired).
 
 The plugin also exposes outbound mutations so agents can file or update Linear tickets as part of their work.
 
 ## Overview
 
-The flow in one sentence: a Linear event hits the webhook → `LinearPlugin` verifies the HMAC signature and publishes `message.inbound.linear.{issue,comment,project}.*` → `RouterPlugin` resolves the channel via `workspace/channels.yaml` and dispatches `agent.skill.request` → the agent's response publishes to `linear.reply.{issueId}` → `LinearPlugin` posts it as a Linear comment.
+The flow in one sentence: a Linear event hits the webhook → `LinearPlugin` verifies the HMAC signature and publishes `message.inbound.linear.{issue,comment,project,agent_session}.*` → for @mentions and assigned sessions it stamps `skillHint: linear_agent_respond` → `RouterPlugin` dispatches `agent.skill.request` to Ava → her response publishes to `linear.reply.{issueId}` (or `linear.agent_activity.{sessionId}`) → `LinearPlugin` posts it back.
 
-No cross-plugin dependencies. A second plugin that wants "Linear issue → protoMaker feature" just subscribes to `message.inbound.linear.issue.created` and fires the appropriate skill — it doesn't touch `LinearPlugin` at all.
+**Linear inbound is `skillHint`-gated, never keyword-routed.** `RouterPlugin` only dispatches a Linear event that carries an explicit `skillHint`; Linear content is never keyword-matched. An un-hinted Linear event is dropped. This prevents GitHub-domain skills (e.g. `pr_review`) from being pulled onto Linear tickets by a stray keyword. `LinearPlugin` sets `skillHint: linear_agent_respond` for `issueMention`/`issueCommentMention` notifications and for agent-session events on issues assigned to Ava — nothing else gets a hint, so nothing else is dispatched.
+
+No cross-plugin dependencies. A second plugin that wants "Linear issue → some agent" just subscribes to `message.inbound.linear.issue.created` and fires the appropriate skill — it doesn't touch `LinearPlugin` at all (see [Linear → proto bridge](#linear--proto-code-execution-bridge) below).
 
 ## Setup
 
@@ -99,84 +101,74 @@ Inbound webhooks are validated against a Zod envelope schema — a malformed Lin
 ## Multi-layer conversation example
 
 ```
-User writes Linear comment:       "Ava, can you plan the migration?"
+User @mentions Ava in a comment:  "@Ava can you plan the migration?"
   ↓
-Linear webhook POST /webhooks/linear
+Linear webhook POST /webhooks/linear  (agent notification: issueCommentMention)
   ↓
-LinearPlugin publishes:           message.inbound.linear.comment.created
-  ↓                               { body, teamKey: "ENG", issueId, ... }
+LinearPlugin publishes:           message.inbound.linear.* with
+  ↓                               { skillHint: "linear_agent_respond", issueId, ... }
+  ↓                               (mention → hinted; un-mentioned ambient events get no hint and drop)
   ↓
-RouterPlugin reads channels.yaml  (linear/ENG → ava)
-  ↓
-RouterPlugin publishes:           agent.skill.request
-  ↓                               { skill: "chat", targets: ["ava"], content: "..." }
+RouterPlugin sees the explicit skillHint and publishes:
+  ↓                               agent.skill.request
+  ↓                               { skill: "linear_agent_respond", targets: ["ava"], content: "..." }
   ↓
 SkillDispatcherPlugin routes to Ava → Ava runs → returns response
   ↓
-Response published on:            linear.reply.{issueId}
+Response published on:            linear.reply.{issueId}  (or linear.agent_activity.{sessionId})
   ↓
-LinearPlugin outbound subscriber  → client.addComment(issueId, text)
+LinearPlugin outbound subscriber  → posts as Ava (actor=app OAuth) or via LINEAR_API_KEY
   ↓
-Comment appears on the Linear issue.
+Comment / agent-activity appears on the Linear issue.
 ```
 
-## Linear → protoMaker board bridge
+For an **assigned** issue, Linear opens an agent session instead of a mention notification. `LinearPlugin` checks `isAssignedToAva(issueId)` (via Ava's OAuth client, fail-open on API error), and only the assigned sessions get `skillHint: linear_agent_respond`. Sessions on issues not assigned to Ava are dropped with no response.
 
-`LinearProtoMakerBridgePlugin` (`lib/plugins/linear-protomaker-bridge.ts`) wires inbound Linear issues into the protoMaker board with no direct dependency on either side — pure bus contract. It's installed unconditionally and is a no-op until `workspace/linear-board-mappings.yaml` exists.
+## Posting as Ava (actor=app OAuth)
+
+Linear distinguishes a *personal* API key (posts as the human who minted it) from an *actor=app* OAuth grant (posts as the application — i.e. "Ava"). When Ava's OAuth token is configured, `LinearPlugin` instantiates an `_avaClient` (built via `getLinearAvaTokenManager`) and uses it for two jobs:
+
+1. **Posting as Ava** — agent activities and plain comments go out under Ava's app identity, not a human's. This is the preferred outbound path.
+2. **Gating responses** — `isAssignedToAva(issueId)` resolves the issue's assignee against Ava's app identity, which is how the assigned-session gate above decides whether to respond.
+
+`LINEAR_API_KEY` is the **fallback**: if no Ava OAuth token is present, outbound mutations fall back to the personal key. With neither set, outbound Linear mutations are disabled (inbound webhooks still work).
+
+The one-time browser authorize that captures Ava's `actor=app` refresh token is driven through the admin `/api/linear/oauth/*` routes (auth = `WORKSTACEAN_API_KEY` as `?apiKey=`).
+
+## Linear → proto code-execution bridge
+
+`LinearProtoBridgePlugin` (`lib/plugins/linear-proto-bridge.ts`) dispatches Linear issues tagged with a trigger label to the **in-process `proto` agent** as a one-shot `code.execute`. Pure bus contract — no direct dependency on `LinearPlugin` or the proto runtime.
 
 ### Configuration
 
-Copy `workspace/linear-board-mappings.yaml.example` to `workspace/linear-board-mappings.yaml` and edit:
-
-```yaml
-mappings:
-  - linearTeamKey: "ENG"
-    protoMakerProjectSlug: "engineering"
-    triggerLabel: "board"
-  - linearTeamKey: "DESIGN"
-    protoMakerProjectSlug: "design-system"
-    triggerLabel: "board"
-```
-
-Each mapping says: when an inbound Linear issue from `linearTeamKey` carries `triggerLabel`, file it as a feature on `protoMakerProjectSlug` via the `manage_feature` skill. Issues without the label drop straight through (RouterPlugin's chat path still handles them per `channels.yaml`).
-
-The mapping file is hot-reloaded at a 5-second interval — add or remove routes without a restart.
+The trigger label defaults to **`proto-task`**. Override it with the `LINEAR_PROTO_BRIDGE_LABEL` env var. There is no config file and no per-team mapping — `proto` is a single fleet-wide agent.
 
 ### Flow
 
 ```
-User creates Linear issue with the "board" label
+User creates / labels a Linear issue with "proto-task"
   ↓
 LinearPlugin publishes:           message.inbound.linear.issue.created
-  ↓                               { teamKey: "ENG", labels: ["board"], ... }
+  ↓                               { issueId, title, labels: ["proto-task"], ... }
   ↓
-LinearProtoMakerBridgePlugin matches the team + label and publishes:
+LinearProtoBridgePlugin matches the label and publishes:
   agent.skill.request {
-    skill:   "manage_feature",
-    targets: ["protomaker"],
-    content: "Create a feature on project 'engineering' ...",
-    meta:    { sourceLinearIssueId, sourceLinearIdentifier, ... },
+    skill:   "code.execute",
+    targets: ["proto"],
+    content: "Execute this scoped coding/research task ...",
+    meta:    { sourceLinearIssueId, sourceLinearIdentifier, triggerLabel, via: "linear-proto-bridge" },
     reply:   { topic: "linear.reply.{issueId}" }
   }
   ↓
-SkillDispatcherPlugin routes to protoMaker, which creates the board feature
+SkillDispatcherPlugin routes to the in-process proto DeepAgent
   ↓
-ProtoMaker's response is published on linear.reply.{issueId}
+proto's result is published on linear.reply.{issueId}
   ↓
-LinearPlugin outbound subscriber comments on the Linear issue:
-  "Filed on board as feature ENG-XXX..."
+LinearPlugin outbound subscriber posts it as a Linear comment.
 ```
 
-### Filing close-the-loop is done; "feature done" close-the-loop is deferred
+Issues without the label are dropped at the bridge (the `linear_agent_respond` mention/assignment path above is independent). The bridge holds **no state** — `reply.topic` is the entire close-the-loop contract; `code.execute` is one-shot.
 
-When the protoMaker board feature later transitions to **done**, ideally a comment is posted back on the Linear issue. This isn't yet wired — there's no bus event today for board feature lifecycle (only skill-completion events from `SkillDispatcherPlugin`).
+## GitHub issues → protoMaker board (not Linear)
 
-Once protoMaker emits a `protomaker.feature.completed` (or similar) event on the bus, adding the done-loop is a ~10-line subscriber here that maps `featureId → linearIssueId` and publishes `linear.reply.{linearIssueId}` with the completion text.
-
-### What this plugin doesn't do
-
-- Doesn't import from `lib/plugins/linear.ts`.
-- Doesn't import from anything protoMaker-specific.
-- Doesn't reach Linear or protoMaker over the network — every operation is a bus publish.
-
-That's the no-cross-plugin-dependency contract.
+The "Linear issue → protoMaker board" wiring that older docs describe **no longer exists**. The path that feeds protoMaker's board is `lib/plugins/protomaker-board-bridge.ts`, which subscribes to **`github.issue.opened`** (not Linear) and POSTs the issue to protoMaker's `/api/engine/signal/submit` intake. protoMaker serves **no `/a2a` endpoint** — it is reached over HTTP, not A2A. See the [GitHub integration doc](github) for that flow.

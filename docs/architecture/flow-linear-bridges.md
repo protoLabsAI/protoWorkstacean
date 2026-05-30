@@ -1,19 +1,22 @@
 ---
-title: Flow — Linear bridges (protomaker + proto)
+title: Flow — Linear → proto bridge
 ---
 
-_Two near-identical bridges turn label-tagged Linear issues into agent dispatches. They bypass RouterPlugin and use a `reply.topic` contract to round-trip the agent's response back to the Linear issue as a comment, with no bridge-side state._
+_A label-tagged Linear issue becomes a `code.execute` dispatch to the in-process `proto` agent. The bridge bypasses RouterPlugin's keyword/channel resolution and uses a `reply.topic` contract to round-trip the agent's response back to the Linear issue as a comment, with no bridge-side state._
 
 ---
 
 ## What & why
 
-`RouterPlugin` resolves chat messages via channels + keywords — neither concept fits a Linear *label* gate (which inspects the issue payload itself). Two bridges fill the gap:
+`RouterPlugin` resolves messages via channels + `skillHint` — neither concept fits a Linear *label* gate (which inspects the issue payload itself). One bridge fills the gap:
 
-- **`linear-protomaker-bridge`** ([lib/plugins/linear-protomaker-bridge.ts](../../lib/plugins/linear-protomaker-bridge.ts)) — issues with the team's configured trigger label dispatch `manage_feature` to `protomaker`. Configured per-team via `workspace/linear-board-mappings.yaml`.
-- **`linear-proto-bridge`** ([lib/plugins/linear-proto-bridge.ts](../../lib/plugins/linear-proto-bridge.ts)) — issues with the `proto-task` label dispatch `code.execute` to the in-process `proto` agent. Single global label gate; override via `LINEAR_PROTO_BRIDGE_LABEL` env.
+- **`linear-proto-bridge`** ([lib/plugins/linear-proto-bridge.ts](../../lib/plugins/linear-proto-bridge.ts)) — issues with the `proto-task` label dispatch `code.execute` to the in-process `proto` agent. Single global label gate; override via `LINEAR_PROTO_BRIDGE_LABEL` env. No per-team mapping — `proto` is one fleet-wide agent, not per-board.
 
-Both follow the same shape; only the gating logic and the target skill/agent differ.
+> **There is no Linear → protoMaker board bridge.** The path that feeds protoMaker's board is `protomaker-board-bridge.ts`, which forwards **`github.issue.opened`** events (not Linear) to protoMaker's HTTP intake. protoMaker serves no `/a2a` endpoint. See [Related](#related).
+
+### How this differs from the mention/assignment path
+
+A Linear @mention or assigned-issue session is **not** a bridge concern. `LinearPlugin` stamps `skillHint: linear_agent_respond` on those events and `RouterPlugin` dispatches them to Ava. Linear inbound is otherwise **`skillHint`-only**: an un-hinted Linear event is never keyword-matched, so it drops. The `proto-task` label bridge is the one place a Linear event turns into a dispatch *without* a `skillHint` — it builds the `agent.skill.request` itself.
 
 ---
 
@@ -31,22 +34,21 @@ Both follow the same shape; only the gating logic and the target skill/agent dif
    ┌──────────────────────────┐
    │ message.inbound.linear.  │
    │   issue.created          │
-   └──────┬──────────────┬────┘
-          │              │
-          ▼              ▼
-   ┌────────────┐  ┌────────────┐
-   │ protomaker │  │   proto    │   each bridge subscribes
-   │   bridge   │  │   bridge   │   independently
-   │            │  │            │
-   │ label gate │  │ label gate │   (different label per bridge)
-   │ team       │  │ env-       │
-   │ mapping    │  │ overridable│
-   └─────┬──────┘  └─────┬──────┘
-         │               │
-         └───────┬───────┘
-                 ▼
+   └──────────────┬───────────┘
+                  │
+                  ▼
+          ┌────────────────┐
+          │  proto bridge  │   subscribes to issue.created
+          │                │
+          │  label gate    │   default "proto-task"
+          │  (env-         │   override LINEAR_PROTO_BRIDGE_LABEL
+          │   overridable) │
+          └───────┬────────┘
+                  │
+                  ▼
    ┌──────────────────────────┐
-   │  agent.skill.request     │  reply.topic = linear.reply.{issueId}
+   │  agent.skill.request     │  skill=code.execute, targets=[proto]
+   │                          │  reply.topic = linear.reply.{issueId}
    └──────────────┬───────────┘
                   ▼
               SkillDispatcher  (→ [flow-inbound-message](flow-inbound-message.md))
@@ -71,9 +73,9 @@ sequenceDiagram
     participant Ext as Linear (external)
     participant LP as LinearPlugin
     participant Bus as Bus
-    participant B as Bridge<br/>(proto OR protomaker)
+    participant B as linear-proto-bridge
     participant SD as SkillDispatcher
-    participant E as Executor<br/>(proto / protomaker)
+    participant E as proto (DeepAgentExecutor)
 
     Ext->>LP: webhook (Issue.Create)
     LP->>LP: validate + dedupe
@@ -81,10 +83,10 @@ sequenceDiagram
     Bus->>B: deliver
 
     rect rgb(240, 230, 220)
-        Note over B: label gate
+        Note over B: label gate (proto-task)
         alt label matches
             B->>B: build content + meta
-            B->>Bus: agent.skill.request<br/>(reply.topic = linear.reply.{issueId})
+            B->>Bus: agent.skill.request<br/>(code.execute@proto, reply.topic = linear.reply.{issueId})
         else label miss
             Note over B: silent drop
         end
@@ -96,7 +98,7 @@ sequenceDiagram
 
     Bus->>LP: deliver (subscriber: linear.reply.#)
     LP->>LP: extract issueId from topic
-    LP->>Ext: client.createComment(issueId, content)
+    LP->>Ext: createComment(issueId, content)
     LP->>Bus: linear.reply.result.{correlationId}<br/>(record API result)
 ```
 
@@ -106,88 +108,53 @@ sequenceDiagram
 
 | Topic | Published by | Subscribed by | File:line |
 |---|---|---|---|
-| `message.inbound.linear.issue.created` | LinearPlugin (webhook) | RouterPlugin, linear-protomaker-bridge, linear-proto-bridge | `lib/plugins/linear.ts` |
-| `agent.skill.request` (manage_feature, protomaker) | linear-protomaker-bridge | SkillDispatcher | `lib/plugins/linear-protomaker-bridge.ts:178` |
-| `agent.skill.request` (code.execute, proto) | linear-proto-bridge | SkillDispatcher | `lib/plugins/linear-proto-bridge.ts:106` |
-| `linear.reply.{issueId}` | SkillDispatcher / executor (writes payload.content) | LinearPlugin._wireOutbound | `lib/plugins/linear.ts:561` |
-| `linear.reply.result.{correlationId}` | LinearPlugin (after API call) | telemetry | `lib/plugins/linear.ts:567` |
+| `message.inbound.linear.issue.created` | LinearPlugin (webhook) | RouterPlugin (skillHint-only), linear-proto-bridge | `lib/plugins/linear.ts` |
+| `agent.skill.request` (code.execute, proto) | linear-proto-bridge | SkillDispatcher | `lib/plugins/linear-proto-bridge.ts:105` |
+| `linear.reply.{issueId}` | SkillDispatcher / executor (writes payload.content) | LinearPlugin outbound subscriber | `lib/plugins/linear.ts` |
+| `linear.reply.result.{correlationId}` | LinearPlugin (after API call) | telemetry | `lib/plugins/linear.ts` |
 
 ---
 
 ## Gate logic
 
-### linear-protomaker-bridge
-
-Configured by **`workspace/linear-board-mappings.yaml`** ([line 96–100](../../lib/plugins/linear-protomaker-bridge.ts)):
-
-```yaml
-mappings:
-  - linearTeamKey: ENG
-    protoMakerProjectSlug: protoworkstacean
-    triggerLabel: feature
-```
-
-Hot-reload: 5s file watcher. Schema validation is **fail-loud** — one malformed mapping rejects the whole file.
-
-Gate sequence ([line 147–211](../../lib/plugins/linear-protomaker-bridge.ts)):
-1. Drop if `issueId || teamKey || title` missing (line 149)
-2. Look up mapping by `teamKey` — drop if not found (line 151)
-3. Check `issue.labels.includes(mapping.triggerLabel)` — drop if absent (line 155)
-4. Build `agent.skill.request` with skill `manage_feature`, targets `["protomaker"]`, reply.topic `linear.reply.${issueId}`
-
-### linear-proto-bridge
-
 Single global label, env-overridable:
 
 ```
-default: proto-task
+default:  proto-task
 override: LINEAR_PROTO_BRIDGE_LABEL=<custom>
 ```
 
 Gate sequence ([line 81–140](../../lib/plugins/linear-proto-bridge.ts)):
 1. Drop if `issueId || title` missing (line 83)
 2. Check `issue.labels.includes(this.triggerLabel)` — drop if absent (line 86–92)
-3. Build `agent.skill.request` with skill `code.execute`, targets `["proto"]`, reply.topic `linear.reply.${issueId}`
-
-No team mapping — proto is a single fleet-wide agent, not per-board.
+3. Build `agent.skill.request` with skill `code.execute`, targets `["proto"]`, reply.topic `linear.reply.${issueId}` (line 105)
 
 ---
 
 ## Reply round-trip
 
-Both bridges set `reply.topic = linear.reply.{issueId}` on dispatch. SkillDispatcher publishes the executor's response to that topic. LinearPlugin subscribes to `linear.reply.#` (excluding `linear.reply.result.*` to avoid feedback loop) and:
+The bridge sets `reply.topic = linear.reply.{issueId}` on dispatch. SkillDispatcher publishes the executor's response to that topic. LinearPlugin subscribes to `linear.reply.#` (excluding `linear.reply.result.*` to avoid a feedback loop) and:
 
-1. Extracts `issueId` from the topic ([linear.ts:565](../../lib/plugins/linear.ts))
-2. Calls `LinearClient.createComment(issueId, msg.payload.content)`
-3. Publishes `linear.reply.result.{correlationId}` with API result for audit
+1. Extracts `issueId` from the topic
+2. Posts the comment (as Ava via actor=app OAuth when wired, else via `LINEAR_API_KEY`)
+3. Publishes `linear.reply.result.{correlationId}` with the API result for audit
 
-The bridges hold **no state** for round-trip — `reply.topic` is the entire close-the-loop contract.
-
----
-
-## Why two bridges, not one
-
-Greenfield rule: "absence of a default = no behavior". The bridges differ in:
-
-- **Configuration shape** (per-team mappings yaml vs. single env var)
-- **Skill** (`manage_feature` vs. `code.execute`)
-- **Target** (`protomaker` vs. `proto`)
-
-A unified bridge would either need a routing table (over-engineering for two cases) or per-bridge configuration that essentially looks like the current two files. Two small bridges is the simpler shape — and both are no-op when their gate misses, so installing both unconditionally is safe.
+The bridge holds **no state** for round-trip — `reply.topic` is the entire close-the-loop contract, and `code.execute` is one-shot: dispatch, run to completion, reply.
 
 ---
 
 ## Failure modes & gotchas
 
-- **Both bridges silent-drop on non-matching label** — by design. RouterPlugin's chat path still handles the issue via `channels.yaml` if a team's channel routes to a default agent. Bridges and router can coexist on the same inbound event.
-- **No "feature completed" close-the-loop** — when the agent's work eventually merges, no automatic comment lands on the originating Linear issue. The bridge only handles the *first* dispatch reply; if the agent's reply is "I'll work on this and PR shortly", there's no async follow-up. See [protoMaker#3810](https://github.com/protoLabsAI/protoMaker/issues/3810) for the lifecycle event work that would close this.
-- **Mapping yaml hot-reload re-validates everything** — a single bad mapping rejects the whole file. Restart-safe but operator gets one chance to see the warning.
-- **`correlationId` convention** — `linear-bridge-${issueId}` (protomaker) or `linear-proto-${issueId}` (proto). Not used for reply routing (that's `reply.topic`); used for tracing and `linear.reply.result.*` correlation.
+- **Silent-drop on non-matching label** — by design. The mention/assignment path (`linear_agent_respond` to Ava) is independent and handles its own events.
+- **No "task completed" close-the-loop** — when the agent's work eventually merges, no automatic comment lands on the originating Linear issue. The bridge only handles the *first* dispatch reply.
+- **`correlationId` convention** — `linear-proto-${issueId}`. Not used for reply routing (that's `reply.topic`); used for tracing and `linear.reply.result.*` correlation.
 
 ---
 
 ## Related
 
-- [flow-inbound-message](flow-inbound-message.md) — what happens after the bridge publishes `agent.skill.request`
-- [flow-pr-review](flow-pr-review.md) — the analogous label-gated dispatch for GitHub PRs (no separate bridge, lives inside GitHubPlugin)
-- [flow-hitl](flow-hitl.md) — what happens if the dispatched agent escalates (HITL gap applies)
+- [integrations/linear](../integrations/linear) — full Linear plugin contract, the `linear_agent_respond` mention/assignment gate, and actor=app OAuth posting.
+- [flow-inbound-message](flow-inbound-message.md) — what happens after the bridge publishes `agent.skill.request`.
+- [integrations/github](../integrations/github) — the GitHub-issue → protoMaker board forwarder (`protomaker-board-bridge.ts`), the path people sometimes confuse with a Linear bridge.
+- [flow-pr-review](flow-pr-review.md) — the analogous label-gated dispatch for GitHub PRs (no separate bridge, lives inside GitHubPlugin).
+- [flow-hitl](flow-hitl.md) — what happens if the dispatched agent escalates.
