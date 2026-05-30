@@ -2,12 +2,26 @@
 title: Deploy with Docker
 ---
 
-This guide covers a production-ready Docker Compose deployment: building the image, mounting the workspace volume, wiring secrets via environment variables, and verifying health.
+This guide covers a production deployment: how code and config ship, building the image, mounting the workspace volume, wiring secrets, and verifying health.
 
 ## Prerequisites
 
 - Docker >= 24
 - Docker Compose v2
+
+## How deployment works
+
+protoWorkstacean separates **code** from **config**:
+
+- **Code ships as an image.** Production runs `ghcr.io/protolabsai/workstacean:main`. [watchtower](https://containrrr.dev/watchtower/) watches that tag and auto-pulls + restarts the container whenever a new `:main` image is published (CI builds and pushes on every merge to `main`).
+- **Workspace config ships as a host bind-mount.** The `workspace/` directory (agent YAMLs, ceremonies, `channels.yaml`) is mounted into the container and updated on the host with `git pull` — it is *not* baked into the image. This means config changes don't require an image rebuild.
+
+Two config reload behaviours follow from that:
+
+- **Ceremonies hot-reload.** Editing or adding a file under `workspace/ceremonies/` (then `git pull` on the host) is picked up live — no restart.
+- **Agent YAMLs need a container restart.** Changes to `workspace/agents/*.yaml` or `workspace/agents.yaml` are read at startup; `docker compose restart workstacean` to apply them.
+
+So the operational model is: **code lands via watchtower automatically; config lands via `git pull` on the host, with a restart only when you touched agent YAMLs.**
 
 ## Docker Compose
 
@@ -18,7 +32,7 @@ services:
   workstacean:
     build:
       context: .
-      target: production
+      target: release
     restart: unless-stopped
     env_file: .env
     environment:
@@ -26,25 +40,19 @@ services:
       - DATA_DIR=/data
       - TZ=America/New_York
     ports:
-      # Expose the HTTP API on the host (adjust or remove for internal-only)
-      - "3000:3000"
-      # Expose the Astro dashboard + WebSocket event stream (disable with DISABLE_EVENT_VIEWER)
+      # Single HTTP server: API + Astro dashboard + WebSocket event stream
       - "8080:8080"
     volumes:
-      # Workspace config (agents, goals, actions, ceremonies, domains)
+      # Workspace config (agents, ceremonies, channels) — bind-mounted from host
       - ./workspace:/workspace
       # Persistent SQLite event log
       - data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
 
 volumes:
   data:
 ```
+
+The Dockerfile defines two runnable stages: `dev` (`bun run --watch`, used by the checked-in compose default) and `release` (`bun run`, no watcher — use it for production). There is no `production` stage. The checked-in `docker-compose.yml` targets `dev` for local development; flip `target` to `release` for a production build, or just run the published `ghcr.io/protolabsai/workstacean:main` image and let watchtower keep it current.
 
 ## Environment file
 
@@ -71,7 +79,7 @@ GITHUB_WEBHOOK_SECRET=your-webhook-secret
 ROUTER_DEFAULT_SKILL=sitrep
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
-WORKSTACEAN_HTTP_PORT=3000
+WORKSTACEAN_HTTP_PORT=8080
 
 # ── Storage ───────────────────────────────────────────────────────────────────
 WORKSPACE_DIR=/workspace
@@ -82,7 +90,7 @@ For a full list of all supported variables, see [reference/env-vars.md](../../re
 
 ## Workspace volume
 
-The `workspace/` directory is mounted read-write so configuration changes can be applied without rebuilding the image:
+The `workspace/` directory is bind-mounted read-write, so configuration changes are applied on the host (via `git pull`) without rebuilding the image:
 
 ```
 ./workspace/                  ← bind-mounted to /workspace in container
@@ -90,20 +98,19 @@ The `workspace/` directory is mounted read-write so configuration changes can be
     ava.yaml
     frank.yaml
   agents.yaml
-  projects.yaml
   channels.yaml
   ceremonies/
     daily-standup.yaml
     security-triage.yaml
 ```
 
-After editing any workspace file, restart the container:
+After editing **agent** YAMLs, restart the container:
 
 ```bash
 docker compose restart workstacean
 ```
 
-Hot-reload for workspace YAML files is not supported in the current version (except `projects.yaml` and skill keywords via `RouterPlugin`).
+Ceremonies under `workspace/ceremonies/` hot-reload — no restart needed.
 
 ## Starting the stack
 
@@ -112,36 +119,26 @@ docker compose up -d
 docker compose logs -f workstacean
 ```
 
-Expected startup output:
-
-```
-[agent-runtime] loaded agent: ava (general, 1 skill)           ← in-process chat agent
-[skill-broker] Registered 3 A2A agent(s)                       ← protomaker, quinn, etc.
-[ceremony-plugin] loaded 5 ceremonies
-[http] listening on :3000
-[workstacean] ready
-```
-
 ## Health check
 
 The `/health` endpoint returns `200 OK` when the server is ready:
 
 ```bash
-curl http://localhost:3000/health
-# {"status":"ok","uptime":42.3}
+curl http://localhost:8080/health
+# {"status":"ok","timestamp":1748534400000}
 ```
 
-Docker's healthcheck (`test: curl -f ...`) will restart the container if this endpoint stops responding.
+Put a healthcheck behind your orchestrator or reverse proxy against this endpoint.
 
 ## Dashboard
 
-The Astro dashboard is built during the Docker image build and served by the event-viewer plugin on port `8080`. Once the stack is up:
+The Astro dashboard is built into the image (the Dockerfile's `dashboard-build` stage) and served by the same HTTP server on port `8080`. Once the stack is up:
 
 ```bash
 open http://localhost:8080
 ```
 
-Set `DISABLE_EVENT_VIEWER=1` in `.env` to skip the plugin entirely (e.g. for headless deployments). See the [Dashboard reference](../../reference/dashboard) for pages, API client, and cache behavior.
+Set `DISABLE_EVENT_VIEWER=1` in `.env` to skip the event-viewer plugin entirely (e.g. for headless deployments). See the [Dashboard reference](../../reference/dashboard) for pages, API client, and cache behavior.
 
 ## Production docker-compose with ava
 
@@ -150,7 +147,7 @@ If you run ava alongside workstacean in the same Compose project:
 ```yaml
 services:
   workstacean:
-    build: .
+    image: ghcr.io/protolabsai/workstacean:main
     restart: unless-stopped
     env_file: .env
     environment:
@@ -163,11 +160,6 @@ services:
     depends_on:
       ava:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
 
   ava:
     image: protoLabsAI/protoMaker:latest

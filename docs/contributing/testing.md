@@ -16,7 +16,7 @@ Wire up the plugins you need against `InMemoryEventBus`, publish a message, and 
 
 ```typescript
 import { describe, it, expect } from 'bun:test';
-import { InMemoryEventBus } from '../lib/bus/in-memory-event-bus';
+import { InMemoryEventBus } from '../lib/bus';
 import { SchedulerPlugin } from '../lib/plugins/scheduler';
 
 describe('SchedulerPlugin', () => {
