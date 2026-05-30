@@ -4,8 +4,19 @@ on:
   push:
     branches:
       - main
+    # The reference docs are generated from code at deploy time (bun run docs:gen),
+    # so a code change can change the published docs without touching docs/**.
+    # Trigger on the generator inputs too — deterministic generators mean a push
+    # that doesn't actually change any doc produces an identical build (harmless
+    # no-op redeploy; the `pages` concurrency group supersedes overlapping runs).
     paths:
-      - 'docs/**'
+      - 'docs/**'                       # content + VitePress config
+      - 'src/**'                        # API routes, bus topics, agent tools, env schema
+      - 'lib/**'                        # bus topics, env (process.env reads)
+      - 'workspace/agents/**'           # agent tool → agent mapping
+      - 'scripts/gen-*.ts'              # the generators
+      - 'scripts/audit-bus-topics.ts'
+      - '.github/workflows/docs-deploy.yml'
   workflow_dispatch:
 
 permissions:
