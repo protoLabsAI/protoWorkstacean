@@ -114,7 +114,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Best-effort ship notification — must NEVER gate main CI. The image is
+      # already built + pushed by this point; a bad/expired webhook is not a
+      # build failure. Fails loud in the logs but exits 0, and continue-on-error
+      # is a backstop for any unexpected throw (e.g. network error). (#669)
       - name: Notify Discord — what shipped
+        continue-on-error: true
         env:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_PROTOWORKSTACEAN_DEV }}
           COMMIT_SUBJECT: ${{ github.event.head_commit.message }}
@@ -129,11 +134,15 @@ jobs:
           const sha     = (process.env.SHORT_SHA ?? '').slice(0, 7);
           const url     = process.env.COMMIT_URL ?? '';
 
-          const resp = await fetch(webhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ embeds: [{ title: \`Shipped — \${sha}\`, description: subject, url, color: 5763719, footer: { text: 'protoWorkstacean' } }] }),
-          });
-          if (!resp.ok) { console.error('Discord post failed:', resp.status); process.exit(1); }
-          console.log('Posted to dev-channel webhook.');
+          try {
+            const resp = await fetch(webhook, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ embeds: [{ title: \`Shipped — \${sha}\`, description: subject, url, color: 5763719, footer: { text: 'protoWorkstacean' } }] }),
+            });
+            if (!resp.ok) { console.error('Discord post failed (non-blocking):', resp.status, await resp.text().catch(() => '')); process.exit(0); }
+            console.log('Posted to dev-channel webhook.');
+          } catch (e) {
+            console.error('Discord post errored (non-blocking):', e?.message ?? e);
+          }
           " --input-type=module
