@@ -237,8 +237,8 @@ workspace/
   agents.yaml                  # A2A remote agents
   agents/                      # In-process agent YAMLs
   ceremonies/                  # Scheduled rituals
-  crons/                       # Plain cron entries
-  projects.yaml
+  crons/                       # Plain cron entries (created by SchedulerPlugin)
+  channels.yaml                # Channel→agent + per-project channel bindings
 test/
   integration/
 tests/

@@ -2,33 +2,31 @@
 title: OnboardingPlugin Reference
 ---
 
-_This is a reference doc. It covers the OnboardingPlugin pipeline, request schema, idempotency guarantees, trigger sources, and related tooling._
-
----
+_This is a reference doc. It covers the OnboardingPlugin pipeline, request schema, idempotency guarantees, and trigger sources._
 
 ---
 
 ## Overview
 
-`OnboardingPlugin` (`lib/plugins/onboarding.ts`) implements a deterministic, idempotent 7-step project provisioning pipeline. When triggered, it registers a project across GitHub and Google Drive, then writes the project's metadata to `workspace/projects.yaml` and notifies downstream consumers.
+`OnboardingPlugin` (`lib/plugins/onboarding.ts`) runs the deterministic, idempotent side-effects of bringing a project online: registering its GitHub webhook, creating its Google Drive folder, and notifying downstream consumers.
+
+**Project registration itself is owned by protoMaker** — protoMaker's project registry is the source of truth for project metadata (see [config-files](config-files) and [`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts)). Operators register the project in protoMaker's UI _before_ triggering onboarding here; this plugin does not create or persist a project record of its own. workstacean reads the canonical project list from protoMaker via the `ProjectRegistry` (exposed at `GET /api/projects`).
 
 ---
 
-## The 7-step pipeline
+## The pipeline
 
 Steps run in sequence. Each step is individually idempotent — re-running the full pipeline for the same slug is safe.
 
 | # | Step | What it does | Skip condition |
 |---|------|-------------|----------------|
-| 1 | **validate** | Checks `slug`, `title`, and `github` are present; validates `github` is `owner/repo` format; rejects duplicate in-flight runs | Missing required fields or invalid format |
-| 2 | **idempotency** | Reads `workspace/projects.yaml` and exits early (success) if the slug is already registered | Slug already in `projects.yaml` |
-| 3 | **github_webhook** | Registers a GitHub repo webhook for `issues`, `issue_comment`, `pull_request`, `pull_request_review_comment` events; skips if webhook URL already registered | No GitHub auth (`QUINN_APP_ID` or `GITHUB_TOKEN`), or `WORKSTACEAN_PUBLIC_URL` not set, or webhook already exists |
-| 4 | **drive_folder** | Creates a Google Drive folder under the org root folder (`drive.orgFolderId` in `workspace/google.yaml`) | Google credentials not set, `google.yaml` missing, or `drive.orgFolderId` empty |
-| 5 | **projects_yaml** | Upserts the project entry into `workspace/projects.yaml` under a write lock; validates entry against `ProjectEntrySchema` before writing; preserves file header comments | Slug already present (double-checked under lock) |
-| 6 | **bus_notify** | Publishes `message.inbound.onboard.complete` with project metadata and step outcomes | Never skipped |
-| 7 | **reply** | Sends a confirmation message (or error) to the reply topic | No reply topic in the inbound message |
+| 1 | **validate** | Checks `slug`, `title`, and `github` are present; validates `github` is `owner/repo` format; rejects duplicate in-flight runs for the same slug | Missing required fields or invalid format |
+| 2 | **github_webhook** | Registers a GitHub repo webhook for `issues`, `issue_comment`, `pull_request`, `pull_request_review_comment` events; lists existing webhooks first and skips if the target URL is already registered | No GitHub auth (`QUINN_APP_ID` or `GITHUB_TOKEN`), or `WORKSTACEAN_PUBLIC_URL` not set, or webhook already exists |
+| 3 | **drive_folder** | Creates a Google Drive folder named after the project title, under the org root folder (`drive.orgFolderId` in `workspace/google.yaml`) | Google credentials not set, `google.yaml` missing, or `drive.orgFolderId` empty |
+| 4 | **bus_notify** | Publishes `message.inbound.onboard.complete` with project metadata and per-step outcomes for downstream consumers | Never skipped |
+| 5 | **reply** | Sends a confirmation message (or error) to the inbound message's reply topic | No reply topic in the inbound message |
 
-Steps 3–4 are non-fatal: an error in one step is logged, and the pipeline continues to `projects_yaml`. The pipeline aborts only if `projects_yaml` (step 5) fails.
+Steps 2–3 are non-fatal: an error in one step is recorded in the step result and the pipeline continues. The plugin does not write any project file — it only performs the external side-effects and publishes the completion event.
 
 ---
 
@@ -46,42 +44,7 @@ Sent as the `payload` of a `message.inbound.onboard` bus message (or the JSON bo
 | `agents` | `string[]` | | `["protomaker", "quinn"]` | Agent identifiers to associate |
 | `discord` | `object` | | `{}` | Discord channel IDs (`general`, `updates`, `dev`, `alerts`, `releases`) |
 
----
-
-## `lib/project-schema.ts` — Zod schema
-
-`lib/project-schema.ts` defines the Zod schema for `workspace/projects.yaml` entries. It is used by:
-
-- `lib/plugins/onboarding.ts` — validates each new entry before writing (step 7 fails if validation fails)
-- `lib/plugins/a2a.ts` — validates on load (warns and skips invalid entries)
-
-### `ProjectEntrySchema` fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `slug` | ✅ | Unique project slug |
-| `github` | ✅ | `"owner/repo"` format |
-| `status` | ✅ | Project status string |
-| `discord.dev` | ✅ | Dev channel ID (may be empty string until channel is created) |
-| `title` | | Human-readable name |
-| `defaultBranch` | | Git default branch |
-| `team` | | Team assignment |
-| `agents` | | List of agent identifiers |
-| `onboardedAt` | | ISO 8601 timestamp of onboarding |
-| `onboardingState` | | Per-step status tracking (`ok` \| `skip` \| `error`) |
-| `googleWorkspace.driveFolderId` | | Google Drive folder ID created during onboarding |
-| `googleWorkspace.sharedDocId` | | Project spec/brief Google Doc ID |
-| `googleWorkspace.calendarId` | | Project-scoped calendar ID |
-
-### Validation helpers
-
-```typescript
-// Validate a single raw entry
-validateProjectEntry(raw: unknown): { ok: true; entry: ProjectEntry } | { ok: false; errors: string[] }
-
-// Parse and validate the full projects.yaml structure (throws on invalid)
-parseProjectsYaml(raw: unknown): ProjectsYaml
-```
+These fields are echoed back on `message.inbound.onboard.complete`; the plugin does not persist them. Channel→agent bindings live in `workspace/channels.yaml` ([ChannelRegistry](workspace-files)), and project metadata lives in the protoMaker registry — neither is written by this plugin.
 
 ---
 
@@ -89,10 +52,9 @@ parseProjectsYaml(raw: unknown): ProjectsYaml
 
 The pipeline is safe to re-run for the same project slug:
 
-1. **Step 2 (idempotency check)** exits early with `status: "already_onboarded"` if the slug is already in `projects.yaml`. No external API calls are made.
-2. **Step 3 (github_webhook)** lists existing webhooks before creating; skips if the target URL is already registered.
-3. **Step 5 (projects_yaml)** double-checks for the slug under a write lock before appending.
-4. **In-flight guard** — concurrent requests for the same slug are rejected with an error while the first run is in progress.
+1. **Step 2 (github_webhook)** lists existing webhooks before creating; skips if the target URL is already registered.
+2. **Step 3 (drive_folder)** is skipped entirely when Google credentials or the org folder ID are absent.
+3. **In-flight guard** — concurrent requests for the same slug are rejected with an error while the first run is in progress.
 
 ---
 
@@ -119,13 +81,13 @@ Content-Type: application/json
 }
 ```
 
-The HTTP handler waits up to 30 seconds for the pipeline to complete and returns the result synchronously. If the pipeline takes longer than 30s, it returns `{ success: true, status: "accepted" }` immediately and the pipeline continues in the background.
+The HTTP handler publishes to `message.inbound.onboard` and waits for the pipeline result on the reply topic.
 
-### Discord `/onboard` slash command (M2)
+### Discord `/onboard` slash command
 
-The Discord plugin routes slash commands to `message.inbound.discord.slash.{interactionId}` via the command config in `workspace/discord.yaml`. An `/onboard` command configured in `discord.yaml` can pass the project fields as options and publish to `message.inbound.onboard`. Autocomplete for project fields can be configured via the `choices` option in the command spec.
+The Discord plugin routes slash commands to `message.inbound.discord.slash.{interactionId}` via the command config in `workspace/discord.yaml`. An `/onboard` command configured in `discord.yaml` can pass the project fields as options and publish to `message.inbound.onboard`.
 
-### GitHub org webhook: `repository.created` (M2)
+### GitHub org webhook: `repository.created`
 
 When the GitHub org webhook is registered and a new repository is created under the org, `lib/plugins/github.ts` catches the `repository` + `action: created` event and publishes to `message.inbound.onboard` automatically. The payload uses the repository's `full_name`, `name`, `owner.login`, `description`, and visibility.
 
@@ -135,7 +97,7 @@ When the GitHub org webhook is registered and a new repository is created under 
 
 | Topic | When published | Payload highlights |
 |-------|---------------|-------------------|
-| `message.inbound.onboard.complete` | After `projects_yaml` step succeeds | `slug`, `github`, `driveFolderId`, per-step `status` |
+| `message.inbound.onboard.complete` | After the pipeline runs | `slug`, `title`, `github`, `defaultBranch`, `team`, `agents`, `discord`, `driveFolderId`, per-step `status` |
 | `{msg.reply.topic}` | After pipeline finishes (success or error) | Full result with `success`, `step`, human-readable `content` |
 
 ---
@@ -144,33 +106,20 @@ When the GitHub org webhook is registered and a new repository is created under 
 
 | Variable | Required by | Default | Purpose |
 |----------|-------------|---------|---------|
-| `WORKSTACEAN_PUBLIC_URL` | Step 3 | — | Base URL for webhook registration (e.g. `https://ws.example.com`) |
-| `QUINN_APP_ID` | Step 3 | — | GitHub App ID for auth (used by `makeGitHubAuth`) |
-| `QUINN_APP_PRIVATE_KEY` | Step 3 | — | GitHub App private key |
-| `GITHUB_TOKEN` | Step 3 | — | Alternative GitHub PAT for webhook registration |
-| `GITHUB_WEBHOOK_SECRET` | Step 3 | — | Optional HMAC secret for GitHub webhooks |
-| `GOOGLE_CLIENT_ID` | Step 4 | — | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | Step 4 | — | Google OAuth client secret |
-| `GOOGLE_REFRESH_TOKEN` | Step 4 | — | Google OAuth refresh token |
-
----
-
-## Config hot-reload
-
-The following workspace config files are watched at runtime (polled every 5 seconds by Node's `watchFile`). Changes take effect without a container restart:
-
-| File | Watched by | What reloads |
-|------|-----------|-------------|
-| `workspace/github.yaml` | `GithubPlugin` | Mention handle, admins, per-event skill hints |
-| `workspace/projects.yaml` | `GithubPlugin`, `A2aPlugin` | Monitored repo list (GithubPlugin), project routing table (A2aPlugin) |
-| `workspace/discord.yaml` | `DiscordPlugin` | Channel config, slash command list (re-registers commands on change) |
-| `workspace/agents.yaml` | `DiscordPlugin` | Agent identity list (bot → agent mapping) |
+| `WORKSTACEAN_PUBLIC_URL` | github_webhook | — | Base URL for webhook registration (e.g. `https://ws.example.com`) |
+| `QUINN_APP_ID` | github_webhook | — | GitHub App ID for auth (used by `makeGitHubAuth`) |
+| `QUINN_APP_PRIVATE_KEY` | github_webhook | — | GitHub App private key |
+| `GITHUB_TOKEN` | github_webhook | — | Alternative GitHub PAT for webhook registration |
+| `GITHUB_WEBHOOK_SECRET` | github_webhook | — | Optional HMAC secret for GitHub webhooks |
+| `GOOGLE_CLIENT_ID` | drive_folder | — | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | drive_folder | — | Google OAuth client secret |
+| `GOOGLE_REFRESH_TOKEN` | drive_folder | — | Google OAuth refresh token |
 
 ---
 
 ## References
 
 - [`lib/plugins/onboarding.ts`](../../lib/plugins/onboarding.ts) — plugin implementation
-- [`lib/project-schema.ts`](../../lib/project-schema.ts) — Zod schema for `projects.yaml` entries
+- [`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts) — protoMaker-backed project registry (source of truth)
 - [`reference/bus-topics.md`](bus-topics) — full bus topic registry
 - [`reference/config-files.md`](config-files) — workspace config file reference

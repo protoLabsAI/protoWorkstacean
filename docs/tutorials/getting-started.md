@@ -66,10 +66,9 @@ cp workspace/agents/frank.yaml.example workspace/agents/frank.yaml
 
 # External A2A agent registry — list the protoMaker team, quinn, etc.
 cp workspace/agents.yaml.example workspace/agents.yaml
-
-# Project registry
-cp workspace/projects.yaml.example workspace/projects.yaml
 ```
+
+There is no project file to copy — projects come from the **protoMaker registry**, not a workspace file. workstacean pulls the canonical project list from protoMaker at startup (and refreshes it periodically) and serves it at `GET /api/projects`.
 
 Edit `workspace/agents/ava.yaml` and set your `systemPrompt`. For a minimal
 chat-only Ava:

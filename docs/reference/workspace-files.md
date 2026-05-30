@@ -112,18 +112,27 @@ skills:
 
 ---
 
-## workspace/projects.yaml
+## Project metadata
 
-Project registry. Read by `RouterPlugin` for GitHub-message enrichment (resolving an inbound `owner/repo` to a project slug + Discord channel set).
+There is no `workspace/projects.yaml`. Project metadata comes from the **protoMaker registry** — workstacean pulls the canonical list via `ProjectRegistry` ([`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts)) and serves it at `GET /api/projects`. `RouterPlugin` resolves an inbound `owner/repo` to a project (`ProjectRegistry.getByGithub`) and then looks up its Discord channels in `workspace/channels.yaml` via `ChannelRegistry.getProjectChannel(slug, kind)`.
+
+## workspace/channels.yaml
+
+Channel→agent and per-project channel bindings. Read by `ChannelRegistry`. Each entry maps a `(platform, channelId)` to an agent, or binds a `(project, kind)` pair to a Discord channel.
 
 ```yaml
-projects:
-  - slug: string           # Unique project identifier
-    owner: string          # GitHub org or user
-    repo: string           # GitHub repository name
-    workspace?: string     # Path to per-project config dir (relative to WORKSPACE_DIR)
-    discordChannels?:      # Discord channel IDs associated with this project
-      - string
+channels:
+  - id: string             # Unique entry id
+    platform: string       # discord | linear | google
+    channelId: string      # Platform channel/team/issue id
+    agent?: string         # Agent that handles this channel (channel→agent route)
+    project?: string       # Project slug — for per-project channel bindings
+    kind?: string          # Binding kind (e.g. "dev") for getProjectChannel(slug, kind)
+    description?: string
+    conversation?:          # Optional multi-turn conversation settings
+      enabled: boolean
+      timeoutMs: number
+      requireMentionAfterFirst?: boolean
 ```
 
 ---

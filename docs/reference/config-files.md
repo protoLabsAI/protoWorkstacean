@@ -86,7 +86,6 @@ Each has a `.example` counterpart — copy it to bootstrap a new deployment:
 |------|-----------|
 | `workspace/agents/<name>.yaml` | `workspace/agents/<name>.yaml.example` — one file per in-process agent |
 | `workspace/agents.yaml` | `workspace/agents.yaml.example` — external A2A agent registry |
-| `workspace/projects.yaml` | `workspace/projects.yaml.example` |
 | `workspace/discord.yaml` | `workspace/discord.yaml.example` |
 | `workspace/google.yaml` | `workspace/google.yaml.example` |
 | `workspace/a2a.yaml` | `workspace/a2a.yaml.example` — outbound A2A delivery targets for the scheduler |
@@ -194,28 +193,13 @@ agents:
 
 ---
 
-## workspace/projects.yaml
+## Project metadata (no workspace file)
 
-Source of truth for the project registry. Consumed by Quinn and protoMaker via `GET /api/projects`. Written to during `onboard_project`.
+There is no `workspace/projects.yaml`. The **protoMaker registry is the source of truth** for project metadata. workstacean pulls the canonical project list from protoMaker (`GET /api/settings/global`) via `ProjectRegistry` ([`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts)) and re-serves it at `GET /api/projects`. Each entry exposes `id`, `name`, derived `slug`, filesystem `path`, derived `github` (`{ owner, repo }`), and `defaultBranch`.
 
-Webhook URLs are never stored here — use `webhookEnv` to point at an env var holding the URL.
+Discord channel bindings are **not** part of project metadata — they live in `workspace/channels.yaml` via the [ChannelRegistry](workspace-files), keyed by `(projectSlug, kind)` and resolved with `ChannelRegistry.getProjectChannel(slug, kind)`.
 
-```yaml
-projects:
-  - slug: your-org-your-repo
-    title: Your Project
-    github: your-org/your-repo
-    defaultBranch: main
-    status: active
-    agents: [protomaker, quinn]
-    discord:
-      dev:
-        channelId: ""
-        webhookEnv: DISCORD_WEBHOOK_YOURPROJECT_DEV      # env var name, not the URL
-      release:
-        channelId: ""
-        webhookEnv: DISCORD_WEBHOOK_YOURPROJECT_RELEASE
-```
+To add a project, register it in protoMaker's UI; workstacean picks it up on the next registry refresh (5-min interval, or immediately on restart).
 
 ---
 
@@ -248,7 +232,7 @@ commands:
             description: "Option description"
             type: string               # string | integer | boolean
             required: false
-            autocomplete: false        # true enables live Discord filtering; project options load from projects.yaml
+            autocomplete: false        # true enables live Discord filtering; project options resolve via the in-process project registry
 ```
 
 ---
