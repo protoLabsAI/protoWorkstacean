@@ -176,8 +176,10 @@ interface CheckRun {
 
 /**
  * Raised when GitHub returns 403 on the CI read — the reviewer's token lacks
- * access to this repo/PR's checks (fork PR, repo outside the app installation,
- * secondary rate limit). This is a reviewer-side *access* gap, NOT a CI
+ * access to this repo/PR's checks. Most often the @protoquinn[bot] App is
+ * missing the `checks:read`/`actions:read` permission, or the repo isn't in the
+ * App's installation; less often a genuine fork PR or a secondary rate limit.
+ * This is a reviewer-side *access* gap, NOT a CI
  * failure, so callers treat it as an unverified-CI Gap rather than a defect or
  * a hard error: `check_ci` reports it plainly, `guardTerminalCi` holds the
  * formal verdict to COMMENT. Other GitHub errors still throw loudly.
@@ -234,9 +236,10 @@ async function checkCi(owner: string, name: string, pr: number): Promise<string>
     if (err instanceof CiAccessError) {
       return (
         `CI checks are not accessible for PR#${pr} in ${owner}/${name} (HTTP 403). ` +
-        `This is a reviewer-side access limitation (fork PR, repo outside the reviewer's ` +
-        `app installation, or rate limit) — NOT a CI failure. Record it as an unverified-CI ` +
-        `Gap; do not treat inaccessible CI as a broken-CI finding.`
+        `This is a reviewer-side access gap — most likely the @protoquinn[bot] App is missing ` +
+        `the checks:read/actions:read permission, or the repo isn't in the App's installation ` +
+        `(less often a genuine fork PR or a secondary rate limit) — NOT a CI failure. Record it ` +
+        `as an unverified-CI Gap; do not treat inaccessible CI as a broken-CI finding.`
       );
     }
     throw err;
@@ -295,8 +298,9 @@ async function guardTerminalCi(
         {
           success: false,
           error:
-            `CI is not accessible on PR#${pr} (HTTP 403) — a reviewer-side access limitation ` +
-            `(fork PR, repo outside the app installation, or rate limit), not a CI failure. ` +
+            `CI is not accessible on PR#${pr} (HTTP 403) — a reviewer-side access gap (most ` +
+            `likely the @protoquinn[bot] App missing checks:read/actions:read, or the repo not ` +
+            `in the App's installation; less often a fork PR or rate limit), not a CI failure. ` +
             `A formal ${verb} would lock in a verdict on unverified CI, so it is held. Record ` +
             `your findings with action='review_comment' (non-blocking) and note the CI-access ` +
             `Gap; do not treat inaccessible CI as a broken-CI FAIL.`,
