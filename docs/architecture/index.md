@@ -50,8 +50,8 @@ Nine flows + one cross-cut. Each doc has the same shape:
                                                               ▼                                       ▼
                                                   ┌────────────────────┐                  ┌──────────────────┐
                                                   │  DeepAgentExecutor │                  │ FunctionExecutor │
-                                                  │  ProtoSdkExecutor  │                  │  (alert/ceremony │
-                                                  │   A2AExecutor      │                  │   /pr-remediator)│
+                                                  │   A2AExecutor      │                  │  (alert/ceremony │
+                                                  │                    │                  │   /pr-remediator)│
                                                   └─────────┬──────────┘                  └────────┬─────────┘
                                                             │ message.outbound.*                   │
                                                             │ linear.reply.{id}                    │
@@ -73,7 +73,7 @@ Everything else — telemetry, dashboard, HITL, fleet health — observes this s
 | # | Doc | Entry trigger | Terminal topic |
 |---|---|---|---|
 | 1 | [flow-inbound-message](flow-inbound-message.md) | `message.inbound.{platform}.*` | `message.outbound.{platform}.*` |
-| 2 | [flow-linear-bridges](flow-linear-bridges.md) | `message.inbound.linear.issue.created` (label-gated) | `linear.reply.{issueId}` |
+| 2 | [flow-linear-bridges](flow-linear-bridges.md) | `message.inbound.linear.issue.created` (`proto-task` label → `code.execute`@`proto`) | `linear.reply.{issueId}` |
 | 3 | [flow-ceremonies](flow-ceremonies.md) | cron tick / external trigger | `ceremony.{id}.completed` + `autonomous.outcome.ceremony.{id}.{skill}` |
 | 4 | [flow-pr-review](flow-pr-review.md) | `message.inbound.github.{owner}.{repo}.pull_request.{n}` | GitHub review (APPROVED / COMMENTED / CHANGES_REQUESTED) |
 | 5 | [flow-alert-remediator](flow-alert-remediator.md) | fleet-health threshold trip → `action.*` / `pr.remediate.*` | `message.outbound.discord.alert` / GitHub mutation |

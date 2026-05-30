@@ -102,10 +102,12 @@ Payload is the raw `CostSample` above. Used for the dashboard fleet-cost view an
 
 | Side | Where | Notes |
 |---|---|---|
-| **Extraction** (consumer) | [`src/executor/executors/a2a-executor.ts`](https://github.com/protoLabsAI/protoWorkstacean/blob/main/src/executor/executors/a2a-executor.ts) — added in #372 | Scans terminal Task artifact parts for `application/vnd.protolabs.cost-v1+json`, flattens onto `result.data` so the cost interceptor records the sample |
-| **Emission** (producer) | [`Quinn/a2a_handler.py::_terminal_artifact_parts`](https://github.com/protoLabsAI/quinn/blob/main/a2a_handler.py) + [`Quinn/server.py::_chat_langgraph_stream`](https://github.com/protoLabsAI/quinn/blob/main/server.py) — added in Quinn #56 | Captures `on_chat_model_end` events from LangGraph for `usage_metadata`, accumulates onto `TaskRecord.usage`, emits the DataPart on COMPLETED |
+| **Extraction** (consumer) | [`src/executor/executors/a2a-executor.ts`](https://github.com/protoLabsAI/protoWorkstacean/blob/main/src/executor/executors/a2a-executor.ts) — added in #372 | Scans terminal Task artifact parts for `application/vnd.protolabs.cost-v1+json`, flattens onto `result.data` so the cost interceptor records the sample. This applies to **remote A2A agents** — the only live one is `protopen`. |
+| **Emission** (producer) | Remote A2A agent's `/a2a` handler | The remote agent surfaces `usage` + `durationMs` (and optionally `costUsd`) on the terminal Task — workstacean's interceptor reads it off `result.data`. |
 
-Quinn currently emits `usage` + `durationMs` only — `costUsd` capture from the LiteLLM gateway response is a follow-up. Consumers tolerate missing `costUsd` and can derive it from per-model rates if needed.
+This extension only fires on the A2A dispatch path. In-process DeepAgents (`ava`, `quinn`, `proto`, `protobot`) run inside the workstacean process — there is no JSON-RPC round-trip and no SQLite layer; their token/wall-time accounting comes from the runtime's own telemetry, not this interceptor. (Quinn was absorbed from a standalone service; its old Python `server.py` / SQLite cost path no longer exists.)
+
+Consumers tolerate a missing `costUsd` and can derive it from per-model rates if needed.
 
 ---
 
