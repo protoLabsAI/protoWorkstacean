@@ -62,6 +62,13 @@ export interface ApiContext {
    * (dispatcher inline) and A2A (TaskTracker) results. Wired in src/index.ts.
    */
   skillResponseCache?: SkillResponseCache;
+  /**
+   * True while a dispatch (in-process or A2A) is still executing. Lets the
+   * task-poll endpoint report a "working" state for in-process dispatches that
+   * aren't yet in the SkillResponseCache and aren't tracked by TaskTracker
+   * (which only covers long-running A2A tasks). Backed by SkillDispatcher.isActive.
+   */
+  activeDispatchCheck?: (correlationId: string) => boolean;
   /** Source of truth for project metadata (slug, path, github coordinates). */
   projectRegistry?: ProjectRegistry;
   /** Channels registry — used by routes that need per-project channel lookups. */

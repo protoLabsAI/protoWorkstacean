@@ -141,7 +141,9 @@ describe("/api/a2a/task/:correlationId (poll)", () => {
     const taskTracker = {
       getAll: () => [{ correlationId: "c-working", taskId: "t1", agentName: "protopen" }],
     } as unknown as ApiContext["taskTracker"];
-    const { poll } = routesFor({ bus, executorRegistry: fakeRegistry(["protopen"]), taskTracker, skillResponseCache });
+    // In-flight in-process dispatch: not cached, not tracked, but actively executing.
+    const activeDispatchCheck = (id: string) => id === "c-inproc";
+    const { poll } = routesFor({ bus, executorRegistry: fakeRegistry(["protopen"]), taskTracker, skillResponseCache, activeDispatchCheck });
 
     const done = await poll(new Request("http://x/api/a2a/task/c-done"), { correlationId: "c-done" });
     const dj = (await done.json()) as { data: Record<string, unknown> };
@@ -152,6 +154,14 @@ describe("/api/a2a/task/:correlationId (poll)", () => {
     const wj = (await working.json()) as { data: Record<string, unknown> };
     expect(wj.data.pending).toBe(true);
     expect(wj.data.taskState).toBe("working");
+    expect(wj.data.taskId).toBe("t1"); // A2A working carries taskId
+
+    // In-flight in-process dispatch → working (no taskId), not "unknown"
+    const inproc = await poll(new Request("http://x/api/a2a/task/c-inproc"), { correlationId: "c-inproc" });
+    const ij = (await inproc.json()) as { data: Record<string, unknown> };
+    expect(ij.data.pending).toBe(true);
+    expect(ij.data.taskState).toBe("working");
+    expect(ij.data.taskId).toBeUndefined();
 
     const unknown = await poll(new Request("http://x/api/a2a/task/c-nope"), { correlationId: "c-nope" });
     const uj = (await unknown.json()) as { data: Record<string, unknown> };
