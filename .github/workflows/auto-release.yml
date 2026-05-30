@@ -50,14 +50,14 @@ jobs:
         id: version
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Detected version: v$VERSION"
 
           if git tag -l "v$VERSION" | grep -q "v$VERSION"; then
-            echo "already_tagged=true" >> $GITHUB_OUTPUT
+            echo "already_tagged=true" >> "$GITHUB_OUTPUT"
             echo "v$VERSION is already tagged."
           else
-            echo "already_tagged=false" >> $GITHUB_OUTPUT
+            echo "already_tagged=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create tag

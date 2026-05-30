@@ -75,8 +75,8 @@ jobs:
               ;;
           esac
 
-          echo "current=$CURRENT" >> $GITHUB_OUTPUT
-          echo "next=$NEXT" >> $GITHUB_OUTPUT
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
           echo "Version bump: v$CURRENT → v$NEXT"
 
       - name: Apply version bump
