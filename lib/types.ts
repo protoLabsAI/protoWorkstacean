@@ -55,25 +55,12 @@ export interface ConversationTurn {
   channelId: string;
 }
 
-export type WidgetType = 'chart' | 'table' | 'status-card' | 'log-stream' | 'metric';
-
-export interface WidgetDescriptor {
-  /** Plugin that contributed this widget — stamped by /api/widgets discovery from plugin.name. */
-  pluginName: string;
-  id: string;
-  type: WidgetType;
-  title: string;
-  query?: string;
-  props?: Record<string, unknown>;
-}
-
 export interface Plugin {
   name: string;
   description: string;
   capabilities: string[];
   install(bus: EventBus): void;
   uninstall(): void;
-  getWidgets?(): WidgetDescriptor[];
 
   /**
    * Bus topics this plugin publishes to. Used by `GET /api/bus/topology`

@@ -28,7 +28,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | `agent.chat.outbound` | — | — | `src/api/ava-tools.ts:109` | _(none)_ |
 | `agent.skill.latency` | ✅ `AGENT_SKILL_LATENCY` (`ACTION_TOPICS`) | — | `src/executor/skill-dispatcher-plugin.ts:518` | _(none)_ |
 | `agent.skill.progress` | ✅ `AGENT_SKILL_PROGRESS_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
-| `agent.skill.request` | ✅ `AGENT_SKILL_REQUEST` (`ACTION_TOPICS`) | — | `src/router/router-plugin.ts:295`<br>`src/router/router-plugin.ts:342`<br>`src/executor/skill-dispatcher-plugin.ts:665`<br>`src/api/openai-compat.ts:171`<br>`src/api/ava-tools.ts:132`<br>`src/api/ava-tools.ts:311`<br>`src/api/a2a-server.ts:296`<br>`src/plugins/fleet-alerts-evaluator-plugin.ts:188`<br>`lib/plugins/pr-remediator.ts:1350`<br>`lib/plugins/pr-remediator.ts:1616`<br>`lib/plugins/linear-proto-bridge.ts:105`<br>`lib/plugins/discord/inbound.ts:115` | `src/executor/skill-dispatcher-plugin.ts:183` |
+| `agent.skill.request` | ✅ `AGENT_SKILL_REQUEST` (`ACTION_TOPICS`) | — | `src/router/router-plugin.ts:295`<br>`src/router/router-plugin.ts:342`<br>`src/executor/skill-dispatcher-plugin.ts:665`<br>`src/api/openai-compat.ts:171`<br>`src/api/ava-tools.ts:132`<br>`src/api/ava-tools.ts:323`<br>`src/api/a2a-server.ts:296`<br>`src/plugins/fleet-alerts-evaluator-plugin.ts:188`<br>`lib/plugins/pr-remediator.ts:1350`<br>`lib/plugins/pr-remediator.ts:1616`<br>`lib/plugins/linear-proto-bridge.ts:105`<br>`lib/plugins/discord/inbound.ts:115` | `src/executor/skill-dispatcher-plugin.ts:183` |
 | `agent.skill.response.{correlationId}` | — | — | _(none)_ | `src/api/ava-tools.ts:51`<br>`lib/plugins/pr-remediator.ts:1335` |
 | `agent.skill.response.#` | — | — | _(none)_ | `lib/plugins/pr-remediator.ts:632` |
 
@@ -312,7 +312,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:96`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:719` |
+| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:96`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:729` |
 
 ## Unresolved call sites
 
@@ -391,7 +391,7 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
 | `src/executor/skill-dispatcher-plugin.ts:861` | publish | `topic` |
 | `src/executor/task-tracker.ts:282` | publish | `topic` |
 | `src/executor/task-tracker.ts:330` | publish | `task.replyTopic` |
-| `src/index.ts:719` | subscribe | `topic` |
+| `src/index.ts:729` | subscribe | `topic` |
 | `src/plugins/ceremony-skill-executor-plugin.ts:123` | publish | `executeTopic` |
 | `src/plugins/CeremonyPlugin.ts:344` | publish | `executeTopic` |
 | `src/plugins/CeremonyPlugin.ts:372` | subscribe | `replyTopic` |

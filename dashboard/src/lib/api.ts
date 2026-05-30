@@ -6,6 +6,10 @@
 //  - In-memory session cache with TTL per endpoint
 //  - Stale-while-revalidate: components get cached data instantly, fresh in background
 //  - invalidate() to force refresh
+//
+// Scope: this dashboard is a read-only debug/observability pane (see
+// docs/architecture/flow-dashboard.md). Every endpoint below is a live
+// backend route — no GOAP/world-state getters, no widget framework.
 
 const API_BASE = "";
 const DEFAULT_TTL = 30_000;
@@ -71,34 +75,11 @@ export function peek<T>(path: string): T | undefined {
   return entry.data as T;
 }
 
-// ── Event-viewer local APIs ────────────────────────────────────────
-export const getEvents = (topic?: string, limit = 500) => {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (topic) params.set("topic", topic);
-  return apiFetch<unknown[]>(`/api/events?${params}`, { ttl: 5_000 });
-};
-
-export const getTopics = () => apiFetch<string[]>("/api/topics");
-export const getConsumers = () => apiFetch<string[]>("/api/consumers");
-// ── Proxied APIs from main server (:3000) ─────────────────────────
+// ── Live backend APIs (proxied through the event-viewer to the main server) ──
 // TTL tuned to each endpoint's refresh cadence.
-export const getWorldState = (force = false) =>
-  apiFetch<WorldStateResponse>("/api/world-state", { ttl: 15_000, force });
 
-export const getServices = (force = false) =>
-  apiFetch<ServicesResponse>("/api/services", { ttl: 30_000, force });
-
-export const getAgentHealth = (force = false) =>
-  apiFetch<AgentHealthResponse>("/api/agent-health", { ttl: 30_000, force });
-
-export const getFlowMetrics = (force = false) =>
-  apiFetch<FlowMetricsResponse>("/api/flow-metrics", { ttl: 30_000, force });
-
-export const getOutcomes = (force = false) =>
-  apiFetch<OutcomesResponse>("/api/outcomes", { ttl: 15_000, force });
-
-export const getOutcomesAnalysis = (force = false) =>
-  apiFetch<OutcomesAnalysisResponse>("/api/outcomes/analysis", { ttl: 30_000, force });
+export const getAgentsRuntime = (force = false) =>
+  apiFetch<AgentsRuntimeResponse>("/api/agents/runtime", { ttl: 30_000, force });
 
 export const getCiHealth = (force = false) =>
   apiFetch<CiHealthResponse>("/api/ci-health", { ttl: 300_000, force });
@@ -106,109 +87,26 @@ export const getCiHealth = (force = false) =>
 export const getPrPipeline = (force = false) =>
   apiFetch<PrPipelineResponse>("/api/pr-pipeline", { ttl: 120_000, force });
 
-export const getBranchDrift = (force = false) =>
-  apiFetch<BranchDriftResponse>("/api/branch-drift", { ttl: 600_000, force });
-
 export const getSecuritySummary = (force = false) =>
   apiFetch<SecuritySummaryResponse>("/api/security-summary", { ttl: 60_000, force });
-
-export const getProjects = () =>
-  apiFetch<unknown[]>("/api/projects", { ttl: 60_000 });
-
-export const getAgents = () =>
-  apiFetch<unknown[]>("/api/agents", { ttl: 60_000 });
-
-export const getGoals = () =>
-  apiFetch<unknown[]>("/api/goals", { ttl: 60_000 });
-
-export const getIncidents = () =>
-  apiFetch<{ data: unknown[] }>("/api/incidents", { ttl: 60_000 });
-
-export const getCeremonies = () =>
-  apiFetch<{ data: unknown[] }>("/api/ceremonies", { ttl: 60_000 });
 
 export const getHitlPending = () =>
   apiFetch<{ data: unknown[] }>("/api/hitl/pending", { ttl: 30_000 });
 
-export const getWidgets = (force = false) =>
-  apiFetch<unknown[]>("/api/widgets", { ttl: 30_000, force });
+export const getCeremonies = () =>
+  apiFetch<{ data: unknown[] }>("/api/ceremonies", { ttl: 60_000 });
 
 // ── Response types (match actual API shapes after envelope unwrap) ─
-export interface WorldStateResponse {
-  timestamp: number;
-  domains: Record<string, {
-    data: unknown;
-    metadata: {
-      collectedAt: number;
-      domain: string;
-      tickNumber: number;
-      failed?: boolean;
-      errorMessage?: string;
-    };
+
+/** GET /api/agents/runtime — the live fleet: every registered executor grouped by agent. */
+export interface AgentsRuntimeResponse {
+  agents: Array<{
+    name: string;
+    type: string;
+    skills: string[];
+    /** A2A agent known from yaml but not yet discovered (no skills registered). */
+    pendingDiscovery?: boolean;
   }>;
-  extensions: Record<string, unknown>;
-  snapshotVersion: number;
-}
-
-export interface ServicesResponse {
-  discord: { configured: boolean; connected: boolean; bot: string | null };
-  github: { configured: boolean; authType: string | null };
-  gateway: { configured: boolean; url: string | null };
-  langfuse: { configured: boolean };
-  graphiti: { configured: boolean; url: string | null };
-}
-
-export interface AgentHealthResponse {
-  agentCount: number;
-  agents: Record<string, { skills: string[]; executorType: string }>;
-  registrationCount: number;
-}
-
-export interface FlowMetricsResponse {
-  velocity?: { currentPeriodCount: number; rollingAverage: number; trend: number };
-  leadTime?: { p50Ms: number; p95Ms: number };
-  efficiency?: { ratio: number; target: number; healthy: boolean };
-  load?: { totalWIP: number };
-  distribution?: { ratios: Record<string, number>; balanced: boolean };
-  bottleneck?: { primaryBottleneck: string | null; hasBottleneck: boolean };
-}
-
-export interface OutcomesResponse {
-  summary: { success: number; failure: number; timeout: number; total: number };
-  recent: Array<{
-    correlationId: string;
-    actionId: string;
-    goalId: string;
-    status: string;
-    startedAt: number;
-    completedAt: number;
-    durationMs: number;
-  }>;
-}
-
-export interface OutcomesAnalysisResponse {
-  success: boolean;
-  data: {
-    actions: Array<{
-      actionId: string;
-      total: number;
-      success: number;
-      failure: number;
-      timeout: number;
-      successRate: number;
-      lastEvaluatedAt: number;
-      alertedAt?: number;
-    }>;
-    hitl: Array<{
-      kind: string;
-      target: string;
-      count: number;
-      firstSeenAt: number;
-      lastSeenAt: number;
-      alertedAt?: number;
-    }>;
-  };
-  collectedAt: number;
 }
 
 export interface CiHealthResponse {
@@ -246,17 +144,6 @@ export interface PrPipelineResponse {
     updatedAt: string;
     stale: boolean;
     labels: string[];
-  }>;
-}
-
-export interface BranchDriftResponse {
-  maxDrift: number;
-  projects: Array<{
-    repo: string;
-    devToStaging: number | null;
-    stagingToMain: number | null;
-    devToMain: number;
-    defaultBranch: string;
   }>;
 }
 
