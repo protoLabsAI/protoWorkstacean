@@ -12,15 +12,15 @@ Task-oriented guides for common operations in protoWorkstacean.
 | [Build an A2A agent](./build-an-a2a-agent) | Agent-author recipe: the endpoint, task lifecycle, hardening, automatic health, and scheduled work |
 | [Extend an A2A agent](./extend-an-a2a-agent) | Opt in to the x-protolabs extensions pack (cost, confidence, effect-domain, blast, hitl-mode) — richer observability + HITL with minimal card changes |
 | [Create a ceremony](./create-a-ceremony) | Schedule a recurring fleet ritual — a skill dispatched on a cron expression |
-| [Integrate an external app](./integrate-external-app) | Connect any service to the scheduled cron / ceremony loop as a reactive actor — purely YAML-driven |
+| [External bus subscribers](./external-bus-subscribers) | Join the in-process event bus over a WebSocket — observability tools, sidecars, multi-node bridging |
 | [Deploy with Docker](./deploy-with-docker) | Production deployment: Docker Compose, env vars, workspace volume mount, health check |
 
 ## Where to start
 
-If you have just completed the [Getting Started tutorial](../../tutorials/getting-started), the natural next guides are:
+If you have just completed the [Getting Started tutorial](../tutorials/getting-started), the natural next guides are:
 
 1. **[Add an agent](./add-an-agent)** — bring your own agent into the fleet
 2. **[Build an A2A agent](./build-an-a2a-agent)** — opinionated recipe for writing the agent itself (endpoint, task lifecycle, hardening, automatic health)
 3. **[Create a ceremony](./create-a-ceremony)** — schedule recurring work
 
-For background on why things work the way they do, see the [Explanation](../../explanation/index) section.
+For background on why things work the way they do, see the [Explanation](../explanation/) section.

@@ -239,7 +239,7 @@ If the producer emits in-process events like `tool_start` / `tool_end` that your
 
 See [A2A Streaming (SSE)](./a2a-streaming) for the full SSE event protocol. Short version: advertise `capabilities.streaming: true`, accept `method: "message/stream"` on `/a2a` and `POST /message:stream`, emit `text/event-stream` frames as work progresses. `A2AExecutor` on Workstacean's side switches transport automatically based on the card; your `message/send` consumers stay unchanged.
 
-On `COMPLETED`, emit **two** events per the A2A spec: first a `kind: "artifact-update"` carrying the authoritative full artifact — text + any [worldstate-delta](../extensions/worldstate-delta-v1) DataParts — as `append: false, lastChunk: true`; then a `kind: "status-update"` with `final: true` to close the stream. Mid-run stays incremental via `kind: "artifact-update"` + `append: true` text deltas only.
+On `COMPLETED`, emit **two** events per the A2A spec: first a `kind: "artifact-update"` carrying the authoritative full artifact — text + any [worldstate-delta](../extensions/effect-domain-v1#worldstate-delta-artifact) DataParts — as `append: false, lastChunk: true`; then a `kind: "status-update"` with `final: true` to close the stream. Mid-run stays incremental via `kind: "artifact-update"` + `append: true` text deltas only.
 
 > **Critical — SSE events must carry a `kind` discriminator.** `@a2a-js/sdk`'s `for await (const event of client.sendMessageStream(...))` routes events by `kind`. Events missing it are silently dropped, which means Workstacean's TaskTracker never attaches, push notifications never register, and HITL chains silently fail. This was Quinn #40. Every frame — initial `task`, every `status-update`, every `artifact-update` — needs `kind`.
 
@@ -420,7 +420,7 @@ A protoAgent that ticks all of these is a first-class fleet citizen — routing,
 
 ### Extensions (cards + runtime)
 - [ ] [`effect-domain-v1`](../extensions/effect-domain-v1) — emit a `worldstate-delta` artifact on terminal tasks so workstacean re-publishes `world.state.delta` for observability
-- [ ] [`worldstate-delta-v1`](../extensions/worldstate-delta-v1) DataPart emitted on the terminal task whenever a state-mutating tool succeeds
+- [ ] [`worldstate-delta-v1`](../extensions/effect-domain-v1#worldstate-delta-artifact) DataPart emitted on the terminal task whenever a state-mutating tool succeeds
 - [ ] [`cost-v1`](../extensions/cost-v1) `{usage, durationMs, costUsd?}` DataPart on every terminal task that ran an LLM. Capture token usage from your model events (LangChain: `on_chat_model_end` → `output.usage_metadata`); compute `durationMs` from `created_at`/`updated_at`; emit only when usage was actually tracked. `costUsd` is optional — derive from per-model rates or capture from the gateway response. Reference: Quinn `_terminal_artifact_parts` + `store.add_usage` (PR #56).
 - [ ] [`confidence-v1`](../extensions/confidence-v1) `{confidence, explanation}` populated when the agent can self-assess
 - [ ] Success contract: `state: completed` means the agent actually achieved the goal, not just that the skill returned without crashing
@@ -438,5 +438,5 @@ A protoAgent that ticks all of these is a first-class fleet citizen — routing,
 - [Add an agent](./add-an-agent) — operator-side YAML + executor wiring
 - [A2A Streaming (SSE)](./a2a-streaming) — SSE event protocol in detail
 - [Create a Ceremony](./create-a-ceremony) — ceremony YAML schema
-- [Workspace files reference](../../reference/workspace-files)
-- [`effect-domain-v1`](../extensions/effect-domain-v1), [`worldstate-delta-v1`](../extensions/worldstate-delta-v1), [`cost-v1`](../extensions/cost-v1), [`confidence-v1`](../extensions/confidence-v1) — the A2A observability extensions
+- [Workspace files reference](../reference/workspace-files)
+- [`effect-domain-v1`](../extensions/effect-domain-v1), [`worldstate-delta-v1`](../extensions/effect-domain-v1#worldstate-delta-artifact), [`cost-v1`](../extensions/cost-v1), [`confidence-v1`](../extensions/confidence-v1) — the A2A observability extensions

@@ -8,7 +8,7 @@ _When an autonomous loop gets stuck, escalation sites publish `operator.message.
 
 ## What & why
 
-Bottlenecks are growth signals (see [memory: bottlenecks-are-growth](../../.claude/projects/-home-josh-dev-protoWorkstacean/memory/feedback_bottlenecks_are_growth.md)). A stuck autonomous loop should **escalate, not silently drop** — each escalation is a feature-request for the next layer of autonomy. HITL is the structural place to surface those.
+Bottlenecks are growth signals. A stuck autonomous loop should **escalate, not silently drop** — each escalation is a feature-request for the next layer of autonomy. HITL is the structural place to surface those.
 
 Two production-wired escalation sources today, both pushing to the same `operator.message.request` topic:
 
@@ -162,4 +162,4 @@ Decision deferred until ~1 week of Phase 1 escalation data informs which shape f
 - [chokepoint-invariants](chokepoint-invariants.md) — #465 is the most well-formed HITL escalation site
 - [flow-alert-remediator](flow-alert-remediator.md) — pr-remediator hosts most escalation sites
 - [flow-dashboard](flow-dashboard.md) — once escalations are bussed, the dashboard can count them
-- [memory: bottlenecks-are-growth](../../.claude/projects/-home-josh-dev-protoWorkstacean/memory/feedback_bottlenecks_are_growth.md) — the design principle behind this flow
+- **Bottlenecks are growth** — the design principle behind this flow: every escalation is a feature-request for the next layer of autonomy

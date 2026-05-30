@@ -86,7 +86,7 @@ WORKSPACE_DIR=/workspace
 DATA_DIR=/data
 ```
 
-For a full list of all supported variables, see [reference/env-vars.md](../../reference/env-vars).
+For a full list of all supported variables, see [reference/env-vars.md](../reference/env-vars).
 
 ## Workspace volume
 
@@ -138,7 +138,7 @@ The Astro dashboard is built into the image (the Dockerfile's `dashboard-build` 
 open http://localhost:8080
 ```
 
-Set `DISABLE_EVENT_VIEWER=1` in `.env` to skip the event-viewer plugin entirely (e.g. for headless deployments). See the [Dashboard reference](../../reference/dashboard) for pages, API client, and cache behavior.
+Set `DISABLE_EVENT_VIEWER=1` in `.env` to skip the event-viewer plugin entirely (e.g. for headless deployments). See the [Dashboard reference](../reference/dashboard) for pages, API client, and cache behavior.
 
 ## Production docker-compose with ava
 
@@ -192,7 +192,7 @@ volumes:
 
 ## Related
 
-- [Getting Started](../../tutorials/getting-started)
-- [Environment variables reference](../../reference/env-vars)
-- [HTTP API reference](../../reference/http-api)
-- [Dashboard reference](../../reference/dashboard)
+- [Getting Started](../tutorials/getting-started)
+- [Environment variables reference](../reference/env-vars)
+- [HTTP API reference](../reference/http-api)
+- [Dashboard reference](../reference/dashboard)
