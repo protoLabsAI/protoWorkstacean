@@ -144,14 +144,14 @@ commands:
     skillHint: bug_triage
 ```
 
-When `project` is an autocomplete option, the plugin loads `projects.yaml` at interaction time and returns matching projects (filtered by slug or title) as Discord choices.
+When `project` is an autocomplete option, the plugin reads the in-process project registry (`ctx.projectRegistry.getProjects()`, sourced from protoMaker) at interaction time and returns matching projects (filtered by slug or name) as Discord choices.
 
-On submission, the project slug is resolved to `devChannelId` and `projectRepo` which are added to the inbound bus payload:
+On submission, the project slug is resolved against the registry; its dev channel is looked up in the `ChannelRegistry` (`getProjectChannel(slug, "dev")`, backed by `workspace/channels.yaml`) and its repo from the registry entry's `github`. Both are added to the inbound bus payload:
 
 ```typescript
 {
-  devChannelId?: string;   // discord.dev channel ID from projects.yaml
-  projectRepo?: string;    // GitHub full name, e.g. "protoLabsAI/protoUI"
+  devChannelId?: string;   // dev channel from ChannelRegistry.getProjectChannel(slug, "dev")
+  projectRepo?: string;    // GitHub full name from the registry, e.g. "protoLabsAI/protoUI"
 }
 ```
 
