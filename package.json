@@ -8,6 +8,8 @@
     "lint": "biome lint src lib",
     "typecheck": "tsc --noEmit",
     "audit:bus": "bun run scripts/audit-bus-topics.ts",
+    "docs:api": "bun run scripts/gen-api-docs.ts",
+    "docs:gen": "bun run audit:bus && bun run docs:api",
     "google:auth": "bun run scripts/get-google-refresh-token.ts"
   },
   "dependencies": {
