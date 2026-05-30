@@ -33,6 +33,15 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      # Regenerate the auto-generated reference docs from current source so the
+      # deployed site is never stale (committed snapshots may lag). Runs at repo
+      # root where the generator scripts + their `typescript` devDep resolve.
+      - name: Install root dependencies (for docs:gen)
+        run: bun install
+
+      - name: Regenerate auto-generated reference docs
+        run: bun run docs:gen
+
       - name: Install dependencies
         working-directory: docs
         run: bun install

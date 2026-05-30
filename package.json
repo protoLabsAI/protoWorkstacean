@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "audit:bus": "bun run scripts/audit-bus-topics.ts",
     "docs:api": "bun run scripts/gen-api-docs.ts",
-    "docs:gen": "bun run audit:bus && bun run docs:api",
+    "docs:tools": "bun run scripts/gen-agent-tools.ts",
+    "docs:env": "bun run scripts/gen-env-vars.ts",
+    "docs:gen": "bun run audit:bus && bun run docs:api && bun run docs:tools && bun run docs:env",
     "google:auth": "bun run scripts/get-google-refresh-token.ts"
   },
   "dependencies": {
