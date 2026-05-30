@@ -10,11 +10,17 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# Least-privilege default; the build-and-push job opts up to packages: write.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: namespace-profile-protolabs-linux
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -41,6 +47,8 @@ jobs:
     runs-on: namespace-profile-protolabs-linux
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # Astro requires Node.js >= 22.12 at build time. GHA runners default
       # to Node 20, which `bun run build` inherits when it invokes astro,
@@ -83,6 +91,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

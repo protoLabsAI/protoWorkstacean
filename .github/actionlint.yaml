@@ -1,0 +1,3 @@
+self-hosted-runner:
+  # Namespace.so managed runner label used across the org's fleet CI.
+  labels: [namespace-profile-protolabs-linux]

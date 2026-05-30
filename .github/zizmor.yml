@@ -1,0 +1,11 @@
+# zizmor configuration — github/workflows lint gate (#611)
+#
+# unpinned-uses: the org pins actions to release tags (@v4, @v0.1.0) rather
+# than commit SHAs. Blanket SHA-pinning is a separate org-wide policy decision
+# (tracked outside this gate), so we accept tag pins here and only fail on
+# fully-unpinned refs (e.g. @main, @master).
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": ref-pin
