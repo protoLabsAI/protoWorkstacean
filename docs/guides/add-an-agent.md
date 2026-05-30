@@ -37,10 +37,10 @@ systemPrompt: |
   You are My Agent, a specialist in...
 
 # Workstacean bus tools this agent may call.
-# Available tools: publish_event, get_world_state, get_incidents, report_incident,
+# Available tools: publish_event, get_projects, get_incidents, report_incident,
 #                  get_ceremonies, run_ceremony
 tools:
-  - get_world_state
+  - get_projects
   - publish_event
 
 # Agent names this agent may delegate work to (at most 2 levels deep).

@@ -58,7 +58,7 @@ systemPrompt: |
   You are MyAgent. Your job is...
 tools:
   - publish_event
-  - get_world_state
+  - get_projects
 maxTurns: 10
 skills:
   - name: my_skill
@@ -70,12 +70,12 @@ skills:
 
 `AgentRuntimePlugin` picks up the file on next restart and registers `my_skill` for routing.
 
-Available tools (see [DeepAgent Runtime](../integrations/runtimes/deep-agent) for the full list):
+A representative selection of tools (the canonical, complete list is the `name:` entries in `src/executor/executors/deep-agent-executor.ts`):
 
-**Orchestration:** `chat_with_agent`, `delegate_task`, `publish_event`, `manage_cron`, `run_ceremony`
-**Observation:** `get_world_state`, `get_projects`, `get_ci_health`, `get_pr_pipeline`, `get_branch_drift`, `get_outcomes`, `get_incidents`, `get_ceremonies`, `get_cost_summary`, `get_confidence_summary`, `web_search`
-**Write/Act:** `manage_board`, `create_github_issue`, `report_incident`, `propose_config_change`
-**Conversation:** `react`, `send_update`, `msg_operator`
+**Orchestration:** `chat_with_agent`, `delegate_task`, `publish_event`, `manage_cron`, `run_ceremony`, `list_agents`
+**Observation:** `get_projects`, `get_ci_health`, `get_pr_pipeline`, `get_branch_drift`, `get_incidents`, `get_ceremonies`, `searxng_search`
+**Write/Act:** `manage_board`, `create_github_issue`, `report_incident`, `pr_inspector`, `clawpatch_review`
+**Conversation:** `react`, `send_update`
 **Discord (protoBot):** `discord_server_stats`, `discord_list_channels`, `discord_create_channel`, `discord_send`, `discord_list_members`
 
 ### External A2A agent

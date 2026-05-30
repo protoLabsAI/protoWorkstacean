@@ -2,7 +2,7 @@
 title: "Extension: x-protolabs/confidence-v1"
 ---
 
-`x-protolabs/confidence-v1` captures the agent's self-reported confidence in its output so OutcomeAnalysis can weight failure signals by how sure the agent was, and the planner can prefer high-confidence candidates when ranking.
+`x-protolabs/confidence-v1` captures the agent's self-reported confidence in its output so OutcomeAnalysis can weight failure signals by how sure the agent was.
 
 **Extension URI**: `https://proto-labs.ai/a2a/ext/confidence-v1`
 
@@ -96,7 +96,7 @@ Agents that don't implement the extension return normal A2A responses — the in
 
 `defaultConfidenceStore` is read by `AgentFleetHealthPlugin` to surface per-(agent, skill) calibration metrics in the fleet view: `highConfFailures`, `avgConfidenceOnSuccess`, calibration-inversion detection. External consumers can pull `GET /api/confidence-summaries` for the same data.
 
-`avgConfidenceOnSuccess` (not the overall average) is the more informative metric — it answers "when this agent succeeds at this skill, how sure is it?" which is what you want for ranking.
+`avgConfidenceOnSuccess` (not the overall average) is the more informative metric — it answers "when this agent succeeds at this skill, how sure is it?" — useful for calibration analysis.
 
 ---
 
@@ -112,5 +112,5 @@ Payload is the raw `ConfidenceSample`. Subscribers: dashboard calibration view, 
 
 ## Related
 
-- [`cost-v1`](cost-v1) — companion metric; planner reads both together
+- [`cost-v1`](cost-v1) — companion metric; surfaced alongside confidence in fleet-health
 - [`effect-domain-v1`](effect-domain-v1) — card-side declaration of effects; observed confidence overrides the declared prior once warm

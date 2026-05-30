@@ -2,13 +2,13 @@
 title: Extend an A2A Agent — the x-protolabs extensions pack
 ---
 
-Once you've built the A2A spec surface ([Build an A2A Agent](./build-an-a2a-agent)) your agent works as a plain A2A responder — workstacean discovers skills, dispatches, tracks tasks, reports to fleet health. But five additional capabilities let the dispatcher, planner, and HITL policy make smarter decisions about each skill:
+Once you've built the A2A spec surface ([Build an A2A Agent](./build-an-a2a-agent)) your agent works as a plain A2A responder — workstacean discovers skills, dispatches, tracks tasks, reports to fleet health. But five additional capabilities give the dispatcher, observability, and HITL policy richer signal about each skill:
 
 | Extension | Purpose | Direction |
 |---|---|---|
-| [cost-v1](../extensions/cost-v1) | Token + wall-time observations → planner tiebreaker | workstacean → stores → planner |
-| [confidence-v1](../extensions/confidence-v1) | Agent self-reported confidence → calibration + ranking | your agent → stores → planner |
-| [effect-domain-v1](../extensions/effect-domain-v1) | Declared world-state deltas → faster planner convergence | your agent's card + response artifacts |
+| [cost-v1](../extensions/cost-v1) | Token + wall-time observations → fleet-health + dashboards | workstacean → stores |
+| [confidence-v1](../extensions/confidence-v1) | Agent self-reported confidence → calibration metrics | your agent → stores |
+| [effect-domain-v1](../extensions/effect-domain-v1) | Agent-reported world-state deltas → `world.state.delta` observability | your agent's response artifacts |
 | [blast-v1](../extensions/blast-v1) | Scope-of-effect declaration → HITL/policy routing | your agent's card |
 | [hitl-mode-v1](../extensions/hitl-mode-v1) | Per-skill approval policy → HITL flow selection | your agent's card |
 
@@ -157,7 +157,7 @@ For **effect-domain-v1** (the response side of it), attach a `worldstate-delta` 
 }
 ```
 
-Workstacean's effect-domain-v1 after-hook extracts this and publishes `world.state.delta` — the planner picks up the mutation immediately instead of waiting for the next full domain poll.
+Workstacean's effect-domain-v1 after-hook extracts this and publishes `world.state.delta` so dashboards and fleet-health observe the mutation in near-real-time.
 
 ## Registration at workstacean side
 
@@ -176,16 +176,15 @@ All five interceptors live in `defaultExtensionRegistry` and fire on every `A2AE
 
 ## Adoption order — recommended
 
-1. **cost-v1** — zero card changes, just emit `usage` + `durationMs` in your terminal data. Gets you dashboard visibility + planner ranking for your agent.
+1. **cost-v1** — zero card changes, just emit `usage` + `durationMs` in your terminal data. Gets you dashboard + fleet-health visibility for your agent.
 2. **confidence-v1** — add `confidence` to your terminal data. Gets your agent into calibration views and unblocks the "high-confidence failure" signal for OutcomeAnalysis.
 3. **blast-v1** — declare scope per skill on the card. Unlocks policy-driven HITL gating without code changes.
 4. **hitl-mode-v1** — declare per-skill approval policy. Now your skills route through the right HITL flow by default (autonomous / notification / veto / gated / compound).
-5. **effect-domain-v1** — the most involved: declare expected deltas on the card, include observed deltas in your response artifacts. Lets the planner react to your actions in ~1s instead of one poll cycle.
+5. **effect-domain-v1** — include observed `worldstate-delta` artifacts in your response. Lets workstacean publish `world.state.delta` so the mutation shows up in observability in ~1s instead of one poll cycle.
 
 Each step is independently useful. The pack composes — e.g. blast-v1 + hitl-mode-v1 together let you say "anything `fleet` or `public` radius is `gated`, reviewer: operator."
 
 ## Related
 
 - [Build an A2A Agent](./build-an-a2a-agent) — the spec-side recipe (task store, webhooks, health)
-- [Self-improving loop](../explanation/self-improving-loop) — how extension observations feed the planner + goal proposals
 - Extension reference pages — [cost-v1](../extensions/cost-v1), [confidence-v1](../extensions/confidence-v1), [effect-domain-v1](../extensions/effect-domain-v1), [blast-v1](../extensions/blast-v1), [hitl-mode-v1](../extensions/hitl-mode-v1)

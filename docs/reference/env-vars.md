@@ -62,9 +62,7 @@ _These env vars describe the HTTP server identity of the protoMaker team runtime
 | `DISCORD_WELCOME_CHANNEL` | _(none)_ | DiscordPlugin | Channel ID for welcome/onboarding messages. |
 | `DISCORD_DIGEST_CHANNEL` | _(none)_ | DiscordPlugin | Channel ID for periodic digest posts. |
 | `DISCORD_OPS_WEBHOOK_URL` | _(none)_ | DiscordPlugin | Webhook URL for operational alerts. |
-| `DISCORD_GOALS_WEBHOOK_URL` | _(none)_ |  | Webhook URL for goal violation/resolution notifications. |
 | `DISCORD_CEREMONY_WEBHOOK_URL` | _(none)_ | CeremonyPlugin | Webhook URL for ceremony run notifications. |
-| `DISCORD_BUDGET_WEBHOOK_URL` | _(none)_ | BudgetPlugin | Webhook URL for budget threshold alerts. |
 | `DISCORD_WEBHOOK_ALERTS` | _(none)_ | Various | General-purpose alert webhook URL (fallback for plugins without a dedicated webhook var). |
 
 Agents can declare their own Discord bot tokens via `discordBotTokenEnvKey` in either `workspace/agents.yaml` (A2A registry) or `workspace/agents/*.yaml` (in-process definitions). DiscordPlugin's agent pool spins up a dedicated `Client()` per declared bot so users can DM each agent directly. The primary token (`DISCORD_BOT_TOKEN`) is the shared listener — protoBot — which handles guild messages, slash commands, HITL interactions, and DM fallback.
