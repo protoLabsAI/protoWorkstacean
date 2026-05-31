@@ -264,6 +264,7 @@ tools:
   - react
   - send_update
   - msg_operator
+  - ask_human
 
 maxTurns: 25
 

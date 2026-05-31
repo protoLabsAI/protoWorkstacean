@@ -6,7 +6,7 @@ title: HTTP API
 
 ## Summary
 
-- **70** HTTP routes across **32** path groups
+- **72** HTTP routes across **33** path groups
 - **14** routes carry a resolved one-line description
 
 Each row links to the route definition as `path:line` so jumping from this index to the source is a click. Routes are defined as `{ method, path, handler }` literals in `src/api/*.ts` and collected by `src/api/index.ts`.
@@ -22,7 +22,7 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `POST` | `/a2a` | `src/api/a2a-server.ts:357` | — |
+| `POST` | `/a2a` | `src/api/a2a-server.ts:416` | — |
 
 ### `/api/a2a`
 
@@ -31,7 +31,14 @@ Each row links to the route definition as `path:line` so jumping from this index
 | `POST` | `/api/a2a/callback/:taskId` | `src/api/a2a-callback.ts:26` | — |
 | `POST` | `/api/a2a/chat` | `src/api/ava-tools.ts:348` | multi-turn conversation with an agent over the bus. |
 | `POST` | `/api/a2a/delegate` | `src/api/ava-tools.ts:349` | fire-and-forget task dispatch to an agent. |
+| `POST` | `/api/a2a/input` | `src/api/human-input.ts:115` | — |
 | `GET` | `/api/a2a/task/:correlationId` | `src/api/ava-tools.ts:350` | correlationId — fetch the result of a dispatch that a chat caller stopped awaiting (timed out). |
+
+### `/api/agent`
+
+| Method | Path | Source | Description |
+|---|---|---|---|
+| `POST` | `/api/agent/ask-human` | `src/api/human-input.ts:62` | — |
 
 ### `/api/agents`
 

@@ -541,4 +541,58 @@ describe("BusAgentExecutor (Phase 7)", () => {
       else process.env.A2A_STREAM_HEARTBEAT_MS = prev;
     }
   });
+
+  test("agent.input.request.{cid} surfaces as an input-required status-update (question + requestId), then completes", async () => {
+    const bus = new InMemoryEventBus();
+    const ctx: ApiContext = {
+      workspaceDir: "/tmp",
+      bus,
+      plugins: [],
+      executorRegistry: new ExecutorRegistry(),
+    };
+
+    const requestId = crypto.randomUUID();
+    bus.subscribe("agent.skill.request", "test", (msg) => {
+      const cid = msg.correlationId!;
+      const replyTopic = msg.reply!.topic!;
+      // Mimic the ask_human round-trip: the agent asks mid-task, then (after the
+      // caller "answers" out of band) the skill completes.
+      setTimeout(() => bus.publish(`agent.input.request.${cid}`, {
+        id: crypto.randomUUID(), correlationId: cid, topic: `agent.input.request.${cid}`, timestamp: Date.now(),
+        payload: { requestId, question: "Which repo should I file against?" },
+      }), 5);
+      setTimeout(() => bus.publish(replyTopic, {
+        id: crypto.randomUUID(), correlationId: cid, topic: replyTopic, timestamp: Date.now(),
+        payload: { content: "Filed against protoWorkstacean.", correlationId: cid },
+      }), 20);
+    });
+
+    const adapter = new BusAgentExecutor(ctx);
+    const eventBus = new DefaultExecutionEventBus();
+    const collected: AgentExecutionEvent[] = [];
+    eventBus.on("event", (e) => collected.push(e));
+    const done = new Promise<void>(resolve => eventBus.on("finished", () => resolve()));
+
+    await adapter.execute(makeRequestContext("Help me file an issue"), eventBus);
+    await done;
+
+    type StatusUpdate = AgentExecutionEvent & { kind: "status-update"; final: boolean; status: { state: string; message?: { parts: Array<{ text?: string }>; metadata?: Record<string, unknown> } } };
+
+    // input-required event carries the question text + the requestId, non-final
+    // (the task is parked, not settled).
+    const inputReq = collected.find(
+      (e): e is StatusUpdate => e.kind === "status-update" && "status" in e && (e as StatusUpdate).status.state === "input-required",
+    );
+    expect(inputReq).toBeDefined();
+    expect(inputReq!.final).toBe(false);
+    expect(inputReq!.status.message?.parts?.[0]?.text).toBe("Which repo should I file against?");
+    expect(inputReq!.status.message?.metadata?.requestId).toBe(requestId);
+
+    // The task still reaches a terminal completed once the reply lands.
+    const completed = collected.find(
+      (e): e is StatusUpdate => e.kind === "status-update" && "status" in e && (e as StatusUpdate).status.state === "completed",
+    );
+    expect(completed).toBeDefined();
+    expect(completed!.final).toBe(true);
+  });
 });

@@ -683,6 +683,36 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
         }),
       },
     ),
+    ask_human: tool(
+      async (input) => {
+        if (!correlationId) {
+          return JSON.stringify({ success: false, error: "No active conversation — ask_human only works while responding to a caller." });
+        }
+        // Blocks until the caller answers (POST /api/a2a/input) or the wait
+        // window elapses. Give the HTTP call slightly more than the server's
+        // wait window so the endpoint returns first.
+        const res = (await http.post(
+          "/api/agent/ask-human",
+          { correlationId, question: input.question },
+          { timeoutMs: 120_000 },
+        )) as { success?: boolean; answer?: string | null; timedOut?: boolean };
+        if (res.timedOut) {
+          return JSON.stringify({ success: false, timedOut: true, note: "The caller did not answer within the wait window." });
+        }
+        return JSON.stringify({ success: true, answer: res.answer });
+      },
+      {
+        name: "ask_human",
+        description:
+          "Ask the caller who invoked you a question and WAIT for their answer. Use when you genuinely need their " +
+          "input or a decision to proceed — a missing detail, an approval, or a choice between options. Returns the " +
+          "caller's answer as a string. They see an input-required prompt and typically answer within seconds. Use " +
+          "sparingly: only when you cannot proceed without it, not for things you can reasonably decide yourself.",
+        schema: z.object({
+          question: z.string().describe("The question to ask the caller. Be specific and self-contained."),
+        }),
+      },
+    ),
   };
 
   return toolNames.map(n => all[n]).filter(Boolean) as StructuredToolInterface[];

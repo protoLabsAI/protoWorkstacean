@@ -8,9 +8,9 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { Route, ApiContext } from "./types.ts";
 import { serveWorkspaceYaml } from "./types.ts";
 import type { CallerIdentity } from "../../lib/auth/agent-keys.ts";
+import { getPendingHumanInput } from "./human-input.ts";
 
 export function createRoutes(ctx: ApiContext): Route[] {
-  const hitlPlugin = ctx.plugins.find(p => p.name === "hitl") as { getPendingRequests(): unknown } | undefined;
 
   /**
    * Resolve a request to a CallerIdentity. Returns null when auth fails:
@@ -255,6 +255,6 @@ export function createRoutes(ctx: ApiContext): Route[] {
     { method: "POST", path: "/api/ceremonies/:id/delete", handler: (req, p) => handleDeleteCeremony(req, p.id) },
     { method: "GET",  path: "/api/skills/:agentName",   handler: (_, p) => handleGetAgentSkills(p.agentName) },
     { method: "GET",  path: "/api/channels",            handler: () => Response.json({ success: true, data: [] }) },
-    { method: "GET",  path: "/api/hitl/pending",        handler: () => Response.json({ success: true, data: hitlPlugin?.getPendingRequests() ?? [] }) },
+    { method: "GET",  path: "/api/hitl/pending",        handler: () => Response.json({ success: true, data: getPendingHumanInput() }) },
   ];
 }

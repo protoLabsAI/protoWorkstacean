@@ -28,6 +28,7 @@ import { createRoutes as prInspectorRoutes } from "./pr-inspector.ts";
 import { createRoutes as clawpatchRoutes } from "./clawpatch.ts";
 import { createRoutes as agentsRuntimeRoutes } from "./agents-runtime.ts";
 import { createRoutes as busHistoryRoutes } from "./bus-history.ts";
+import { createRoutes as humanInputRoutes } from "./human-input.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
@@ -55,5 +56,6 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...clawpatchRoutes(ctx),
     ...agentsRuntimeRoutes(ctx),
     ...busHistoryRoutes(ctx),
+    ...humanInputRoutes(ctx),
   ];
 }
