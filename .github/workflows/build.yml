@@ -38,11 +38,11 @@ jobs:
 
   dashboard:
     # Dashboard lives in a sub-project with its own tsconfig + build pipeline
-    # (Astro islands). The root `test` job does not cover `dashboard/src/` —
-    # discovered the hard way on 2026-04-11 when 31 unresolved git merge
+    # (Vite + React 19 SPA). The root `test` job does not cover `dashboard/src/`
+    # — discovered the hard way on 2026-04-11 when 31 unresolved git merge
     # conflict markers landed on dev through the M3-M6 milestone merges
     # because every PR CI went green while dashboard build would have blown
-    # up. See task #82 in the board. Keep this job fast (astro build is ~1s)
+    # up. See task #82 in the board. Keep this job fast (vite build is ~1s)
     # and independent so the full CI cost is negligible.
     runs-on: namespace-profile-protolabs-linux
     steps:
@@ -50,11 +50,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # Astro requires Node.js >= 22.12 at build time. GHA runners default
-      # to Node 20, which `bun run build` inherits when it invokes astro,
-      # causing a hard "not supported" failure. Set Node explicitly so the
-      # astro build runs against a supported runtime.
-      - name: Setup Node (for Astro build)
+      # Pin Node 22 so `bun run build` (which shells out to tsc + vite) runs on
+      # a supported runtime rather than the GHA-default Node 20.
+      - name: Setup Node (for the dashboard build)
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -69,14 +67,14 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run dashboard tests
-        # Dashboard owns its own deps (preact/compat, @xyflow/react, …) —
-        # root `bun test` is scoped via root bunfig.toml to lib/ + src/
-        # only, so tests under dashboard/src/**/__tests__/ have to run
-        # here where dashboard node_modules is resolvable.
+        # Dashboard owns its own deps (react, @xyflow/react, …) — the root
+        # `bun test` is scoped via root bunfig.toml to lib/ + src/ only, so
+        # tests under dashboard/src/**/__tests__/ have to run here where the
+        # dashboard node_modules is resolvable.
         working-directory: dashboard
         run: bun test
 
-      - name: Build dashboard (astro build)
+      - name: Build dashboard (tsc + vite build)
         working-directory: dashboard
         run: bun run build
 

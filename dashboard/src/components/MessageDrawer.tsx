@@ -13,7 +13,7 @@
  * the SystemGraph container, and `position: fixed` lifts it visually.
  */
 
-import { useEffect } from "preact/hooks";
+import { useEffect } from "react";
 
 export interface DrawerMessage {
   /** Stable id (random or msg.id from the WS frame) — used as React key. */
@@ -41,43 +41,43 @@ export default function MessageDrawer({ topic, messages, onClose }: Props) {
 
   return (
     <>
-      <div class="md-backdrop" onClick={onClose} />
-      <aside class="md-drawer" role="dialog" aria-label={`Messages on topic ${topic}`}>
-        <header class="md-header">
+      <div className="md-backdrop" onClick={onClose} />
+      <aside className="md-drawer" role="dialog" aria-label={`Messages on topic ${topic}`}>
+        <header className="md-header">
           <div>
-            <h3 class="md-title">{topic}</h3>
-            <p class="md-meta">
+            <h3 className="md-title">{topic}</h3>
+            <p className="md-meta">
               {messages.length} message{messages.length === 1 ? "" : "s"} in WS buffer
               {messages.length > 0 && ` · newest ${relativeTime(messages[messages.length - 1].timestamp)}`}
             </p>
           </div>
-          <button class="md-close" onClick={onClose} aria-label="Close">×</button>
+          <button className="md-close" onClick={onClose} aria-label="Close">×</button>
         </header>
 
         {messages.length === 0 ? (
-          <div class="md-empty">
+          <div className="md-empty">
             No traffic observed on this topic since this dashboard opened.
             History resets on each page load — the WS subscription only
             captures messages that fire while you're watching.
           </div>
         ) : (
-          <ol class="md-list">
+          <ol className="md-list">
             {[...messages].reverse().map((m) => (
-              <li class="md-row" key={m.id}>
-                <div class="md-row-head">
-                  <span class="md-ts">{new Date(m.timestamp).toLocaleTimeString()}</span>
+              <li className="md-row" key={m.id}>
+                <div className="md-row-head">
+                  <span className="md-ts">{new Date(m.timestamp).toLocaleTimeString()}</span>
                   {m.correlationId ? (
-                    <a class="md-trace-link" href={`/trace?correlationId=${encodeURIComponent(m.correlationId)}`}>
+                    <a className="md-trace-link" href={`/trace?correlationId=${encodeURIComponent(m.correlationId)}`}>
                       trace →
                     </a>
                   ) : (
-                    <span class="md-no-trace">no correlationId</span>
+                    <span className="md-no-trace">no correlationId</span>
                   )}
                 </div>
                 {m.correlationId && (
-                  <code class="md-corr">{m.correlationId}</code>
+                  <code className="md-corr">{m.correlationId}</code>
                 )}
-                <pre class="md-payload">{previewPayload(m.payload)}</pre>
+                <pre className="md-payload">{previewPayload(m.payload)}</pre>
               </li>
             ))}
           </ol>

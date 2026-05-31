@@ -2,10 +2,10 @@
 title: Dashboard
 ---
 
-The Workstacean dashboard is a static Astro + Preact site at `dashboard/`. It is a
-**read-only debug and observability pane** — not a control surface and not the
-product's operational UI. You watch the fleet through it; you do not drive the
-fleet from it. The charter and data-flow rationale live in
+The Workstacean dashboard is a static **Vite + React 19** single-page app at
+`dashboard/`. It is a **read-only debug and observability pane** — not a control
+surface and not the product's operational UI. You watch the fleet through it; you
+do not drive the fleet from it. The charter and data-flow rationale live in
 [Flow — Dashboard data path](../architecture/flow-dashboard).
 
 ## Quick facts
@@ -13,18 +13,18 @@ fleet from it. The charter and data-flow rationale live in
 | Field | Value |
 |---|---|
 | Source | `dashboard/` (standalone `package.json`) |
-| Framework | Astro 6.x, static output |
-| Islands | Preact (`@astrojs/preact`) hydrated with `client:load` |
+| Framework | Vite 6 + React 19, static SPA (`react-router-dom` client routing) |
+| Graph | `@xyflow/react` (native React — no `preact/compat` shim) |
 | Theme | Dark (`styles/global.css` CSS tokens) |
-| Build output | `dashboard/dist/` |
-| Served by | `lib/plugins/event-viewer.ts` on port `8080` |
-| API base | Same origin — plugin proxies `/api/*` and `/ws` to `WORKSTACEAN_HTTP_PORT` |
+| Build output | `dashboard/dist/` (one `index.html` shell + content-hashed `assets/`) |
+| Served by | `lib/plugins/event-viewer.ts` on port `8080` (and the main app on `WORKSTACEAN_HTTP_PORT`) — both fall back to `index.html` for client routes |
+| API base | Same origin — the server proxies `/api/*` and `/ws` to `WORKSTACEAN_HTTP_PORT` |
 
 ## Pages
 
-All pages live under `dashboard/src/pages/`. Each renders a `DashboardLayout`
-wrapper with a sidebar, a WebSocket status indicator in the header, and the
-page-specific component hydrated as a Preact island. The dashboard is five
+The five routes are declared in `dashboard/src/App.tsx`; each renders inside the
+shared `Layout` (`dashboard/src/Layout.tsx`) — a sidebar, a WebSocket status dot
+in the header, and an `<Outlet/>` for the active view. The dashboard is five
 focused panes — every one reads a live backend route.
 
 | Route | Component | Polls | Notes |
@@ -35,9 +35,9 @@ focused panes — every one reads a live backend route.
 | `/events` | `EventStream` | WebSocket | Real-time bus event feed with topic filter |
 | `/agents` | `AgentsView` | 30 s | Fleet roster from `/api/agents/runtime` — per-agent skills + attached ceremonies |
 
-The sidebar nav is declared in `dashboard/src/layouts/DashboardLayout.astro`. The
-header WebSocket dot connects to `/ws` for a live/disconnected indicator,
-independent of page-level polling.
+The sidebar nav is declared in `dashboard/src/Layout.tsx` (`NavLink`s drive the
+active state). The header WebSocket dot opens its own `/ws` connection for a
+live/disconnected indicator, independent of page-level polling.
 
 ## API client
 
@@ -71,18 +71,14 @@ interval tick so they always refresh rather than hitting the cache.
 A new pane is justified only when it surfaces live debug/observability state that
 the existing five don't. Keep it read-only.
 
-1. Add a component under `dashboard/src/components/` — Preact, `.tsx`.
-2. Add an `.astro` page under `dashboard/src/pages/` that imports the component and renders it inside `<DashboardLayout>`:
-   ```astro
-   ---
-   import DashboardLayout from "../layouts/DashboardLayout.astro";
-   import MyThing from "../components/MyThing.tsx";
-   ---
-   <DashboardLayout title="My Thing" activePage="my-thing">
-     <MyThing client:load />
-   </DashboardLayout>
+1. Add a component under `dashboard/src/components/` — a React `.tsx` with a default export.
+2. Add a `<Route>` in `dashboard/src/App.tsx`:
+   ```tsx
+   import MyThing from "./components/MyThing";
+   // …inside <Route element={<Layout />}>
+   <Route path="/my-thing" element={<MyThing />} />
    ```
-3. Add a nav entry to `navItems` in `DashboardLayout.astro`. Use the same `id` string as your `activePage` prop.
+3. Add a nav entry to `NAV_ITEMS` in `dashboard/src/Layout.tsx` (`{ to: "/my-thing", label: "My Thing", title: "My Thing" }`). If the view manages its own scroll/height (a graph or a live feed), add its path to the `FULL_BLEED` set so the content area drops its padding.
 4. If the component needs new data, add a getter + response type to `dashboard/src/lib/api.ts` — do **not** call `fetch()` directly from components; cache seeding and envelope unwrap live in the api module. The getter must point at a route that actually exists in `src/api/`.
 
 ## Build and serve
@@ -91,10 +87,10 @@ the existing five don't. Keep it read-only.
 # Development
 cd dashboard
 bun install
-bun run dev           # Astro dev server, hot reload, port 4321
+bun run dev           # Vite dev server, HMR, port 5173 (proxies /api + /ws to :8080)
 
 # Production build
-bun run build         # outputs dashboard/dist/
+bun run build         # tsc --noEmit && vite build → dashboard/dist/
 
 # Serve via main app
 cd ..

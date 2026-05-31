@@ -24,7 +24,7 @@
  *   outer   — external services (where work eventually lands)
  */
 
-import { useEffect, useMemo, useRef, useState } from "preact/compat";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlow, Background, Controls, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import AgentNode, { type AgentActivityState } from "./AgentNode.tsx";

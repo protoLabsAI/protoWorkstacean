@@ -1,4 +1,4 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect } from "react";
 import {
   getAgentsRuntime,
   getCiHealth,
@@ -154,7 +154,7 @@ function HealthCardView({ label, metric, status }: CardState) {
 
   return (
     <div
-      class="card"
+      className="card"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -162,7 +162,7 @@ function HealthCardView({ label, metric, status }: CardState) {
         borderColor: borderColor[status],
       }}
     >
-      <div class="card-title">{label}</div>
+      <div className="card-title">{label}</div>
       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
         <span
           style={{
@@ -226,7 +226,7 @@ export default function OverviewGrid() {
           gap: 16px;
         }
       `}</style>
-      <div class="overview-grid">
+      <div className="overview-grid">
         {cards.map((card) => (
           <HealthCardView key={card.label} {...card} />
         ))}

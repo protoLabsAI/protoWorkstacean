@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useRef } from "react";
 import { WebSocketManager } from "../lib/websocket";
 import type { WsMessage } from "../lib/websocket";
 import { topicMatchesFilter } from "../lib/topic-filter";
@@ -425,50 +425,50 @@ export default function EventStream() {
         }
       `}</style>
 
-      <div class="es-root">
-        <div class="es-sticky">
-          <div class="es-header">
-            <div class="es-header-title">Event Stream</div>
-            <div class="es-tabs">
+      <div className="es-root">
+        <div className="es-sticky">
+          <div className="es-header">
+            <div className="es-header-title">Event Stream</div>
+            <div className="es-tabs">
               <button
-                class={`es-tab${activeTab === "events" ? " active" : ""}`}
+                className={`es-tab${activeTab === "events" ? " active" : ""}`}
                 onClick={() => { setActiveTab("events"); setExpandedId(null); }}
               >
                 Events
               </button>
               <button
-                class={`es-tab${activeTab === "logs" ? " active" : ""}`}
+                className={`es-tab${activeTab === "logs" ? " active" : ""}`}
                 onClick={() => { setActiveTab("logs"); setExpandedId(null); }}
               >
                 Logs
               </button>
             </div>
-            <div class="es-status">
-              <span class={dotClass} />
+            <div className="es-status">
+              <span className={dotClass} />
               {statusLabel}
             </div>
-            <div class="es-badge">
+            <div className="es-badge">
               {filtered.length} {activeTab === "events" ? "events" : "logs"}
             </div>
           </div>
 
-          <div class="es-toolbar">
+          <div className="es-toolbar">
             <input
-              class="es-filter"
+              className="es-filter"
               type="text"
               placeholder={activeTab === "events" ? "Filter by topic (e.g. agent.*)" : "Filter by topic (e.g. debug.*)"}
               value={filter}
-              onInput={(e) => setFilter((e.target as HTMLInputElement).value)}
+              onChange={(e) => setFilter(e.currentTarget.value)}
             />
-            <button class="es-btn" onClick={clearActive}>Clear</button>
+            <button className="es-btn" onClick={clearActive}>Clear</button>
             <button
-              class={`es-btn${isPaused ? " paused" : ""}`}
+              className={`es-btn${isPaused ? " paused" : ""}`}
               onClick={() => setIsPaused((p) => !p)}
             >
               {isPaused ? "Resume" : "Pause"}
             </button>
             <button
-              class={`es-btn${autoScroll ? " active" : ""}`}
+              className={`es-btn${autoScroll ? " active" : ""}`}
               onClick={() => setAutoScroll((a) => !a)}
               title="Toggle auto-scroll"
             >
@@ -477,9 +477,9 @@ export default function EventStream() {
           </div>
         </div>
 
-        <div class="es-list" ref={listRef} onScroll={handleScroll}>
+        <div className="es-list" ref={listRef} onScroll={handleScroll}>
           {filtered.length === 0 ? (
-            <div class="es-empty">
+            <div className="es-empty">
               <p>{items.length === 0 ? "Waiting for events…" : "No matches for current filter"}</p>
             </div>
           ) : (

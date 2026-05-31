@@ -617,15 +617,14 @@ interface BusSubscribeWsData {
 }
 
 // ── Dashboard static-asset serving ───────────────────────────────────────────
-// Astro emits an HTML-per-route layout (`dashboard/dist/system/index.html`,
-// `dashboard/dist/_astro/<hash>.css`, etc.). Map pathnames to files like a
-// minimal static host:
+// The dashboard is a Vite + React single-page app: one `dashboard/dist/index.html`
+// shell plus content-hashed assets under `dashboard/dist/assets/`. Serve like a
+// minimal static host with an SPA fallback:
 //   /                  → dashboard/dist/index.html
-//   /system            → dashboard/dist/system/index.html
-//   /system/           → dashboard/dist/system/index.html
-//   /system/foo.png    → dashboard/dist/system/foo.png
-//   /_astro/x.css      → dashboard/dist/_astro/x.css
-// Returns null when no file matches; the caller falls through to the 404.
+//   /assets/x-<hash>.js → dashboard/dist/assets/x-<hash>.js  (cached immutable)
+//   /favicon.svg       → dashboard/dist/favicon.svg
+//   /system, /agents…  → dashboard/dist/index.html (client route — react-router renders it)
+// Returns null when nothing matches (missing asset → the caller's 404).
 const DASHBOARD_DIST = resolve(import.meta.dir, "../dashboard/dist");
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -654,26 +653,30 @@ async function serveDashboardAsset(pathname: string): Promise<Response | null> {
   // Strip leading slash; map "" / "/" to the dashboard index.
   const rel = pathname.replace(/^\/+/, "") || "index.html";
 
-  // Try, in order: exact file, then directory/index.html (so /system loads
-  // /system/index.html the way Astro's static server would). For routes
-  // that don't match the dist layout at all (e.g. /api/foo would already
-  // have been handled by the API loop), both probes miss and we return null.
-  const candidates = [
-    join(DASHBOARD_DIST, rel),
-    join(DASHBOARD_DIST, rel, "index.html"),
-  ];
-  for (const candidate of candidates) {
-    const file = Bun.file(candidate);
-    if (await file.exists()) {
-      const ext = candidate.slice(candidate.lastIndexOf("."));
-      const type = MIME[ext] ?? "application/octet-stream";
-      // Hashed _astro/ assets are content-addressed and safe to cache hard;
-      // everything else (route HTML) stays mutable so dashboard rebuilds land.
-      const cacheControl = pathname.startsWith("/_astro/")
-        ? "public, max-age=31536000, immutable"
-        : "no-cache";
-      return new Response(file, {
-        headers: { "content-type": type, "cache-control": cacheControl },
+  // Exact file hit — assets, favicon, index.html.
+  const exact = Bun.file(join(DASHBOARD_DIST, rel));
+  if (await exact.exists()) {
+    const ext = rel.slice(rel.lastIndexOf("."));
+    const type = MIME[ext] ?? "application/octet-stream";
+    // Vite emits content-hashed files under /assets/ — safe to cache hard;
+    // everything else (the index shell) stays mutable so rebuilds land.
+    const cacheControl = pathname.startsWith("/assets/")
+      ? "public, max-age=31536000, immutable"
+      : "no-cache";
+    return new Response(exact, {
+      headers: { "content-type": type, "cache-control": cacheControl },
+    });
+  }
+
+  // SPA fallback: an extensionless path is a client route (/system, /agents…)
+  // — serve the app shell and let react-router render it. A path that looks
+  // like a missing asset (has an extension) falls through to null → 404.
+  const hasExtension = rel.includes(".") && !rel.endsWith("/");
+  if (!hasExtension) {
+    const shell = Bun.file(join(DASHBOARD_DIST, "index.html"));
+    if (await shell.exists()) {
+      return new Response(shell, {
+        headers: { "content-type": MIME[".html"], "cache-control": "no-cache" },
       });
     }
   }

@@ -80,7 +80,7 @@ RUN pnpm add -g @protolabsai/proto@latest acpx@latest && \
 RUN pnpm add -g @protolabsai/rabbit-hole-cli@^0.1.2 && \
     rh --version
 
-# build the dashboard Astro static site
+# build the dashboard (Vite + React 19 static SPA)
 FROM oven/bun:1 AS dashboard-build
 WORKDIR /dashboard
 COPY dashboard/package.json ./

@@ -17,13 +17,13 @@ export function LogRow({ msg, isExpanded, onClick }: LogRowProps) {
 
   return (
     <>
-      <div class="log-row" onClick={onClick}>
-        <span class="event-time">{formatTime(msg.timestamp)}</span>
-        <span class={`log-level ${level}`}>{level}</span>
-        <span class="log-message">{message}</span>
+      <div className="log-row" onClick={onClick}>
+        <span className="event-time">{formatTime(msg.timestamp)}</span>
+        <span className={`log-level ${level}`}>{level}</span>
+        <span className="log-message">{message}</span>
       </div>
       {isExpanded && (
-        <div class="log-detail open">
+        <div className="log-detail open">
           <pre>{JSON.stringify(p, null, 2)}</pre>
         </div>
       )}

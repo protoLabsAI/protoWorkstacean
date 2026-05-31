@@ -2,7 +2,7 @@
 title: Flow — Dashboard data path
 ---
 
-_The dashboard is a separate Astro + React frontend at `http://ava:3333` (Tailscale-only). It reads from API routes that aggregate live bus events plus rolling-window snapshots. The bus → API → tile chain is one-way; the dashboard does not write to the bus._
+_The dashboard is a separate Vite + React 19 frontend at `http://ava:3333` (Tailscale-only). It reads from API routes that aggregate live bus events plus rolling-window snapshots. The bus → API → tile chain is one-way; the dashboard does not write to the bus._
 
 ---
 
@@ -48,7 +48,7 @@ Three classes of data feed the tiles:
                             │  (http://ava:3333)
                             ▼
    ┌──────────────────────────────────────────────────────────┐
-   │ dashboard/  (Astro + React)                              │
+   │ dashboard/  (Vite + React 19)                            │
    │                                                          │
    │  pages/                    fetch via:                    │
    │   • system.astro             dashboard/src/lib/api.ts    │
