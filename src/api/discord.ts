@@ -327,17 +327,40 @@ export function createRoutes(ctx: ApiContext): Route[] {
           return Response.json({ success: false, error: "Throttled — last update was < 5s ago", throttled: true }, { status: 429 });
         }
 
+        const content = body.content.slice(0, 2000);
+
+        // Fan the update onto the A2A progress bus first. A2A callers (e.g.
+        // ORBIS over /a2a) have no Discord message behind their correlationId,
+        // but they stream `agent.skill.progress.{cid}` → working status-updates
+        // (see a2a-server.ts). This is what makes the agent's mid-task narration
+        // reach A2A streaming/poll clients instead of being Discord-only.
+        const progressTopic = `agent.skill.progress.${body.correlationId}`;
+        ctx.bus.publish(progressTopic, {
+          id: crypto.randomUUID(),
+          correlationId: body.correlationId,
+          topic: progressTopic,
+          timestamp: Date.now(),
+          payload: { text: content },
+          source: { interface: "api" },
+        });
+
+        // Mirror to Discord when this conversation has a live Discord message.
+        // Its absence is normal for an A2A conversation — not an error — so we
+        // don't fail the call on it.
         const pending = pendingReplies.get(body.correlationId);
-        if (!pending?.message) {
-          return Response.json({ success: false, error: "No pending message for this correlationId" }, { status: 404 });
+        let discordDelivered = false;
+        if (pending?.message) {
+          try {
+            await (pending.message.channel as any).send({ content });
+            discordDelivered = true;
+          } catch (e) {
+            console.warn(
+              `[discord/progress] Discord send failed for ${body.correlationId.slice(0, 8)}… (bus publish already succeeded): ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
         }
 
-        try {
-          await (pending.message.channel as any).send({ content: body.content.slice(0, 2000) });
-          return Response.json({ success: true });
-        } catch (e) {
-          return Response.json({ success: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
-        }
+        return Response.json({ success: true, delivered: { bus: true, discord: discordDelivered } });
       },
     },
   ];
