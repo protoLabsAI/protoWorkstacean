@@ -29,10 +29,10 @@ export interface AgentNodeData {
 }
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
-  idle: "#30363d",
-  running: "#3fb950",     // GitHub green
-  completed: "#58a6ff",   // GitHub blue
-  error: "#f85149",       // GitHub red
+  idle: "var(--border-default)",
+  running: "var(--text-success)",     // GitHub green
+  completed: "var(--accent-fg)",   // GitHub blue
+  error: "var(--text-danger)",       // GitHub red
 };
 
 const TYPE_LABEL: Record<string, string> = {
@@ -57,8 +57,8 @@ export default function AgentNode({ data }: { data: AgentNodeData }) {
   return (
     <div
       style={{
-        background: "#0d1117",
-        color: "#e6edf3",
+        background: "var(--bg-canvas)",
+        color: "var(--text-primary)",
         border: `1px solid ${statusColor}`,
         borderRadius: 8,
         padding: 10,
@@ -69,19 +69,19 @@ export default function AgentNode({ data }: { data: AgentNodeData }) {
         boxShadow: status === "running" ? `0 0 12px ${statusColor}40` : "none",
       }}
     >
-      <Handle type="target" position={Position.Left} style={{ background: "#30363d" }} />
-      <Handle type="source" position={Position.Right} style={{ background: "#30363d" }} />
+      <Handle type="target" position={Position.Left} style={{ background: "var(--border-default)" }} />
+      <Handle type="source" position={Position.Right} style={{ background: "var(--border-default)" }} />
 
       {/* Header: name + type badge + status pill */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-        <strong style={{ fontSize: 13, color: "#e6edf3" }}>{data.label}</strong>
+        <strong style={{ fontSize: 13, color: "var(--text-primary)" }}>{data.label}</strong>
         <span
           style={{
             fontSize: 9,
             padding: "1px 5px",
-            border: "1px solid #30363d",
+            border: "1px solid var(--border-default)",
             borderRadius: 3,
-            color: "#8b949e",
+            color: "var(--text-secondary)",
           }}
         >
           {TYPE_LABEL[data.type] ?? data.type}
@@ -102,22 +102,22 @@ export default function AgentNode({ data }: { data: AgentNodeData }) {
 
       {/* Current skill */}
       {activity?.currentSkill && (
-        <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 4 }}>
-          skill: <span style={{ color: "#e6edf3" }}>{activity.currentSkill}</span>
+        <div style={{ fontSize: 10, color: "var(--text-secondary)", marginBottom: 4 }}>
+          skill: <span style={{ color: "var(--text-primary)" }}>{activity.currentSkill}</span>
           {activity.startedAt && status === "running" && (
-            <span style={{ marginLeft: 6, color: "#6e7681" }}>· {relativeTime(activity.startedAt)}</span>
+            <span style={{ marginLeft: 6, color: "var(--text-secondary)" }}>· {relativeTime(activity.startedAt)}</span>
           )}
         </div>
       )}
 
       {/* Tool call history */}
       {activity && activity.toolCalls.length > 0 && (
-        <div style={{ borderTop: "1px solid #21262d", paddingTop: 4, marginTop: 4 }}>
+        <div style={{ borderTop: "1px solid var(--border-muted)", paddingTop: 4, marginTop: 4 }}>
           {activity.toolCalls.slice(0, 4).map((call, idx) => (
-            <div key={idx} style={{ fontSize: 10, color: "#8b949e", lineHeight: 1.4 }}>
-              <span style={{ color: "#7ee787" }}>↳</span>{" "}
-              <span style={{ color: "#e6edf3" }}>{call.tools.join(", ")}</span>
-              <span style={{ marginLeft: 6, color: "#6e7681" }}>{relativeTime(call.timestamp)}</span>
+            <div key={idx} style={{ fontSize: 10, color: "var(--text-secondary)", lineHeight: 1.4 }}>
+              <span style={{ color: "var(--text-success)" }}>↳</span>{" "}
+              <span style={{ color: "var(--text-primary)" }}>{call.tools.join(", ")}</span>
+              <span style={{ marginLeft: 6, color: "var(--text-secondary)" }}>{relativeTime(call.timestamp)}</span>
             </div>
           ))}
         </div>
@@ -127,11 +127,11 @@ export default function AgentNode({ data }: { data: AgentNodeData }) {
       {status === "completed" && activity?.resultPreview && (
         <div
           style={{
-            borderTop: "1px solid #21262d",
+            borderTop: "1px solid var(--border-muted)",
             paddingTop: 4,
             marginTop: 4,
             fontSize: 10,
-            color: "#8b949e",
+            color: "var(--text-secondary)",
             fontStyle: "italic",
             whiteSpace: "nowrap",
             overflow: "hidden",

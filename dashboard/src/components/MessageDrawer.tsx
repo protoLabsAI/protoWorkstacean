@@ -121,9 +121,9 @@ const DRAWER_STYLES = `
     height: 100vh;
     width: 480px;
     max-width: 90vw;
-    background: #0d1117;
-    border-left: 1px solid #30363d;
-    color: #c9d1d9;
+    background: var(--bg-canvas);
+    border-left: 1px solid var(--border-default);
+    color: var(--text-primary);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     z-index: 101;
     display: flex;
@@ -135,32 +135,32 @@ const DRAWER_STYLES = `
     align-items: flex-start;
     justify-content: space-between;
     padding: 1rem 1.25rem 0.75rem;
-    border-bottom: 1px solid #21262d;
+    border-bottom: 1px solid var(--border-muted);
   }
   .md-title {
     margin: 0;
     font-size: 0.95rem;
-    color: #58a6ff;
+    color: var(--accent-fg);
     word-break: break-all;
   }
   .md-meta {
     margin: 0.25rem 0 0;
-    color: #8b949e;
+    color: var(--text-secondary);
     font-size: 0.8rem;
   }
   .md-close {
     background: transparent;
     border: none;
-    color: #8b949e;
+    color: var(--text-secondary);
     font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
     padding: 0 0.25rem;
   }
-  .md-close:hover { color: #f85149; }
+  .md-close:hover { color: var(--text-danger); }
   .md-empty {
     padding: 2rem 1.25rem;
-    color: #8b949e;
+    color: var(--text-secondary);
     font-size: 0.85rem;
     line-height: 1.5;
   }
@@ -174,7 +174,7 @@ const DRAWER_STYLES = `
   .md-row {
     margin-bottom: 1rem;
     padding-bottom: 1rem;
-    border-bottom: 1px dashed #21262d;
+    border-bottom: 1px dashed var(--border-muted);
   }
   .md-row:last-child { border-bottom: none; }
   .md-row-head {
@@ -183,24 +183,24 @@ const DRAWER_STYLES = `
     justify-content: space-between;
     margin-bottom: 0.35rem;
   }
-  .md-ts { color: #8b949e; font-size: 0.8rem; }
+  .md-ts { color: var(--text-secondary); font-size: 0.8rem; }
   .md-trace-link {
-    color: #58a6ff;
+    color: var(--accent-fg);
     text-decoration: none;
     font-size: 0.8rem;
   }
   .md-trace-link:hover { text-decoration: underline; }
-  .md-no-trace { color: #6e7681; font-size: 0.75rem; font-style: italic; }
+  .md-no-trace { color: var(--text-secondary); font-size: 0.75rem; font-style: italic; }
   .md-corr {
     display: block;
-    color: #c9d1d9;
+    color: var(--text-primary);
     font-size: 0.75rem;
     margin-bottom: 0.35rem;
     opacity: 0.7;
     word-break: break-all;
   }
   .md-payload {
-    background: #161b22;
+    background: var(--bg-default);
     padding: 0.6rem;
     margin: 0;
     border-radius: 4px;
@@ -208,6 +208,6 @@ const DRAWER_STYLES = `
     overflow-x: auto;
     max-height: 240px;
     overflow-y: auto;
-    color: #c9d1d9;
+    color: var(--text-primary);
   }
 `;

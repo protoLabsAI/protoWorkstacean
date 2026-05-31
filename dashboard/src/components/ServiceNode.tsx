@@ -17,9 +17,9 @@ export default function ServiceNode({ data }: { data: ServiceNodeData }) {
   return (
     <div
       style={{
-        background: "#161b22",
-        color: "#e6edf3",
-        border: "1px dashed #58a6ff",
+        background: "var(--bg-default)",
+        color: "var(--text-primary)",
+        border: "1px dashed var(--accent-fg)",
         borderRadius: 999,
         padding: "6px 14px",
         fontFamily: "ui-monospace, SFMono-Regular, monospace",
@@ -30,8 +30,8 @@ export default function ServiceNode({ data }: { data: ServiceNodeData }) {
       }}
       title={data.description}
     >
-      <Handle type="target" position={Position.Left} style={{ background: "#58a6ff", opacity: 0.4 }} />
-      <Handle type="source" position={Position.Right} style={{ background: "#58a6ff", opacity: 0.4 }} />
+      <Handle type="target" position={Position.Left} style={{ background: "var(--accent-fg)", opacity: 0.4 }} />
+      <Handle type="source" position={Position.Right} style={{ background: "var(--accent-fg)", opacity: 0.4 }} />
       {data.icon ? <span style={{ marginRight: 4 }}>{data.icon}</span> : null}
       <span>{data.label}</span>
     </div>
