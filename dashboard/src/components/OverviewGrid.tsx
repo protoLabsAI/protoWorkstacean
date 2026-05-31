@@ -1,18 +1,14 @@
 import { useState, useEffect } from "preact/hooks";
 import {
-  getServices,
-  getAgentHealth,
+  getAgentsRuntime,
   getCiHealth,
   getPrPipeline,
-  getFlowMetrics,
   getSecuritySummary,
   getHitlPending,
   peek,
-  type ServicesResponse,
-  type AgentHealthResponse,
+  type AgentsRuntimeResponse,
   type CiHealthResponse,
   type PrPipelineResponse,
-  type FlowMetricsResponse,
   type SecuritySummaryResponse,
 } from "../lib/api";
 
@@ -26,28 +22,14 @@ interface CardState {
 
 const POLL_INTERVAL = 30_000;
 
-function deriveServicesStatus(data: ServicesResponse): Pick<CardState, "metric" | "status"> {
-  // Services response: { discord: { configured, connected }, github: { configured, ... }, ... }
-  const services = Object.entries(data).filter(([, v]) => v && typeof v === "object");
-  if (services.length === 0) return { metric: "No services", status: "yellow" };
-
-  const configured = services.filter(([, v]) => (v as { configured?: boolean }).configured);
-  const unhealthy = configured.filter(([name, v]) => {
-    // "connected" for Discord, "configured" is enough for the rest
-    if (name === "discord") return !(v as { connected?: boolean }).connected;
-    return false;
-  });
-
-  if (unhealthy.length > 0) {
-    return { metric: `${unhealthy.length} unhealthy`, status: "red" };
-  }
-  return { metric: `${configured.length} healthy`, status: "green" };
-}
-
-function deriveAgentHealthStatus(data: AgentHealthResponse): Pick<CardState, "metric" | "status"> {
-  const count = data.agentCount ?? 0;
-  if (count === 0) return { metric: "None registered", status: "red" };
-  return { metric: `${count} registered`, status: "green" };
+function deriveAgentsStatus(data: AgentsRuntimeResponse): Pick<CardState, "metric" | "status"> {
+  const agents = data.agents ?? [];
+  // The synthetic "function" cluster (alert.*/ceremony.*/pr.*) isn't an agent — exclude it from the count.
+  const real = agents.filter((a) => a.type !== "function");
+  if (real.length === 0) return { metric: "None registered", status: "red" };
+  const pending = real.filter((a) => a.pendingDiscovery).length;
+  if (pending > 0) return { metric: `${real.length} agents · ${pending} discovering`, status: "yellow" };
+  return { metric: `${real.length} agents`, status: "green" };
 }
 
 function deriveCiHealthStatus(data: CiHealthResponse): Pick<CardState, "metric" | "status"> {
@@ -70,16 +52,6 @@ function derivePrPipelineStatus(data: PrPipelineResponse): Pick<CardState, "metr
   if (stale > 0) return { metric: `${stale} stale`, status: "yellow" };
   if (readyToMerge > 0) return { metric: `${readyToMerge} ready to merge`, status: "green" };
   return { metric: `${totalOpen} open`, status: "green" };
-}
-
-function deriveFlowMetricsStatus(data: FlowMetricsResponse): Pick<CardState, "metric" | "status"> {
-  const efficiency = data.efficiency;
-  if (!efficiency) return { metric: "No data", status: "yellow" };
-  const pct = Math.round((efficiency.ratio ?? 0) * 100);
-  return {
-    metric: `${pct}% efficiency`,
-    status: efficiency.healthy ? "green" : "yellow",
-  };
 }
 
 function deriveSecurityStatus(data: SecuritySummaryResponse): Pick<CardState, "metric" | "status"> {
@@ -119,21 +91,12 @@ async function safeFetch<T>(
 
 const CARD_CONFIGS: CardFetcher[] = [
   {
-    label: "Service Connectivity",
-    endpoint: "/api/services",
-    fetch: (force) => safeFetch(getServices, deriveServicesStatus, force ?? false),
+    label: "Fleet",
+    endpoint: "/api/agents/runtime",
+    fetch: (force) => safeFetch(getAgentsRuntime, deriveAgentsStatus, force ?? false),
     seedFromCache: () => {
-      const cached = peek<ServicesResponse>("/api/services");
-      return cached ? deriveServicesStatus(cached) : null;
-    },
-  },
-  {
-    label: "Agent Health",
-    endpoint: "/api/agent-health",
-    fetch: (force) => safeFetch(getAgentHealth, deriveAgentHealthStatus, force ?? false),
-    seedFromCache: () => {
-      const cached = peek<AgentHealthResponse>("/api/agent-health");
-      return cached ? deriveAgentHealthStatus(cached) : null;
+      const cached = peek<AgentsRuntimeResponse>("/api/agents/runtime");
+      return cached ? deriveAgentsStatus(cached) : null;
     },
   },
   {
@@ -152,15 +115,6 @@ const CARD_CONFIGS: CardFetcher[] = [
     seedFromCache: () => {
       const cached = peek<PrPipelineResponse>("/api/pr-pipeline");
       return cached ? derivePrPipelineStatus(cached) : null;
-    },
-  },
-  {
-    label: "Flow Efficiency",
-    endpoint: "/api/flow-metrics",
-    fetch: (force) => safeFetch(getFlowMetrics, deriveFlowMetricsStatus, force ?? false),
-    seedFromCache: () => {
-      const cached = peek<FlowMetricsResponse>("/api/flow-metrics");
-      return cached ? deriveFlowMetricsStatus(cached) : null;
     },
   },
   {

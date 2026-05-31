@@ -1,18 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
-import {
-  getAgents,
-  getAgentHealth,
-  getCeremonies,
-  peek,
-  type AgentHealthResponse,
-} from "../lib/api";
-
-interface AgentDef {
-  name: string;
-  url?: string;
-  skills?: Array<{ name: string; description?: string }>;
-  subscribesTo?: string[];
-}
+import { getAgentsRuntime, getCeremonies } from "../lib/api";
 
 interface Ceremony {
   id: string;
@@ -25,11 +12,10 @@ interface Ceremony {
 
 interface AgentCard {
   name: string;
-  url: string;
-  skills: Array<{ name: string; description?: string }>;
+  skills: string[];
   ceremonies: Ceremony[];
   registered: boolean;
-  executorType: string | null;
+  executorType: string;
 }
 
 const POLL_INTERVAL = 30_000;
@@ -41,37 +27,24 @@ export default function AgentsView() {
 
   async function refresh(force = false) {
     try {
-      const [agentDefs, health, ceremonyData] = await Promise.all([
-        getAgents() as Promise<{ agents?: AgentDef[] } | AgentDef[]>,
-        getAgentHealth(force),
+      const [runtime, ceremonyData] = await Promise.all([
+        getAgentsRuntime(force),
         getCeremonies() as Promise<Ceremony[] | { data: Ceremony[] }>,
       ]);
-
-      const defs: AgentDef[] = Array.isArray(agentDefs)
-        ? agentDefs
-        : (agentDefs as { agents?: AgentDef[] }).agents ?? [];
 
       const ceremonies: Ceremony[] = Array.isArray(ceremonyData)
         ? ceremonyData
         : (ceremonyData as { data: Ceremony[] }).data ?? [];
 
-      const registeredAgents = health.agents ?? {};
-
-      const cards: AgentCard[] = defs.map((def) => {
-        const reg = registeredAgents[def.name];
-        const agentCeremonies = ceremonies.filter(
-          (c) => c.targets?.includes(def.name),
-        );
-
-        return {
-          name: def.name,
-          url: def.url ?? "",
-          skills: def.skills ?? [],
-          ceremonies: agentCeremonies,
-          registered: !!reg,
-          executorType: reg?.executorType ?? null,
-        };
-      });
+      const cards: AgentCard[] = (runtime.agents ?? []).map((a) => ({
+        name: a.name,
+        skills: a.skills ?? [],
+        ceremonies: ceremonies.filter((c) => c.targets?.includes(a.name)),
+        // Everything the registry returns is live; A2A agents still discovering
+        // skills are surfaced as not-yet-registered.
+        registered: !a.pendingDiscovery,
+        executorType: a.type,
+      }));
 
       // Sort: registered first, then alphabetical
       cards.sort((a, b) => {
@@ -309,20 +282,13 @@ export default function AgentsView() {
 
               {isExpanded && (
                 <div class="agent-details">
-                  {agent.url && (
-                    <div class="detail-section">
-                      <div class="detail-label">Endpoint</div>
-                      <div class="detail-url">{agent.url}</div>
-                    </div>
-                  )}
-
                   <div class="detail-section">
                     <div class="detail-label">Skills</div>
                     {agent.skills.length > 0 ? (
                       <div class="skill-list">
                         {agent.skills.map((s) => (
-                          <span class="skill-tag" key={s.name} title={s.description}>
-                            {s.name}
+                          <span class="skill-tag" key={s}>
+                            {s}
                           </span>
                         ))}
                       </div>
