@@ -1,19 +1,34 @@
-/* GitHub dark palette #0d1117 */
+/* Brand tokens come from @protolabsai/design (the studio's --pl-* design system:
+   dark-first ground, Geist, violet gradient). The dashboard's own semantic
+   tokens below map onto them, so the whole UI restyles from that one source —
+   change a brand token, the dashboard follows. */
+@import "@protolabsai/design/css";
+
 :root {
-  --bg-canvas: #0d1117;
-  --bg-default: #161b22;
-  --bg-subtle: #21262d;
-  --bg-inset: #010409;
-  --border-default: #30363d;
-  --border-muted: #21262d;
-  --text-primary: #c9d1d9;
-  --text-secondary: #8b949e;
-  --text-link: #58a6ff;
-  --text-success: #3fb950;
-  --text-warning: #d29922;
-  --text-danger: #f85149;
-  --accent-fg: #58a6ff;
-  --accent-emphasis: #1f6feb;
+  /* Surfaces */
+  --bg-canvas: var(--pl-color-bg);            /* #0a0a0c */
+  --bg-default: var(--pl-color-bg-raised);    /* #131316 — cards, sidebar, header */
+  --bg-subtle: #1c1c22;                       /* one step above raised (hover); no brand token */
+  --bg-inset: #060608;                        /* below canvas — code blocks */
+  /* Borders */
+  --border-default: var(--pl-color-border-strong);  /* rgba(255,255,255,.18) */
+  --border-muted: var(--pl-color-border);           /* rgba(255,255,255,.08) */
+  /* Text */
+  --text-primary: var(--pl-color-fg);               /* #ededed */
+  --text-secondary: var(--pl-color-fg-muted);       /* #a1a1aa */
+  --text-link: var(--pl-color-brand-violet-light);  /* #a78bfa */
+  --text-success: var(--pl-color-status-success);
+  --text-warning: var(--pl-color-status-warning);
+  --text-danger: var(--pl-color-status-error);
+  /* Brand accent (violet — replaces the old GitHub blue) */
+  --accent-fg: var(--pl-color-brand-violet-light);  /* #a78bfa */
+  --accent-emphasis: var(--pl-color-brand-indigo);  /* #6366f1 */
+  /* RGB channels for translucent accent fills — var() can't be nested in rgba() */
+  --accent-rgb: 167, 139, 250;
+  --success-rgb: 76, 175, 110;
+  --warning-rgb: 210, 153, 34;
+  --danger-rgb: 230, 90, 80;
+  /* Layout */
   --sidebar-width: 220px;
   --header-height: 56px;
 }
@@ -31,8 +46,7 @@ body {
   height: 100%;
   background-color: var(--bg-canvas);
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
-    sans-serif;
+  font-family: var(--pl-font-sans);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -48,7 +62,7 @@ a:hover {
 
 code,
 pre {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-family: var(--pl-font-mono);
   font-size: 12px;
 }
 
@@ -78,22 +92,22 @@ h4 {
 }
 
 .badge-green {
-  background: rgba(63, 185, 80, 0.15);
+  background: rgba(var(--success-rgb), 0.15);
   color: var(--text-success);
 }
 
 .badge-yellow {
-  background: rgba(210, 153, 34, 0.15);
+  background: rgba(var(--warning-rgb), 0.15);
   color: var(--text-warning);
 }
 
 .badge-red {
-  background: rgba(248, 81, 73, 0.15);
+  background: rgba(var(--danger-rgb), 0.15);
   color: var(--text-danger);
 }
 
 .badge-blue {
-  background: rgba(88, 166, 255, 0.15);
+  background: rgba(var(--accent-rgb), 0.15);
   color: var(--accent-fg);
 }
 

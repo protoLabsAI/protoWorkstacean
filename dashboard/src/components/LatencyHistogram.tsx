@@ -165,9 +165,9 @@ const STYLES = `
     min-width: 260px;
     max-width: 360px;
     background: rgba(13, 17, 23, 0.92);
-    border: 1px solid #30363d;
+    border: 1px solid var(--border-default);
     border-radius: 6px;
-    color: #c9d1d9;
+    color: var(--text-primary);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 0.8rem;
     backdrop-filter: blur(4px);
@@ -175,25 +175,25 @@ const STYLES = `
   }
   .lh-head {
     padding: 0.5rem 0.75rem 0.4rem;
-    border-bottom: 1px solid #21262d;
+    border-bottom: 1px solid var(--border-muted);
   }
   .lh-head h3 {
     margin: 0;
     font-size: 0.85rem;
-    color: #e6edf3;
+    color: var(--text-primary);
   }
   .lh-meta {
     margin: 0.2rem 0 0;
-    color: #8b949e;
+    color: var(--text-secondary);
     font-size: 0.7rem;
   }
   .lh-status { font-weight: 500; }
-  .lh-status--connected    { color: #3fb950; }
-  .lh-status--connecting   { color: #d29922; }
-  .lh-status--disconnected { color: #f85149; }
+  .lh-status--connected    { color: var(--text-success); }
+  .lh-status--connecting   { color: var(--text-warning); }
+  .lh-status--disconnected { color: var(--text-danger); }
   .lh-empty {
     padding: 0.75rem;
-    color: #8b949e;
+    color: var(--text-secondary);
     font-size: 0.75rem;
   }
   .lh-table {
@@ -203,25 +203,25 @@ const STYLES = `
   }
   .lh-table thead th {
     text-align: left;
-    color: #6e7681;
+    color: var(--text-secondary);
     font-weight: 500;
     padding: 0.4rem 0.5rem;
-    border-bottom: 1px solid #21262d;
+    border-bottom: 1px solid var(--border-muted);
   }
   .lh-table th.lh-num { text-align: right; }
   .lh-table td {
     padding: 0.3rem 0.5rem;
-    border-bottom: 1px dashed #21262d;
+    border-bottom: 1px dashed var(--border-muted);
   }
   .lh-table tbody tr:last-child td { border-bottom: none; }
   .lh-num { text-align: right; width: 4rem; }
   .lh-skill {
-    color: #c9d1d9;
+    color: var(--text-primary);
     max-width: 12rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .lh-p95 { color: #d29922; }
-  .lh-max { color: #f85149; }
+  .lh-p95 { color: var(--text-warning); }
+  .lh-max { color: var(--text-danger); }
 `;

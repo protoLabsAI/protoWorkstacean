@@ -139,17 +139,17 @@ const CARD_CONFIGS: CardFetcher[] = [
 
 function HealthCardView({ label, metric, status }: CardState) {
   const dotStyle: Record<Status, string> = {
-    green: "#3fb950",
-    yellow: "#d29922",
-    red: "#f85149",
-    loading: "#8b949e",
+    green: "var(--text-success)",
+    yellow: "var(--text-warning)",
+    red: "var(--text-danger)",
+    loading: "var(--text-secondary)",
   };
 
   const borderColor: Record<Status, string> = {
-    green: "rgba(63, 185, 80, 0.3)",
-    yellow: "rgba(210, 153, 34, 0.3)",
-    red: "rgba(248, 81, 73, 0.3)",
-    loading: "#21262d",
+    green: "rgba(var(--success-rgb), 0.3)",
+    yellow: "rgba(var(--warning-rgb), 0.3)",
+    red: "rgba(var(--danger-rgb), 0.3)",
+    loading: "var(--border-muted)",
   };
 
   return (

@@ -147,9 +147,9 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
       position: PLACEHOLDER_POS,
       data: { label: p.name },
       style: {
-        background: "#161b22",
-        color: "#e6edf3",
-        border: "1px solid #30363d",
+        background: "var(--bg-default)",
+        color: "var(--text-primary)",
+        border: "1px solid var(--border-default)",
         borderRadius: 6,
         padding: "6px 10px",
         fontSize: 11,
@@ -186,8 +186,8 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
           target: `plugin-${subscriber.name}`,
           label: topic,
           animated: active,
-          style: { stroke: active ? "#3fb950" : "#21262d", strokeWidth: active ? 1.5 : 1 },
-          labelStyle: { fill: "#6e7681", fontSize: 9, fontFamily: "ui-monospace, monospace" },
+          style: { stroke: active ? "var(--text-success)" : "var(--border-muted)", strokeWidth: active ? 1.5 : 1 },
+          labelStyle: { fill: "var(--text-secondary)", fontSize: 9, fontFamily: "ui-monospace, monospace" },
         });
       }
     }
@@ -201,7 +201,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
         id: `${pluginName}->${svcId}`,
         source: `plugin-${pluginName}`,
         target: svcId,
-        style: { stroke: "#58a6ff", strokeDasharray: "4 4", opacity: 0.5 },
+        style: { stroke: "var(--accent-fg)", strokeDasharray: "4 4", opacity: 0.5 },
       });
     }
   }
@@ -218,7 +218,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
       source: `plugin-${hostPlugin}`,
       target: `agent-${a.name}`,
       animated: live,
-      style: { stroke: live ? "#3fb950" : "#30363d", strokeWidth: live ? 2 : 1 },
+      style: { stroke: live ? "var(--text-success)" : "var(--border-default)", strokeWidth: live ? 2 : 1 },
     });
   }
 
@@ -259,9 +259,9 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
       position: PLACEHOLDER_POS,
       data: { label: "api-routes" },
       style: {
-        background: "#1c2128",
-        color: "#d29922",
-        border: "1px dashed #d29922",
+        background: "var(--bg-default)",
+        color: "var(--text-warning)",
+        border: "1px dashed var(--text-warning)",
         borderRadius: 6,
         padding: "6px 10px",
         fontSize: 11,
@@ -277,12 +277,12 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
         label: topic,
         animated: active,
         style: {
-          stroke: active ? "#3fb950" : "#d29922",
+          stroke: active ? "var(--text-success)" : "var(--text-warning)",
           strokeWidth: active ? 1.5 : 1,
           strokeDasharray: active ? undefined : "4 4",
           opacity: active ? 1 : 0.7,
         },
-        labelStyle: { fill: "#d29922", fontSize: 9, fontFamily: "ui-monospace, monospace" },
+        labelStyle: { fill: "var(--text-warning)", fontSize: 9, fontFamily: "ui-monospace, monospace" },
       });
     }
   }
@@ -470,10 +470,10 @@ export default function SystemGraph() {
   );
 
   if (error) {
-    return <div style={{ padding: 24, color: "#f85149", fontFamily: "monospace" }}>topology error: {error}</div>;
+    return <div style={{ padding: 24, color: "var(--text-danger)", fontFamily: "monospace" }}>topology error: {error}</div>;
   }
   if (!topology) {
-    return <div style={{ padding: 24, color: "#8b949e" }}>loading topology…</div>;
+    return <div style={{ padding: 24, color: "var(--text-secondary)" }}>loading topology…</div>;
   }
 
   const drawerMessages = useMemo(
@@ -484,7 +484,7 @@ export default function SystemGraph() {
   );
 
   return (
-    <div style={{ width: "100%", height: "calc(100vh - 64px)", background: "#0d1117", position: "relative" }}>
+    <div style={{ width: "100%", height: "calc(100vh - 64px)", background: "var(--bg-canvas)", position: "relative" }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -499,7 +499,7 @@ export default function SystemGraph() {
           if (topic) setOpenTopic(topic);
         }}
       >
-        <Background color="#21262d" gap={16} />
+        <Background color="var(--bg-subtle)" gap={16} />
         <Controls position="bottom-right" />
       </ReactFlow>
       <QuinnVerdictCounters />

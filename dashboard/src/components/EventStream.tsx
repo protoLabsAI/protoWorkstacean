@@ -128,8 +128,8 @@ export default function EventStream() {
           position: sticky;
           top: -24px;
           z-index: 10;
-          background: linear-gradient(180deg, #161b22 0%, #12161d 100%);
-          border-bottom: 1px solid #30363d;
+          background: linear-gradient(180deg, var(--bg-default) 0%, var(--bg-default) 100%);
+          border-bottom: 1px solid var(--border-default);
           box-shadow: 0 4px 12px -8px rgba(0, 0, 0, 0.5);
           backdrop-filter: blur(8px);
         }
@@ -148,14 +148,14 @@ export default function EventStream() {
           top: 0;
           width: 3px;
           height: 100%;
-          background: linear-gradient(180deg, #58a6ff 0%, #1f6feb 100%);
+          background: linear-gradient(180deg, var(--accent-fg) 0%, var(--accent-emphasis) 100%);
           border-radius: 0 0 2px 2px;
           opacity: 0.8;
         }
         .es-header-title {
           font-size: 13px;
           font-weight: 600;
-          color: #c9d1d9;
+          color: var(--text-primary);
           letter-spacing: 0.3px;
           text-transform: uppercase;
           display: flex;
@@ -164,7 +164,7 @@ export default function EventStream() {
         }
         .es-header-title::before {
           content: "◉";
-          color: #58a6ff;
+          color: var(--accent-fg);
           font-size: 14px;
           animation: es-pulse-dot 2s ease-in-out infinite;
         }
@@ -175,43 +175,43 @@ export default function EventStream() {
         .es-tabs {
           display: flex;
           gap: 2px;
-          background: #0d1117;
+          background: var(--bg-canvas);
           border-radius: 6px;
           padding: 2px;
-          border: 1px solid #21262d;
+          border: 1px solid var(--border-muted);
         }
         .es-tab {
           padding: 5px 16px;
           font-size: 12px;
           border-radius: 4px;
           cursor: pointer;
-          color: #8b949e;
+          color: var(--text-secondary);
           border: none;
           background: transparent;
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
           font-weight: 500;
           transition: all 0.15s;
         }
-        .es-tab:hover { color: #c9d1d9; }
+        .es-tab:hover { color: var(--text-primary); }
         .es-tab.active {
-          background: #21262d;
-          color: #c9d1d9;
-          box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.2);
+          background: var(--bg-subtle);
+          color: var(--text-primary);
+          box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.2);
         }
 
         .status-dot {
           width: 8px;
           height: 8px;
           border-radius: 50%;
-          background: #f85149;
+          background: var(--text-danger);
           transition: background 0.2s;
           flex-shrink: 0;
         }
         .status-dot.connected {
-          background: #3fb950;
-          box-shadow: 0 0 6px rgba(63, 185, 80, 0.6);
+          background: var(--text-success);
+          box-shadow: 0 0 6px rgba(var(--success-rgb), 0.6);
         }
-        .status-dot.connecting { background: #d29922; animation: es-pulse 1s infinite; }
+        .status-dot.connecting { background: var(--text-warning); animation: es-pulse 1s infinite; }
         @keyframes es-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
         .es-status {
@@ -221,17 +221,17 @@ export default function EventStream() {
           font-size: 12px;
           padding: 4px 10px;
           border-radius: 12px;
-          background: #21262d;
-          color: #c9d1d9;
+          background: var(--bg-subtle);
+          color: var(--text-primary);
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
-          border: 1px solid #30363d;
+          border: 1px solid var(--border-default);
         }
         .es-badge {
           font-size: 11px;
-          background: #30363d;
+          background: var(--border-default);
           padding: 3px 10px;
           border-radius: 10px;
-          color: #c9d1d9;
+          color: var(--text-primary);
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
           font-weight: 500;
           margin-left: auto;
@@ -244,9 +244,9 @@ export default function EventStream() {
           flex-wrap: wrap;
         }
         .es-filter {
-          background: #0d1117;
-          border: 1px solid #30363d;
-          color: #c9d1d9;
+          background: var(--bg-canvas);
+          border: 1px solid var(--border-default);
+          color: var(--text-primary);
           padding: 6px 10px;
           border-radius: 6px;
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
@@ -254,12 +254,12 @@ export default function EventStream() {
           width: 260px;
           outline: none;
         }
-        .es-filter:focus { border-color: #58a6ff; }
-        .es-filter::placeholder { color: #484f58; }
+        .es-filter:focus { border-color: var(--accent-fg); }
+        .es-filter::placeholder { color: var(--text-secondary); }
         .es-btn {
-          background: #21262d;
-          border: 1px solid #30363d;
-          color: #c9d1d9;
+          background: var(--bg-subtle);
+          border: 1px solid var(--border-default);
+          color: var(--text-primary);
           padding: 6px 12px;
           border-radius: 6px;
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
@@ -267,9 +267,9 @@ export default function EventStream() {
           cursor: pointer;
           transition: background 0.15s;
         }
-        .es-btn:hover { background: #30363d; }
-        .es-btn.active { background: #1f6feb; border-color: #1f6feb; }
-        .es-btn.paused { background: #da3633; border-color: #da3633; }
+        .es-btn:hover { background: var(--border-default); }
+        .es-btn.active { background: var(--accent-emphasis); border-color: var(--accent-emphasis); }
+        .es-btn.paused { background: var(--text-danger); border-color: var(--text-danger); }
 
         .es-list {
           flex: 1;
@@ -278,8 +278,8 @@ export default function EventStream() {
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
         }
         .es-list::-webkit-scrollbar { width: 8px; }
-        .es-list::-webkit-scrollbar-track { background: #0d1117; }
-        .es-list::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+        .es-list::-webkit-scrollbar-track { background: var(--bg-canvas); }
+        .es-list::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 4px; }
 
         .es-empty {
           display: flex;
@@ -287,7 +287,7 @@ export default function EventStream() {
           align-items: center;
           justify-content: center;
           height: 200px;
-          color: #484f58;
+          color: var(--text-secondary);
           gap: 8px;
           font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
           font-size: 14px;
@@ -299,15 +299,15 @@ export default function EventStream() {
           align-items: flex-start;
           gap: 12px;
           padding: 8px 16px;
-          border-bottom: 1px solid #21262d;
+          border-bottom: 1px solid var(--border-muted);
           cursor: pointer;
           transition: background 0.1s;
           overflow-x: auto;
         }
-        .event-row:hover { background: #161b22; }
+        .event-row:hover { background: var(--bg-default); }
         .event-time {
           font-size: 11px;
-          color: #484f58;
+          color: var(--text-secondary);
           white-space: nowrap;
           min-width: 70px;
           padding-top: 2px;
@@ -320,17 +320,17 @@ export default function EventStream() {
           font-weight: 500;
           letter-spacing: 0.5px;
         }
-        .event-topic.source-agent { background: #1a1932; color: #bc8cff; }
-        .event-topic.source-cli { background: #122d20; color: #3fb950; }
-        .event-topic.source-signal { background: #2d1f12; color: #d29922; }
-        .event-topic.source-echo { background: #1f2330; color: #79c0ff; }
-        .event-topic.source-scheduler { background: #2d1229; color: #f778ba; }
-        .event-topic.source-logger { background: #1a2332; color: #58a6ff; }
-        .event-topic.source-event-viewer { background: #2d2a12; color: #e3b341; }
-        .event-topic.source-default { background: #21262d; color: #8b949e; }
+        .event-topic.source-agent { background: rgba(var(--accent-rgb), 0.12); color: var(--accent-fg); }
+        .event-topic.source-cli { background: rgba(var(--success-rgb), 0.12); color: var(--text-success); }
+        .event-topic.source-signal { background: rgba(var(--warning-rgb), 0.12); color: var(--text-warning); }
+        .event-topic.source-echo { background: rgba(var(--accent-rgb), 0.12); color: var(--accent-fg); }
+        .event-topic.source-scheduler { background: rgba(var(--accent-rgb), 0.12); color: var(--accent-fg); }
+        .event-topic.source-logger { background: rgba(var(--accent-rgb), 0.12); color: var(--accent-fg); }
+        .event-topic.source-event-viewer { background: rgba(var(--warning-rgb), 0.12); color: var(--text-warning); }
+        .event-topic.source-default { background: var(--bg-subtle); color: var(--text-secondary); }
         .event-preview {
           font-size: 12px;
-          color: #8b949e;
+          color: var(--text-secondary);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -339,19 +339,19 @@ export default function EventStream() {
         .event-detail {
           display: none;
           padding: 0 16px 12px 98px;
-          background: #0d1117;
-          border-bottom: 1px solid #21262d;
+          background: var(--bg-canvas);
+          border-bottom: 1px solid var(--border-muted);
         }
         .event-detail.open { display: block; }
         .event-detail pre {
-          background: #161b22;
-          border: 1px solid #30363d;
+          background: var(--bg-default);
+          border: 1px solid var(--border-default);
           border-radius: 6px;
           padding: 12px;
           font-size: 12px;
           overflow: auto;
           max-height: 400px;
-          color: #c9d1d9;
+          color: var(--text-primary);
           line-height: 1.5;
         }
         .event-detail-toolbar {
@@ -360,16 +360,16 @@ export default function EventStream() {
           margin-bottom: 6px;
         }
         .detail-btn {
-          background: #21262d;
-          border: 1px solid #30363d;
-          color: #8b949e;
+          background: var(--bg-subtle);
+          border: 1px solid var(--border-default);
+          color: var(--text-secondary);
           padding: 3px 8px;
           border-radius: 4px;
           font-size: 11px;
           cursor: pointer;
           font-family: inherit;
         }
-        .detail-btn:hover { background: #30363d; color: #c9d1d9; }
+        .detail-btn:hover { background: var(--border-default); color: var(--text-primary); }
 
         /* Log rows */
         .log-row {
@@ -377,11 +377,11 @@ export default function EventStream() {
           align-items: flex-start;
           gap: 12px;
           padding: 4px 16px;
-          border-bottom: 1px solid #161b22;
+          border-bottom: 1px solid var(--bg-default);
           cursor: pointer;
           transition: background 0.1s;
         }
-        .log-row:hover { background: #161b22; }
+        .log-row:hover { background: var(--bg-default); }
         .log-level {
           font-size: 10px;
           padding: 1px 6px;
@@ -392,14 +392,14 @@ export default function EventStream() {
           min-width: 44px;
           text-align: center;
         }
-        .log-level.log { background: #21262d; color: #8b949e; }
-        .log-level.debug { background: #1a2332; color: #58a6ff; }
-        .log-level.info { background: #122d20; color: #3fb950; }
-        .log-level.warn { background: #2d1f12; color: #d29922; }
-        .log-level.error { background: #2d1215; color: #f85149; }
+        .log-level.log { background: var(--bg-subtle); color: var(--text-secondary); }
+        .log-level.debug { background: rgba(var(--accent-rgb), 0.12); color: var(--accent-fg); }
+        .log-level.info { background: rgba(var(--success-rgb), 0.12); color: var(--text-success); }
+        .log-level.warn { background: rgba(var(--warning-rgb), 0.12); color: var(--text-warning); }
+        .log-level.error { background: rgba(var(--danger-rgb), 0.12); color: var(--text-danger); }
         .log-message {
           font-size: 12px;
-          color: #6e7681;
+          color: var(--text-secondary);
           flex: 1;
           white-space: nowrap;
           overflow: hidden;
@@ -408,19 +408,19 @@ export default function EventStream() {
         .log-detail {
           display: none;
           padding: 0 16px 12px 98px;
-          background: #0d1117;
-          border-bottom: 1px solid #161b22;
+          background: var(--bg-canvas);
+          border-bottom: 1px solid var(--bg-default);
         }
         .log-detail.open { display: block; }
         .log-detail pre {
-          background: #161b22;
-          border: 1px solid #30363d;
+          background: var(--bg-default);
+          border: 1px solid var(--border-default);
           border-radius: 6px;
           padding: 12px;
           font-size: 12px;
           overflow: auto;
           max-height: 400px;
-          color: #c9d1d9;
+          color: var(--text-primary);
           line-height: 1.5;
         }
       `}</style>

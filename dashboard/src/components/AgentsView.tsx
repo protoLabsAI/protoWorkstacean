@@ -147,7 +147,7 @@ export default function AgentsView() {
           font-size: 12px;
           padding: 3px 10px;
           border-radius: 12px;
-          background: rgba(88, 166, 255, 0.1);
+          background: rgba(var(--accent-rgb), 0.1);
           color: var(--accent-fg);
           font-family: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
         }
@@ -244,7 +244,7 @@ export default function AgentsView() {
               key={agent.name}
               style={{
                 borderColor: agent.registered
-                  ? "rgba(63, 185, 80, 0.3)"
+                  ? "rgba(var(--success-rgb), 0.3)"
                   : "var(--border-default)",
               }}
             >
@@ -255,8 +255,8 @@ export default function AgentsView() {
                 <span
                   className="agent-status-dot"
                   style={{
-                    background: agent.registered ? "#3fb950" : "#8b949e",
-                    boxShadow: agent.registered ? "0 0 4px #3fb950" : "none",
+                    background: agent.registered ? "var(--text-success)" : "var(--text-secondary)",
+                    boxShadow: agent.registered ? "0 0 4px var(--text-success)" : "none",
                   }}
                 />
                 <span className="agent-name">{agent.name}</span>
@@ -264,7 +264,7 @@ export default function AgentsView() {
                   <span
                     className="agent-type-badge"
                     style={{
-                      background: "rgba(88, 166, 255, 0.1)",
+                      background: "rgba(var(--accent-rgb), 0.1)",
                       color: "var(--accent-fg)",
                     }}
                   >
@@ -305,7 +305,7 @@ export default function AgentsView() {
                           <span
                             className="ceremony-enabled"
                             style={{
-                              background: c.enabled !== false ? "#3fb950" : "#8b949e",
+                              background: c.enabled !== false ? "var(--text-success)" : "var(--text-secondary)",
                             }}
                           />
                           <span className="ceremony-name">{c.name || c.id}</span>

@@ -157,9 +157,9 @@ const STYLES = `
     min-width: 220px;
     max-width: 320px;
     background: rgba(13, 17, 23, 0.92);
-    border: 1px solid #30363d;
+    border: 1px solid var(--border-default);
     border-radius: 6px;
-    color: #c9d1d9;
+    color: var(--text-primary);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 0.8rem;
     backdrop-filter: blur(4px);
@@ -167,25 +167,25 @@ const STYLES = `
   }
   .qvc-head {
     padding: 0.5rem 0.75rem 0.4rem;
-    border-bottom: 1px solid #21262d;
+    border-bottom: 1px solid var(--border-muted);
   }
   .qvc-head h3 {
     margin: 0;
     font-size: 0.85rem;
-    color: #e6edf3;
+    color: var(--text-primary);
   }
   .qvc-meta {
     margin: 0.2rem 0 0;
-    color: #8b949e;
+    color: var(--text-secondary);
     font-size: 0.7rem;
   }
   .qvc-status { font-weight: 500; }
-  .qvc-status--connected    { color: #3fb950; }
-  .qvc-status--connecting   { color: #d29922; }
-  .qvc-status--disconnected { color: #f85149; }
+  .qvc-status--connected    { color: var(--text-success); }
+  .qvc-status--connecting   { color: var(--text-warning); }
+  .qvc-status--disconnected { color: var(--text-danger); }
   .qvc-empty {
     padding: 0.75rem;
-    color: #8b949e;
+    color: var(--text-secondary);
     font-size: 0.75rem;
   }
   .qvc-table {
@@ -195,30 +195,30 @@ const STYLES = `
   }
   .qvc-table thead th {
     text-align: left;
-    color: #6e7681;
+    color: var(--text-secondary);
     font-weight: 500;
     padding: 0.4rem 0.5rem;
-    border-bottom: 1px solid #21262d;
+    border-bottom: 1px solid var(--border-muted);
   }
   .qvc-table td {
     padding: 0.3rem 0.5rem;
-    border-bottom: 1px dashed #21262d;
+    border-bottom: 1px dashed var(--border-muted);
   }
   .qvc-table tbody tr:last-child td { border-bottom: none; }
   .qvc-num { text-align: right; width: 2.4rem; }
-  .qvc-approve { color: #3fb950; }
-  .qvc-block   { color: #f85149; }
-  .qvc-comment { color: #58a6ff; }
+  .qvc-approve { color: var(--text-success); }
+  .qvc-block   { color: var(--text-danger); }
+  .qvc-comment { color: var(--accent-fg); }
   .qvc-repo {
-    color: #c9d1d9;
+    color: var(--text-primary);
     max-width: 14rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .qvc-total-row td {
-    border-top: 1px solid #30363d;
-    color: #e6edf3;
+    border-top: 1px solid var(--border-default);
+    color: var(--text-primary);
     font-weight: 500;
   }
 `;
