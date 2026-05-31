@@ -13,7 +13,7 @@
  * restarts.
  */
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useState } from "react";
 
 interface Counts {
   approved: number;
@@ -99,44 +99,44 @@ export default function QuinnVerdictCounters() {
   const sinceMin = Math.floor((Date.now() - openedAt) / 60_000);
 
   return (
-    <aside class="qvc-panel" aria-label="Quinn review verdicts since page load">
-      <header class="qvc-head">
+    <aside className="qvc-panel" aria-label="Quinn review verdicts since page load">
+      <header className="qvc-head">
         <div>
           <h3>Quinn verdicts</h3>
-          <p class="qvc-meta">
+          <p className="qvc-meta">
             since tab opened {sinceMin}m ago ·{" "}
-            <span class={`qvc-status qvc-status--${wsStatus}`}>{wsStatus}</span>
+            <span className={`qvc-status qvc-status--${wsStatus}`}>{wsStatus}</span>
           </p>
         </div>
       </header>
 
       {rows.length === 0 ? (
-        <div class="qvc-empty">No verdicts observed yet.</div>
+        <div className="qvc-empty">No verdicts observed yet.</div>
       ) : (
-        <table class="qvc-table">
+        <table className="qvc-table">
           <thead>
             <tr>
               <th>repo</th>
-              <th class="qvc-num qvc-approve" title="APPROVE">✓</th>
-              <th class="qvc-num qvc-block"   title="REQUEST_CHANGES">✗</th>
-              <th class="qvc-num qvc-comment" title="COMMENT">💬</th>
+              <th className="qvc-num qvc-approve" title="APPROVE">✓</th>
+              <th className="qvc-num qvc-block"   title="REQUEST_CHANGES">✗</th>
+              <th className="qvc-num qvc-comment" title="COMMENT">💬</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.repo}>
-                <td class="qvc-repo" title={r.repo}>{r.repo}</td>
-                <td class="qvc-num qvc-approve">{r.approved || ""}</td>
-                <td class="qvc-num qvc-block">{r.requestedChanges || ""}</td>
-                <td class="qvc-num qvc-comment">{r.commented || ""}</td>
+                <td className="qvc-repo" title={r.repo}>{r.repo}</td>
+                <td className="qvc-num qvc-approve">{r.approved || ""}</td>
+                <td className="qvc-num qvc-block">{r.requestedChanges || ""}</td>
+                <td className="qvc-num qvc-comment">{r.commented || ""}</td>
               </tr>
             ))}
             {rows.length > 1 && (
-              <tr class="qvc-total-row">
-                <td class="qvc-repo">total ({grandTotal})</td>
-                <td class="qvc-num qvc-approve">{totals.approved || ""}</td>
-                <td class="qvc-num qvc-block">{totals.requestedChanges || ""}</td>
-                <td class="qvc-num qvc-comment">{totals.commented || ""}</td>
+              <tr className="qvc-total-row">
+                <td className="qvc-repo">total ({grandTotal})</td>
+                <td className="qvc-num qvc-approve">{totals.approved || ""}</td>
+                <td className="qvc-num qvc-block">{totals.requestedChanges || ""}</td>
+                <td className="qvc-num qvc-comment">{totals.commented || ""}</td>
               </tr>
             )}
           </tbody>

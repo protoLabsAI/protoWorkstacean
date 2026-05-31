@@ -1,4 +1,4 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect } from "react";
 import { getAgentsRuntime, getCeremonies } from "../lib/api";
 
 interface Ceremony {
@@ -210,37 +210,37 @@ export default function AgentsView() {
         }
       `}</style>
 
-      <div class="agent-summary">
-        <div class="agent-summary-item">
-          <span class="agent-summary-count">{agents.length}</span>
+      <div className="agent-summary">
+        <div className="agent-summary-item">
+          <span className="agent-summary-count">{agents.length}</span>
           agents
         </div>
-        <div class="agent-summary-item">
-          <span class="agent-summary-count">{agents.filter((a) => a.registered).length}</span>
+        <div className="agent-summary-item">
+          <span className="agent-summary-count">{agents.filter((a) => a.registered).length}</span>
           registered
         </div>
-        <div class="agent-summary-item">
-          <span class="agent-summary-count">
+        <div className="agent-summary-item">
+          <span className="agent-summary-count">
             {agents.reduce((sum, a) => sum + a.skills.length, 0)}
           </span>
           skills
         </div>
-        <div class="agent-summary-item">
-          <span class="agent-summary-count">
+        <div className="agent-summary-item">
+          <span className="agent-summary-count">
             {agents.reduce((sum, a) => sum + a.ceremonies.filter((c) => c.enabled !== false).length, 0)}
           </span>
           active jobs
         </div>
       </div>
 
-      <div class="agents-grid">
+      <div className="agents-grid">
         {agents.map((agent) => {
           const isExpanded = expandedAgent === agent.name;
           const activeCeremonies = agent.ceremonies.filter((c) => c.enabled !== false);
 
           return (
             <div
-              class="agent-card"
+              className="agent-card"
               key={agent.name}
               style={{
                 borderColor: agent.registered
@@ -249,20 +249,20 @@ export default function AgentsView() {
               }}
             >
               <div
-                class="agent-card-header"
+                className="agent-card-header"
                 onClick={() => setExpandedAgent(isExpanded ? null : agent.name)}
               >
                 <span
-                  class="agent-status-dot"
+                  className="agent-status-dot"
                   style={{
                     background: agent.registered ? "#3fb950" : "#8b949e",
                     boxShadow: agent.registered ? "0 0 4px #3fb950" : "none",
                   }}
                 />
-                <span class="agent-name">{agent.name}</span>
+                <span className="agent-name">{agent.name}</span>
                 {agent.executorType && (
                   <span
-                    class="agent-type-badge"
+                    className="agent-type-badge"
                     style={{
                       background: "rgba(88, 166, 255, 0.1)",
                       color: "var(--accent-fg)",
@@ -275,45 +275,45 @@ export default function AgentsView() {
                   {agent.skills.length} skills
                   {activeCeremonies.length > 0 && ` / ${activeCeremonies.length} jobs`}
                 </span>
-                <span class={`chevron ${isExpanded ? "chevron--open" : ""}`}>
+                <span className={`chevron ${isExpanded ? "chevron--open" : ""}`}>
                   &#9654;
                 </span>
               </div>
 
               {isExpanded && (
-                <div class="agent-details">
-                  <div class="detail-section">
-                    <div class="detail-label">Skills</div>
+                <div className="agent-details">
+                  <div className="detail-section">
+                    <div className="detail-label">Skills</div>
                     {agent.skills.length > 0 ? (
-                      <div class="skill-list">
+                      <div className="skill-list">
                         {agent.skills.map((s) => (
-                          <span class="skill-tag" key={s}>
+                          <span className="skill-tag" key={s}>
                             {s}
                           </span>
                         ))}
                       </div>
                     ) : (
-                      <div class="no-ceremonies">No skills registered</div>
+                      <div className="no-ceremonies">No skills registered</div>
                     )}
                   </div>
 
-                  <div class="detail-section">
-                    <div class="detail-label">Recurring Jobs</div>
+                  <div className="detail-section">
+                    <div className="detail-label">Recurring Jobs</div>
                     {agent.ceremonies.length > 0 ? (
                       agent.ceremonies.map((c) => (
-                        <div class="ceremony-row" key={c.id}>
+                        <div className="ceremony-row" key={c.id}>
                           <span
-                            class="ceremony-enabled"
+                            className="ceremony-enabled"
                             style={{
                               background: c.enabled !== false ? "#3fb950" : "#8b949e",
                             }}
                           />
-                          <span class="ceremony-name">{c.name || c.id}</span>
-                          <span class="ceremony-schedule">{c.schedule}</span>
+                          <span className="ceremony-name">{c.name || c.id}</span>
+                          <span className="ceremony-schedule">{c.schedule}</span>
                         </div>
                       ))
                     ) : (
-                      <div class="no-ceremonies">No recurring jobs</div>
+                      <div className="no-ceremonies">No recurring jobs</div>
                     )}
                   </div>
                 </div>

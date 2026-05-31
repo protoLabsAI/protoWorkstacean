@@ -19,7 +19,7 @@
  * Same WS + reconnect shape as QuinnVerdictCounters.
  */
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useState } from "react";
 
 interface LatencyPayload {
   skill?: string;
@@ -115,36 +115,36 @@ export default function LatencyHistogram() {
   const sinceMin = Math.floor((Date.now() - openedAt) / 60_000);
 
   return (
-    <aside class="lh-panel" aria-label="Per-skill latency since page load">
-      <header class="lh-head">
+    <aside className="lh-panel" aria-label="Per-skill latency since page load">
+      <header className="lh-head">
         <h3>Skill latency</h3>
-        <p class="lh-meta">
+        <p className="lh-meta">
           since tab opened {sinceMin}m ago ·{" "}
-          <span class={`lh-status lh-status--${wsStatus}`}>{wsStatus}</span>
+          <span className={`lh-status lh-status--${wsStatus}`}>{wsStatus}</span>
         </p>
       </header>
 
       {rows.length === 0 ? (
-        <div class="lh-empty">No webhook-triggered completions observed yet.</div>
+        <div className="lh-empty">No webhook-triggered completions observed yet.</div>
       ) : (
-        <table class="lh-table">
+        <table className="lh-table">
           <thead>
             <tr>
               <th>skill</th>
-              <th class="lh-num" title="sample count">n</th>
-              <th class="lh-num" title="median">p50</th>
-              <th class="lh-num" title="95th percentile">p95</th>
-              <th class="lh-num" title="max observed">max</th>
+              <th className="lh-num" title="sample count">n</th>
+              <th className="lh-num" title="median">p50</th>
+              <th className="lh-num" title="95th percentile">p95</th>
+              <th className="lh-num" title="max observed">max</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.skill}>
-                <td class="lh-skill" title={r.skill}>{r.skill}</td>
-                <td class="lh-num">{r.count}</td>
-                <td class="lh-num">{fmt(r.p50)}</td>
-                <td class="lh-num lh-p95">{fmt(r.p95)}</td>
-                <td class="lh-num lh-max">{fmt(r.max)}</td>
+                <td className="lh-skill" title={r.skill}>{r.skill}</td>
+                <td className="lh-num">{r.count}</td>
+                <td className="lh-num">{fmt(r.p50)}</td>
+                <td className="lh-num lh-p95">{fmt(r.p95)}</td>
+                <td className="lh-num lh-max">{fmt(r.max)}</td>
               </tr>
             ))}
           </tbody>

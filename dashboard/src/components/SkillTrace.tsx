@@ -14,7 +14,7 @@
  * }
  */
 
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "react";
 
 interface BusMessage {
   id: string;
@@ -84,7 +84,7 @@ export default function SkillTrace() {
 
   const search = (
     <form
-      class="trace-search"
+      className="trace-search"
       onSubmit={(e) => {
         e.preventDefault();
         const next = inputValue.trim();
@@ -100,7 +100,7 @@ export default function SkillTrace() {
         type="text"
         placeholder="correlationId"
         value={inputValue}
-        onInput={(e) => setInputValue((e.target as HTMLInputElement).value)}
+        onChange={(e) => setInputValue(e.currentTarget.value)}
       />
       <button type="submit">Trace</button>
     </form>
@@ -108,12 +108,12 @@ export default function SkillTrace() {
 
   if (!correlationId) {
     return (
-      <div class="skill-trace">
-        <header class="trace-header">
+      <div className="skill-trace">
+        <header className="trace-header">
           <h2>Skill trace</h2>
           {search}
         </header>
-        <p class="trace-empty">
+        <p className="trace-empty">
           Paste a correlationId to load every bus message under it. Trace
           history lives in memory for 30 minutes after the messages fire.
         </p>
@@ -123,11 +123,11 @@ export default function SkillTrace() {
   }
 
   if (loading) {
-    return <div class="trace-empty">Loading trace for {correlationId}…</div>;
+    return <div className="trace-empty">Loading trace for {correlationId}…</div>;
   }
   if (error) {
     return (
-      <div class="trace-empty trace-error">
+      <div className="trace-empty trace-error">
         <h3>Trace lookup failed</h3>
         <p>{error}</p>
         <p>
@@ -140,7 +140,7 @@ export default function SkillTrace() {
   }
   if (messages.length === 0) {
     return (
-      <div class="trace-empty">
+      <div className="trace-empty">
         <h3>No bus messages for {correlationId}</h3>
         <p>Either the id is wrong, no traffic ran under it, or the entry
           aged out of the 30-min ring.</p>
@@ -149,37 +149,37 @@ export default function SkillTrace() {
   }
 
   return (
-    <div class="skill-trace">
-      <header class="trace-header">
+    <div className="skill-trace">
+      <header className="trace-header">
         <div>
           <h2>Trace · <code>{correlationId}</code></h2>
-          <p class="trace-meta">
+          <p className="trace-meta">
             {messages.length} message{messages.length === 1 ? "" : "s"} ·
             spans {((messages[messages.length - 1].timestamp - t0) / 1000).toFixed(2)}s
           </p>
         </div>
         {search}
-        <a class="langfuse-link" href={langfuseUrl} target="_blank" rel="noreferrer">
+        <a className="langfuse-link" href={langfuseUrl} target="_blank" rel="noreferrer">
           Open in Langfuse →
         </a>
       </header>
 
-      <ol class="trace-list">
+      <ol className="trace-list">
         {messages.map((m) => {
           const isOpen = expanded === m.id;
           return (
-            <li class="trace-row" key={m.id}>
+            <li className="trace-row" key={m.id}>
               <button
-                class="trace-row-toggle"
+                className="trace-row-toggle"
                 onClick={() => setExpanded(isOpen ? null : m.id)}
                 aria-expanded={isOpen}
               >
-                <span class="trace-ts">+{((m.timestamp - t0) / 1000).toFixed(3)}s</span>
-                <span class="trace-topic">{m.topic}</span>
-                <span class="trace-source">{m.source?.interface ?? "-"}</span>
+                <span className="trace-ts">+{((m.timestamp - t0) / 1000).toFixed(3)}s</span>
+                <span className="trace-topic">{m.topic}</span>
+                <span className="trace-source">{m.source?.interface ?? "-"}</span>
               </button>
               {isOpen && (
-                <pre class="trace-payload">{JSON.stringify(m.payload ?? {}, null, 2)}</pre>
+                <pre className="trace-payload">{JSON.stringify(m.payload ?? {}, null, 2)}</pre>
               )}
             </li>
           );

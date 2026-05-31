@@ -32,15 +32,15 @@ export function EventRow({ msg, isExpanded, onClick }: EventRowProps) {
 
   return (
     <>
-      <div class="event-row" onClick={onClick}>
-        <span class="event-time">{formatTime(msg.timestamp)}</span>
-        <span class={`event-topic source-${source}`} title={msg.topic}>
+      <div className="event-row" onClick={onClick}>
+        <span className="event-time">{formatTime(msg.timestamp)}</span>
+        <span className={`event-topic source-${source}`} title={msg.topic}>
           {compressTopic(msg.topic)}
         </span>
-        <span class="event-preview">{formatPayload(msg)}</span>
+        <span className="event-preview">{formatPayload(msg)}</span>
       </div>
       {isExpanded && (
-        <div class="event-detail open">
+        <div className="event-detail open">
           <pre>{JSON.stringify(msg, null, 2)}</pre>
         </div>
       )}

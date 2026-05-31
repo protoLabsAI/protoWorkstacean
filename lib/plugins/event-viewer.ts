@@ -175,18 +175,16 @@ export class EventViewerPlugin implements Plugin {
       woff2: "font/woff2",
     };
 
-    // If the path has an extension, try it directly
+    // Real asset request (has a recognised extension) — serve it directly.
     const ext = safePath.split(".").pop()?.toLowerCase() || "";
     if (ext && mimes[ext]) {
       return this.serveFile(safePath, mimes[ext]);
     }
 
-    // Astro builds directory-based routes: /world-state → dist/world-state/index.html
-    const directResp = await this.serveFile(`${safePath}/index.html`, "text/html");
-    if (directResp.status !== 404) return directResp;
-
-    // Fallback: try the raw path (for extensionless assets)
-    return this.serveFile(safePath, mimes[ext] || "application/octet-stream");
+    // SPA fallback: the dashboard is a Vite + React single-page app with
+    // client-side routing. Any extensionless path (/system, /agents, /trace…)
+    // is a client route — serve the app shell and let react-router render it.
+    return this.serveFile("index.html", "text/html");
   }
 
   private async serveFile(path: string, contentType: string): Promise<Response> {
