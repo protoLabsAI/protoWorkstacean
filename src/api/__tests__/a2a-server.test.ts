@@ -477,4 +477,68 @@ describe("BusAgentExecutor (Phase 7)", () => {
     );
     expect(canceledEvt).toBeDefined();
   });
+
+  test("emits periodic working heartbeats while awaiting a slow terminal result (keeps SSE alive)", async () => {
+    // The real failure mode: a long in-process turn emits no events between the
+    // initial `working` and the terminal status, so an idle-timeout proxy cuts
+    // the SSE stream. With a low heartbeat interval and a delayed reply, the
+    // adapter should emit ≥1 intermediate `working` heartbeat before terminal.
+    const prev = process.env.A2A_STREAM_HEARTBEAT_MS;
+    process.env.A2A_STREAM_HEARTBEAT_MS = "20";
+    try {
+      const bus = new InMemoryEventBus();
+      const ctx: ApiContext = {
+        workspaceDir: "/tmp",
+        bus,
+        plugins: [],
+        executorRegistry: new ExecutorRegistry(),
+      };
+
+      // Reply only after ~90ms — long enough for several 20ms heartbeats — and
+      // emit no progress events of our own, mimicking a silent DeepAgent turn.
+      bus.subscribe("agent.skill.request", "test", (msg) => {
+        const cid = msg.correlationId!;
+        const replyTopic = msg.reply!.topic!;
+        setTimeout(() => bus.publish(replyTopic, {
+          id: crypto.randomUUID(), correlationId: cid, topic: replyTopic, timestamp: Date.now(),
+          payload: { content: "slow result", correlationId: cid },
+        }), 90);
+      });
+
+      const adapter = new BusAgentExecutor(ctx);
+      const eventBus = new DefaultExecutionEventBus();
+      const collected: AgentExecutionEvent[] = [];
+      eventBus.on("event", (e) => collected.push(e));
+      const done = new Promise<void>(resolve => eventBus.on("finished", () => resolve()));
+
+      await adapter.execute(makeRequestContext("Slow silent task"), eventBus);
+      await done;
+
+      type StatusUpdate = AgentExecutionEvent & { kind: "status-update"; final: boolean; status: { state: string } };
+      const workingEvts = collected.filter(
+        (e): e is StatusUpdate =>
+          e.kind === "status-update" &&
+          "status" in e &&
+          (e as StatusUpdate).status.state === "working",
+      );
+      // We emit no progress of our own, so every `working` beyond the initial
+      // pre-dispatch transition is a heartbeat. Expect ≥2 (initial + ≥1 beat),
+      // all non-final.
+      expect(workingEvts.length).toBeGreaterThanOrEqual(2);
+      expect(workingEvts.every(e => e.final === false)).toBe(true);
+
+      // Heartbeats stop once settled — no `working` update after the terminal
+      // completed event (the interval is cleared and guarded by `settled`).
+      const completedIdx = collected.findIndex(
+        e => e.kind === "status-update" && "status" in e && (e as StatusUpdate).status.state === "completed",
+      );
+      const workingAfterTerminal = collected.slice(completedIdx + 1).some(
+        e => e.kind === "status-update" && "status" in e && (e as StatusUpdate).status.state === "working",
+      );
+      expect(workingAfterTerminal).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.A2A_STREAM_HEARTBEAT_MS;
+      else process.env.A2A_STREAM_HEARTBEAT_MS = prev;
+    }
+  });
 });

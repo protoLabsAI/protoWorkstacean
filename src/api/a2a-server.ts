@@ -292,6 +292,29 @@ class BusAgentExecutor implements AgentExecutor {
       final: false,
     });
 
+    // Keep the stream warm. A long in-process turn (DeepAgent runs can take
+    // 20–40s) emits no events between this `working` and the terminal status,
+    // and idle-timeout proxies in front of the A2A endpoint cut a byte-silent
+    // SSE stream (~10s observed). Emit a periodic `working` heartbeat until the
+    // task settles so the connection survives and the caller keeps seeing the
+    // task is alive. Real narration still arrives via the progress subscriber
+    // above when the agent emits it (agent.skill.progress.{cid}); this is the
+    // floor beneath that. Cleared on settle/cancel.
+    const heartbeatMs = Number(process.env.A2A_STREAM_HEARTBEAT_MS) || 8000;
+    const heartbeat = setInterval(() => {
+      if (settled) return;
+      eventBus.publish({
+        kind: "status-update",
+        taskId,
+        contextId,
+        status: {
+          state: "working",
+          timestamp: new Date().toISOString(),
+        },
+        final: false,
+      });
+    }, heartbeatMs);
+
     // Dispatch to the bus. SkillDispatcherPlugin handles the rest.
     this.ctx.bus.publish("agent.skill.request", {
       id: crypto.randomUUID(),
@@ -310,6 +333,7 @@ class BusAgentExecutor implements AgentExecutor {
     });
 
     await done;
+    clearInterval(heartbeat);
     if (cancelled) {
       console.log(`[a2a-server] Task ${taskId.slice(0, 8)}… canceled`);
     }
