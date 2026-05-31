@@ -199,11 +199,45 @@ class BusAgentExecutor implements AgentExecutor {
         });
       });
 
+      // Input-required subscriber — when the in-process agent's `ask_human`
+      // tool announces it needs an answer (agent.input.request.{cid}), surface
+      // an `input-required` status-update carrying the question + requestId so
+      // the A2A caller knows to answer (POST /api/a2a/input {requestId, answer}).
+      // Non-final: the task is parked, not settled — the agent's run is still in
+      // flight (blocked on the tool) and the heartbeat keeps this stream alive.
+      const inputReqTopic = `agent.input.request.${correlationId}`;
+      const inputReqSubId = this.ctx.bus.subscribe(inputReqTopic, "a2a-server-input", (msg: BusMessage) => {
+        if (settled) return;
+        const p = (msg.payload ?? {}) as { requestId?: string; question?: string };
+        eventBus.publish({
+          kind: "status-update",
+          taskId,
+          contextId,
+          status: {
+            state: "input-required",
+            timestamp: new Date().toISOString(),
+            message: {
+              kind: "message",
+              messageId: crypto.randomUUID(),
+              role: "agent",
+              taskId,
+              contextId,
+              parts: [{ kind: "text", text: p.question ?? "" }],
+              // requestId rides on the message metadata so the caller can answer
+              // this specific request via POST /api/a2a/input.
+              metadata: { requestId: p.requestId, kind: "input-request" },
+            },
+          },
+          final: false,
+        });
+      });
+
       const subId = this.ctx.bus.subscribe(replyTopic, "a2a-server", (msg: BusMessage) => {
         if (settled) return;
         settled = true;
         this.ctx.bus.unsubscribe(subId);
         this.ctx.bus.unsubscribe(progressSubId);
+        this.ctx.bus.unsubscribe(inputReqSubId);
         this.activeCancels.delete(taskId);
 
         const payload = (msg.payload ?? {}) as { content?: string; error?: string };
@@ -264,6 +298,7 @@ class BusAgentExecutor implements AgentExecutor {
         cancelled = true;
         this.ctx.bus.unsubscribe(subId);
         this.ctx.bus.unsubscribe(progressSubId);
+        this.ctx.bus.unsubscribe(inputReqSubId);
         this.activeCancels.delete(taskId);
         eventBus.publish({
           kind: "status-update",

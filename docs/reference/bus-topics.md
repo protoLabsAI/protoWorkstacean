@@ -6,11 +6,11 @@ title: Bus Topics
 
 ## Summary
 
-- **77** distinct topics seen across the codebase
-- **14** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
-- **63** raw-string / template topics not in TOPICS (candidates to register)
-- **15** topics that couldn't be statically resolved (computed at runtime)
-- **93** publish call sites, **50** subscribe call sites
+- **82** distinct topics seen across the codebase
+- **16** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
+- **66** raw-string / template topics not in TOPICS (candidates to register)
+- **18** topics that couldn't be statically resolved (computed at runtime)
+- **98** publish call sites, **51** subscribe call sites
 
 Each row links to the original call site as `path:line` so jumping from this index to the source is a click.
 
@@ -26,11 +26,17 @@ Each row links to the original call site as `path:line` so jumping from this ind
 |---|---|---|---|---|
 | `agent.chat.inbound` | — | — | `src/api/ava-tools.ts:168` | _(none)_ |
 | `agent.chat.outbound` | — | — | `src/api/ava-tools.ts:109` | _(none)_ |
+| `agent.input.request` | ✅ `AGENT_INPUT_REQUEST_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
+| `agent.input.response` | ✅ `AGENT_INPUT_RESPONSE_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
 | `agent.skill.latency` | ✅ `AGENT_SKILL_LATENCY` (`ACTION_TOPICS`) | — | `src/executor/skill-dispatcher-plugin.ts:518` | _(none)_ |
 | `agent.skill.progress` | ✅ `AGENT_SKILL_PROGRESS_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
-| `agent.skill.request` | ✅ `AGENT_SKILL_REQUEST` (`ACTION_TOPICS`) | — | `src/router/router-plugin.ts:295`<br>`src/router/router-plugin.ts:342`<br>`src/executor/skill-dispatcher-plugin.ts:665`<br>`src/api/openai-compat.ts:171`<br>`src/api/ava-tools.ts:132`<br>`src/api/ava-tools.ts:323`<br>`src/api/a2a-server.ts:296`<br>`src/plugins/fleet-alerts-evaluator-plugin.ts:188`<br>`lib/plugins/pr-remediator.ts:1350`<br>`lib/plugins/pr-remediator.ts:1616`<br>`lib/plugins/linear-proto-bridge.ts:105`<br>`lib/plugins/discord/inbound.ts:115` | `src/executor/skill-dispatcher-plugin.ts:183` |
+| `agent.skill.request` | ✅ `AGENT_SKILL_REQUEST` (`ACTION_TOPICS`) | — | `src/router/router-plugin.ts:295`<br>`src/router/router-plugin.ts:342`<br>`src/executor/skill-dispatcher-plugin.ts:665`<br>`src/api/openai-compat.ts:171`<br>`src/api/ava-tools.ts:132`<br>`src/api/ava-tools.ts:323`<br>`src/api/a2a-server.ts:354`<br>`src/plugins/fleet-alerts-evaluator-plugin.ts:188`<br>`lib/plugins/pr-remediator.ts:1350`<br>`lib/plugins/pr-remediator.ts:1616`<br>`lib/plugins/linear-proto-bridge.ts:105`<br>`lib/plugins/discord/inbound.ts:115` | `src/executor/skill-dispatcher-plugin.ts:183` |
 | `agent.skill.response.{correlationId}` | — | — | _(none)_ | `src/api/ava-tools.ts:51`<br>`lib/plugins/pr-remediator.ts:1335` |
 | `agent.skill.response.#` | — | — | _(none)_ | `lib/plugins/pr-remediator.ts:632` |
+
+**`agent.input.request`** — Prefix for human-input requests. Full topic is `agent.input.request.{correlationId}`. An in-process agent's `ask_human` tool (via POST /api/agent/ask-human) publishes here when it needs an answer from the A2A caller; BusAgentExecutor turns it into an `input-required` status-update on the caller's stream. See src/api/human-input.ts.
+
+**`agent.input.response`** — Prefix for human-input answers. Full topic is `agent.input.response.{requestId}`. Published when the caller answers via POST /api/a2a/input; unblocks the waiting `ask_human` handler.
 
 **`agent.skill.latency`** — Published by SkillDispatcherPlugin after every successful skill completion that came from a webhook-stamped dispatch (today: github's `_handleAutoReview`). Structured form of the existing `[skill-latency]` log line — dashboard tiles + downstream alerting can subscribe and accumulate without parsing stdout. Payload shape: { skill, totalMs, queueMs, executeMs, github? }. - totalMs   = webhook arrival → done - queueMs   = webhook arrival → dispatch start (bus hops + routing) - executeMs = dispatch start → done (LLM + tools) - github    = { owner, repo, number } when the original payload carried it (PR reviews, etc.); absent otherwise.
 
@@ -276,7 +282,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{computed}` | — | — | `src/api/a2a-server.ts:133`<br>`src/api/a2a-server.ts:188`<br>`src/api/a2a-server.ts:237`<br>`src/api/a2a-server.ts:268`<br>`src/api/a2a-server.ts:284` | _(none)_ |
+| `{computed}` | — | — | `src/api/a2a-server.ts:133`<br>`src/api/a2a-server.ts:188`<br>`src/api/a2a-server.ts:212`<br>`src/api/a2a-server.ts:271`<br>`src/api/a2a-server.ts:303`<br>`src/api/a2a-server.ts:319`<br>`src/api/a2a-server.ts:341` | _(none)_ |
 
 ## `{executeTopic}.*`
 
@@ -290,17 +296,35 @@ Each row links to the original call site as `path:line` so jumping from this ind
 |---|---|---|---|---|
 | `{failedTopic}` | — | — | _(none)_ | `src/api/operator.ts:61` |
 
+## `{inputReqTopic}.*`
+
+| Topic | Declared | Payload | Publishers | Subscribers |
+|---|---|---|---|---|
+| `{inputReqTopic}` | — | — | _(none)_ | `src/api/a2a-server.ts:209` |
+
 ## `{progressTopic}.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{progressTopic}` | — | — | _(none)_ | `src/api/a2a-server.ts:155` |
+| `{progressTopic}` | — | — | `src/api/discord.ts:338` | `src/api/a2a-server.ts:155` |
 
 ## `{replyTopic}.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{replyTopic}` | — | — | `src/executor/skill-dispatcher-plugin.ts:832`<br>`lib/plugins/onboarding.ts:375` | `src/api/openai-compat.ts:157`<br>`src/api/a2a-server.ts:202`<br>`src/plugins/CeremonyPlugin.ts:372` |
+| `{replyTopic}` | — | — | `src/executor/skill-dispatcher-plugin.ts:832`<br>`lib/plugins/onboarding.ts:375` | `src/api/openai-compat.ts:157`<br>`src/api/a2a-server.ts:235`<br>`src/plugins/CeremonyPlugin.ts:372` |
+
+## `{requestTopic}.*`
+
+| Topic | Declared | Payload | Publishers | Subscribers |
+|---|---|---|---|---|
+| `{requestTopic}` | — | — | `src/api/human-input.ts:82` | _(none)_ |
+
+## `{responseTopic}.*`
+
+| Topic | Declared | Payload | Publishers | Subscribers |
+|---|---|---|---|---|
+| `{responseTopic}` | — | — | `src/api/human-input.ts:143` | _(none)_ |
 
 ## `{skillRequestTopic}.*`
 
@@ -312,7 +336,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:96`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:729` |
+| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:96`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:732` |
 
 ## Unresolved call sites
 
@@ -355,23 +379,37 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
           taskId,
           contextId,
       ` |
-| `src/api/a2a-server.ts:202` | subscribe | `replyTopic` |
-| `src/api/a2a-server.ts:237` | publish | `{
+| `src/api/a2a-server.ts:209` | subscribe | `inputReqTopic` |
+| `src/api/a2a-server.ts:212` | publish | `{
           kind: "status-update",
           taskId,
           contextId,
       ` |
-| `src/api/a2a-server.ts:268` | publish | `{
+| `src/api/a2a-server.ts:235` | subscribe | `replyTopic` |
+| `src/api/a2a-server.ts:271` | publish | `{
           kind: "status-update",
           taskId,
           contextId,
       ` |
-| `src/api/a2a-server.ts:284` | publish | `{
+| `src/api/a2a-server.ts:303` | publish | `{
+          kind: "status-update",
+          taskId,
+          contextId,
+      ` |
+| `src/api/a2a-server.ts:319` | publish | `{
       kind: "status-update",
       taskId,
       contextId,
       status: {
   ` |
+| `src/api/a2a-server.ts:341` | publish | `{
+        kind: "status-update",
+        taskId,
+        contextId,
+        stat` |
+| `src/api/discord.ts:338` | publish | `progressTopic` |
+| `src/api/human-input.ts:82` | publish | `requestTopic` |
+| `src/api/human-input.ts:143` | publish | `responseTopic` |
 | `src/api/openai-compat.ts:157` | subscribe | `replyTopic` |
 | `src/api/operations.ts:80` | publish | `topic` |
 | `src/api/operations.ts:115` | publish | `topic` |
@@ -391,7 +429,7 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
 | `src/executor/skill-dispatcher-plugin.ts:861` | publish | `topic` |
 | `src/executor/task-tracker.ts:282` | publish | `topic` |
 | `src/executor/task-tracker.ts:330` | publish | `task.replyTopic` |
-| `src/index.ts:729` | subscribe | `topic` |
+| `src/index.ts:732` | subscribe | `topic` |
 | `src/plugins/ceremony-skill-executor-plugin.ts:123` | publish | `executeTopic` |
 | `src/plugins/CeremonyPlugin.ts:344` | publish | `executeTopic` |
 | `src/plugins/CeremonyPlugin.ts:372` | subscribe | `replyTopic` |

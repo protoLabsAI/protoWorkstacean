@@ -10,7 +10,7 @@ Every variable recognised by protoWorkstacean is declared in the zod `EnvSchema`
 
 - **63** variables declared in `EnvSchema`
 - **0** required (no `.optional()`); the rest are optional
-- **26** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
+- **28** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
 
 ## Core / runtime
 
@@ -142,6 +142,8 @@ These variables are read via `process.env` somewhere in `src/` or `lib/` but are
 | Variable | Read at |
 |---|---|
 | `A2A_CHAT_REPLY_TIMEOUT_MS` | `src/api/ava-tools.ts` |
+| `A2A_INPUT_REQUIRED_TTL_MS` | `src/api/human-input.ts` |
+| `A2A_STREAM_HEARTBEAT_MS` | `src/api/a2a-server.ts` |
 | `AUTOMAKER_API_KEY` | `lib/plugins/protomaker-board-bridge.ts`, `src/plugins/project-registry.ts` |
 | `BACKMERGE_WORKFLOW_FILE` | `lib/plugins/pr-remediator.ts` |
 | `BACKMERGE_WORKFLOW_REF` | `lib/plugins/pr-remediator.ts` |

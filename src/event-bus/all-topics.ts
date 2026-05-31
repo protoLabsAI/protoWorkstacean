@@ -51,6 +51,22 @@ export const ACTION_TOPICS = {
    */
   AGENT_SKILL_PROGRESS_PREFIX: "agent.skill.progress",
 
+  /**
+   * Prefix for human-input requests. Full topic is
+   * `agent.input.request.{correlationId}`. An in-process agent's `ask_human`
+   * tool (via POST /api/agent/ask-human) publishes here when it needs an answer
+   * from the A2A caller; BusAgentExecutor turns it into an `input-required`
+   * status-update on the caller's stream. See src/api/human-input.ts.
+   */
+  AGENT_INPUT_REQUEST_PREFIX: "agent.input.request",
+
+  /**
+   * Prefix for human-input answers. Full topic is
+   * `agent.input.response.{requestId}`. Published when the caller answers via
+   * POST /api/a2a/input; unblocks the waiting `ask_human` handler.
+   */
+  AGENT_INPUT_RESPONSE_PREFIX: "agent.input.response",
+
   /** Wildcard subscription pattern — matches all cron events from SchedulerPlugin. */
   CRON_ALL: "cron.#",
 
