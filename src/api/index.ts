@@ -30,6 +30,7 @@ import { createRoutes as agentsRuntimeRoutes } from "./agents-runtime.ts";
 import { createRoutes as busHistoryRoutes } from "./bus-history.ts";
 import { createRoutes as humanInputRoutes } from "./human-input.ts";
 import { createRoutes as agentsCrudRoutes } from "./agents-crud.ts";
+import { createRoutes as controlPlaneRoutes } from "./control-plane.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
@@ -59,5 +60,6 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...busHistoryRoutes(ctx),
     ...humanInputRoutes(ctx),
     ...agentsCrudRoutes(ctx),
+    ...controlPlaneRoutes(ctx),
   ];
 }

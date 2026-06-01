@@ -98,6 +98,10 @@ export const getHitlPending = () =>
 export const getCeremonies = () =>
   apiFetch<{ data: unknown[] }>("/api/ceremonies", { ttl: 60_000 });
 
+/** GET /api/control-plane/state — unified control-plane read: fleet + durable-backed health. */
+export const getControlPlaneState = (force = false) =>
+  apiFetch<ControlPlaneState>("/api/control-plane/state", { ttl: 15_000, force });
+
 // ── Response types (match actual API shapes after envelope unwrap) ─
 
 /** GET /api/agents/runtime — the live fleet: every registered executor grouped by agent. */
@@ -109,6 +113,27 @@ export interface AgentsRuntimeResponse {
     /** A2A agent known from yaml but not yet discovered (no skills registered). */
     pendingDiscovery?: boolean;
   }>;
+}
+
+/** Per-agent 24h health rollup (subset of the backend FleetHealthSnapshot). */
+export interface AgentHealthMetrics {
+  agentName: string;
+  successRate: number;
+  totalOutcomes: number;
+  failureRate1h: number;
+}
+
+/** GET /api/control-plane/state — unified read: live fleet + (durably-backed) health. */
+export interface ControlPlaneState {
+  agents: AgentsRuntimeResponse["agents"];
+  health: {
+    agents: AgentHealthMetrics[];
+    windowHours: 24;
+    maxFailureRate1h: number;
+    totalCostUsd1d: number;
+    collectedAt: number;
+  } | null;
+  collectedAt: number;
 }
 
 export interface CiHealthResponse {
