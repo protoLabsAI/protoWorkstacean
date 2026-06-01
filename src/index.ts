@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, mkdirSync } from "node:fs";
-import { resolve, join, extname } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { resolve, join } from "node:path";
 import { InMemoryEventBus } from "../lib/bus";
 import { DebugPlugin } from "../lib/plugins/debug";
 import { LoggerPlugin } from "../lib/plugins/logger";
@@ -547,57 +547,15 @@ for (const entry of pluginRegistry) {
   }
 }
 
-// --- Dynamic plugin loading from workspace/plugins/ ---
-function isPlugin(value: unknown): value is Plugin {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as Plugin).name === "string" &&
-    typeof (value as Plugin).install === "function" &&
-    typeof (value as Plugin).uninstall === "function"
-  );
-}
+// The dynamic workspace/plugins/*.ts loader was retired in ADR-0005 (ADR-0004
+// P4). It was structurally broken — Node's module cache pins old code so it
+// can't safely hot-reload, and the workspace is bind-mounted outside the app's
+// module tree so plugins there can't resolve app lib/ or node_modules. Extension
+// is now out-of-process (A2A agents + MCP servers, both control-plane-managed
+// and hot-swappable) or compiled-in under lib/plugins/. There is no in-process
+// hot-loaded-code surface by design.
 
-async function loadWorkspacePlugins(): Promise<Plugin[]> {
-  const pluginsDir = join(workspaceDir, "plugins");
-  if (!existsSync(pluginsDir)) return [];
-
-  const loaded: Plugin[] = [];
-  const files = readdirSync(pluginsDir).filter(
-    (f) => extname(f) === ".ts" || extname(f) === ".js"
-  );
-
-  for (const file of files) {
-    const modulePath = join(pluginsDir, file);
-    try {
-      const mod = await import(modulePath);
-      // Check default export or named exports for Plugin interface.
-      // Deduplicate: Object.values(mod) includes default in some runtimes,
-      // so a plain default export would otherwise be installed twice.
-      const seen = new Set<unknown>();
-      const candidates: unknown[] = [];
-      for (const v of mod.default ? [mod.default, ...Object.values(mod)] : Object.values(mod)) {
-        if (!seen.has(v)) { seen.add(v); candidates.push(v); }
-      }
-
-      for (const candidate of candidates) {
-        if (isPlugin(candidate)) {
-          candidate.install(bus);
-          loaded.push(candidate);
-          console.log(`Loaded workspace plugin: ${candidate.name} (${file})`);
-        }
-      }
-    } catch (err) {
-      console.error(`Failed to load plugin ${file}:`, err);
-    }
-  }
-
-  return loaded;
-}
-
-const workspacePlugins = await loadWorkspacePlugins();
-
-const allPlugins = [...corePlugins, ...registeredPlugins, ...workspacePlugins];
+const allPlugins = [...corePlugins, ...registeredPlugins];
 
 console.log("WorkStacean started.");
 console.log(`Workspace: ${workspaceDir}`);

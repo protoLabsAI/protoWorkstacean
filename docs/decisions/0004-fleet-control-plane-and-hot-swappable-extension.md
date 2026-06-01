@@ -27,7 +27,7 @@ protoWorkstacean is the switchboard: `trigger → router → dispatcher → exec
 | A2A agent **skills** (remote card change) | ✅ auto re-register (`ExecutorRegistry.unregister()` already exists) |
 | **DeepAgents (`workspace/agents/*.yaml`)** | ~~❌ boot-only → restart~~ → ✅ **hot-reload (P1 shipped, #714/#715)** |
 | **A2A agent entries (`workspace/agents.yaml` + `agents.d/`)** | ~~❌ boot-only → restart~~ → ✅ **control-plane register/remove, live (P3 day-4, #723/#725)** |
-| **Workspace plugins (`workspace/plugins/*.ts`)** | ❌ restart, Node module-cache pins the old code, **and they can't import app modules** |
+| ~~**Workspace plugins (`workspace/plugins/*.ts`)**~~ | ~~❌ restart, Node module-cache pins the old code~~ → **retired (P4, ADR-0005)** — replaced by out-of-process A2A / MCP |
 
 Two structural facts drive this ADR:
 
@@ -141,7 +141,7 @@ On add/test of an A2A agent or MCP server, fetch its descriptor (`/.well-known/a
 1. ✅ **P1 — Agent registry hot-reload** *(shipped — #714 watch+detect, #715 apply).* `WorkspaceWatcher` (reusable poll-based file/dir diff) watches `workspace/agents/`; `AgentRuntimePlugin` reconciles the live registry via `ExecutorRegistry.register`/`unregister` + `IExecutor.dispose?()`. Add/edit/remove a DeepAgent YAML applies in ~5s, no restart; a parse error keeps the running agent; in-flight dispatch is never aborted.
 2. ✅ **P2 — Control-plane write API + `command.*` + registrar** *(shipped — #717).* `POST/PUT/DELETE /api/agents` + `/api/agents/test` validate, publish `command.agent.*`, and the sole `ControlPlaneRegistrar` performs the atomic YAML write (synchronous, so the API verifies + responds). Create/edit/remove an agent via API → persisted → live via P1, no restart.
 3. ✅ **P3 — Management Console + capability discovery** *(shipped — #718 Console, #719 edit-in-place, #720 agent-card probe, #723/#725 A2A register/remove).* Separate auth-gated Console (`@protolabsai/ui`): DeepAgent CRUD + test-before-save + agent-card capability probe; A2A endpoints register to `workspace/agents.d/` (per-file, so the documented `agents.yaml` is never clobbered) and unregister live via `SkillBroker`. The debug dashboard stays read-only.
-4. **P4 — MCP client tier + capability grants + trust tiers**; **retire the `workspace/plugins/*.ts` loader**. (Its own slice — see [ADR-0005](./0005-mcp-client-tier-and-trust-tiers); #712.)
+4. ✅ **P4 — MCP client tier + capability grants + trust tiers; retire the `workspace/plugins/*.ts` loader** *(shipped — see [ADR-0005](./0005-mcp-client-tier-and-trust-tiers): registry, live client, Console, loader retired).* MCP servers are a control-plane registry (`workspace/mcp-servers.d/`); `McpClientPlugin` connects each enabled server and registers its tools as executors live. Trust tiers gate auto-enable; grants are audit-only (v1). The dynamic TS-plugin loader is removed — extension is out-of-process (A2A/MCP) or compiled-in.
 5. ✅ **P5 (cross-cutting) — Durable + unified state** *(shipped — #726 durable fleet-health, #727 unified read + doc).* `FleetStateRepository` persists outcomes to `knowledge.db`; `AgentFleetHealthPlugin` rehydrates its 24h window on startup (survives restart). `GET /api/control-plane/state` is the one read view (fleet + durable-backed health), consumed by the Console; `flow-dashboard.md` documents the read/write split.
 
 ---
