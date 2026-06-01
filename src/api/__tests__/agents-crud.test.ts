@@ -125,4 +125,16 @@ describe("agents-crud control-plane API", () => {
     });
     expect(existsSync(outside)).toBe(false); // refused — not inside agents/
   });
+
+  test("GET /api/agents/:name returns the full def; 404 for unknown", async () => {
+    await route("POST", "/api/agents").handler(reqWith(AGENT), {});
+    const res = await route("GET", "/api/agents/:name").handler(reqWith(undefined), { name: "tester" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { def: { name: string; skills: Array<{ name: string }> } };
+    expect(body.def.name).toBe("tester");
+    expect(body.def.skills[0]!.name).toBe("chat");
+
+    const missing = await route("GET", "/api/agents/:name").handler(reqWith(undefined), { name: "ghost" });
+    expect(missing.status).toBe(404);
+  });
 });

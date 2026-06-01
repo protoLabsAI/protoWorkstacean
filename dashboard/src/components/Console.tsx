@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button, Badge, Card, Empty, Divider, type Status } from "@protolabsai/ui";
-import { RefreshCw, Plus, Trash2, CircleCheck } from "lucide-react";
+import { RefreshCw, Plus, Trash2, CircleCheck, Pencil, X } from "lucide-react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import {
   getAgentsRuntime,
   testAgent,
   createAgent,
+  updateAgent,
   deleteAgent,
+  getAgentDef,
   getAdminKey,
   setAdminKey,
   type AgentsRuntimeResponse,
@@ -42,6 +44,7 @@ export default function Console() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null); // agent name being edited; null = create mode
 
   const refresh = useCallback(async () => {
     try {
@@ -81,18 +84,38 @@ export default function Console() {
     );
   }
 
-  async function onCreate() {
+  function resetForm() {
+    setEditing(null);
+    setDraft(TEMPLATE);
+    setResult(null);
+  }
+
+  async function onSubmit() {
     const def = parseDraft();
     if (def === null) return;
     setBusy(true);
-    const r = await createAgent(def);
+    const r = editing ? await updateAgent(editing, def) : await createAgent(def);
     setBusy(false);
     if (r.ok) {
-      setResult({ ok: true, msg: `Created "${(r.body?.name as string) ?? ""}" — live in ~5s via hot-reload.` });
+      const verb = editing ? "Updated" : "Created";
+      const who = editing ?? (r.body?.name as string) ?? "";
+      setResult({ ok: true, msg: `${verb} "${who}" — live in ~5s via hot-reload.` });
+      resetForm();
       setTimeout(() => void refresh(), 5500);
       void refresh();
     } else {
-      setResult({ ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "create failed"}` });
+      setResult({ ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "save failed"}` });
+    }
+  }
+
+  async function onEdit(name: string) {
+    const r = await getAgentDef(name);
+    if (r.ok && r.body?.def) {
+      setEditing(name);
+      setDraft(JSON.stringify(r.body.def, null, 2));
+      setResult({ ok: true, msg: `Loaded "${name}" — edit below and Save.` });
+    } else {
+      setResult({ ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "load failed"}` });
     }
   }
 
@@ -146,7 +169,9 @@ export default function Console() {
 
       <Card>
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <strong style={{ color: "var(--text-primary)", fontSize: "14px" }}>New agent</strong>
+          <strong style={{ color: "var(--text-primary)", fontSize: "14px" }}>
+            {editing ? `Editing "${editing}"` : "New agent"}
+          </strong>
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.currentTarget.value)}
@@ -158,9 +183,16 @@ export default function Console() {
             <Button onClick={onValidate} disabled={busy}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><CircleCheck size={14} /> Validate</span>
             </Button>
-            <Button variant="primary" onClick={onCreate} disabled={busy}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Plus size={14} /> Create</span>
+            <Button variant="primary" onClick={onSubmit} disabled={busy}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                {editing ? <CircleCheck size={14} /> : <Plus size={14} />} {editing ? "Save" : "Create"}
+              </span>
             </Button>
+            {editing && (
+              <Button onClick={resetForm} disabled={busy}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><X size={14} /> Cancel</span>
+              </Button>
+            )}
             {result && (
               <span style={{ color: result.ok ? "var(--text-success)" : "var(--text-danger)", fontSize: "13px" }}>
                 {result.ok ? "✓ " : "✗ "}{result.msg}
@@ -192,9 +224,14 @@ export default function Console() {
                     ))}
                   </span>
                   {a.type === "deep-agent" && (
-                    <Button onClick={() => setPendingDelete(a.name)} disabled={busy}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Trash2 size={14} /> Remove</span>
-                    </Button>
+                    <>
+                      <Button onClick={() => void onEdit(a.name)} disabled={busy}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Pencil size={14} /> Edit</span>
+                      </Button>
+                      <Button onClick={() => setPendingDelete(a.name)} disabled={busy}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Trash2 size={14} /> Remove</span>
+                      </Button>
+                    </>
                   )}
                 </div>
               </Card>

@@ -16,8 +16,8 @@
  */
 
 import { join, resolve, dirname } from "node:path";
-import { existsSync } from "node:fs";
-import { stringify as stringifyYaml } from "yaml";
+import { existsSync, readFileSync } from "node:fs";
+import { stringify as stringifyYaml, parse as parseYaml } from "yaml";
 import type { Route, ApiContext } from "./types.ts";
 import { parseAgentYaml, loadAgentEntries } from "../agent-runtime/agent-definition-loader.ts";
 import type { AgentDefinition, RawAgentYaml } from "../agent-runtime/types.ts";
@@ -63,6 +63,24 @@ export function createRoutes(ctx: ApiContext): Route[] {
   }
 
   return [
+    {
+      // Read one agent's full definition (for the Console's edit form). The
+      // earlier-registered GET /api/agents/runtime wins for the literal
+      // "runtime", so this only sees real agent names.
+      method: "GET",
+      path: "/api/agents/:name",
+      handler: async (req, p) => {
+        if (!authorized(req)) return unauthorized();
+        const file = fileForAgent(p.name);
+        if (!file) return Response.json({ success: false, error: `Agent "${p.name}" not found` }, { status: 404 });
+        try {
+          const def = parseYaml(readFileSync(file, "utf8"));
+          return Response.json({ success: true, name: p.name, file, def });
+        } catch (err) {
+          return Response.json({ success: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+        }
+      },
+    },
     {
       method: "POST",
       path: "/api/agents/test",

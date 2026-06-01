@@ -199,3 +199,6 @@ export const updateAgent = (name: string, def: unknown) =>
 /** Remove an agent by name (→ unregistered in ~5s). */
 export const deleteAgent = (name: string) =>
   adminFetch(`/api/agents/${encodeURIComponent(name)}`, "DELETE");
+/** Read one agent's full definition (to pre-fill the edit form). */
+export const getAgentDef = (name: string) =>
+  adminFetch(`/api/agents/${encodeURIComponent(name)}`, "GET");
