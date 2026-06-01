@@ -82,6 +82,14 @@ export interface IExecutor {
   /** Identifies the executor type for logging and diagnostics. */
   readonly type: string;
   execute(req: SkillRequest): Promise<SkillResult>;
+  /**
+   * Optional teardown when this executor is unregistered (agent removed or
+   * reloaded — ADR-0004 hot-swap). Best-effort + safe to call while a dispatch
+   * is in flight: an in-flight `execute()` holds its own references, so dispose
+   * only releases idle resources (caches, pooled connections). Must not abort
+   * running work.
+   */
+  dispose?(): void | Promise<void>;
 }
 
 // ── Registry types ────────────────────────────────────────────────────────────
