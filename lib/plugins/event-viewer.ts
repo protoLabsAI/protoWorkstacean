@@ -5,6 +5,17 @@ import type { Plugin, EventBus, BusMessage } from "../types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Per-connection WebSocket state.
+ *  - "ws"  → /ws: the full firehose (every bus message), via the shared broadcast.
+ *  - "bus" → /api/bus/subscribe?topic=…: its own topic-filtered bus subscription,
+ *            matching the main server's contract so the dashboard's live overlays
+ *            work on the :8081 origin too (the HTTP proxy can't upgrade a WS).
+ */
+type WsData =
+  | { kind: "ws"; id: string }
+  | { kind: "bus"; id: string; topic: string; subscriberId?: string };
+
 export class EventViewerPlugin implements Plugin {
   name = "event-viewer";
   description = "Web UI event viewer via HTTP + WebSocket";
@@ -12,7 +23,7 @@ export class EventViewerPlugin implements Plugin {
 
   private bus: EventBus | null = null;
   private server: ReturnType<typeof Bun.serve> | null = null;
-  private wsClients: Set<ServerWebSocket<unknown>> = new Set();
+  private wsClients: Set<ServerWebSocket<WsData>> = new Set();
   private subscriptionId: string | null = null;
   private port: number;
   private viewerDir: string;
@@ -29,17 +40,33 @@ export class EventViewerPlugin implements Plugin {
       this.broadcast(msg);
     });
 
-    this.server = Bun.serve({
+    this.server = Bun.serve<WsData>({
       port: this.port,
       fetch: (req, server) => {
         const url = new URL(req.url);
 
         if (url.pathname === "/ws") {
           const upgraded = server.upgrade(req, {
-            data: { id: crypto.randomUUID() },
+            data: { kind: "ws", id: crypto.randomUUID() },
           });
           if (upgraded) return undefined;
           return new Response("WebSocket upgrade failed", { status: 400 });
+        }
+
+        // Live topic-filtered bus feed — same contract as the main server's
+        // /api/bus/subscribe. The HTTP proxy can't upgrade a WebSocket, so serve
+        // it here from the in-process bus: each client gets its own bus
+        // subscription, so wildcard topics (#, foo.*) are matched by the bus.
+        // Restores the /system live-edge pulses + latency/verdict overlays on
+        // the :8081 origin (read-only, Tailscale-gated like /ws — no auth).
+        if (url.pathname === "/api/bus/subscribe") {
+          const topic = url.searchParams.get("topic");
+          if (!topic) return new Response("Missing ?topic= query param", { status: 400 });
+          const upgraded = server.upgrade(req, {
+            data: { kind: "bus", id: crypto.randomUUID(), topic },
+          });
+          if (upgraded) return undefined;
+          return new Response("WebSocket upgrade failed", { status: 426 });
         }
 
         if (url.pathname === "/api/events") return this.handleApiEvents(req);
@@ -58,11 +85,32 @@ export class EventViewerPlugin implements Plugin {
       },
       websocket: {
         open: (ws) => {
-          this.wsClients.add(ws);
+          if (ws.data.kind === "bus") {
+            // Own bus subscription per client — the bus matches the topic
+            // pattern; we forward the same trimmed shape as the main server.
+            ws.data.subscriberId = this.bus!.subscribe(ws.data.topic, `viewer-ws-${ws.data.id}`, (msg) => {
+              try {
+                ws.send(JSON.stringify({
+                  topic: msg.topic,
+                  correlationId: msg.correlationId,
+                  timestamp: msg.timestamp,
+                  payload: msg.payload,
+                }));
+              } catch {
+                // client disconnected mid-send; close() handles cleanup
+              }
+            });
+          } else {
+            this.wsClients.add(ws);
+          }
         },
         message: () => {},
         close: (ws) => {
-          this.wsClients.delete(ws);
+          if (ws.data.kind === "bus") {
+            if (ws.data.subscriberId) this.bus?.unsubscribe(ws.data.subscriberId);
+          } else {
+            this.wsClients.delete(ws);
+          }
         },
       },
     });
