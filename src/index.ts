@@ -7,6 +7,7 @@ import { CLIPlugin } from "../lib/plugins/cli";
 import { SignalPlugin } from "../lib/plugins/signal";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { A2ADeliveryPlugin } from "../lib/plugins/a2a-delivery";
+import { ControlPlaneRegistrarPlugin } from "./plugins/control-plane-registrar-plugin.ts";
 import type { Plugin, } from "../lib/types";
 import { parseEnv } from "./config/env.ts";
 // Fail-fast env validation — exits immediately on misconfiguration.
@@ -129,6 +130,8 @@ const corePlugins: Plugin[] = [
   new SignalPlugin(),
   new SchedulerPlugin(dataDir),
   new A2ADeliveryPlugin(workspaceDir),
+  // ADR-0004 P2: sole writer of workspace config for control-plane command.* mutations.
+  new ControlPlaneRegistrarPlugin(workspaceDir),
 ];
 
 for (const plugin of corePlugins) {
