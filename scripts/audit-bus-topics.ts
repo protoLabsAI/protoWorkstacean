@@ -130,6 +130,19 @@ function readJsDoc(node: ts.Node): string | undefined {
   return undefined;
 }
 
+/**
+ * Escape bare `<`/`>` in prose so VitePress (Vue's template compiler) doesn't
+ * try to parse e.g. `agents.d/<name>.yaml` as an unclosed HTML element. Code
+ * spans (backtick-delimited) are left intact — a generic like `Record<string>`
+ * inside ticks must render literally, not as entities.
+ */
+function escapeAngleProse(text: string): string {
+  return text
+    .split(/(`[^`]*`)/) // keep backtick spans as their own (odd-index) chunks
+    .map((chunk, i) => (i % 2 === 1 ? chunk : chunk.replace(/</g, "&lt;").replace(/>/g, "&gt;")))
+    .join("");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Build payload-type binding from src/event-bus/payloads.ts
 //
@@ -389,7 +402,7 @@ function renderMarkdown(entries: TopicEntry[]): string {
     // Per-topic notes (only when there's documentation worth surfacing)
     for (const e of (byGroup.get(g) ?? [])) {
       if (e.doc) {
-        lines.push(`**\`${e.topic}\`** — ${e.doc}`);
+        lines.push(`**\`${e.topic}\`** — ${escapeAngleProse(e.doc)}`);
         lines.push("");
       }
     }

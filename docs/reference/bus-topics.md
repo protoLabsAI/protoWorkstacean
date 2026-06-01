@@ -55,7 +55,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
 | `autonomous.outcome` | ✅ `AUTONOMOUS_OUTCOME_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
-| `autonomous.outcome.#` | — | — | _(none)_ | `src/plugins/agent-fleet-health-plugin.ts:188` |
+| `autonomous.outcome.#` | — | — | _(none)_ | `src/plugins/agent-fleet-health-plugin.ts:206` |
 
 **`autonomous.outcome`** — Published by SkillDispatcherPlugin after every task reaches terminal state. Full topic is `autonomous.outcome.{systemActor}.{skill}`.
 
@@ -81,7 +81,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | `command.agent.upsert` | ✅ `COMMAND_AGENT_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:41` |
 | `command.schedule` | — | — | _(none)_ | `lib/plugins/scheduler.ts:73` |
 
-**`command.a2a.upsert`** — A2A-endpoint mutations (ADR-0004 P3). The registrar persists the entry to workspace/agents.d/<name>.yaml; SkillBroker registers/unregisters the A2AExecutor live in the same turn (no restart). command.a2a.upsert — { name, file, yaml, entry } command.a2a.remove — { name, file }
+**`command.a2a.upsert`** — A2A-endpoint mutations (ADR-0004 P3). The registrar persists the entry to workspace/agents.d/&lt;name&gt;.yaml; SkillBroker registers/unregisters the A2AExecutor live in the same turn (no restart). command.a2a.upsert — { name, file, yaml, entry } command.a2a.remove — { name, file }
 
 **`command.agent.upsert`** — Control-plane mutations (ADR-0004 P2). The write API publishes these; the ControlPlaneRegistrar is the sole subscriber + the only writer of the workspace config files. Auditable in bus-history. The file write triggers the agent-runtime hot-reload (P1), so the change goes live within ~5s. command.agent.upsert  — { name, file, yaml }  → atomic write command.agent.remove  — { name, file }        → delete
 
@@ -351,7 +351,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:200`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/agents-crud.ts:55`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/feature-notifier.ts:98`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:747` |
+| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:200`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/agents-crud.ts:55`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/feature-notifier.ts:98`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:754` |
 
 ## Unresolved call sites
 
@@ -446,7 +446,7 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
 | `src/executor/skill-dispatcher-plugin.ts:861` | publish | `topic` |
 | `src/executor/task-tracker.ts:282` | publish | `topic` |
 | `src/executor/task-tracker.ts:330` | publish | `task.replyTopic` |
-| `src/index.ts:747` | subscribe | `topic` |
+| `src/index.ts:754` | subscribe | `topic` |
 | `src/plugins/ceremony-skill-executor-plugin.ts:123` | publish | `executeTopic` |
 | `src/plugins/CeremonyPlugin.ts:344` | publish | `executeTopic` |
 | `src/plugins/CeremonyPlugin.ts:372` | subscribe | `replyTopic` |
