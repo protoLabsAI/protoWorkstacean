@@ -26,7 +26,7 @@ protoWorkstacean is the switchboard: `trigger → router → dispatcher → exec
 | Crons (SchedulerPlugin) | ⚠️ runtime add/remove via bus command; no file-watch |
 | A2A agent **skills** (remote card change) | ✅ auto re-register (`ExecutorRegistry.unregister()` already exists) |
 | **DeepAgents (`workspace/agents/*.yaml`)** | ~~❌ boot-only → restart~~ → ✅ **hot-reload (P1 shipped, #714/#715)** |
-| **A2A agent entries (`workspace/agents.yaml`)** | ❌ **boot-only load → restart** |
+| **A2A agent entries (`workspace/agents.yaml` + `agents.d/`)** | ~~❌ boot-only → restart~~ → ✅ **control-plane register/remove, live (P3 day-4, #723/#725)** |
 | **Workspace plugins (`workspace/plugins/*.ts`)** | ❌ restart, Node module-cache pins the old code, **and they can't import app modules** |
 
 Two structural facts drive this ADR:
@@ -138,11 +138,11 @@ On add/test of an A2A agent or MCP server, fetch its descriptor (`/.well-known/a
 
 ## 5. Phased plan (impact → effort)
 
-1. ✅ **P1 — Agent registry hot-reload** *(shipped — #714 watch+detect, #715 apply).* `WorkspaceWatcher` (reusable poll-based file/dir diff) watches `workspace/agents/`; `AgentRuntimePlugin` reconciles the live registry via `ExecutorRegistry.register`/`unregister` + `IExecutor.dispose?()`. Add/edit/remove a DeepAgent YAML applies in ~5s, no restart; a parse error keeps the running agent; in-flight dispatch is never aborted. *(`workspace/agents.yaml` A2A entries still need a restart — extends in a later slice.)*
-2. **P2 — Control-plane write API + `command.*` + registrar** for agents (then crons/channels), modeled on the existing `/api/ceremonies` CRUD. Create/edit/remove an agent via API → persisted → live, no restart.
-3. **P3 — Management UI (separate Console surface) + capability discovery** (agent-card/MCP probe + test-before-save), mirroring ORBIS `DelegatesSettings`.
-4. **P4 — MCP client tier + capability grants + trust tiers**; **retire the `workspace/plugins/*.ts` loader**. (Larger — likely its own sprint.)
-5. **P5 (cross-cutting) — Durable + unified state**: persist fleet-health / outcomes / run-history; one control-plane read view.
+1. ✅ **P1 — Agent registry hot-reload** *(shipped — #714 watch+detect, #715 apply).* `WorkspaceWatcher` (reusable poll-based file/dir diff) watches `workspace/agents/`; `AgentRuntimePlugin` reconciles the live registry via `ExecutorRegistry.register`/`unregister` + `IExecutor.dispose?()`. Add/edit/remove a DeepAgent YAML applies in ~5s, no restart; a parse error keeps the running agent; in-flight dispatch is never aborted.
+2. ✅ **P2 — Control-plane write API + `command.*` + registrar** *(shipped — #717).* `POST/PUT/DELETE /api/agents` + `/api/agents/test` validate, publish `command.agent.*`, and the sole `ControlPlaneRegistrar` performs the atomic YAML write (synchronous, so the API verifies + responds). Create/edit/remove an agent via API → persisted → live via P1, no restart.
+3. ✅ **P3 — Management Console + capability discovery** *(shipped — #718 Console, #719 edit-in-place, #720 agent-card probe, #723/#725 A2A register/remove).* Separate auth-gated Console (`@protolabsai/ui`): DeepAgent CRUD + test-before-save + agent-card capability probe; A2A endpoints register to `workspace/agents.d/` (per-file, so the documented `agents.yaml` is never clobbered) and unregister live via `SkillBroker`. The debug dashboard stays read-only.
+4. **P4 — MCP client tier + capability grants + trust tiers**; **retire the `workspace/plugins/*.ts` loader**. (Larger — its own sprint, #712.)
+5. ✅ **P5 (cross-cutting) — Durable + unified state** *(shipped — #726 durable fleet-health, #727 unified read + doc).* `FleetStateRepository` persists outcomes to `knowledge.db`; `AgentFleetHealthPlugin` rehydrates its 24h window on startup (survives restart). `GET /api/control-plane/state` is the one read view (fleet + durable-backed health), consumed by the Console; `flow-dashboard.md` documents the read/write split.
 
 ---
 
@@ -154,11 +154,11 @@ Scope: land **P1 + P2 + P3** and the durable/unified-state slice of **P5**, leav
 |---|---|---|---|
 | **1** | Registry abstraction + agent file-watch (detect only) | Extract the shared file-watch/diff helper (from the Channel/Ceremony pattern); arm it on `workspace/agents/` + `agents.yaml`; log computed add/change/remove diffs — no apply yet. | Editing an agent YAML logs the correct diff within ~5 s; tests on the diff logic. |
 | **2** | P1 — apply the diff (hot-reload agents) | Executor lifecycle (`dispose()`); `AgentRuntimePlugin`/`SkillBroker` apply diffs via `ExecutorRegistry.register`/`unregister`; drain in-flight before dispose. | Add/edit/remove an agent YAML → live in `/api/agents/runtime` with **no restart**; in-flight dispatch isn't dropped; tests. **Ship P1.** |
-| **3** | P2 — control-plane write API | `POST/PUT/DELETE /api/agents` + `command.agent.*` + `ControlPlaneRegistrar` (atomic YAML write) + `/api/agents/test`. Reuse the `/api/ceremonies` CRUD shape. | Create an agent via API → persisted to YAML → live (via P1) → no restart; auth-gated; mutations visible in bus-history; tests. **Ship P2.** |
-| **4** | P3 — Console surface + capability discovery | Separate auth-gated management pane: agent CRUD + test-before-save + agent-card capability probe surfaced read-only. (A2A endpoints next.) | Add/edit/remove an agent + an A2A endpoint from the UI, with a reachability/card test before save; the debug dashboard stays read-only. |
-| **5** | P5 slice — durable + unified state + docs | Persist fleet-health + cron/ceremony run-history to SQLite; one control-plane read view; update `flow-dashboard.md` to name the read/write split; sprint retro. | State survives restart; one pane shows registries + health + recent runs; ADR + docs updated. |
+| **3** | P2 — control-plane write API | `POST/PUT/DELETE /api/agents` + `command.agent.*` + `ControlPlaneRegistrar` (atomic YAML write) + `/api/agents/test`. Reuse the `/api/ceremonies` CRUD shape. | ✅ Shipped (#717). Create an agent via API → persisted → live (via P1) → no restart; auth-gated; mutations on the bus; tests + live prod smoke (10/10). |
+| **4** | P3 — Console surface + capability discovery | Separate auth-gated management pane: agent CRUD + test-before-save + agent-card capability probe surfaced read-only; A2A endpoint register/remove. | ✅ Shipped (#718/#719/#720/#723/#725). DeepAgent CRUD + agent-card probe; A2A register→`agents.d/`→live, remove via `SkillBroker`; debug dashboard stays read-only. |
+| **5** | P5 slice — durable + unified state + docs | Persist fleet-health to SQLite; one control-plane read view; update `flow-dashboard.md` for the read/write split; sprint retro. | ✅ Shipped (#726/#727). Fleet-health rehydrates from `knowledge.db` on restart; `GET /api/control-plane/state` unifies fleet + health; doc + ADR updated. |
 
-P4 (MCP client, capability grants, trust tiers, retiring the workspace-plugin loader) is a scoped follow-up sprint — it introduces a new external-tool tier and a trust/grant model and deserves its own ADR slice.
+**Outcome:** P1+P2+P3+P5 shipped (#714/#715/#717/#718/#719/#720/#723/#725/#726/#727), each green + tested, each shipped on its own. P4 (MCP client, capability grants, trust tiers, retiring the workspace-plugin loader) is the scoped follow-up sprint (#712) — it introduces a new external-tool tier and a trust/grant model and deserves its own ADR slice.
 
 ---
 
