@@ -7,9 +7,11 @@
 //  - Stale-while-revalidate: components get cached data instantly, fresh in background
 //  - invalidate() to force refresh
 //
-// Scope: this dashboard is a read-only debug/observability pane (see
-// docs/architecture/flow-dashboard.md). Every endpoint below is a live
-// backend route — no GOAP/world-state getters, no widget framework.
+// Scope: the debug/observability panes are read-only (see
+// docs/architecture/flow-dashboard.md). The ONE exception is the
+// "Control-plane writes" section at the bottom — the Console surface
+// (ADR-0004 P3): admin-key-gated mutations of the fleet. Everything else is a
+// live read-only backend route.
 
 const API_BASE = "";
 const DEFAULT_TTL = 30_000;
@@ -152,3 +154,48 @@ export interface SecuritySummaryResponse {
   criticalCount: number;
   incidents: Array<{ id: string; title: string; severity: string; status: string }>;
 }
+
+// ── Control-plane writes (Console / ADR-0004 P3 — admin-key gated) ──────────
+// The fleet's write surface. Unlike the read getters, these are NOT cached and
+// return the raw { status, body } so the Console can show 201/409/400/401 etc.
+// The admin key is held in localStorage and sent as X-API-Key.
+
+const ADMIN_KEY_LS = "workstacean.adminKey";
+export function getAdminKey(): string {
+  return (typeof localStorage !== "undefined" && localStorage.getItem(ADMIN_KEY_LS)) || "";
+}
+export function setAdminKey(key: string): void {
+  if (typeof localStorage !== "undefined") localStorage.setItem(ADMIN_KEY_LS, key);
+}
+
+export interface WriteResult {
+  status: number;
+  ok: boolean;
+  body: Record<string, unknown> | null;
+}
+
+async function adminFetch(path: string, method: string, body?: unknown): Promise<WriteResult> {
+  const key = getAdminKey();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      ...(key ? { "x-api-key": key } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let parsed: Record<string, unknown> | null = null;
+  try { parsed = (await res.json()) as Record<string, unknown>; } catch { /* empty body */ }
+  return { status: res.status, ok: res.ok, body: parsed };
+}
+
+/** Validate an agent definition without persisting it. */
+export const testAgent = (def: unknown) => adminFetch("/api/agents/test", "POST", def);
+/** Create a new in-process agent (→ hot-reload registers it in ~5s). */
+export const createAgent = (def: unknown) => adminFetch("/api/agents", "POST", def);
+/** Update an existing agent by name. */
+export const updateAgent = (name: string, def: unknown) =>
+  adminFetch(`/api/agents/${encodeURIComponent(name)}`, "PUT", def);
+/** Remove an agent by name (→ unregistered in ~5s). */
+export const deleteAgent = (name: string) =>
+  adminFetch(`/api/agents/${encodeURIComponent(name)}`, "DELETE");
