@@ -66,31 +66,10 @@ agents:
     subscribesTo:
       - message.inbound.discord.#
 
-  # roxy — ProtoMaker Portfolio Manager. Monitors + unblocks the ProtoMaker
-  # portfolio (board / features / PRs / CI), takes the smallest unblocking
-  # action, reports a sitrep — she does NOT write code. protoAgent A2A fork.
-  # The "missing piece" between org-intake (Ava/Linear) and execution.
-  #
-  # Runs as a docker service on the shared network → reachable as roxy:7870
-  # (no Tailscale, so NOT external — unlike protopen).
-  #
-  # STAGED, not yet live — uncomment once ALL of:
-  #   1. roxy is deployed on the shared docker-ai network (roxy:7870 resolves
-  #      from this container), and
-  #   2. ROXY_API_KEY is provisioned in Infisical (ai/prod), matching roxy's side, and
-  #   3. roxy's agent card advertises her operational skill (e.g. project_operations)
-  #      + a real description — it's currently the protoAgent template default
-  #      (only `chat`), so until then the fleet can only summon her via `chat`,
-  #      not route `skill: project_operations` to her (ceremony/event paths).
-  # Leaving it commented avoids registering a dead executor + 10-min card-
-  # discovery spam for the whole fleet (same policy as frank above).
-  #
-  # - name: roxy
-  #   url: http://roxy:7870/a2a
-  #   auth:
-  #     scheme: apiKey
-  #     credentialsEnv: ROXY_API_KEY
-  #   streaming: true
-  #   subscribesTo:
-  #     - message.inbound.discord.#
-  #     - message.inbound.github.#
+  # roxy — ProtoMaker Portfolio Manager (monitors + unblocks the protoMaker
+  # portfolio; read-only on code). Deliberately NOT registered here: she is
+  # control-plane-managed (ADR-0004), registered live to workspace/agents.d/roxy.yaml
+  # via POST /api/a2a-endpoints and re-registered idempotently on deploy by her own
+  # stack (homelab-iac/stacks/roxy). url http://roxy:7870/a2a on the shared network,
+  # auth ROXY_API_KEY. Do NOT add a roxy entry here — agents.d/ wins the dedup, so a
+  # hand entry would be shadowed, and two homes drift.
