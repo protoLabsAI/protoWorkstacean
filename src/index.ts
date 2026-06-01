@@ -326,6 +326,17 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // MCP client tier (ADR-0005 P4): connects to enabled MCP servers from
+    // workspace/mcp-servers.d/ and registers one McpExecutor per discovered
+    // tool. Control-plane-managed (command.mcp.*); hot-reloads with no restart.
+    name: "mcp-client",
+    condition: () => true,
+    factory: async () => {
+      const { McpClientPlugin } = await import("./mcp/mcp-client-plugin.js");
+      return new McpClientPlugin(workspaceDir, executorRegistry);
+    },
+  },
+  {
     // Registers Discord-alert FunctionExecutors for `alert.*` skills that
     // have no agent-backed handler. Crons/ceremonies can dispatch alert.*
     // skills directly without needing an agent.
@@ -525,13 +536,13 @@ for (const entry of pluginRegistry) {
 {
   const hasDispatcher = registeredPlugins.some(p => p.name === "skill-dispatcher");
   const hasRegistrar = registeredPlugins.some(p =>
-    p.name === "agent-runtime" || p.name === "skill-broker",
+    p.name === "agent-runtime" || p.name === "skill-broker" || p.name === "mcp-client",
   );
   if (hasDispatcher && !hasRegistrar) {
     console.warn(
-      "[startup] skill-dispatcher is installed but no executor registrar (agent-runtime / skill-broker) is active. " +
+      "[startup] skill-dispatcher is installed but no executor registrar (agent-runtime / skill-broker / mcp-client) is active. " +
       "All agent.skill.request messages will be dropped. " +
-      "Add workspace/agents/*.yaml or workspace/agents.yaml to register at least one agent.",
+      "Add workspace/agents/*.yaml, workspace/agents.yaml, or workspace/mcp-servers.d/ to register at least one agent or MCP server.",
     );
   }
 }
