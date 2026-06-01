@@ -25,7 +25,7 @@ protoWorkstacean is the switchboard: `trigger → router → dispatcher → exec
 | Channels (`workspace/channels.yaml`) | ✅ hot-reload (5 s watch) |
 | Crons (SchedulerPlugin) | ⚠️ runtime add/remove via bus command; no file-watch |
 | A2A agent **skills** (remote card change) | ✅ auto re-register (`ExecutorRegistry.unregister()` already exists) |
-| **DeepAgents (`workspace/agents/*.yaml`)** | ❌ **boot-only load → container restart** |
+| **DeepAgents (`workspace/agents/*.yaml`)** | ~~❌ boot-only → restart~~ → ✅ **hot-reload (P1 shipped, #714/#715)** |
 | **A2A agent entries (`workspace/agents.yaml`)** | ❌ **boot-only load → restart** |
 | **Workspace plugins (`workspace/plugins/*.ts`)** | ❌ restart, Node module-cache pins the old code, **and they can't import app modules** |
 
@@ -138,7 +138,7 @@ On add/test of an A2A agent or MCP server, fetch its descriptor (`/.well-known/a
 
 ## 5. Phased plan (impact → effort)
 
-1. **P1 — Agent registry hot-reload.** Watch `workspace/agents/` + `agents.yaml`; diff-and-apply via `ExecutorRegistry.register`/`unregister` + executor lifecycle (construct/dispose). *Kills restart-to-add-agent — the biggest win, lowest risk (proven file-watch pattern).*
+1. ✅ **P1 — Agent registry hot-reload** *(shipped — #714 watch+detect, #715 apply).* `WorkspaceWatcher` (reusable poll-based file/dir diff) watches `workspace/agents/`; `AgentRuntimePlugin` reconciles the live registry via `ExecutorRegistry.register`/`unregister` + `IExecutor.dispose?()`. Add/edit/remove a DeepAgent YAML applies in ~5s, no restart; a parse error keeps the running agent; in-flight dispatch is never aborted. *(`workspace/agents.yaml` A2A entries still need a restart — extends in a later slice.)*
 2. **P2 — Control-plane write API + `command.*` + registrar** for agents (then crons/channels), modeled on the existing `/api/ceremonies` CRUD. Create/edit/remove an agent via API → persisted → live, no restart.
 3. **P3 — Management UI (separate Console surface) + capability discovery** (agent-card/MCP probe + test-before-save), mirroring ORBIS `DelegatesSettings`.
 4. **P4 — MCP client tier + capability grants + trust tiers**; **retire the `workspace/plugins/*.ts` loader**. (Larger — likely its own sprint.)
