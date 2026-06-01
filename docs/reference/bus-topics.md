@@ -6,11 +6,11 @@ title: Bus Topics
 
 ## Summary
 
-- **84** distinct topics seen across the codebase
-- **16** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
+- **86** distinct topics seen across the codebase
+- **18** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
 - **68** raw-string / template topics not in TOPICS (candidates to register)
 - **18** topics that couldn't be statically resolved (computed at runtime)
-- **99** publish call sites, **53** subscribe call sites
+- **100** publish call sites, **55** subscribe call sites
 
 Each row links to the original call site as `path:line` so jumping from this index to the source is a click.
 
@@ -75,7 +75,11 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
+| `command.agent.remove` | ✅ `COMMAND_AGENT_REMOVE` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:50` |
+| `command.agent.upsert` | ✅ `COMMAND_AGENT_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:49` |
 | `command.schedule` | — | — | _(none)_ | `lib/plugins/scheduler.ts:73` |
+
+**`command.agent.upsert`** — Control-plane mutations (ADR-0004 P2). The write API publishes these; the ControlPlaneRegistrar is the sole subscriber + the only writer of the workspace config files. Auditable in bus-history. The file write triggers the agent-runtime hot-reload (P1), so the change goes live within ~5s. command.agent.upsert  — { name, file, yaml }  → atomic write command.agent.remove  — { name, file }        → delete
 
 ## `config.*`
 
@@ -343,7 +347,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:96`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/feature-notifier.ts:98`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:744` |
+| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:200`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/agents-crud.ts:55`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/feature-notifier.ts:98`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:747` |
 
 ## Unresolved call sites
 
@@ -374,7 +378,7 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
 | `lib/plugins/scheduler.ts:263` | publish | `def.topic` |
 | `lib/plugins/scheduler.ts:374` | publish | `reply.topic` |
 | `lib/plugins/signal.ts:103` | publish | `msg.topic` |
-| `src/agent-runtime/agent-runtime-plugin.ts:96` | publish | `topic` |
+| `src/agent-runtime/agent-runtime-plugin.ts:200` | publish | `topic` |
 | `src/api/a2a-server.ts:133` | publish | `{
       kind: "task",
       id: taskId,
@@ -415,6 +419,7 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
         taskId,
         contextId,
         stat` |
+| `src/api/agents-crud.ts:55` | publish | `topic` |
 | `src/api/discord.ts:338` | publish | `progressTopic` |
 | `src/api/human-input.ts:82` | publish | `requestTopic` |
 | `src/api/human-input.ts:143` | publish | `responseTopic` |
@@ -437,7 +442,7 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
 | `src/executor/skill-dispatcher-plugin.ts:861` | publish | `topic` |
 | `src/executor/task-tracker.ts:282` | publish | `topic` |
 | `src/executor/task-tracker.ts:330` | publish | `task.replyTopic` |
-| `src/index.ts:744` | subscribe | `topic` |
+| `src/index.ts:747` | subscribe | `topic` |
 | `src/plugins/ceremony-skill-executor-plugin.ts:123` | publish | `executeTopic` |
 | `src/plugins/CeremonyPlugin.ts:344` | publish | `executeTopic` |
 | `src/plugins/CeremonyPlugin.ts:372` | subscribe | `replyTopic` |

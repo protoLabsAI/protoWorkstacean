@@ -67,6 +67,17 @@ export const ACTION_TOPICS = {
    */
   AGENT_INPUT_RESPONSE_PREFIX: "agent.input.response",
 
+  /**
+   * Control-plane mutations (ADR-0004 P2). The write API publishes these; the
+   * ControlPlaneRegistrar is the sole subscriber + the only writer of the
+   * workspace config files. Auditable in bus-history. The file write triggers
+   * the agent-runtime hot-reload (P1), so the change goes live within ~5s.
+   *   command.agent.upsert  — { name, file, yaml }  → atomic write
+   *   command.agent.remove  — { name, file }        → delete
+   */
+  COMMAND_AGENT_UPSERT: "command.agent.upsert",
+  COMMAND_AGENT_REMOVE: "command.agent.remove",
+
   /** Wildcard subscription pattern — matches all cron events from SchedulerPlugin. */
   CRON_ALL: "cron.#",
 
