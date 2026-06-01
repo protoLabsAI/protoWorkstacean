@@ -5,9 +5,9 @@ relevantTo: [architecture]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 18
-  referenced: 2
-  successfulFeatures: 2
+  loaded: 19
+  referenced: 3
+  successfulFeatures: 3
 ---
 # architecture
 
@@ -75,3 +75,10 @@ usageStats:
 - **Problem solved:** The `AgentFleetHealthPlugin` depends on `fleetStateRepo` for persistence.
 - **Why this works:** The implementation uses an optional dependency (`private readonly fleetStateRepo?: FleetStateRepository`) and checks for its existence before attempting writes or hydration. This allows the plugin to function as a purely in-memory aggregator if the database layer is unavailable or not configured.
 - **Trade-offs:** Makes the code slightly more defensive with null checks, but significantly increases the portability and testability of the plugin.
+
+### Transitioning from a 'hold' state (COMMENT only) to a 're-dispatch' model upon terminal CI conclusions. (2026-06-01)
+- **Context:** The system was previously holding verdicts in a provisional COMMENT state while CI was running, but lacked a mechanism to upgrade these to formal APPROVE/REQUEST_CHANGES once CI finished.
+- **Why:** To solve the 'stalled PR' problem where automation would provide feedback but never finalize the review process after the environment was validated.
+- **Rejected:** Polling CI status from the agent side.
+- **Trade-offs:** Requires handling specific webhook events (`check_suite.completed`, `workflow_run.completed`) and mapping SHAs to open PRs, which increases integration surface area compared to simple polling.
+- **Breaking if changed:** Removing this logic reverts the system to a purely advisory role where it can never formally pass a PR through a gate automatically.

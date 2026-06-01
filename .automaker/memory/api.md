@@ -5,9 +5,9 @@ relevantTo: [api]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 5
-  referenced: 1
-  successfulFeatures: 1
+  loaded: 6
+  referenced: 2
+  successfulFeatures: 2
 ---
 # api
 
@@ -15,3 +15,10 @@ usageStats:
 - **Problem solved:** The registry needs to know how many active requests are currently being handled by a specific executor instance to determine when it is safe to call `dispose()`.
 - **Why this works:** Using a WeakMap prevents memory leaks because the entry is automatically garbage collected once the executor instance itself is no longer referenced, avoiding the need for manual cleanup of the counter map.
 - **Trade-offs:** Provides automatic memory management at the cost of slightly more complex debugging if one needs to inspect the registry state (as WeakMap contents aren't enumerable).
+
+### Implementation of distinct dedup key prefixes (`ci-review:` vs `pr-review:`) for different trigger types. (2026-06-01)
+- **Context:** Preventing race conditions or duplicate review actions when a PR review is triggered by both a code commit and a CI completion event.
+- **Why:** Ensures that the state machine can distinguish between a review initiated by developer activity (commit) and one initiated by automated infrastructure (CI), allowing them to coexist or transition without colliding in the deduplication logic.
+- **Rejected:** Using a single unified dedup key based only on the PR number/SHA.
+- **Trade-offs:** Increases complexity in the key generation logic but provides granular control over which event type 'owns' the current review cycle.
+- **Breaking if changed:** If prefixes are merged, a CI completion might inadvertently suppress a manual re-review or vice versa due to key collision.
