@@ -6,11 +6,11 @@ title: Bus Topics
 
 ## Summary
 
-- **86** distinct topics seen across the codebase
-- **18** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
+- **88** distinct topics seen across the codebase
+- **20** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
 - **68** raw-string / template topics not in TOPICS (candidates to register)
 - **18** topics that couldn't be statically resolved (computed at runtime)
-- **100** publish call sites, **55** subscribe call sites
+- **100** publish call sites, **59** subscribe call sites
 
 Each row links to the original call site as `path:line` so jumping from this index to the source is a click.
 
@@ -75,9 +75,13 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `command.agent.remove` | ✅ `COMMAND_AGENT_REMOVE` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:50` |
-| `command.agent.upsert` | ✅ `COMMAND_AGENT_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:49` |
+| `command.a2a.remove` | ✅ `COMMAND_A2A_REMOVE` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/skill-broker-plugin.ts:140`<br>`src/plugins/control-plane-registrar-plugin.ts:44` |
+| `command.a2a.upsert` | ✅ `COMMAND_A2A_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/skill-broker-plugin.ts:136`<br>`src/plugins/control-plane-registrar-plugin.ts:43` |
+| `command.agent.remove` | ✅ `COMMAND_AGENT_REMOVE` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:42` |
+| `command.agent.upsert` | ✅ `COMMAND_AGENT_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:41` |
 | `command.schedule` | — | — | _(none)_ | `lib/plugins/scheduler.ts:73` |
+
+**`command.a2a.upsert`** — A2A-endpoint mutations (ADR-0004 P3). The registrar persists the entry to workspace/agents.d/<name>.yaml; SkillBroker registers/unregisters the A2AExecutor live in the same turn (no restart). command.a2a.upsert — { name, file, yaml, entry } command.a2a.remove — { name, file }
 
 **`command.agent.upsert`** — Control-plane mutations (ADR-0004 P2). The write API publishes these; the ControlPlaneRegistrar is the sole subscriber + the only writer of the workspace config files. Auditable in bus-history. The file write triggers the agent-runtime hot-reload (P1), so the change goes live within ~5s. command.agent.upsert  — { name, file, yaml }  → atomic write command.agent.remove  — { name, file }        → delete
 
@@ -178,7 +182,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | `message.outbound.discord.alert` | ✅ `MESSAGE_OUTBOUND_DISCORD_ALERT` (`MESSAGE_TOPICS`) | — | `src/plugins/quinn-review-notifier-plugin.ts:113`<br>`src/plugins/alert-skill-executor-plugin.ts:135`<br>`lib/plugins/pr-remediator.ts:1241`<br>`lib/plugins/pr-remediator.ts:1638` | _(none)_ |
 | `message.outbound.discord.dm.user.#` | — | — | _(none)_ | `lib/plugins/discord/outbound.ts:129` |
 | `message.outbound.discord.push.{AGENT_OPS_CHANNEL}` | — | — | `src/api/ava-tools.ts:117`<br>`src/api/ava-tools.ts:181` | _(none)_ |
-| `message.outbound.discord.push.{opsChannel}` | — | — | `src/plugins/skill-broker-plugin.ts:137` | _(none)_ |
+| `message.outbound.discord.push.{opsChannel}` | — | — | `src/plugins/skill-broker-plugin.ts:178` | _(none)_ |
 | `message.outbound.github.#` | — | — | _(none)_ | `lib/plugins/github.ts:318` |
 | `message.outbound.google.docs` | — | — | _(none)_ | `lib/plugins/google/docs.ts:60` |
 | `message.outbound.google.drive` | — | — | _(none)_ | `lib/plugins/google/drive.ts:61` |

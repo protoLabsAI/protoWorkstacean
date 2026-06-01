@@ -21,33 +21,27 @@ import { writeFileSync, renameSync, unlinkSync, existsSync, mkdirSync } from "no
 import { resolve, dirname } from "node:path";
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 
-interface AgentUpsertPayload {
-  name?: string;
-  file?: string;
-  yaml?: string;
-}
-interface AgentRemovePayload {
-  name?: string;
-  file?: string;
-}
-
 export class ControlPlaneRegistrarPlugin implements Plugin {
   name = "control-plane-registrar";
   description = "Sole writer of workspace config files for control-plane command.* mutations";
   capabilities = ["control-plane", "config-writer"];
 
-  /** Writes are confined to this root — a path-traversal guard. */
-  private readonly agentsRoot: string;
+  /** Writes are confined to these roots — a path-traversal guard. */
+  private readonly agentsRoot: string;   // workspace/agents/   — in-process DeepAgents (P2)
+  private readonly agentsdRoot: string;  // workspace/agents.d/ — A2A endpoints (P3)
   private subscriptionIds: string[] = [];
 
   constructor(workspaceDir: string) {
     this.agentsRoot = resolve(workspaceDir, "agents");
+    this.agentsdRoot = resolve(workspaceDir, "agents.d");
   }
 
   install(bus: EventBus): void {
     this.subscriptionIds.push(
-      bus.subscribe("command.agent.upsert", this.name, (msg) => this._onUpsert(msg)),
-      bus.subscribe("command.agent.remove", this.name, (msg) => this._onRemove(msg)),
+      bus.subscribe("command.agent.upsert", this.name, (msg) => this._write(this.agentsRoot, msg)),
+      bus.subscribe("command.agent.remove", this.name, (msg) => this._delete(this.agentsRoot, msg)),
+      bus.subscribe("command.a2a.upsert", this.name, (msg) => this._write(this.agentsdRoot, msg)),
+      bus.subscribe("command.a2a.remove", this.name, (msg) => this._delete(this.agentsdRoot, msg)),
     );
   }
 
@@ -55,40 +49,40 @@ export class ControlPlaneRegistrarPlugin implements Plugin {
     this.subscriptionIds = [];
   }
 
-  /** Guard: the target must resolve to a file directly inside the agents root. */
-  private _safe(file: string | undefined): string | null {
+  /** Guard: the target must resolve to a file directly inside `root`. */
+  private _safe(file: string | undefined, root: string): string | null {
     if (!file) return null;
     const resolved = resolve(file);
-    if (dirname(resolved) !== this.agentsRoot) {
-      console.warn(`[control-plane] refusing write outside ${this.agentsRoot}: ${file}`);
+    if (dirname(resolved) !== root) {
+      console.warn(`[control-plane] refusing write outside ${root}: ${file}`);
       return null;
     }
     return resolved;
   }
 
-  private _onUpsert(msg: BusMessage): void {
-    const p = (msg.payload ?? {}) as AgentUpsertPayload;
-    const file = this._safe(p.file);
+  private _write(root: string, msg: BusMessage): void {
+    const p = (msg.payload ?? {}) as { name?: string; file?: string; yaml?: string };
+    const file = this._safe(p.file, root);
     if (!file || typeof p.yaml !== "string") return;
     try {
-      if (!existsSync(this.agentsRoot)) mkdirSync(this.agentsRoot, { recursive: true });
+      if (!existsSync(root)) mkdirSync(root, { recursive: true });
       // Atomic: write a temp sibling then rename over the target.
       const tmp = `${file}.tmp-${msg.id}`;
       writeFileSync(tmp, p.yaml, "utf8");
       renameSync(tmp, file);
-      console.log(`[control-plane] wrote agent "${p.name}" → ${file}`);
+      console.log(`[control-plane] wrote "${p.name}" → ${file}`);
     } catch (err) {
-      console.error(`[control-plane] upsert "${p.name}" failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`[control-plane] write "${p.name}" failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  private _onRemove(msg: BusMessage): void {
-    const p = (msg.payload ?? {}) as AgentRemovePayload;
-    const file = this._safe(p.file);
+  private _delete(root: string, msg: BusMessage): void {
+    const p = (msg.payload ?? {}) as { name?: string; file?: string };
+    const file = this._safe(p.file, root);
     if (!file) return;
     try {
       if (existsSync(file)) unlinkSync(file);
-      console.log(`[control-plane] removed agent "${p.name}" → ${file}`);
+      console.log(`[control-plane] removed "${p.name}" → ${file}`);
     } catch (err) {
       console.error(`[control-plane] remove "${p.name}" failed: ${err instanceof Error ? err.message : String(err)}`);
     }
