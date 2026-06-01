@@ -43,28 +43,33 @@ A single surface that mutates the control plane: create/edit/remove in-process D
    ┌──────────────────────────────────────────────────────────┐
    │ src/api/  HTTP routes (per-module)                       │
    │                                                          │
-   │  /api/bus-events       (BusHistoryRecorder)              │
-   │  /api/agent-health     (AgentFleetHealth)                │
-   │  /api/outcomes         (AgentFleetHealth)                │
-   │  /api/cost-summaries   (CostStore)                       │
-   │  /api/pr-pipeline      (GitHubPlugin)                    │
-   │  /api/ceremonies       (CeremonyPlugin)                  │
-   │  /api/a2a-status       (SkillBrokerPlugin)               │
+   │  /api/bus/history          (BusHistoryRecorder)          │
+   │  /api/bus/topology         (bus introspection)           │
+   │  /api/bus/subscribe (WS)    (live topic feed)            │
+   │  /api/control-plane/state  (fleet + AgentFleetHealth)    │
+   │  /api/agents/runtime       (ExecutorRegistry)            │
+   │  /api/cost-summaries       (CostStore)                   │
+   │  /api/pr-pipeline          (GitHubPlugin)                │
+   │  /api/ceremonies           (CeremonyPlugin)              │
    └────────────────────────┬─────────────────────────────────┘
                             │
                             ▼  HTTPS over Tailscale
                             │  (http://ava:3333)
                             ▼
    ┌──────────────────────────────────────────────────────────┐
-   │ dashboard/  (Vite + React 19)                            │
+   │ dashboard/  (Vite + React 19 SPA, react-router)          │
    │                                                          │
-   │  pages/                    fetch via:                    │
-   │   • system.astro             dashboard/src/lib/api.ts    │
-   │   • agents.astro             TTL: 15s fleet health       │
-   │   • outcomes.astro                  30s cost             │
-   │   • fleet-cost.astro                live SSE for events  │
-   │   • pr-pipeline.astro                                    │
-   │   • ceremonies.astro                                     │
+   │  routes (src/components/)    fetch via dashboard/src/lib/api.ts │
+   │   • /          OverviewGrid                              │
+   │   • /system    SystemGraph   (GET + /ws + WS             │
+   │   • /trace     SkillTrace      /api/bus/subscribe)       │
+   │   • /events    EventStream                               │
+   │   • /agents    AgentsView                                │
+   │   • /console   Console  ← the WRITE surface (admin key)  │
+   │                                                          │
+   │  Routes render inside Layout (sidebar + header), each    │
+   │  wrapped in an ErrorBoundary — a pane crash is contained │
+   │  (sidebar stays, error shown), never a blank screen.     │
    └──────────────────────────────────────────────────────────┘
 ```
 
@@ -166,19 +171,20 @@ The browser never publishes to the bus. The only path from a click to a bus mess
 
 ---
 
-## Tile inventory (current)
+## Route inventory (current SPA)
 
-| Tile | Page | Data source |
+| Route | Component | Data source |
 |---|---|---|
-| Live event log | `system.astro` | `/api/bus-events` (SSE) |
-| Agent grid | `agents.astro` | `/api/agent-health` |
-| Outcomes by skill | `outcomes.astro` | `/api/outcomes` |
-| Fleet cost / token usage | `fleet-cost.astro` | `/api/cost-summaries` |
-| PR review pipeline (PR-1/-2/-3) | `pr-pipeline.astro` | `/api/pr-pipeline` + `flow.item.*` |
-| Ceremony status | `ceremonies.astro` | `/api/ceremonies` |
-| Architectural-column overlay | `system.astro` | static layout + live agent positions |
+| `/` | `OverviewGrid` | `/api/agents/runtime`, `/api/ci-health`, `/api/pr-pipeline`, `/api/security-summary`, `/api/hitl/pending` |
+| `/system` | `SystemGraph` | `/api/bus/topology` + `/api/agents/runtime` (graph) · `/api/bus/subscribe?topic=#` (live edge pulses) · overlays `QuinnVerdictCounters` + `LatencyHistogram` (each their own `/api/bus/subscribe` WS) |
+| `/trace` | `SkillTrace` | `/api/bus/history` (D1 skill-trace) |
+| `/events` | `EventStream` | `/ws` (live bus feed) |
+| `/agents` | `AgentsView` | `/api/agents/runtime`, `/api/ceremonies` |
+| `/console` | `Console` | `/api/control-plane/state` (read) + admin write API (the one write surface) |
 
-D1/D2/D3 (dashboard sub-pages) and O-2/-3/-4 (corner overlay tiles) are sub-views of the above sources, not independent data paths.
+Header live/disconnected indicator: its own `/ws` connection in `Layout`.
+
+> **WS caveat (`:8081` vs direct):** the live-update sockets (`/api/bus/subscribe`, `/ws`) are served by the **main server**. The event-viewer proxy (`:8081`) upgrades `/ws` itself but does **not** proxy `/api/bus/subscribe` — so when the dashboard is loaded via `:8081`, the `/system` live-edge pulses + the latency/verdict overlays get no live data (the views still render; they retry silently). Serve the dashboard from the main-server origin for full live WS, or teach the event-viewer to proxy `/api/bus/subscribe`. (tracked follow-up)
 
 ---
 
