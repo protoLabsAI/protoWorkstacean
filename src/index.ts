@@ -169,6 +169,18 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // FeatureNotifierPlugin posts protoMaker feature.completed/failed events to
+    // each project's dev channel (ADR-0002 reporting leg). Shares the router's
+    // ChannelRegistry. First-party (not a workspace plugin) so it can resolve
+    // app internals in the container — the workspace-plugin version never did.
+    name: "feature-notifier",
+    condition: () => true,
+    factory: async () => {
+      const { FeatureNotifierPlugin } = await import("../lib/plugins/feature-notifier");
+      return new FeatureNotifierPlugin({ channelRegistry });
+    },
+  },
+  {
     name: "discord",
     condition: () => !!process.env.DISCORD_BOT_TOKEN,
     factory: async () => {

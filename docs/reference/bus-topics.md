@@ -6,11 +6,11 @@ title: Bus Topics
 
 ## Summary
 
-- **82** distinct topics seen across the codebase
+- **84** distinct topics seen across the codebase
 - **16** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
-- **66** raw-string / template topics not in TOPICS (candidates to register)
+- **68** raw-string / template topics not in TOPICS (candidates to register)
 - **18** topics that couldn't be statically resolved (computed at runtime)
-- **98** publish call sites, **51** subscribe call sites
+- **99** publish call sites, **53** subscribe call sites
 
 Each row links to the original call site as `path:line` so jumping from this index to the source is a click.
 
@@ -111,6 +111,13 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
 | `entry.topic` | — | — | `src/plugins/pr-remediator-skill-executor-plugin.ts:111` | _(none)_ |
+
+## `feature.*`
+
+| Topic | Declared | Payload | Publishers | Subscribers |
+|---|---|---|---|---|
+| `feature.completed` | — | — | _(none)_ | `lib/plugins/feature-notifier.ts:62` |
+| `feature.failed` | — | — | _(none)_ | `lib/plugins/feature-notifier.ts:65` |
 
 ## `flow.*`
 
@@ -336,7 +343,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:96`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:732` |
+| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:96`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/feature-notifier.ts:98`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:744` |
 
 ## Unresolved call sites
 
@@ -349,6 +356,7 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
 | `lib/plugins/cli.ts:201` | publish | `msg.topic` |
 | `lib/plugins/debug.ts:31` | publish | `topic` |
 | `lib/plugins/echo.ts:35` | publish | `reply.topic` |
+| `lib/plugins/feature-notifier.ts:98` | publish | `topic` |
 | `lib/plugins/github.ts:393` | publish | `topic` |
 | `lib/plugins/github.ts:635` | publish | `topic` |
 | `lib/plugins/github.ts:715` | publish | `topic` |
@@ -429,7 +437,7 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
 | `src/executor/skill-dispatcher-plugin.ts:861` | publish | `topic` |
 | `src/executor/task-tracker.ts:282` | publish | `topic` |
 | `src/executor/task-tracker.ts:330` | publish | `task.replyTopic` |
-| `src/index.ts:732` | subscribe | `topic` |
+| `src/index.ts:744` | subscribe | `topic` |
 | `src/plugins/ceremony-skill-executor-plugin.ts:123` | publish | `executeTopic` |
 | `src/plugins/CeremonyPlugin.ts:344` | publish | `executeTopic` |
 | `src/plugins/CeremonyPlugin.ts:372` | subscribe | `replyTopic` |
