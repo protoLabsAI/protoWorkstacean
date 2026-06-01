@@ -713,6 +713,28 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
         }),
       },
     ),
+    msg_operator: tool(
+      async (input) =>
+        JSON.stringify(await http.post("/api/operator/message", {
+          message: input.message,
+          urgency: input.urgency ?? "normal",
+          ...(input.topic ? { topic: input.topic } : {}),
+          from: agentName ?? "agent",
+        })),
+      {
+        name: "msg_operator",
+        description:
+          "Send a direct message to the human operator (a Discord DM). Use for genuine escalation only — a dead end " +
+          "after you've exhausted your options, a decision that needs credentials / infrastructure / policy, or " +
+          "cost/risk beyond your authority. Not for routine progress (that's send_update). Match urgency to reality: " +
+          "low (FYI), normal (needs attention this session), high (review soon), urgent (system degraded, act now).",
+        schema: z.object({
+          message: z.string().describe("What the operator needs to know — specific and self-contained, including what you already tried."),
+          urgency: z.enum(["low", "normal", "high", "urgent"]).optional().describe("Defaults to normal."),
+          topic: z.string().optional().describe("Optional short subject tag."),
+        }),
+      },
+    ),
   };
 
   return toolNames.map(n => all[n]).filter(Boolean) as StructuredToolInterface[];
