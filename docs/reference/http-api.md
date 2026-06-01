@@ -6,7 +6,7 @@ title: HTTP API
 
 ## Summary
 
-- **77** HTTP routes across **33** path groups
+- **78** HTTP routes across **33** path groups
 - **14** routes carry a resolved one-line description
 
 Each row links to the route definition as `path:line` so jumping from this index to the source is a click. Routes are defined as `{ method, path, handler }` literals in `src/api/*.ts` and collected by `src/api/index.ts`.
@@ -32,6 +32,7 @@ Each row links to the route definition as `path:line` so jumping from this index
 | `POST` | `/api/a2a/chat` | `src/api/ava-tools.ts:348` | multi-turn conversation with an agent over the bus. |
 | `POST` | `/api/a2a/delegate` | `src/api/ava-tools.ts:349` | fire-and-forget task dispatch to an agent. |
 | `POST` | `/api/a2a/input` | `src/api/human-input.ts:115` | — |
+| `POST` | `/api/a2a/probe` | `src/api/agents-crud.ts:66` | — |
 | `GET` | `/api/a2a/task/:correlationId` | `src/api/ava-tools.ts:350` | correlationId — fetch the result of a dispatch that a chat caller stopped awaiting (timed out). |
 
 ### `/api/agent`
@@ -45,12 +46,12 @@ Each row links to the route definition as `path:line` so jumping from this index
 | Method | Path | Source | Description |
 |---|---|---|---|
 | `GET` | `/api/agents` | `src/api/operations.ts:250` | — |
-| `POST` | `/api/agents` | `src/api/agents-crud.ts:103` | — |
-| `GET` | `/api/agents/:name` | `src/api/agents-crud.ts:66` | — |
-| `PUT` | `/api/agents/:name` | `src/api/agents-crud.ts:133` | — |
-| `DELETE` | `/api/agents/:name` | `src/api/agents-crud.ts:151` | — |
+| `POST` | `/api/agents` | `src/api/agents-crud.ts:142` | — |
+| `GET` | `/api/agents/:name` | `src/api/agents-crud.ts:105` | — |
+| `PUT` | `/api/agents/:name` | `src/api/agents-crud.ts:172` | — |
+| `DELETE` | `/api/agents/:name` | `src/api/agents-crud.ts:190` | — |
 | `GET` | `/api/agents/runtime` | `src/api/agents-runtime.ts:67` | — |
-| `POST` | `/api/agents/test` | `src/api/agents-crud.ts:84` | — |
+| `POST` | `/api/agents/test` | `src/api/agents-crud.ts:123` | — |
 
 ### `/api/board`
 

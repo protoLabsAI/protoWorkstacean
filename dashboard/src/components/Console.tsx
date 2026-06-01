@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button, Badge, Card, Empty, Divider, type Status } from "@protolabsai/ui";
-import { RefreshCw, Plus, Trash2, CircleCheck, Pencil, X } from "lucide-react";
+import { RefreshCw, Plus, Trash2, CircleCheck, Pencil, X, Globe } from "lucide-react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import {
   getAgentsRuntime,
@@ -9,6 +9,7 @@ import {
   updateAgent,
   deleteAgent,
   getAgentDef,
+  probeAgentCard,
   getAdminKey,
   setAdminKey,
   type AgentsRuntimeResponse,
@@ -45,6 +46,8 @@ export default function Console() {
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null); // agent name being edited; null = create mode
+  const [probeUrl, setProbeUrl] = useState("");
+  const [probe, setProbe] = useState<{ reachable: boolean; name?: string; skills: string[]; error?: string } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -117,6 +120,23 @@ export default function Console() {
     } else {
       setResult({ ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "load failed"}` });
     }
+  }
+
+  async function onProbe() {
+    setBusy(true);
+    setProbe(null);
+    const r = await probeAgentCard(probeUrl.trim());
+    setBusy(false);
+    if (!r.ok) {
+      setProbe({ reachable: false, skills: [], error: `${r.status}: ${(r.body?.error as string) ?? "probe failed"}` });
+      return;
+    }
+    setProbe({
+      reachable: Boolean(r.body?.reachable),
+      name: r.body?.name as string | undefined,
+      skills: (r.body?.skills as string[] | undefined) ?? [],
+      error: r.body?.error as string | undefined,
+    });
   }
 
   async function doDelete(name: string) {
@@ -199,6 +219,41 @@ export default function Console() {
               </span>
             )}
           </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          <div>
+            <strong style={{ color: "var(--text-primary)", fontSize: "14px" }}>Discover an A2A agent</strong>
+            <p style={{ color: "var(--text-secondary)", fontSize: "12px", margin: "2px 0 0" }}>
+              Probe a remote agent's card for reachability + skills before wiring it in.
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <input
+              value={probeUrl}
+              placeholder="https://agent.example/ (base URL)"
+              onChange={(e) => setProbeUrl(e.currentTarget.value)}
+              style={{ ...inputStyle, fontFamily: "inherit", flex: 1 }}
+            />
+            <Button onClick={onProbe} disabled={busy || !probeUrl.trim()}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Globe size={14} /> Probe</span>
+            </Button>
+          </div>
+          {probe && (
+            probe.reachable ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <Badge status="success">reachable</Badge>
+                <strong style={{ color: "var(--text-primary)", fontSize: "13px" }}>{probe.name}</strong>
+                {probe.skills.length === 0
+                  ? <span style={{ color: "var(--text-secondary)", fontSize: "12px" }}>no skills advertised</span>
+                  : probe.skills.map((s) => <Badge key={s} status="neutral">{s}</Badge>)}
+              </div>
+            ) : (
+              <span style={{ color: "var(--text-danger)", fontSize: "13px" }}>✗ {probe.error}</span>
+            )
+          )}
         </div>
       </Card>
 

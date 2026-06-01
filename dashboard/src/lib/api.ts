@@ -202,3 +202,6 @@ export const deleteAgent = (name: string) =>
 /** Read one agent's full definition (to pre-fill the edit form). */
 export const getAgentDef = (name: string) =>
   adminFetch(`/api/agents/${encodeURIComponent(name)}`, "GET");
+/** Probe an A2A agent's card for reachability + skills (capability discovery). */
+export const probeAgentCard = (url: string) =>
+  adminFetch("/api/a2a/probe", "POST", { url });
