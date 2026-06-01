@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: "/trace", label: "Trace", title: "Skill Trace" },
   { to: "/events", label: "Events", title: "Events" },
   { to: "/agents", label: "Agents", title: "Agents" },
+  { to: "/console", label: "Console", title: "Console" },
 ] as const;
 
 // Routes whose component manages its own scroll/height (graph, live feeds) —
