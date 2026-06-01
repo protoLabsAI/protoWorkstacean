@@ -26,6 +26,7 @@ import type { Plugin, EventBus } from "../../lib/types.ts";
 import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import { MODEL_RATES } from "../../lib/types/budget.ts";
+import type { FleetStateRepository, OutcomeRecord as PersistedOutcomeRecord } from "../knowledge/fleet-state.ts";
 
 const WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 hours
 const WINDOW_1H_MS = 60 * 60 * 1_000; // 1 hour
@@ -180,10 +181,27 @@ export class AgentFleetHealthPlugin implements Plugin {
      * for legacy tests until they opt in.
      */
     private readonly executorRegistry?: ExecutorRegistry,
+    /**
+     * Optional durable backing store (ADR-0004 P5). When set, every outcome is
+     * persisted to knowledge.db and the 24h window is rehydrated from it on
+     * install(), so fleet health survives restarts. Degrades gracefully — when
+     * absent, the in-memory path is unchanged.
+     */
+    private readonly fleetStateRepo?: FleetStateRepository,
   ) {}
 
   install(bus: EventBus): void {
     this.bus = bus;
+
+    // Rehydrate the in-memory window from the durable store on startup.
+    if (this.fleetStateRepo) {
+      const records = this.fleetStateRepo.hydrateRecords(24);
+      for (const r of records) this._addToWindow(r);
+      if (records.length > 0) {
+        console.log(`[agent-fleet-health] hydrated ${records.length} records from knowledge.db`);
+      }
+    }
+
     this.subscriptionIds.push(
       bus.subscribe("autonomous.outcome.#", this.name, (msg) => {
         const p = msg.payload as AutonomousOutcomePayload | undefined;
@@ -328,23 +346,58 @@ export class AgentFleetHealthPlugin implements Plugin {
       const existing = this.agentWindows.get(p.systemActor) ?? [];
       existing.push(record);
       this.agentWindows.set(p.systemActor, existing);
-      return;
+    } else {
+      // Synthetic actor: plugin / subsystem label that isn't a real executor.
+      // Log once per distinct actor so operators can see what's being filtered
+      // without flooding on every outcome.
+      if (!this.seenSyntheticActors.has(p.systemActor)) {
+        this.seenSyntheticActors.add(p.systemActor);
+        console.warn(
+          `[agent-fleet-health] synthetic_actor_filtered systemActor=${p.systemActor} ` +
+            `skill=${p.skill} — not in ExecutorRegistry; aggregating under systemActors[] ` +
+            `instead of agents[]. Fix source so it doesn't masquerade as an agent.`,
+        );
+      }
+      const existing = this.systemActorWindows.get(p.systemActor) ?? [];
+      existing.push(record);
+      this.systemActorWindows.set(p.systemActor, existing);
     }
 
-    // Synthetic actor: plugin / subsystem label that isn't a real executor.
-    // Log once per distinct actor so operators can see what's being filtered
-    // without flooding on every outcome.
-    if (!this.seenSyntheticActors.has(p.systemActor)) {
-      this.seenSyntheticActors.add(p.systemActor);
-      console.warn(
-        `[agent-fleet-health] synthetic_actor_filtered systemActor=${p.systemActor} ` +
-          `skill=${p.skill} — not in ExecutorRegistry; aggregating under systemActors[] ` +
-          `instead of agents[]. Fix source so it doesn't masquerade as an agent.`,
-      );
-    }
-    const existing = this.systemActorWindows.get(p.systemActor) ?? [];
+    // Persist to the durable store (fire-and-forget; degrades to no-op when absent).
+    this.fleetStateRepo?.recordOutcome({
+      systemActor: p.systemActor,
+      skill: p.skill,
+      success: p.success,
+      durationMs: p.durationMs,
+      costUsd,
+      correlationId: p.correlationId,
+      failureReason: record.failureReason,
+      model: p.model,
+      inputTokens: p.usage?.input_tokens,
+      outputTokens: p.usage?.output_tokens,
+      timestamp: record.timestamp,
+    });
+  }
+
+  /**
+   * Add a hydrated record (from FleetStateRepository on startup) to the correct
+   * in-memory window. Mirrors `_record`'s routing without re-persisting or
+   * re-warning, since these rows came from the store.
+   */
+  private _addToWindow(r: PersistedOutcomeRecord): void {
+    const record: OutcomeRecord = {
+      timestamp: r.timestamp,
+      success: r.success,
+      durationMs: r.durationMs,
+      costUsd: r.costUsd,
+      skill: r.skill,
+      correlationId: r.correlationId,
+      failureReason: r.failureReason,
+    };
+    const window = this._isRegisteredAgent(r.systemActor) ? this.agentWindows : this.systemActorWindows;
+    const existing = window.get(r.systemActor) ?? [];
     existing.push(record);
-    this.systemActorWindows.set(p.systemActor, existing);
+    window.set(r.systemActor, existing);
   }
 
   /**

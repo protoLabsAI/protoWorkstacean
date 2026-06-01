@@ -1,6 +1,9 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { InMemoryEventBus } from "../../lib/bus.ts";
 import { AgentFleetHealthPlugin } from "./agent-fleet-health-plugin.ts";
+import { FleetStateRepository } from "../knowledge/fleet-state.ts";
 import { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { IExecutor, SkillRequest, SkillResult } from "../executor/types.ts";
 import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
@@ -498,6 +501,79 @@ describe("AgentFleetHealthPlugin", () => {
       const ava = plugin.getFleetHealth().agents.find(a => a.agentName === "ava")!;
       // Falls back to default rate
       expect(ava.costPerSuccessfulOutcome).toBeCloseTo(0.018, 4);
+    });
+  });
+
+  describe("durable persistence (ADR-0004 P5)", () => {
+    const DB = join(import.meta.dir, ".test-fleet-health-hydrate.db");
+    const wipe = () => {
+      for (const s of ["", "-wal", "-shm"]) if (existsSync(DB + s)) rmSync(DB + s);
+    };
+
+    beforeEach(wipe);
+    afterEach(wipe);
+
+    test("persists outcomes and rehydrates the window on install", async () => {
+      const registry = makeRegistry(["ava"]);
+
+      // First lifetime: record an outcome, then tear down.
+      const repo1 = new FleetStateRepository(DB);
+      repo1.init();
+      const p1 = new AgentFleetHealthPlugin(registry, repo1);
+      p1.install(bus);
+      bus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "ava",
+        skill: "plan",
+        success: true,
+        durationMs: 1000,
+      }));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(p1.getFleetHealth().agents).toHaveLength(1);
+      p1.uninstall();
+      repo1.close();
+
+      // Second lifetime: a fresh plugin + bus hydrates the prior outcome from disk.
+      const bus2 = new InMemoryEventBus();
+      const repo2 = new FleetStateRepository(DB);
+      repo2.init();
+      const p2 = new AgentFleetHealthPlugin(registry, repo2);
+      p2.install(bus2);
+
+      const ava = p2.getFleetHealth().agents.find((a) => a.agentName === "ava");
+      expect(ava).toBeDefined();
+      expect(ava!.totalOutcomes).toBe(1);
+      expect(ava!.successRate).toBe(1);
+      p2.uninstall();
+      repo2.close();
+    });
+
+    test("hydration routes unregistered actors to systemActors[]", async () => {
+      const registry = makeRegistry(["ava"]); // pr-remediator is NOT registered
+
+      const repo1 = new FleetStateRepository(DB);
+      repo1.init();
+      const p1 = new AgentFleetHealthPlugin(registry, repo1);
+      p1.install(bus);
+      bus.publish("autonomous.outcome.completed", makeOutcomeMsg({
+        systemActor: "pr-remediator",
+        skill: "remediate",
+        success: true,
+      }));
+      await new Promise((r) => setTimeout(r, 10));
+      p1.uninstall();
+      repo1.close();
+
+      const bus2 = new InMemoryEventBus();
+      const repo2 = new FleetStateRepository(DB);
+      repo2.init();
+      const p2 = new AgentFleetHealthPlugin(registry, repo2);
+      p2.install(bus2);
+
+      const snap = p2.getFleetHealth();
+      expect(snap.agents.find((a) => a.agentName === "pr-remediator")).toBeUndefined();
+      expect(snap.systemActors.find((s) => s.systemActor === "pr-remediator")).toBeDefined();
+      p2.uninstall();
+      repo2.close();
     });
   });
 });
