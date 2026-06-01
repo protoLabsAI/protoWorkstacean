@@ -90,6 +90,34 @@ export interface AgentHealthProbe {
   error?: string;
 }
 
+/**
+ * Reconcile an agent's registry against a freshly-fetched card.
+ *
+ *  - toAdd:    card skills not already card-registered and not a yaml override.
+ *  - toRemove: previously card-registered skills no longer on the card — but
+ *              NEVER a yaml override (those are declared intent in agents.yaml /
+ *              agents.d and persist regardless of what the card advertises).
+ *
+ * Pure so the override-preservation invariant is unit-testable without the
+ * network. `previousCard`/`currentCard` are card-discovered sets only; yaml
+ * overrides are tracked separately and registered once at agent registration.
+ */
+export function reconcileCardSkills(
+  previousCard: Set<string>,
+  yamlOverrides: Set<string>,
+  currentCard: Set<string>,
+): { toAdd: string[]; toRemove: string[] } {
+  const toAdd: string[] = [];
+  for (const s of currentCard) {
+    if (!previousCard.has(s) && !yamlOverrides.has(s)) toAdd.push(s);
+  }
+  const toRemove: string[] = [];
+  for (const s of previousCard) {
+    if (!currentCard.has(s) && !yamlOverrides.has(s)) toRemove.push(s);
+  }
+  return { toAdd, toRemove };
+}
+
 export class SkillBrokerPlugin implements Plugin {
   readonly name = "skill-broker";
   readonly description = "Registers A2AExecutors with ExecutorRegistry from agents.yaml + auto-discovered agent cards";
@@ -99,8 +127,16 @@ export class SkillBrokerPlugin implements Plugin {
   private readonly executorRegistry: ExecutorRegistry;
   private refreshTimer?: ReturnType<typeof setInterval>;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
-  /** Tracks skills we registered per agent so we can cleanly re-register on refresh. */
+  /** Card-discovered skills per agent — the set diffed + pruned on each card refresh. */
   private registeredSkills = new Map<string, Set<string>>();
+  /**
+   * Yaml-declared skills per agent (the `skills:` block in agents.yaml / agents.d).
+   * These are OVERRIDES — they take precedence and are NEVER pruned by card
+   * discovery, even when the agent's card doesn't (yet) advertise them. Without
+   * this, an agent whose card lags its yaml (e.g. a fresh fork still advertising
+   * only `chat`) loses its declared skills on the first 10-min refresh.
+   */
+  private readonly yamlSkills = new Map<string, Set<string>>();
   /** Per-agent liveness probe cache, refreshed every HEARTBEAT_INTERVAL_MS. */
   private fleetHealth = new Map<string, AgentHealthProbe>();
   /** Live A2A agent set (def + executor) — the source for timers + control-plane reconcile. */
@@ -192,7 +228,10 @@ export class SkillBrokerPlugin implements Plugin {
       this.executorRegistry.register(skillName, executor, { agentName: agent.name, priority: 5 });
       explicitSkills.add(skillName);
     }
-    this.registeredSkills.set(agent.name, explicitSkills);
+    // Yaml skills are overrides — record them separately so card discovery never
+    // prunes them. registeredSkills only ever tracks card-discovered skills.
+    this.yamlSkills.set(agent.name, explicitSkills);
+    this.registeredSkills.set(agent.name, new Set());
     this.agentDefs.set(agent.name, agent);
     this.executors.set(agent.name, executor);
     void this._discoverSkills(agent, executor, resolvedUrl);
@@ -206,6 +245,7 @@ export class SkillBrokerPlugin implements Plugin {
       if (reg.agentName === name && reg.skill) this.executorRegistry.unregister(reg.skill, name);
     }
     this.registeredSkills.delete(name);
+    this.yamlSkills.delete(name);
     this.agentDefs.delete(name);
     this.executors.delete(name);
     this.fleetHealth.delete(name);
@@ -282,33 +322,24 @@ export class SkillBrokerPlugin implements Plugin {
         );
       }
 
+      // registeredSkills tracks only CARD-discovered skills (yaml overrides live
+      // in yamlSkills and are never pruned here).
       const previouslyRegistered = this.registeredSkills.get(agent.name) ?? new Set<string>();
+      const yamlOverrides = this.yamlSkills.get(agent.name) ?? new Set<string>();
       const currentSkills = new Set<string>();
       for (const cardSkill of card.skills ?? []) {
         if (cardSkill.id) currentSkills.add(cardSkill.id);
       }
 
-      // Add skills that are in the new card but not yet registered.
-      let added = 0;
-      for (const skillName of currentSkills) {
-        if (previouslyRegistered.has(skillName)) continue;
-        this.executorRegistry.register(skillName, executor, {
-          agentName: agent.name,
-          priority: 5,
-        });
-        added++;
+      const { toAdd, toRemove } = reconcileCardSkills(previouslyRegistered, yamlOverrides, currentSkills);
+      for (const skillName of toAdd) {
+        this.executorRegistry.register(skillName, executor, { agentName: agent.name, priority: 5 });
       }
-
-      // Remove skills that were registered but are no longer in the card.
-      // Without this, an agent that drops a skill keeps absorbing dispatches
-      // for it until workstacean restarts — exactly the kind of silent drift
-      // #608's loud-failure fix was meant to prevent.
-      const removed: string[] = [];
-      for (const skillName of previouslyRegistered) {
-        if (currentSkills.has(skillName)) continue;
+      for (const skillName of toRemove) {
         this.executorRegistry.unregister(skillName, agent.name);
-        removed.push(skillName);
       }
+      const added = toAdd.length;
+      const removed = toRemove;
 
       this.registeredSkills.set(agent.name, currentSkills);
       if (added > 0) {
