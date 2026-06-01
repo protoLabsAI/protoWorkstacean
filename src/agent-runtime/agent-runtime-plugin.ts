@@ -27,6 +27,9 @@ import { DeepAgentExecutor } from "../executor/executors/deep-agent-executor.ts"
 import { ProtoSdkExecutor } from "../executor/executors/proto-sdk-executor.ts";
 import { loadAgentDefinitions } from "./agent-definition-loader.ts";
 import type { AgentDefinition } from "./types.ts";
+import { WorkspaceWatcher, type FileDiff } from "../../lib/workspace-watcher.ts";
+import { computeAgentDiff, hashDefinition, isEmptyAgentDiff } from "./agent-diff.ts";
+import { join } from "node:path";
 
 export interface AgentRuntimeConfig {
   workspaceDir: string;
@@ -45,6 +48,9 @@ export class AgentRuntimePlugin implements Plugin {
   private readonly config: AgentRuntimeConfig;
   private readonly executorRegistry: ExecutorRegistry;
   private bus?: EventBus;
+  /** Currently-registered agents: name → content hash. The "running" set the on-disk state is diffed against. */
+  private readonly registered = new Map<string, string>();
+  private watcher?: WorkspaceWatcher;
 
   constructor(config: AgentRuntimeConfig, executorRegistry: ExecutorRegistry) {
     this.config = config;
@@ -66,6 +72,7 @@ export class AgentRuntimePlugin implements Plugin {
           priority: 10,
         });
       }
+      this.registered.set(def.name, hashDefinition(def));
     }
 
     const agentNames = definitions.map(d => `${d.name}(${d.runtime ?? "deep-agent"})`).join(", ") || "(none)";
@@ -73,9 +80,49 @@ export class AgentRuntimePlugin implements Plugin {
       `[agent-runtime] Registered ${definitions.length} agent(s) ` +
       `[deep-agent: ${counts["deep-agent"]}, proto-sdk: ${counts["proto-sdk"]}]: ${agentNames}`,
     );
+
+    // ADR-0004 P1 (day 1 — detect-only): watch workspace/agents/ and report
+    // drift between the on-disk definitions and the running set. The apply path
+    // (build/register added, unregister/dispose removed) lands in P1 day 2.
+    this.watcher = new WorkspaceWatcher({
+      dirs: [join(this.config.workspaceDir, "agents")],
+      onChange: (diff) => this._onAgentsChanged(diff),
+    });
+    this.watcher.start();
   }
 
-  uninstall(): void {}
+  /**
+   * Detect-only handler (P1 day 1): a workspace/agents/ file changed. Reload the
+   * definitions and log how the on-disk state has drifted from the running set.
+   * Does NOT mutate the registry yet — that's P1 day 2.
+   */
+  private _onAgentsChanged(diff: FileDiff): void {
+    let definitions: AgentDefinition[];
+    try {
+      definitions = loadAgentDefinitions(this.config.workspaceDir);
+    } catch (err) {
+      console.error(`[agent-runtime] reload failed: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    const agentDiff = computeAgentDiff(this.registered, definitions);
+    if (isEmptyAgentDiff(agentDiff)) {
+      // File touched but no semantic agent change (comment, whitespace, mtime-only).
+      return;
+    }
+    const fileSummary = `+${diff.added.length} ~${diff.changed.length} -${diff.removed.length} file(s)`;
+    console.log(
+      `[agent-runtime] workspace/agents changed (${fileSummary}) — on-disk agents drift from running: ` +
+      `added=[${agentDiff.added.map(d => d.name).join(", ")}] ` +
+      `changed=[${agentDiff.changed.map(d => d.name).join(", ")}] ` +
+      `removed=[${agentDiff.removed.join(", ")}]. ` +
+      `Detect-only (P1 day 1); restart or the P1 day-2 apply picks these up.`,
+    );
+  }
+
+  uninstall(): void {
+    this.watcher?.stop();
+    this.watcher = undefined;
+  }
 
   /**
    * Shared tool-call telemetry hook — fires per tool_use event into
