@@ -1,7 +1,5 @@
-import { resolve, dirname, join } from "node:path";
-import { readFileSync, existsSync } from "node:fs";
+import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
 import type { ServerWebSocket } from "bun";
 import type { Plugin, EventBus, BusMessage } from "../types";
 
@@ -18,12 +16,10 @@ export class EventViewerPlugin implements Plugin {
   private subscriptionId: string | null = null;
   private port: number;
   private viewerDir: string;
-  private workspaceDir: string;
 
   constructor(port: number = 8080) {
     this.port = port;
     this.viewerDir = resolve(__dirname, "../../dashboard/dist");
-    this.workspaceDir = resolve(process.env.WORKSPACE_DIR || join(process.cwd(), "workspace"));
   }
 
   install(bus: EventBus): void {
@@ -49,7 +45,12 @@ export class EventViewerPlugin implements Plugin {
         if (url.pathname === "/api/events") return this.handleApiEvents(req);
         if (url.pathname === "/api/topics") return this.handleApiTopics();
         if (url.pathname === "/api/consumers") return this.handleApiConsumers();
-        if (url.pathname === "/api/agents") return this.handleApiAgents();
+        // NOTE: no /api/agents interception here. The control plane (ADR-0004)
+        // owns /api/agents on the main server — GET /api/agents/runtime plus the
+        // POST/PUT/DELETE write API. A legacy exact-match handler used to dump
+        // agents.yaml here and swallowed the Console's mutations (returned 200,
+        // never proxied), breaking create/edit/delete from the UI. Everything
+        // under /api/ now proxies straight through.
 
         if (url.pathname.startsWith("/api/")) return this.proxyToMainServer(req, url);
 
@@ -114,24 +115,6 @@ export class EventViewerPlugin implements Plugin {
 
   private handleApiConsumers(): Response {
     return Response.json(this.bus?.consumers() ?? []);
-  }
-
-  private handleApiAgents(): Response {
-    return this._serveYaml("agents.yaml", "agents");
-  }
-
-  private _serveYaml(filename: string, key: string): Response {
-    const filePath = join(this.workspaceDir, filename);
-    if (!existsSync(filePath)) {
-      return Response.json({ success: false, error: `${filename} not found` }, { status: 404 });
-    }
-    try {
-      const raw = readFileSync(filePath, "utf8");
-      const parsed = parseYaml(raw) as Record<string, unknown>;
-      return Response.json({ success: true, data: parsed[key] ?? [] });
-    } catch (err) {
-      return Response.json({ success: false, error: `Failed to parse ${filename}` }, { status: 500 });
-    }
   }
 
   private mainServerPort: number = parseInt(process.env.PORT || "3000", 10);
