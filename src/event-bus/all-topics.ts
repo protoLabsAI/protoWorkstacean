@@ -77,6 +77,15 @@ export const ACTION_TOPICS = {
    */
   COMMAND_AGENT_UPSERT: "command.agent.upsert",
   COMMAND_AGENT_REMOVE: "command.agent.remove",
+  /**
+   * A2A-endpoint mutations (ADR-0004 P3). The registrar persists the entry to
+   * workspace/agents.d/<name>.yaml; SkillBroker registers/unregisters the
+   * A2AExecutor live in the same turn (no restart).
+   *   command.a2a.upsert — { name, file, yaml, entry }
+   *   command.a2a.remove — { name, file }
+   */
+  COMMAND_A2A_UPSERT: "command.a2a.upsert",
+  COMMAND_A2A_REMOVE: "command.a2a.remove",
 
   /** Wildcard subscription pattern — matches all cron events from SchedulerPlugin. */
   CRON_ALL: "cron.#",

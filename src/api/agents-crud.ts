@@ -16,7 +16,7 @@
  */
 
 import { join, resolve, dirname } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { stringify as stringifyYaml, parse as parseYaml } from "yaml";
 import type { Route, ApiContext } from "./types.ts";
 import { parseAgentYaml, loadAgentEntries } from "../agent-runtime/agent-definition-loader.ts";
@@ -60,6 +60,45 @@ export function createRoutes(ctx: ApiContext): Route[] {
       payload: { name, ...payload },
       source: { interface: "api" },
     });
+  }
+
+  // ── A2A endpoints (control-plane-managed, per-file in workspace/agents.d/) ──
+  const agentsdDir = join(ctx.workspaceDir, "agents.d");
+  /** The managed file for an A2A agent (control-plane writes here; agents.yaml stays hand-maintained). */
+  const a2aManagedFile = (name: string) => join(agentsdDir, `${safeFileName(name)}.yaml`);
+  /** All A2A agent names known today — agents.yaml (hand-maintained) + agents.d/ (managed). */
+  function listA2aNames(): string[] {
+    const names: string[] = [];
+    const yamlPath = join(ctx.workspaceDir, "agents.yaml");
+    if (existsSync(yamlPath)) {
+      try {
+        const p = parseYaml(readFileSync(yamlPath, "utf8")) as { agents?: Array<{ name?: string }> };
+        for (const a of p?.agents ?? []) if (a?.name) names.push(a.name);
+      } catch { /* tolerate a malformed agents.yaml */ }
+    }
+    if (existsSync(agentsdDir)) {
+      try {
+        for (const f of readdirSync(agentsdDir)) {
+          if (!/\.ya?ml$/.test(f) || f.endsWith(".example")) continue;
+          try {
+            const d = parseYaml(readFileSync(join(agentsdDir, f), "utf8")) as { name?: string };
+            if (d?.name) names.push(d.name);
+          } catch { /* skip */ }
+        }
+      } catch { /* dir gone */ }
+    }
+    return names;
+  }
+  /** Validate an A2A entry — name + http(s) url are the essentials SkillBroker needs. */
+  function validateA2a(body: unknown): { entry: Record<string, unknown> } | { error: Response } {
+    const e = (body ?? {}) as Record<string, unknown>;
+    if (!e.name || typeof e.name !== "string") {
+      return { error: Response.json({ success: false, error: "name (string) is required" }, { status: 400 }) };
+    }
+    if (!e.url || typeof e.url !== "string" || !/^https?:\/\//.test(e.url)) {
+      return { error: Response.json({ success: false, error: "url (http/https) is required" }, { status: 400 }) };
+    }
+    return { entry: e };
   }
 
   return [
@@ -199,6 +238,65 @@ export function createRoutes(ctx: ApiContext): Route[] {
           return Response.json({ success: false, error: "delete did not complete (see logs)" }, { status: 500 });
         }
         return Response.json({ success: true, name: p.name, note: "unregistered within ~5s" });
+      },
+    },
+
+    // ── A2A endpoints — control-plane-managed remote agents (agents.d/) ──
+    {
+      method: "POST",
+      path: "/api/a2a-endpoints",
+      handler: async (req) => {
+        if (!authorized(req)) return unauthorized();
+        let body: unknown;
+        try { body = await req.json(); } catch { return badJson(); }
+        const v = validateA2a(body);
+        if ("error" in v) return v.error;
+        const name = v.entry.name as string;
+        if (listA2aNames().includes(name)) {
+          return Response.json({ success: false, error: `A2A agent "${name}" already exists` }, { status: 409 });
+        }
+        const file = a2aManagedFile(name);
+        command("command.a2a.upsert", name, { file, yaml: stringifyYaml(v.entry), entry: v.entry });
+        if (!existsSync(file)) {
+          return Response.json({ success: false, error: "write did not complete (see logs)" }, { status: 500 });
+        }
+        return Response.json({ success: true, name, file, note: "registered live (SkillBroker)" }, { status: 201 });
+      },
+    },
+    {
+      method: "PUT",
+      path: "/api/a2a-endpoints/:name",
+      handler: async (req, p) => {
+        if (!authorized(req)) return unauthorized();
+        let body: unknown;
+        try { body = await req.json(); } catch { return badJson(); }
+        const v = validateA2a(body);
+        if ("error" in v) return v.error;
+        if (v.entry.name !== p.name) {
+          return Response.json({ success: false, error: `body name "${v.entry.name as string}" must match path "${p.name}"` }, { status: 400 });
+        }
+        const file = a2aManagedFile(p.name);
+        if (!existsSync(file)) {
+          return Response.json({ success: false, error: `A2A agent "${p.name}" not found (control-plane managed only — hand-maintained agents.yaml entries are edited there)` }, { status: 404 });
+        }
+        command("command.a2a.upsert", p.name, { file, yaml: stringifyYaml(v.entry), entry: v.entry });
+        return Response.json({ success: true, name: p.name, file, note: "updated live" });
+      },
+    },
+    {
+      method: "DELETE",
+      path: "/api/a2a-endpoints/:name",
+      handler: async (req, p) => {
+        if (!authorized(req)) return unauthorized();
+        const file = a2aManagedFile(p.name);
+        if (!existsSync(file)) {
+          return Response.json({ success: false, error: `A2A agent "${p.name}" not found (control-plane managed only)` }, { status: 404 });
+        }
+        command("command.a2a.remove", p.name, { file });
+        if (existsSync(file)) {
+          return Response.json({ success: false, error: "delete did not complete (see logs)" }, { status: 500 });
+        }
+        return Response.json({ success: true, name: p.name, note: "unregistered live" });
       },
     },
   ];

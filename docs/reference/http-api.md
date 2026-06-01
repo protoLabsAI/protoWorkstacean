@@ -6,8 +6,8 @@ title: HTTP API
 
 ## Summary
 
-- **78** HTTP routes across **33** path groups
-- **14** routes carry a resolved one-line description
+- **81** HTTP routes across **34** path groups
+- **15** routes carry a resolved one-line description
 
 Each row links to the route definition as `path:line` so jumping from this index to the source is a click. Routes are defined as `{ method, path, handler }` literals in `src/api/*.ts` and collected by `src/api/index.ts`.
 
@@ -32,8 +32,16 @@ Each row links to the route definition as `path:line` so jumping from this index
 | `POST` | `/api/a2a/chat` | `src/api/ava-tools.ts:348` | multi-turn conversation with an agent over the bus. |
 | `POST` | `/api/a2a/delegate` | `src/api/ava-tools.ts:349` | fire-and-forget task dispatch to an agent. |
 | `POST` | `/api/a2a/input` | `src/api/human-input.ts:115` | — |
-| `POST` | `/api/a2a/probe` | `src/api/agents-crud.ts:66` | — |
+| `POST` | `/api/a2a/probe` | `src/api/agents-crud.ts:105` | — |
 | `GET` | `/api/a2a/task/:correlationId` | `src/api/ava-tools.ts:350` | correlationId — fetch the result of a dispatch that a chat caller stopped awaiting (timed out). |
+
+### `/api/a2a-endpoints`
+
+| Method | Path | Source | Description |
+|---|---|---|---|
+| `POST` | `/api/a2a-endpoints` | `src/api/agents-crud.ts:245` | A2A endpoints — control-plane-managed remote agents (agents.d/) |
+| `PUT` | `/api/a2a-endpoints/:name` | `src/api/agents-crud.ts:266` | — |
+| `DELETE` | `/api/a2a-endpoints/:name` | `src/api/agents-crud.ts:286` | — |
 
 ### `/api/agent`
 
@@ -46,12 +54,12 @@ Each row links to the route definition as `path:line` so jumping from this index
 | Method | Path | Source | Description |
 |---|---|---|---|
 | `GET` | `/api/agents` | `src/api/operations.ts:250` | — |
-| `POST` | `/api/agents` | `src/api/agents-crud.ts:142` | — |
-| `GET` | `/api/agents/:name` | `src/api/agents-crud.ts:105` | — |
-| `PUT` | `/api/agents/:name` | `src/api/agents-crud.ts:172` | — |
-| `DELETE` | `/api/agents/:name` | `src/api/agents-crud.ts:190` | — |
+| `POST` | `/api/agents` | `src/api/agents-crud.ts:181` | — |
+| `GET` | `/api/agents/:name` | `src/api/agents-crud.ts:144` | — |
+| `PUT` | `/api/agents/:name` | `src/api/agents-crud.ts:211` | — |
+| `DELETE` | `/api/agents/:name` | `src/api/agents-crud.ts:229` | — |
 | `GET` | `/api/agents/runtime` | `src/api/agents-runtime.ts:67` | — |
-| `POST` | `/api/agents/test` | `src/api/agents-crud.ts:123` | — |
+| `POST` | `/api/agents/test` | `src/api/agents-crud.ts:162` | — |
 
 ### `/api/board`
 
