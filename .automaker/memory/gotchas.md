@@ -5,9 +5,9 @@ relevantTo: [gotchas]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 72
-  referenced: 0
-  successfulFeatures: 0
+  loaded: 75
+  referenced: 1
+  successfulFeatures: 1
 ---
 # gotchas
 
@@ -20,3 +20,8 @@ usageStats:
 - **Situation:** Initial implementation of workspace watchers often only detects that a file changed, but doesn't handle the complex state transition of removing old registrations and adding new ones.
 - **Root cause:** A simple 'reload all' approach is inefficient and disruptive; a 'diff-and-apply' approach minimizes the impact on the running system by only touching the specific agents that changed.
 - **How to avoid:** Requires maintaining a hash or version of the agent definition to perform effective diffing.
+
+#### [Gotcha] Distinction between 'Registered Agents' and 'Synthetic Actors' in telemetry attribution. (2026-06-01)
+- **Situation:** Handling outcomes where the `systemActor` is not found in the `ExecutorRegistry`.
+- **Root cause:** Some system components act as actors but aren't formal executors. The implementation explicitly detects these 'synthetic actors', logs a warning once to prevent log flooding, and routes them to a separate `systemActorWindows` collection rather than the standard `agentWindows`.
+- **How to avoid:** Requires maintaining two separate Map collections in memory, but ensures high signal-to-noise ratio in agent health dashboards.

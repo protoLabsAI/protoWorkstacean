@@ -5,9 +5,9 @@ relevantTo: [architecture]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 15
-  referenced: 1
-  successfulFeatures: 1
+  loaded: 18
+  referenced: 2
+  successfulFeatures: 2
 ---
 # architecture
 
@@ -63,3 +63,15 @@ usageStats:
 - **Rejected:** Immediate replacement of executors, which would cause in-flight requests to fail with 'executor not found' or 'connection closed' errors.
 - **Trade-offs:** Increases complexity by requiring a WeakMap for in-flight counting and adding asynchronous waiting logic to the unregistration process; however, it provides much higher system stability during configuration changes.
 - **Breaking if changed:** Removing the `unregisterAgent` drain logic or the `dispose()` hook would lead to either interrupted user requests or leaked resources (e.g., open sockets/processes) from old executors.
+
+### Implementation of a durable, unified live state using a repository pattern for plugin hydration. (2026-06-01)
+- **Context:** The AgentFleetHealthPlugin needed to maintain rolling 24h windows of agent performance (success/latency/cost) but would lose this data on restart.
+- **Why:** By introducing `FleetStateRepository` backed by `knowledge.db`, the system can hydrate in-memory Maps during the `install()` phase, ensuring continuity of telemetry without requiring a full historical replay of all events.
+- **Rejected:** Relying solely on in-memory state (lost on restart) or querying a full historical database on every request (too slow for real-time rollups).
+- **Trade-offs:** Increases complexity by requiring a dual-write strategy (in-memory window + durable store) and a hydration step at startup, but provides near-instantaneous read access to recent history.
+- **Breaking if changed:** Removing the hydration logic causes 'blind spots' in telemetry every time the service restarts; removing the repository prevents persistence entirely.
+
+#### [Pattern] Graceful degradation of durable storage in plugins. (2026-06-01)
+- **Problem solved:** The `AgentFleetHealthPlugin` depends on `fleetStateRepo` for persistence.
+- **Why this works:** The implementation uses an optional dependency (`private readonly fleetStateRepo?: FleetStateRepository`) and checks for its existence before attempting writes or hydration. This allows the plugin to function as a purely in-memory aggregator if the database layer is unavailable or not configured.
+- **Trade-offs:** Makes the code slightly more defensive with null checks, but significantly increases the portability and testability of the plugin.
