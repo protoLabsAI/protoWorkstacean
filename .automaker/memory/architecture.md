@@ -5,9 +5,9 @@ relevantTo: [architecture]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 19
-  referenced: 3
-  successfulFeatures: 3
+  loaded: 20
+  referenced: 4
+  successfulFeatures: 4
 ---
 # architecture
 
@@ -82,3 +82,8 @@ usageStats:
 - **Rejected:** Polling CI status from the agent side.
 - **Trade-offs:** Requires handling specific webhook events (`check_suite.completed`, `workflow_run.completed`) and mapping SHAs to open PRs, which increases integration surface area compared to simple polling.
 - **Breaking if changed:** Removing this logic reverts the system to a purely advisory role where it can never formally pass a PR through a gate automatically.
+
+#### [Pattern] Implementing a 'Formal Review' guard (`_hasFormalQuinnReview`) before re-triggering automation. (2026-06-01)
+- **Problem solved:** CI completion webhooks can fire multiple times or for different check suites on the same commit.
+- **Why this works:** To prevent Quinn from repeatedly reviewing a PR that already has a definitive status (APPROVED or CHANGES_REQUESTED), saving compute and avoiding noise in the PR timeline.
+- **Trade-offs:** Requires the system to maintain/check the state of previous reviews, but significantly reduces redundant API calls and LLM usage.

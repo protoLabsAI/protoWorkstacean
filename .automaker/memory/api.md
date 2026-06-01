@@ -5,9 +5,9 @@ relevantTo: [api]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 6
-  referenced: 2
-  successfulFeatures: 2
+  loaded: 7
+  referenced: 3
+  successfulFeatures: 3
 ---
 # api
 
@@ -22,3 +22,10 @@ usageStats:
 - **Rejected:** Using a single unified dedup key based only on the PR number/SHA.
 - **Trade-offs:** Increases complexity in the key generation logic but provides granular control over which event type 'owns' the current review cycle.
 - **Breaking if changed:** If prefixes are merged, a CI completion might inadvertently suppress a manual re-review or vice versa due to key collision.
+
+### Use a specific `ci-review:` prefix for the deduplication key when re-dispatching reviews via CI completion events. (2026-06-01)
+- **Context:** The system needs to trigger an automatic review after CI passes, but must avoid infinite loops or colliding with standard PR review triggers.
+- **Why:** It distinguishes between a review triggered by a manual/standard PR event and one triggered specifically by a CI status change, allowing for granular control over which logic applies to which trigger.
+- **Rejected:** Using the same `pr-review:` prefix as standard PR reviews.
+- **Trade-offs:** Adds slight complexity to the key management but provides much higher observability and prevents collision-based logic errors.
+- **Breaking if changed:** If removed, the system might lose the ability to differentiate why a review was triggered, potentially leading to duplicate processing or inability to apply CI-specific logic.

@@ -5,9 +5,9 @@ relevantTo: [gotchas]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 76
-  referenced: 2
-  successfulFeatures: 2
+  loaded: 77
+  referenced: 3
+  successfulFeatures: 3
 ---
 # gotchas
 
@@ -25,3 +25,8 @@ usageStats:
 - **Situation:** Handling outcomes where the `systemActor` is not found in the `ExecutorRegistry`.
 - **Root cause:** Some system components act as actors but aren't formal executors. The implementation explicitly detects these 'synthetic actors', logs a warning once to prevent log flooding, and routes them to a separate `systemActorWindows` collection rather than the standard `agentWindows`.
 - **How to avoid:** Requires maintaining two separate Map collections in memory, but ensures high signal-to-noise ratio in agent health dashboards.
+
+#### [Gotcha] The necessity of a 'Stale SHA guard' during CI webhook handling. (2026-06-01)
+- **Situation:** In active development, a developer might push a new commit while a CI run for an older commit is still finishing.
+- **Root cause:** Webhooks for older commits can arrive late. If the system processes a 'success' for an old SHA, it might attempt to review a PR that has already moved forward, causing context mismatch.
+- **How to avoid:** Increases implementation complexity by requiring SHA verification against the current PR head, but ensures review accuracy.
