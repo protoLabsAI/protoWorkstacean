@@ -51,7 +51,9 @@ For a single repository: **Settings → Webhooks → Add webhook**
 | Content type | `application/json` |
 | Secret | Value of `GITHUB_WEBHOOK_SECRET` |
 | SSL verification | Enable |
-| Events | Issue comments, Issues, Pull request review comments, Pull requests |
+| Events | Issue comments, Issues, Pull request review comments, Pull requests, **Workflow runs**, **Check suites** |
+
+> **Workflow runs + Check suites are required for the CI-completion re-review** (#721): Quinn posts a provisional `COMMENT` while CI is in flight and only upgrades to a formal `APPROVE`/`REQUEST_CHANGES` once every check is terminal. Without these two events nothing re-invokes Quinn when CI finishes, so clean PRs stall at the provisional comment. If you registered the webhook before 2026-06, **edit the existing hook to add them** (`PATCH orgs/protoLabsAI/hooks/<id>` with the full events list).
 
 ### Org-level webhook (recommended)
 
@@ -69,7 +71,9 @@ gh api orgs/protoLabsAI/hooks \
   --field "events[]=issues" \
   --field "events[]=issue_comment" \
   --field "events[]=pull_request" \
-  --field "events[]=pull_request_review_comment"
+  --field "events[]=pull_request_review_comment" \
+  --field "events[]=workflow_run" \
+  --field "events[]=check_suite"
 ```
 
 ---
@@ -83,7 +87,10 @@ Fine-grained PAT scoped to the target repo:
 | Issues | Read & Write |
 | Pull requests | Read & Write |
 | Actions | Read |
+| Checks | Read |
 | Contents | Read |
+
+> **Checks: Read** backs the CI-completion re-review's terminal gate (#721) — Quinn reads `commits/{sha}/check-runs` to confirm every check has finished before posting a formal verdict. If it's missing the gate fails *open* (Quinn still re-reviews, just without waiting for full terminality).
 
 ---
 
