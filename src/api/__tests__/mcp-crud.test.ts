@@ -112,6 +112,18 @@ describe("mcp-crud control-plane API", () => {
     expect(byName.thirdparty!.enabled).toBe(false); // community is off until the operator enables it (ADR-0005 D2)
   });
 
+  test("GET /:name returns the full stored def; 404 when missing", async () => {
+    await route("POST", "/api/mcp-servers").handler(req(STDIO), {});
+    const res = await route("GET", "/api/mcp-servers/:name").handler(req(undefined), { name: "filesystem" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { def: { name: string; command: string[] } };
+    expect(body.def.name).toBe("filesystem");
+    expect(body.def.command[0]).toBe("npx"); // full def — includes the command the list summary omits
+
+    const missing = await route("GET", "/api/mcp-servers/:name").handler(req(undefined), { name: "ghost" });
+    expect(missing.status).toBe(404);
+  });
+
   test("admin key enforced when ctx.apiKey is set", async () => {
     ctx = { ...ctx, apiKey: "secret" };
     routes = createRoutes(ctx);

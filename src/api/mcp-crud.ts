@@ -148,6 +148,25 @@ export function createRoutes(ctx: ApiContext): Route[] {
       },
     },
     {
+      // Full stored def for one server (to pre-fill the edit form / flip enabled).
+      // env holds unresolved ${VAR} refs (resolved at connect time), not secrets.
+      method: "GET",
+      path: "/api/mcp-servers/:name",
+      handler: (req, p) => {
+        if (!authorized(req)) return unauthorized();
+        const file = managedFile(p.name);
+        if (!existsSync(file)) {
+          return Response.json({ success: false, error: `MCP server "${p.name}" not found` }, { status: 404 });
+        }
+        try {
+          const def = parseYaml(readFileSync(file, "utf8"));
+          return Response.json({ success: true, name: p.name, def });
+        } catch (err) {
+          return Response.json({ success: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+        }
+      },
+    },
+    {
       method: "POST",
       path: "/api/mcp-servers",
       handler: async (req) => {
