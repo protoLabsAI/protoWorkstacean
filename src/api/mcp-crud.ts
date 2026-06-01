@@ -20,6 +20,11 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { stringify as stringifyYaml, parse as parseYaml } from "yaml";
 import type { Route, ApiContext } from "./types.ts";
 import type { McpServerDef, TrustTier, McpTransport, CapabilityGrant } from "../mcp/types.ts";
+import { mcpEnabled, probeMcpServer } from "../mcp/mcp-connect.ts";
+
+// Canonical trust-tier enable gate lives in mcp-connect (shared with the plugin);
+// re-exported so existing importers (and the unified read) keep their path.
+export { mcpEnabled };
 
 const TRUST_TIERS: TrustTier[] = ["builtin", "trusted", "community"];
 const TRANSPORTS: McpTransport[] = ["stdio", "sse"];
@@ -37,13 +42,6 @@ export interface McpServerSummary {
   enabled: boolean;
   grants: CapabilityGrant[];
   description?: string;
-}
-
-/** Effective enabled state: explicit `enabled`, else builtin/trusted auto-enable, community off (ADR-0005 D2). */
-export function mcpEnabled(def: Pick<McpServerDef, "trust" | "enabled">): boolean {
-  if (typeof def.enabled === "boolean") return def.enabled;
-  const trust = def.trust ?? "community";
-  return trust === "builtin" || trust === "trusted";
 }
 
 /** Every MCP server registered on disk (workspace/mcp-servers.d/*.yaml). Shared with the unified read. */
@@ -125,6 +123,22 @@ export function createRoutes(ctx: ApiContext): Route[] {
   const knownNames = () => new Set(listMcpServers(ctx.workspaceDir).map((s) => s.name));
 
   return [
+    {
+      // Capability discovery (ADR-0005): connect to a candidate MCP server and
+      // list its tools, so the operator sees real capabilities before saving —
+      // the test-before-save mirror of /api/a2a/probe. Validates the def first.
+      method: "POST",
+      path: "/api/mcp-servers/test",
+      handler: async (req) => {
+        if (!authorized(req)) return unauthorized();
+        let body: unknown;
+        try { body = await req.json(); } catch { return badJson(); }
+        const v = validate(body);
+        if ("error" in v) return v.error;
+        const probe = await probeMcpServer(v.def);
+        return Response.json({ success: true, ...probe });
+      },
+    },
     {
       method: "GET",
       path: "/api/mcp-servers",

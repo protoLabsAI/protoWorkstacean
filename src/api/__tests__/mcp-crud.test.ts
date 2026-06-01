@@ -118,6 +118,18 @@ describe("mcp-crud control-plane API", () => {
     const noKey = await route("POST", "/api/mcp-servers").handler(req(STDIO), {});
     expect(noKey.status).toBe(401);
   });
+
+  test("POST /test validates then probes — bad def 400; valid-but-unreachable → reachable:false", async () => {
+    const bad = await route("POST", "/api/mcp-servers/test").handler(req({ name: "x", transport: "stdio" }), {});
+    expect(bad.status).toBe(400); // no command → never attempts a connection
+
+    const unreach = await route("POST", "/api/mcp-servers/test").handler(
+      req({ name: "ghost", transport: "stdio", command: ["this-command-does-not-exist-pw99"] }), {},
+    );
+    const body = (await unreach.json()) as { success: boolean; reachable: boolean };
+    expect(body.success).toBe(true);
+    expect(body.reachable).toBe(false);
+  }, 12_000);
 });
 
 describe("mcpEnabled — trust-tier auto-enable (ADR-0005 D2)", () => {
