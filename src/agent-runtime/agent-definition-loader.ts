@@ -137,14 +137,26 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
   };
 }
 
+/** A parsed agent definition + the file it came from (one agent per file). */
+export interface AgentEntry {
+  def: AgentDefinition;
+  /** Absolute path to the source YAML — used by hot-reload to tell removal from a parse error. */
+  file: string;
+}
+
 /**
- * Load all agent definitions from workspace/agents/*.yaml.
+ * Load all agent definitions from workspace/agents/*.yaml, each paired with its
+ * source file.
  *
  * - Files matching *.example are skipped.
- * - Files that fail to parse are logged and skipped (startup continues).
+ * - Files that fail to parse are logged and skipped (startup + reload continue).
  * - Returns an empty array if the agents/ directory doesn't exist.
+ *
+ * Does not log per-agent (callers do, once, at the right moment — startup logs
+ * each agent; hot-reload logs only the deltas, so it doesn't re-log the fleet
+ * every poll).
  */
-export function loadAgentDefinitions(workspaceDir: string): AgentDefinition[] {
+export function loadAgentEntries(workspaceDir: string): AgentEntry[] {
   const agentsDir = join(workspaceDir, "agents");
   if (!existsSync(agentsDir)) return [];
 
@@ -152,15 +164,14 @@ export function loadAgentDefinitions(workspaceDir: string): AgentDefinition[] {
     (f) => (f.endsWith(".yaml") || f.endsWith(".yml")) && !f.endsWith(".example"),
   );
 
-  const definitions: AgentDefinition[] = [];
+  const entries: AgentEntry[] = [];
 
   for (const file of files) {
     const filePath = join(agentsDir, file);
     try {
       const raw = parseYaml(readFileSync(filePath, "utf8")) as RawAgentYaml;
       const def = parseAgentYaml(raw, file);
-      definitions.push(def);
-      console.log(`[agent-runtime] Loaded agent "${def.name}" (${def.role}, model: ${def.model})`);
+      entries.push({ def, file: filePath });
     } catch (err) {
       console.error(
         `[agent-runtime] Skipping ${file}: ${err instanceof Error ? err.message : String(err)}`,
@@ -168,5 +179,10 @@ export function loadAgentDefinitions(workspaceDir: string): AgentDefinition[] {
     }
   }
 
-  return definitions;
+  return entries;
+}
+
+/** Convenience: just the definitions (drops the source-file pairing). */
+export function loadAgentDefinitions(workspaceDir: string): AgentDefinition[] {
+  return loadAgentEntries(workspaceDir).map((e) => e.def);
 }

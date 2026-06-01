@@ -25,11 +25,12 @@ import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { IExecutor } from "../executor/types.ts";
 import { DeepAgentExecutor } from "../executor/executors/deep-agent-executor.ts";
 import { ProtoSdkExecutor } from "../executor/executors/proto-sdk-executor.ts";
-import { loadAgentDefinitions } from "./agent-definition-loader.ts";
+import { loadAgentEntries, type AgentEntry } from "./agent-definition-loader.ts";
 import type { AgentDefinition } from "./types.ts";
-import { WorkspaceWatcher, type FileDiff } from "../../lib/workspace-watcher.ts";
-import { computeAgentDiff, hashDefinition, isEmptyAgentDiff } from "./agent-diff.ts";
-import { join } from "node:path";
+import { WorkspaceWatcher } from "../../lib/workspace-watcher.ts";
+import { computeAgentDiff, hashDefinition } from "./agent-diff.ts";
+import { existsSync } from "node:fs";
+import { join, basename } from "node:path";
 
 export interface AgentRuntimeConfig {
   workspaceDir: string;
@@ -37,6 +38,14 @@ export interface AgentRuntimeConfig {
   gatewayApiKey?: string;
   apiBaseUrl?: string;
   apiKey?: string;
+}
+
+/** A running agent: its executor, the skills it's registered for, content hash, and source file. */
+interface RegisteredAgent {
+  executor: IExecutor;
+  skills: string[];
+  hash: string;
+  file: string;
 }
 
 export class AgentRuntimePlugin implements Plugin {
@@ -48,75 +57,123 @@ export class AgentRuntimePlugin implements Plugin {
   private readonly config: AgentRuntimeConfig;
   private readonly executorRegistry: ExecutorRegistry;
   private bus?: EventBus;
-  /** Currently-registered agents: name → content hash. The "running" set the on-disk state is diffed against. */
-  private readonly registered = new Map<string, string>();
+  /** Running agents by name — the live set the on-disk definitions are reconciled against. */
+  private readonly registered = new Map<string, RegisteredAgent>();
   private watcher?: WorkspaceWatcher;
+  /** Executor factory — injectable for tests; defaults to the real DeepAgent / ProtoSDK builder. */
+  private readonly buildExecutor: (def: AgentDefinition) => IExecutor;
 
-  constructor(config: AgentRuntimeConfig, executorRegistry: ExecutorRegistry) {
+  constructor(
+    config: AgentRuntimeConfig,
+    executorRegistry: ExecutorRegistry,
+    opts: { buildExecutor?: (def: AgentDefinition) => IExecutor } = {},
+  ) {
     this.config = config;
     this.executorRegistry = executorRegistry;
+    this.buildExecutor = opts.buildExecutor ?? ((def) => this._buildExecutor(def));
   }
 
   install(bus: EventBus): void {
     this.bus = bus;
-    const definitions = loadAgentDefinitions(this.config.workspaceDir);
+    const entries = loadAgentEntries(this.config.workspaceDir);
 
     const counts = { "deep-agent": 0, "proto-sdk": 0 };
-    for (const def of definitions) {
-      const executor = this._buildExecutor(def);
+    for (const { def, file } of entries) {
       counts[def.runtime ?? "deep-agent"] += 1;
-
-      for (const skill of def.skills) {
-        this.executorRegistry.register(skill.name, executor, {
-          agentName: def.name,
-          priority: 10,
-        });
-      }
-      this.registered.set(def.name, hashDefinition(def));
+      this._register(def, file);
+      console.log(`[agent-runtime] Loaded agent "${def.name}" (${def.role}, model: ${def.model})`);
     }
 
-    const agentNames = definitions.map(d => `${d.name}(${d.runtime ?? "deep-agent"})`).join(", ") || "(none)";
+    const agentNames = entries.map(e => `${e.def.name}(${e.def.runtime ?? "deep-agent"})`).join(", ") || "(none)";
     console.log(
-      `[agent-runtime] Registered ${definitions.length} agent(s) ` +
+      `[agent-runtime] Registered ${entries.length} agent(s) ` +
       `[deep-agent: ${counts["deep-agent"]}, proto-sdk: ${counts["proto-sdk"]}]: ${agentNames}`,
     );
 
-    // ADR-0004 P1 (day 1 — detect-only): watch workspace/agents/ and report
-    // drift between the on-disk definitions and the running set. The apply path
-    // (build/register added, unregister/dispose removed) lands in P1 day 2.
+    // ADR-0004 P1: hot-reload. Watch workspace/agents/ and reconcile the live
+    // registry on every change — add / reload / remove an agent with no restart.
     this.watcher = new WorkspaceWatcher({
       dirs: [join(this.config.workspaceDir, "agents")],
-      onChange: (diff) => this._onAgentsChanged(diff),
+      onChange: () => this._applyAgentChanges(),
     });
     this.watcher.start();
   }
 
+  /** Build an executor for `def`, register its skills, and record it as running. */
+  private _register(def: AgentDefinition, file: string): void {
+    const executor = this.buildExecutor(def);
+    const skills = def.skills.map(s => s.name);
+    for (const skill of skills) {
+      this.executorRegistry.register(skill, executor, { agentName: def.name, priority: 10 });
+    }
+    this.registered.set(def.name, { executor, skills, hash: hashDefinition(def), file });
+  }
+
   /**
-   * Detect-only handler (P1 day 1): a workspace/agents/ file changed. Reload the
-   * definitions and log how the on-disk state has drifted from the running set.
-   * Does NOT mutate the registry yet — that's P1 day 2.
+   * P1 apply: reload workspace/agents/ and reconcile the live registry —
+   * register added agents, re-register changed ones, unregister + dispose
+   * removed ones. No restart.
+   *
+   * Safety: a file that fails to parse is dropped from the loaded set, which
+   * would otherwise look like a removal. We only treat an agent as removed when
+   * its source file is actually GONE; if the file is still present, the agent
+   * vanished due to a parse error and we KEEP the running instance — a typo
+   * never silently drops a live agent.
    */
-  private _onAgentsChanged(diff: FileDiff): void {
-    let definitions: AgentDefinition[];
+  private _applyAgentChanges(): void {
+    let entries: AgentEntry[];
     try {
-      definitions = loadAgentDefinitions(this.config.workspaceDir);
+      entries = loadAgentEntries(this.config.workspaceDir);
     } catch (err) {
       console.error(`[agent-runtime] reload failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
-    const agentDiff = computeAgentDiff(this.registered, definitions);
-    if (isEmptyAgentDiff(agentDiff)) {
-      // File touched but no semantic agent change (comment, whitespace, mtime-only).
-      return;
+
+    const fileByName = new Map(entries.map(e => [e.def.name, e.file]));
+    const registeredHashes = new Map([...this.registered].map(([name, r]) => [name, r.hash]));
+    const diff = computeAgentDiff(registeredHashes, entries.map(e => e.def));
+
+    for (const name of diff.removed) {
+      const reg = this.registered.get(name);
+      if (!reg) continue;
+      if (existsSync(reg.file)) {
+        console.warn(
+          `[agent-runtime] "${name}" no longer parses from ${basename(reg.file)} — keeping the running instance (fix or delete the file)`,
+        );
+        continue;
+      }
+      this._removeAgent(name, reg);
     }
-    const fileSummary = `+${diff.added.length} ~${diff.changed.length} -${diff.removed.length} file(s)`;
-    console.log(
-      `[agent-runtime] workspace/agents changed (${fileSummary}) — on-disk agents drift from running: ` +
-      `added=[${agentDiff.added.map(d => d.name).join(", ")}] ` +
-      `changed=[${agentDiff.changed.map(d => d.name).join(", ")}] ` +
-      `removed=[${agentDiff.removed.join(", ")}]. ` +
-      `Detect-only (P1 day 1); restart or the P1 day-2 apply picks these up.`,
-    );
+
+    for (const def of diff.added) {
+      this._register(def, fileByName.get(def.name) ?? "");
+      console.log(`[agent-runtime] + "${def.name}" hot-added (${def.skills.length} skill(s)) — no restart`);
+    }
+
+    for (const def of diff.changed) {
+      const old = this.registered.get(def.name);
+      if (!old) continue;
+      for (const skill of old.skills) this.executorRegistry.unregister(skill, def.name);
+      this._register(def, fileByName.get(def.name) ?? old.file);
+      this._disposeExecutor(def.name, old.executor);
+      console.log(`[agent-runtime] ~ "${def.name}" reloaded (${def.skills.length} skill(s)) — no restart`);
+    }
+  }
+
+  private _removeAgent(name: string, reg: RegisteredAgent): void {
+    for (const skill of reg.skills) this.executorRegistry.unregister(skill, name);
+    this.registered.delete(name);
+    this._disposeExecutor(name, reg.executor);
+    console.log(`[agent-runtime] - "${name}" hot-removed (${reg.skills.length} skill(s) unregistered) — no restart`);
+  }
+
+  /** Best-effort executor teardown — never blocks the apply or aborts in-flight work. */
+  private _disposeExecutor(name: string, executor: IExecutor): void {
+    void Promise.resolve()
+      .then(() => executor.dispose?.())
+      .catch((err) =>
+        console.warn(`[agent-runtime] dispose("${name}") failed: ${err instanceof Error ? err.message : String(err)}`),
+      );
   }
 
   uninstall(): void {

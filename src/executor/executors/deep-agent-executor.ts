@@ -796,6 +796,16 @@ export class DeepAgentExecutor implements IExecutor {
     return built;
   }
 
+  /**
+   * Release idle resources when this executor is unregistered (ADR-0004
+   * hot-swap). Drops the per-model ChatOpenAI cache so the instances can be
+   * GC'd. Safe with an in-flight `execute()` — that call already holds its own
+   * model + agent references, so clearing the cache never touches running work.
+   */
+  dispose(): void {
+    this.modelCache.clear();
+  }
+
   async execute(req: SkillRequest): Promise<SkillResult> {
     const prompt = req.content ?? req.prompt ?? this._buildPrompt(req);
 
