@@ -6,7 +6,7 @@ title: HTTP API
 
 ## Summary
 
-- **76** HTTP routes across **33** path groups
+- **77** HTTP routes across **33** path groups
 - **14** routes carry a resolved one-line description
 
 Each row links to the route definition as `path:line` so jumping from this index to the source is a click. Routes are defined as `{ method, path, handler }` literals in `src/api/*.ts` and collected by `src/api/index.ts`.
@@ -45,11 +45,12 @@ Each row links to the route definition as `path:line` so jumping from this index
 | Method | Path | Source | Description |
 |---|---|---|---|
 | `GET` | `/api/agents` | `src/api/operations.ts:250` | — |
-| `POST` | `/api/agents` | `src/api/agents-crud.ts:85` | — |
-| `PUT` | `/api/agents/:name` | `src/api/agents-crud.ts:115` | — |
-| `DELETE` | `/api/agents/:name` | `src/api/agents-crud.ts:133` | — |
+| `POST` | `/api/agents` | `src/api/agents-crud.ts:103` | — |
+| `GET` | `/api/agents/:name` | `src/api/agents-crud.ts:66` | — |
+| `PUT` | `/api/agents/:name` | `src/api/agents-crud.ts:133` | — |
+| `DELETE` | `/api/agents/:name` | `src/api/agents-crud.ts:151` | — |
 | `GET` | `/api/agents/runtime` | `src/api/agents-runtime.ts:67` | — |
-| `POST` | `/api/agents/test` | `src/api/agents-crud.ts:66` | — |
+| `POST` | `/api/agents/test` | `src/api/agents-crud.ts:84` | — |
 
 ### `/api/board`
 
