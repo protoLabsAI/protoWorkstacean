@@ -73,11 +73,17 @@ Loaded only when their prerequisite environment variable is set:
 
 Skipping a plugin on missing config is safe because all communication is through the bus. If DiscordPlugin is not loaded, messages are never published to `message.inbound.discord.#`, so nothing breaks — there is just no Discord input source.
 
-### Workspace plugins
+### Extension surfaces (no in-process hot-loaded code)
 
-Loaded from `workspace/plugins/`. Each `.ts` file exports a default `Plugin` implementation. These are the right place for deployment-specific extensions that don't belong in the core codebase.
+The dynamic `workspace/plugins/*.ts` loader was **retired in [ADR-0005](../decisions/0005-mcp-client-tier-and-trust-tiers)** (ADR-0004 P4). It was structurally broken: Node's module cache pins old code so it can't safely hot-reload, and the workspace is bind-mounted outside the app's module tree, so a plugin there can't resolve app `lib/` or `node_modules`. There is no in-process hot-loaded-code surface by design.
 
-Workspace plugins are loaded last, after all core and integration plugins. They can safely subscribe to any topic because the topics they care about are already published by the time they receive messages.
+Extend the fleet instead through:
+
+- **A2A agents** — register a remote agent via the control plane (`workspace/agents.d/` + the Console); its skills become executors live.
+- **MCP servers** — register an MCP server via the control plane (`workspace/mcp-servers.d/` + the Console); its tools become executors live (ADR-0005). Trust tiers gate auto-enable.
+- **Compiled-in plugins** — first-party plugins live in `lib/plugins/` and ship in the image.
+
+A2A and MCP are out-of-process (the correct isolation boundary for untrusted extension) and hot-swappable without a restart; compiled-in plugins need an image deploy.
 
 ## Ordering guarantees
 

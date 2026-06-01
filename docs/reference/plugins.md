@@ -88,11 +88,13 @@ interface BusMessage {
 
 ---
 
-## Writing a workspace bus plugin
+## Writing a first-party bus plugin
+
+> The dynamic `workspace/plugins/*.ts` loader was retired in [ADR-0005](../decisions/0005-mcp-client-tier-and-trust-tiers). First-party plugins now live in `lib/plugins/` and are statically imported + compiled into the image (register them in `src/index.ts`). For runtime, no-rebuild extension use an **A2A agent** or **MCP server** via the control plane instead.
 
 ```typescript
-// workspace/plugins/my-plugin.ts
-import type { Plugin, EventBus, BusMessage } from "../../lib/types";
+// lib/plugins/my-plugin.ts — register it in src/index.ts's plugin registry
+import type { Plugin, EventBus, BusMessage } from "../types";
 
 export default {
   name: "my-plugin",
@@ -126,4 +128,4 @@ export default {
 
 - Cannot modify the agent's system prompt directly
 - Cannot intercept tool calls at the LLM layer
-- Hot reload requires a container restart (`docker restart workstacean`)
+- Compiled-in: adding/changing one requires an image build + deploy (runtime hot-swap is for A2A agents and MCP servers, not in-process code)

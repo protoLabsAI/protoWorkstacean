@@ -291,6 +291,10 @@ lastFired: "2026-04-01T14:00:00.000Z"   # auto-updated by SchedulerPlugin
 
 ---
 
-## workspace/plugins/{name}.ts
+## workspace/mcp-servers.d/{name}.yaml
 
-Workspace plugins are TypeScript/JavaScript files exporting a default object implementing the `Plugin` interface. Loaded on container startup. See [`reference/plugins.md`](plugins) for the full interface contract.
+One MCP server per file (ADR-0005): `name`, `trust` (builtin/trusted/community), `transport` (stdio→`command`/`args`/`env`, sse→`url`), optional `grants`, `allowedTools`/`excludeTools`, `enabled`. `McpClientPlugin` connects each enabled server and registers its tools as executors. Managed via the Console / `POST /api/mcp-servers`.
+
+## ~~workspace/plugins/{name}.ts~~ (retired)
+
+The dynamic TS-plugin loader was removed in [ADR-0005](../decisions/0005-mcp-client-tier-and-trust-tiers). First-party plugins live in `lib/plugins/` (compiled in); runtime extension is out-of-process via A2A agents or MCP servers. See [`reference/plugins.md`](plugins).

@@ -155,8 +155,10 @@ enabled?: boolean        # Default: true
 
 ---
 
-## workspace/plugins/
+## workspace/mcp-servers.d/
 
-Directory for hot-loaded workspace plugins. Each `.ts` (or `.js`) file exports a default `Plugin` implementation. Loaded at startup by the plugin loader.
+Control-plane-managed MCP servers (ADR-0005), one `McpServerDef` per `.yaml` file. `McpClientPlugin` connects each enabled server and registers its tools as executors live. Managed via the Console / `POST /api/mcp-servers`; trust tiers gate auto-enable.
 
-This directory is optional — leave it empty or omit it if you don't need custom plugins.
+## ~~workspace/plugins/~~ (retired)
+
+The dynamic TS-plugin loader was removed in [ADR-0005](../decisions/0005-mcp-client-tier-and-trust-tiers) (Node module-cache + workspace module-resolution made it unsafe/broken). First-party plugins live in `lib/plugins/` (compiled in); runtime extension is out-of-process via A2A agents (`agents.d/`) or MCP servers (`mcp-servers.d/`).

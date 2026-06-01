@@ -6,18 +6,19 @@ _This is an explanation doc. It explains how the plugin system works conceptuall
 
 ---
 
-## Workspace bus plugins
+## Bus plugins
+
+> **Retired surface:** the dynamic `workspace/plugins/*.ts` loader was removed in [ADR-0005](../decisions/0005-mcp-client-tier-and-trust-tiers) (ADR-0004 P4) — Node's module cache made hot-reload unsafe and bind-mounted workspace files couldn't resolve app modules. First-party plugins are now **statically imported and compiled into the image**; runtime extension is out-of-process via A2A agents / MCP servers (see [plugin-system](plugin-system)).
 
 ### Startup loading
 
-On container start, `src/index.ts` runs `loadWorkspacePlugins()`:
+On container start, `src/index.ts` builds the plugin list from a static registry:
 
-1. Scans `workspace/plugins/` for `.ts` and `.js` files
-2. Dynamically imports each file via `await import(filePath)`
-3. Checks that the default export satisfies the `Plugin` interface (`name`, `install`, `uninstall`)
-4. Calls `plugin.install(bus)` on each valid plugin
+1. Core plugins (Logger, Debug, …) install first
+2. Conditionally-enabled integration + registrar plugins (Discord, GitHub, AgentRuntime, SkillBroker, McpClient, …) install if their config is present
+3. Each plugin's `install(bus)` is called as it's added
 
-The install order is non-deterministic (filesystem scan order). Plugins should not depend on each other's install order.
+Registrars install before `SkillDispatcherPlugin` first processes a message; otherwise plugins should not depend on each other's install order.
 
 ### What happens in `install()`
 
@@ -77,10 +78,8 @@ The SchedulerPlugin has its own internal lifecycle for timers:
 
 ---
 
-## Plugin discovery failure modes
+## Plugin failure modes
 
-If a workspace plugin file fails to import (syntax error, missing dependency), `loadWorkspacePlugins()` logs the error and skips that plugin. Other plugins continue to load. The server starts regardless.
+If a conditionally-enabled plugin's `install()` throws, the error is caught and logged; that plugin is not installed but the server continues. A misconfigured integration therefore never prevents startup — you can always connect and debug.
 
-If a plugin's `install()` throws, the error is caught and logged. The plugin is not installed, but the server continues.
-
-This means a broken plugin in `workspace/plugins/` never prevents the server from starting — you can always connect and debug.
+Out-of-process extensions degrade the same way: an unreachable A2A agent or MCP server registers no skills/tools (logged loudly) without affecting the rest of the fleet.
