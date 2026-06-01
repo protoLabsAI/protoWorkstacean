@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { WebSocketManager } from "./lib/websocket";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./Layout.css";
 
 const NAV_ITEMS = [
@@ -79,7 +80,11 @@ export default function Layout() {
         </header>
 
         <main className={`main-content${fullBleed ? " main-content--full" : ""}`}>
-          <Outlet />
+          {/* Keyed by path so a crash in one pane resets when you navigate away,
+              and never takes down the sidebar/nav with it. */}
+          <ErrorBoundary key={pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

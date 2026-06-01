@@ -469,19 +469,24 @@ export default function SystemGraph() {
     [topology, agents, agentActivity, activeEdges],
   );
 
-  if (error) {
-    return <div style={{ padding: 24, color: "var(--text-danger)", fontFamily: "monospace" }}>topology error: {error}</div>;
-  }
-  if (!topology) {
-    return <div style={{ padding: 24, color: "var(--text-secondary)" }}>loading topology…</div>;
-  }
-
+  // ALL hooks must run before any conditional return (Rules of Hooks). This
+  // useMemo previously sat AFTER the error/loading early-returns: the first
+  // render (topology null) skipped it, then once topology loaded the return was
+  // skipped and the hook ran — a changing hook count that crashed the whole
+  // /system view (and, with no ErrorBoundary, blanked the app). Keep it here.
   const drawerMessages = useMemo(
     () => (openTopic ? topicHistoryRef.current.get(openTopic) ?? [] : []),
     // drawerTick is the WS-driven invalidation signal; openTopic re-runs when
     // the drawer switches topics.
     [openTopic, drawerTick],
   );
+
+  if (error) {
+    return <div style={{ padding: 24, color: "var(--text-danger)", fontFamily: "monospace" }}>topology error: {error}</div>;
+  }
+  if (!topology) {
+    return <div style={{ padding: 24, color: "var(--text-secondary)" }}>loading topology…</div>;
+  }
 
   return (
     <div style={{ width: "100%", height: "calc(100vh - 64px)", background: "var(--bg-canvas)", position: "relative" }}>
