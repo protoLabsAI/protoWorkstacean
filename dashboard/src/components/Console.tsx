@@ -10,6 +10,8 @@ import {
   deleteAgent,
   getAgentDef,
   probeAgentCard,
+  createA2aEndpoint,
+  deleteA2aEndpoint,
   getAdminKey,
   setAdminKey,
   type AgentsRuntimeResponse,
@@ -44,7 +46,8 @@ export default function Console() {
   const [draft, setDraft] = useState(TEMPLATE);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ name: string; kind: "agent" | "a2a" } | null>(null);
+  const [probeName, setProbeName] = useState("");
   const [editing, setEditing] = useState<string | null>(null); // agent name being edited; null = create mode
   const [probeUrl, setProbeUrl] = useState("");
   const [probe, setProbe] = useState<{ reachable: boolean; name?: string; skills: string[]; error?: string } | null>(null);
@@ -131,22 +134,42 @@ export default function Console() {
       setProbe({ reachable: false, skills: [], error: `${r.status}: ${(r.body?.error as string) ?? "probe failed"}` });
       return;
     }
+    const name = r.body?.name as string | undefined;
+    if (name && !probeName) setProbeName(name); // seed the registry name from the card
     setProbe({
       reachable: Boolean(r.body?.reachable),
-      name: r.body?.name as string | undefined,
+      name,
       skills: (r.body?.skills as string[] | undefined) ?? [],
       error: r.body?.error as string | undefined,
     });
   }
 
-  async function doDelete(name: string) {
+  async function onAddA2a() {
+    const name = probeName.trim();
+    if (!name) { setResult({ ok: false, msg: "Set a registry name for the A2A agent." }); return; }
+    setBusy(true);
+    const r = await createA2aEndpoint({ name, url: probeUrl.trim(), streaming: true });
+    setBusy(false);
+    if (r.ok) {
+      setResult({ ok: true, msg: `Registered A2A agent "${name}" — live.` });
+      setProbe(null); setProbeUrl(""); setProbeName("");
+      setTimeout(() => void refresh(), 1500);
+      void refresh();
+    } else {
+      setResult({ ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "add failed"}` });
+    }
+  }
+
+  async function doDelete() {
+    const target = pendingDelete;
+    if (!target) return;
     setPendingDelete(null);
     setBusy(true);
-    const r = await deleteAgent(name);
+    const r = target.kind === "a2a" ? await deleteA2aEndpoint(target.name) : await deleteAgent(target.name);
     setBusy(false);
     setResult(
       r.ok
-        ? { ok: true, msg: `Removed "${name}" — unregistered in ~5s.` }
+        ? { ok: true, msg: `Removed "${target.name}" — unregistered in ~5s.` }
         : { ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "delete failed"}` },
     );
     setTimeout(() => void refresh(), 5500);
@@ -243,13 +266,26 @@ export default function Console() {
           </div>
           {probe && (
             probe.reachable ? (
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <Badge status="success">reachable</Badge>
-                <strong style={{ color: "var(--text-primary)", fontSize: "13px" }}>{probe.name}</strong>
-                {probe.skills.length === 0
-                  ? <span style={{ color: "var(--text-secondary)", fontSize: "12px" }}>no skills advertised</span>
-                  : probe.skills.map((s) => <Badge key={s} status="neutral">{s}</Badge>)}
-              </div>
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <Badge status="success">reachable</Badge>
+                  <strong style={{ color: "var(--text-primary)", fontSize: "13px" }}>{probe.name}</strong>
+                  {probe.skills.length === 0
+                    ? <span style={{ color: "var(--text-secondary)", fontSize: "12px" }}>no skills advertised</span>
+                    : probe.skills.map((s) => <Badge key={s} status="neutral">{s}</Badge>)}
+                </div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    value={probeName}
+                    placeholder="registry name (e.g. quinn)"
+                    onChange={(e) => setProbeName(e.currentTarget.value)}
+                    style={{ ...inputStyle, fontFamily: "inherit", flex: 1 }}
+                  />
+                  <Button variant="primary" onClick={() => void onAddA2a()} disabled={busy || !probeName.trim()}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Plus size={14} /> Register</span>
+                  </Button>
+                </div>
+              </>
             ) : (
               <span style={{ color: "var(--text-danger)", fontSize: "13px" }}>✗ {probe.error}</span>
             )
@@ -278,15 +314,19 @@ export default function Console() {
                       <Badge key={s} status="neutral">{s}</Badge>
                     ))}
                   </span>
-                  {a.type === "deep-agent" && (
+                  {a.type === "deep-agent" ? (
                     <>
                       <Button onClick={() => void onEdit(a.name)} disabled={busy}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Pencil size={14} /> Edit</span>
                       </Button>
-                      <Button onClick={() => setPendingDelete(a.name)} disabled={busy}>
+                      <Button onClick={() => setPendingDelete({ name: a.name, kind: "agent" })} disabled={busy}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Trash2 size={14} /> Remove</span>
                       </Button>
                     </>
+                  ) : (
+                    <Button onClick={() => setPendingDelete({ name: a.name, kind: "a2a" })} disabled={busy}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Trash2 size={14} /> Remove</span>
+                    </Button>
                   )}
                 </div>
               </Card>
@@ -295,16 +335,20 @@ export default function Console() {
         )}
         <Divider />
         <p style={{ color: "var(--text-secondary)", fontSize: "12px" }}>
-          In-process (deep-agent) agents are managed here. A2A agents are registered in <code>workspace/agents.yaml</code> (control-plane support coming).
+          In-process (deep-agent) agents are managed here. A2A agents discovered via Probe are persisted to <code>workspace/agents.d/</code>; entries hand-maintained in <code>workspace/agents.yaml</code> stay read-only.
         </p>
       </div>
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title={`Remove "${pendingDelete ?? ""}"?`}
-        message="Unregisters the agent from the live fleet (~5s) and deletes its YAML from workspace/agents/."
+        title={`Remove "${pendingDelete?.name ?? ""}"?`}
+        message={
+          pendingDelete?.kind === "a2a"
+            ? "Unregisters the A2A agent from the live fleet (~5s) and deletes its YAML from workspace/agents.d/."
+            : "Unregisters the agent from the live fleet (~5s) and deletes its YAML from workspace/agents/."
+        }
         confirmLabel="Remove"
-        onConfirm={() => { if (pendingDelete) void doDelete(pendingDelete); }}
+        onConfirm={() => void doDelete()}
         onCancel={() => setPendingDelete(null)}
       />
     </div>

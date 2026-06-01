@@ -205,3 +205,9 @@ export const getAgentDef = (name: string) =>
 /** Probe an A2A agent's card for reachability + skills (capability discovery). */
 export const probeAgentCard = (url: string) =>
   adminFetch("/api/a2a/probe", "POST", { url });
+/** Register a remote A2A agent (persisted to agents.d/; live via SkillBroker). */
+export const createA2aEndpoint = (entry: unknown) =>
+  adminFetch("/api/a2a-endpoints", "POST", entry);
+/** Remove a control-plane-managed A2A agent. */
+export const deleteA2aEndpoint = (name: string) =>
+  adminFetch(`/api/a2a-endpoints/${encodeURIComponent(name)}`, "DELETE");
