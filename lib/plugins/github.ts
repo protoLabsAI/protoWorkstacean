@@ -34,6 +34,13 @@ import { makeGitHubAuth } from "../github-auth.ts";
 import { withCircuitBreaker } from "./circuit-breaker.ts";
 import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
 import type { ReleasePublishedPayload } from "../../src/event-bus/payloads.ts";
+import { handlePRMerge, parsePRMergePayload } from "../../src/webhooks/github-pr-merge.ts";
+import {
+  handleCommentResponse,
+  handleReviewDismissal,
+  type ReviewCommentPayload,
+  type ReviewDismissalPayload,
+} from "../../src/webhooks/github-comment-response.ts";
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -575,8 +582,32 @@ export class GitHubPlugin implements Plugin {
             timestamp: Date.now(),
             payload: { id: prId, status: "complete", stage: "done", completedAt: Date.now() },
           });
+          // Index the merged PR (diff + symbols + review decision) into Qdrant so
+          // future Quinn reviews have context from past decisions. Best-effort,
+          // off the hot path — a Qdrant/network failure must never block the webhook.
+          const mergePayload = parsePRMergePayload(event, payload);
+          if (mergePayload) {
+            void handlePRMerge(mergePayload, getToken).catch((err) =>
+              console.warn(`[github] PR-merge indexing failed for ${owner}/${repoName}#${prNumber}: ${err instanceof Error ? err.message : err}`),
+            );
+          }
         }
       }
+    }
+
+    // ── Review-learning side-effects (dismissal-tracker → Qdrant) ────────────
+    // Developer replies to Quinn's inline comments, and dismissals of Quinn's
+    // reviews, feed the review-learning pipeline so future reviews adapt to
+    // pushback. Independent of the @mention / auto-review paths and best-effort.
+    if (event === "pull_request_review_comment" && payload.action === "created") {
+      void this._trackCommentResponse(payload, getToken).catch((err) =>
+        console.warn(`[github] comment-response tracking failed: ${err instanceof Error ? err.message : err}`),
+      );
+    }
+    if (event === "pull_request_review" && payload.action === "dismissed") {
+      void this._trackReviewDismissal(payload).catch((err) =>
+        console.warn(`[github] review-dismissal tracking failed: ${err instanceof Error ? err.message : err}`),
+      );
     }
 
     const ctx = extractContext(event, payload);
@@ -947,6 +978,42 @@ export class GitHubPlugin implements Plugin {
       | { check_runs?: Array<Record<string, unknown>> }
       | null;
     return allChecksTerminal(data?.check_runs);
+  }
+
+  /**
+   * A developer replied to an inline review comment. If the parent comment was
+   * Quinn's, feed the reply into the review-learning pipeline (dismissal-tracker)
+   * with Quinn's original comment as the matched context.
+   */
+  private async _trackCommentResponse(
+    payload: Record<string, unknown>,
+    getToken: (owner: string, repo: string) => Promise<string>,
+  ): Promise<void> {
+    const comment = payload.comment as Record<string, unknown> | undefined;
+    const inReplyTo = comment?.in_reply_to_id as number | undefined;
+    if (!inReplyTo) return; // only replies, not top-level comments
+
+    const repository = payload.repository as Record<string, unknown> | undefined;
+    const owner = (repository?.owner as Record<string, unknown> | undefined)?.login as string | undefined;
+    const repo = repository?.name as string | undefined;
+    if (!owner || !repo) return;
+
+    // Fetch the parent comment — only track replies to *Quinn's* comments.
+    const parent = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/pulls/comments/${inReplyTo}`)) as
+      | { user?: { login?: string }; body?: string }
+      | null;
+    const parentAuthor = parent?.user?.login;
+    if (!parentAuthor || !parentAuthor.toLowerCase().startsWith("protoquinn")) return;
+
+    await handleCommentResponse(payload as unknown as ReviewCommentPayload, parent.body ?? "");
+  }
+
+  /** A Quinn review was dismissed — record the dismissal + reason for learning. */
+  private async _trackReviewDismissal(payload: Record<string, unknown>): Promise<void> {
+    const review = payload.review as Record<string, unknown> | undefined;
+    const login = (review?.user as Record<string, unknown> | undefined)?.login as string | undefined;
+    if (!login || !login.toLowerCase().startsWith("protoquinn")) return; // only Quinn's own reviews
+    await handleReviewDismissal(payload as unknown as ReviewDismissalPayload, (review?.body as string | null) ?? "", "");
   }
 
   private async _postComment(
