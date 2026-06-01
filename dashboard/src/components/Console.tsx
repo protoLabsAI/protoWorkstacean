@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Button, Badge, Card, Empty, Divider, type Status } from "@protolabsai/ui";
 import { RefreshCw, Plus, Trash2, CircleCheck, Pencil, X, Globe } from "lucide-react";
 import { ConfirmDialog } from "./ConfirmDialog";
+import McpPanel from "./McpPanel";
 import {
   getControlPlaneState,
   testAgent,
@@ -16,6 +17,7 @@ import {
   setAdminKey,
   type AgentsRuntimeResponse,
   type AgentHealthMetrics,
+  type McpServerSummary,
 } from "../lib/api";
 
 // The Console is the fleet's WRITE surface (ADR-0004 P3) — distinct from the
@@ -50,6 +52,7 @@ function healthStatus(m: AgentHealthMetrics): Status {
 
 export default function Console() {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
   const [health, setHealth] = useState<Map<string, AgentHealthMetrics>>(new Map());
   const [key, setKey] = useState(getAdminKey());
   const [draft, setDraft] = useState(TEMPLATE);
@@ -65,6 +68,7 @@ export default function Console() {
     try {
       const data = await getControlPlaneState(true);
       setAgents(data.agents ?? []);
+      setMcpServers(data.mcpServers ?? []);
       setHealth(new Map((data.health?.agents ?? []).map((h) => [h.agentName, h])));
     } catch (err) {
       setResult({ ok: false, msg: `Failed to load fleet: ${err instanceof Error ? err.message : String(err)}` });
@@ -356,6 +360,8 @@ export default function Console() {
           In-process (deep-agent) agents are managed here. A2A agents discovered via Probe are persisted to <code>workspace/agents.d/</code>; entries hand-maintained in <code>workspace/agents.yaml</code> stay read-only.
         </p>
       </div>
+
+      <McpPanel servers={mcpServers} busy={busy} setBusy={setBusy} onChanged={() => void refresh()} />
 
       <ConfirmDialog
         open={pendingDelete !== null}

@@ -123,9 +123,20 @@ export interface AgentHealthMetrics {
   failureRate1h: number;
 }
 
-/** GET /api/control-plane/state — unified read: live fleet + (durably-backed) health. */
+/** A registered MCP server (ADR-0005 P4) — registry view. */
+export interface McpServerSummary {
+  name: string;
+  trust: "builtin" | "trusted" | "community";
+  transport: "stdio" | "sse";
+  enabled: boolean;
+  grants: Array<"network" | "secrets" | "filesystem">;
+  description?: string;
+}
+
+/** GET /api/control-plane/state — unified read: live fleet + (durably-backed) health + MCP servers. */
 export interface ControlPlaneState {
   agents: AgentsRuntimeResponse["agents"];
+  mcpServers: McpServerSummary[];
   health: {
     agents: AgentHealthMetrics[];
     windowHours: 24;
@@ -134,6 +145,14 @@ export interface ControlPlaneState {
     collectedAt: number;
   } | null;
   collectedAt: number;
+}
+
+/** Result of probing an MCP server's tools (POST /api/mcp-servers/test). */
+export interface McpProbeResult {
+  reachable: boolean;
+  tools?: Array<{ name: string; description?: string }>;
+  latencyMs?: number;
+  error?: string;
 }
 
 export interface CiHealthResponse {
@@ -236,3 +255,18 @@ export const createA2aEndpoint = (entry: unknown) =>
 /** Remove a control-plane-managed A2A agent. */
 export const deleteA2aEndpoint = (name: string) =>
   adminFetch(`/api/a2a-endpoints/${encodeURIComponent(name)}`, "DELETE");
+
+// ── MCP servers (ADR-0005 P4) ───────────────────────────────────────────────
+/** Probe a candidate MCP server for reachability + tools (test-before-save). */
+export const probeMcpServer = (def: unknown) => adminFetch("/api/mcp-servers/test", "POST", def);
+/** Register an MCP server (persisted to mcp-servers.d/; tools connect live when enabled). */
+export const createMcpServer = (def: unknown) => adminFetch("/api/mcp-servers", "POST", def);
+/** Read one MCP server's full stored def (to flip enabled / pre-fill an edit). */
+export const getMcpServerDef = (name: string) =>
+  adminFetch(`/api/mcp-servers/${encodeURIComponent(name)}`, "GET");
+/** Update an MCP server (e.g. toggle enabled, change grants). */
+export const updateMcpServer = (name: string, def: unknown) =>
+  adminFetch(`/api/mcp-servers/${encodeURIComponent(name)}`, "PUT", def);
+/** Remove an MCP server (→ disconnected + unregistered live). */
+export const deleteMcpServer = (name: string) =>
+  adminFetch(`/api/mcp-servers/${encodeURIComponent(name)}`, "DELETE");
