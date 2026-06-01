@@ -126,6 +126,51 @@ interface GitHubEventContext {
   author: string;
 }
 
+// ── CI-completion → pr_review re-dispatch decision logic (#721) ──────────────
+// Pure, exported so the gating is unit-testable without the network. The
+// orchestration (_handleCiCompletion) wires these to GitHub REST + dispatch.
+
+/** Head SHA carried by a `workflow_run` or `check_suite` completed payload. */
+export function ciCompletionHeadSha(payload: Record<string, unknown>): string | undefined {
+  const suite = (payload.workflow_run ?? payload.check_suite) as Record<string, unknown> | undefined;
+  const sha = suite?.head_sha;
+  return typeof sha === "string" && sha.length > 0 ? sha : undefined;
+}
+
+/**
+ * A PR is eligible for a CI-completion re-review only when it's open, not a
+ * draft, and its head is STILL this SHA — a newer push means a fresh review is
+ * already in flight via `synchronize`, so re-reviewing the stale SHA is noise.
+ */
+export function prEligibleForCiReview(pr: Record<string, unknown>, headSha: string): boolean {
+  const head = (pr.head as Record<string, unknown> | undefined)?.sha;
+  return (
+    typeof pr.number === "number" &&
+    pr.state === "open" &&
+    pr.draft !== true &&
+    head === headSha
+  );
+}
+
+/**
+ * True when every check-run for the SHA is terminal (status "completed"), so
+ * guardTerminalCi will permit a formal verdict. No checks → terminal (nothing
+ * to wait for).
+ */
+export function allChecksTerminal(checkRuns: Array<Record<string, unknown>> | undefined): boolean {
+  if (!Array.isArray(checkRuns) || checkRuns.length === 0) return true;
+  return checkRuns.every((r) => r.status === "completed");
+}
+
+/** True iff @protoquinn[bot] has already left a review on the PR (the provisional→formal case). */
+export function quinnHasReviewed(reviews: Array<Record<string, unknown>> | undefined): boolean {
+  if (!Array.isArray(reviews)) return false;
+  return reviews.some((r) => {
+    const login = (r.user as Record<string, unknown> | undefined)?.login;
+    return typeof login === "string" && login.toLowerCase().startsWith("protoquinn");
+  });
+}
+
 /**
  * Normalize a GitHub `release` webhook payload into a ReleasePublishedPayload,
  * or null when it isn't a published release worth surfacing (wrong action,
@@ -432,6 +477,23 @@ export class GitHubPlugin implements Plugin {
         });
         console.log(`[github] release.published: ${rel.owner}/${rel.repo} ${rel.version} → release.published`);
       }
+      return;
+    }
+
+    // ── CI completion → re-dispatch pr_review (upgrade provisional → formal) ──
+    // Quinn's terminal-CI guard (guardTerminalCi, #3886) holds the formal
+    // verdict to a non-blocking COMMENT while CI is in flight, deferring the
+    // APPROVE/REQUEST_CHANGES to "a later pass once every check is terminal."
+    // Nothing re-invoked Quinn on CI completion, so clean PRs stalled at the
+    // provisional COMMENT forever (#721). We re-dispatch here. Both
+    // workflow_run and check_suite are accepted: GitHub Actions emits both, and
+    // taking either guards against the check-run lag race (the just-finished
+    // run sometimes still reads in_progress when its workflow_run lands).
+    // Requires the GitHub App to subscribe to `workflow_run` + `check_suite`.
+    if ((event === "workflow_run" || event === "check_suite") && payload.action === "completed") {
+      void this._handleCiCompletion(event, payload, bus, getToken).catch((err) => {
+        console.error(`[github] CI-completion re-review failed: ${err instanceof Error ? err.message : err}`);
+      });
       return;
     }
 
@@ -762,6 +824,129 @@ export class GitHubPlugin implements Plugin {
         );
       });
     }
+  }
+
+  /**
+   * Re-dispatch pr_review when CI completes, so Quinn's provisional COMMENT
+   * (held by guardTerminalCi while checks were in flight) upgrades to a formal
+   * APPROVE / REQUEST_CHANGES (#721). Fires for `workflow_run` and `check_suite`
+   * completed events, both keyed by head SHA.
+   *
+   * Targeted, not a blanket re-review:
+   *  - resolves the open PR(s) whose head is this SHA,
+   *  - only re-reviews PRs Quinn has ALREADY reviewed (the provisional→formal
+   *    case — never a surprise first-touch from a CI event),
+   *  - gates on ALL checks being terminal, so it dispatches once at the true
+   *    terminal moment rather than once per finishing workflow.
+   * The dispatcher's `@sha7` cooldown (#437) is the backstop against any
+   * residual burst from the two event types arriving together.
+   */
+  private async _handleCiCompletion(
+    event: string,
+    payload: Record<string, unknown>,
+    bus: EventBus,
+    getToken: (owner: string, repo: string) => Promise<string>,
+  ): Promise<void> {
+    const repository = payload.repository as Record<string, unknown> | undefined;
+    const owner = ((repository?.owner as Record<string, unknown> | undefined)?.login) as string | undefined;
+    const repo = repository?.name as string | undefined;
+    const headSha = ciCompletionHeadSha(payload);
+    if (!owner || !repo || !headSha) return;
+
+    const pulls = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/commits/${headSha}/pulls`)) as
+      | Array<Record<string, unknown>>
+      | null;
+    if (!Array.isArray(pulls) || pulls.length === 0) return;
+
+    for (const pr of pulls) {
+      const number = pr.number as number;
+      if (!prEligibleForCiReview(pr, headSha)) continue;
+
+      if (!(await this._quinnHasReviewed(getToken, owner, repo, number))) continue;
+      if (!(await this._ciTerminal(getToken, owner, repo, headSha))) {
+        console.log(`[github] CI-completion (${event}): ${owner}/${repo}#${number} — checks not all terminal yet, deferring`);
+        continue;
+      }
+
+      const ctx: GitHubEventContext = {
+        owner,
+        repo,
+        number,
+        title: (pr.title as string | undefined) ?? "",
+        url: (pr.html_url as string | undefined) ?? "",
+        body: (pr.body as string | undefined) ?? "",
+        author: ((pr.user as Record<string, unknown> | undefined)?.login as string | undefined) ?? "",
+      };
+      // Synthesize the shape _handleAutoReview reads (pull_request.draft +
+      // pull_request.head.sha). skipDedup: the all-terminal gate already ensures
+      // a single meaningful dispatch; the dispatcher's @sha7 cooldown collapses
+      // any workflow_run+check_suite co-arrival.
+      const synthPayload: Record<string, unknown> = { action: "ci_completed", pull_request: pr };
+      console.log(`[github] CI-completion (${event}): re-dispatching pr_review for ${owner}/${repo}#${number} @${headSha.slice(0, 7)}`);
+      // event="pull_request" so the published topic is byte-identical to a
+      // normal auto-review (the routed path is proven); the "ci_completed"
+      // action just suppresses the opened-only leading comment.
+      this._handleAutoReview("pull_request", synthPayload, ctx, bus, getToken, { skipDedup: true });
+    }
+  }
+
+  /** Authenticated GitHub REST GET. Returns parsed JSON, or null on any failure (best-effort). */
+  private async _ghGet(
+    getToken: (owner: string, repo: string) => Promise<string>,
+    owner: string,
+    repo: string,
+    path: string,
+  ): Promise<unknown> {
+    try {
+      const token = await getToken(owner, repo);
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(`https://api.github.com${path}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        }),
+      );
+      if (!res.ok) {
+        console.warn(`[github] GET ${path} → ${res.status}`);
+        return null;
+      }
+      return await res.json();
+    } catch (err) {
+      console.error(`[github] GET ${path} error:`, err);
+      return null;
+    }
+  }
+
+  /** True iff @protoquinn[bot] has already left a review on this PR. */
+  private async _quinnHasReviewed(
+    getToken: (owner: string, repo: string) => Promise<string>,
+    owner: string,
+    repo: string,
+    number: number,
+  ): Promise<boolean> {
+    const reviews = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/pulls/${number}/reviews`)) as
+      | Array<Record<string, unknown>>
+      | null;
+    return quinnHasReviewed(reviews ?? undefined);
+  }
+
+  /**
+   * True when every check-run for the SHA is terminal, so guardTerminalCi will
+   * permit a formal verdict.
+   */
+  private async _ciTerminal(
+    getToken: (owner: string, repo: string) => Promise<string>,
+    owner: string,
+    repo: string,
+    headSha: string,
+  ): Promise<boolean> {
+    const data = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/commits/${headSha}/check-runs`)) as
+      | { check_runs?: Array<Record<string, unknown>> }
+      | null;
+    return allChecksTerminal(data?.check_runs);
   }
 
   private async _postComment(
