@@ -51,7 +51,7 @@ For a single repository: **Settings → Webhooks → Add webhook**
 | Content type | `application/json` |
 | Secret | Value of `GITHUB_WEBHOOK_SECRET` |
 | SSL verification | Enable |
-| Events | Issue comments, Issues, Pull request review comments, Pull requests |
+| Events | Issue comments, Issues, Pull request review comments, Pull requests, Check suites, Workflow runs |
 
 ### Org-level webhook (recommended)
 
@@ -69,7 +69,9 @@ gh api orgs/protoLabsAI/hooks \
   --field "events[]=issues" \
   --field "events[]=issue_comment" \
   --field "events[]=pull_request" \
-  --field "events[]=pull_request_review_comment"
+  --field "events[]=pull_request_review_comment" \
+  --field "events[]=check_suite" \
+  --field "events[]=workflow_run"
 ```
 
 ---

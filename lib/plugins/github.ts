@@ -517,6 +517,23 @@ export class GitHubPlugin implements Plugin {
       }
     }
 
+    // ── Terminal-CI re-review: check_suite / workflow_run completed ──────────
+    // When CI finishes, resolve head SHA → open PR(s) and re-dispatch pr_review
+    // so Quinn can land a formal APPROVE/REQUEST_CHANGES (guardTerminalCi will
+    // pass now that all checks are terminal). Uses ci-review: dedup prefix to
+    // avoid collision with commit-triggered pr-review: dedup.
+    // Placed before extractContext — these events don't produce a context.
+    if (event === "check_suite" && payload.action === "completed") {
+      this._handleCiCompletion(payload, "check_suite", bus, getToken)
+        .catch((err) => console.error("[github] CI-completion (check_suite) error:", err));
+      return;
+    }
+    if (event === "workflow_run" && payload.action === "completed") {
+      this._handleCiCompletion(payload, "workflow_run", bus, getToken)
+        .catch((err) => console.error("[github] CI-completion (workflow_run) error:", err));
+      return;
+    }
+
     const ctx = extractContext(event, payload);
     if (!ctx) return;
 
@@ -661,10 +678,10 @@ export class GitHubPlugin implements Plugin {
     ctx: GitHubEventContext,
     bus: EventBus,
     getToken: (owner: string, repo: string) => Promise<string>,
-    opts: { skipDedup: boolean } = { skipDedup: false },
+    opts: { skipDedup: boolean; dedupKey?: string } = { skipDedup: false },
   ): void {
     const action = payload.action as string;
-    const dedupKey = `pr-review:${ctx.owner}/${ctx.repo}#${ctx.number}`;
+    const dedupKey = opts.dedupKey ?? `pr-review:${ctx.owner}/${ctx.repo}#${ctx.number}`;
     if (!opts.skipDedup) {
       const lastDispatched = this.recentDispatches.get(dedupKey);
       if (lastDispatched && Date.now() - lastDispatched < GitHubPlugin.DEDUP_WINDOW_MS) {
@@ -791,6 +808,214 @@ export class GitHubPlugin implements Plugin {
       }
     } catch (err) {
       console.error("[github] Error posting comment:", err);
+    }
+  }
+
+  /** Terminal CI conclusions — null means "still running". */
+  private static readonly TERMINAL_CONCLUSIONS = new Set([
+    "success", "failure", "neutral", "skipped", "cancelled", "timed_out", "action_required",
+  ]);
+
+  private _isTerminalConclusion(conclusion: unknown): boolean {
+    return typeof conclusion === "string" && GitHubPlugin.TERMINAL_CONCLUSIONS.has(conclusion);
+  }
+
+  /**
+   * Resolve open PR(s) at a given head SHA.
+   * Calls GET /repos/{owner}/{repo}/commits/{sha}/pulls/open
+   */
+  private async _resolvePrsForSha(
+    getToken: (owner: string, repo: string) => Promise<string>,
+    owner: string,
+    repo: string,
+    sha: string,
+  ): Promise<Array<{ number: number; sha: string }>> {
+    try {
+      const token = await getToken(owner, repo);
+      const url = `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(sha)}/pulls/open`;
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        }),
+      );
+      if (!res.ok) {
+        console.warn(`[github] CI-completion: SHA→PR lookup failed ${res.status} for ${owner}/${repo}@${sha}`);
+        return [];
+      }
+      const prs = (await res.json()) as Array<Record<string, unknown>>;
+      return prs.map((pr) => ({
+        number: pr.number as number,
+        sha: (pr.head as Record<string, unknown>)?.sha as string,
+      }));
+    } catch (err) {
+      console.warn(`[github] CI-completion: SHA→PR lookup error for ${owner}/${repo}@${sha}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Check whether Quinn already has a formal (non-COMMENT) review on the PR.
+   * Returns true if APPROVED or CHANGES_REQUESTED review exists by protoquinn[bot].
+   */
+  private async _hasFormalQuinnReview(
+    getToken: (owner: string, repo: string) => Promise<string>,
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<boolean> {
+    try {
+      const token = await getToken(owner, repo);
+      const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/reviews`;
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        }),
+      );
+      if (!res.ok) {
+        console.warn(`[github] CI-completion: review lookup failed ${res.status} for ${owner}/${repo}#${prNumber}`);
+        return false;
+      }
+      const reviews = (await res.json()) as Array<Record<string, unknown>>;
+      const quinnReview = reviews.find((r) => {
+        const login = ((r.user as Record<string, unknown> | undefined)?.login as string | undefined)?.toLowerCase();
+        return login === "protoquinn" || login === "protoquinn[bot]";
+      });
+      const quinnState = (quinnReview ?? {}).state as string | undefined;
+      return quinnState === "APPROVED" || quinnState === "CHANGES_REQUESTED";
+    } catch (err) {
+      console.warn(`[github] CI-completion: review lookup error for ${owner}/${repo}#${prNumber}:`, err);
+      return false;
+    }
+  }
+
+  /**
+   * Handle CI-completion webhook events (check_suite.completed / workflow_run.completed).
+   * Resolves head SHA → open PR(s) and re-dispatches pr_review through _handleAutoReview.
+   */
+  private async _handleCiCompletion(
+    payload: Record<string, unknown>,
+    eventType: "check_suite" | "workflow_run",
+    bus: EventBus,
+    getToken: (owner: string, repo: string) => Promise<string>,
+  ): Promise<void> {
+    const ciObject = eventType === "check_suite"
+      ? payload.check_suite as Record<string, unknown> | undefined
+      : payload.workflow_run as Record<string, unknown> | undefined;
+
+    if (!ciObject) {
+      console.warn(`[github] CI-completion: missing ${eventType} object in payload`);
+      return;
+    }
+
+    const headSha = ciObject.head_sha as string | undefined;
+    const repo = payload.repository as Record<string, unknown> | undefined;
+    const owner = ((repo?.owner as Record<string, unknown> | undefined)?.login as string) ?? "";
+    const repoName = (repo?.name as string) ?? "";
+
+    if (!headSha || !owner || !repoName) {
+      console.warn(`[github] CI-completion: missing head_sha or repo info (${eventType})`);
+      return;
+    }
+
+    // Only trigger on terminal conclusions (null = still running)
+    const conclusion = ciObject.conclusion as string | null | undefined;
+    if (!this._isTerminalConclusion(conclusion)) {
+      console.log(`[github] CI-completion: non-terminal conclusion "${conclusion}" — skipping (${eventType})`);
+      return;
+    }
+
+    // Resolve SHA → open PRs
+    const prs = await this._resolvePrsForSha(getToken, owner, repoName, headSha);
+    if (prs.length === 0) {
+      console.log(`[github] CI-completion: no open PRs at ${owner}/${repoName}@${headSha.slice(0, 7)}`);
+      return;
+    }
+
+    for (const pr of prs) {
+      // Stale SHA guard — skip if CI result is for a superseded commit
+      if (pr.sha !== headSha) {
+        console.log(`[github] CI-completion: stale SHA for ${owner}/${repoName}#${pr.number} (expected ${headSha.slice(0, 7)}, got ${pr.sha.slice(0, 7)})`);
+        continue;
+      }
+
+      // Skip if Quinn already has a formal review
+      if (await this._hasFormalQuinnReview(getToken, owner, repoName, pr.number)) {
+        console.log(`[github] CI-completion: Quinn already has formal review on ${owner}/${repoName}#${pr.number} — skipping`);
+        continue;
+      }
+
+      // Fetch PR details to build context
+      const prDetail = await this._fetchPrDetail(getToken, owner, repoName, pr.number);
+      if (!prDetail) continue;
+
+      const ctx: GitHubEventContext = {
+        owner,
+        repo: repoName,
+        number: pr.number,
+        title: prDetail.title as string,
+        url: prDetail.html_url as string,
+        body: (prDetail.body as string | null) ?? "",
+        author: ((prDetail.user as Record<string, unknown> | undefined)?.login as string) ?? "",
+      };
+
+      const syntheticPayload: Record<string, unknown> = {
+        action: "ci_completed",
+        pull_request: {
+          draft: prDetail.draft,
+          head: { sha: headSha },
+          title: ctx.title,
+          html_url: ctx.url,
+          body: ctx.body,
+          user: prDetail.user,
+        },
+      };
+
+      this._handleAutoReview(
+        eventType,
+        syntheticPayload,
+        ctx,
+        bus,
+        getToken,
+        { skipDedup: true, dedupKey: `ci-review:${owner}/${repoName}#${pr.number}` },
+      );
+    }
+  }
+
+  /** Fetch full PR detail from GitHub API. */
+  private async _fetchPrDetail(
+    getToken: (owner: string, repo: string) => Promise<string>,
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<Record<string, unknown> | null> {
+    try {
+      const token = await getToken(owner, repo);
+      const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`;
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        }),
+      );
+      if (!res.ok) {
+        console.warn(`[github] CI-completion: PR detail fetch failed ${res.status} for ${owner}/${repo}#${prNumber}`);
+        return null;
+      }
+      return (await res.json()) as Record<string, unknown>;
+    } catch (err) {
+      console.warn(`[github] CI-completion: PR detail fetch error for ${owner}/${repo}#${prNumber}:`, err);
+      return null;
     }
   }
 }

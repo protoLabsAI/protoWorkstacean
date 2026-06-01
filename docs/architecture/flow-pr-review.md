@@ -81,6 +81,20 @@ This is the same chokepoint-invariant shape as cooldown / target-guard / actor-f
                   ▼
             GitHub REST API
         POST /repos/{owner}/{repo}/pulls/{n}/reviews
+
+   ┌──────────────────────────────────────────────────────────────┐
+   │  Terminal-CI re-review trigger (check_suite / workflow_run)  │
+   │                                                              │
+   │  CI completes → _handleCiCompletion()                        │
+   │    1. terminal conclusion check (skip null = still running)  │
+   │    2. SHA → open PR lookup (GET /commits/{sha}/pulls/open)  │
+   │    3. stale SHA guard (skip if head.sha ≠ ci.head_sha)      │
+   │    4. formal review check (skip if Quinn already APPROVED/   │
+   │       CHANGES_REQUESTED)                                     │
+   │    5. re-dispatch _handleAutoReview(ci-review: dedup key)   │
+   │    → Quinn re-reviews → guardTerminalCi passes → formal     │
+   │      APPROVE/REQUEST_CHANGES lands                           │
+   └──────────────────────────────────────────────────────────────┘
 ```
 
 The chat-reply path (Quinn answering a comment, no verdict) still flows through `message.outbound.github.{o}.{r}.{n}` → `GitHubPlugin._postComment`. Only the formal verdict tools use the `pr-inspector.ts` backend.
@@ -120,16 +134,27 @@ sequenceDiagram
     Q->>Q: read PR diff via tools
     Q->>Q: analyze (LLM)
 
-    alt PASS
+    alt PASS (CI terminal)
         Q->>Bus: review_approve tool call → message.outbound.github.{o}.{r}.{n}
-    else WARN
-        Q->>Bus: review_comment tool call → message.outbound.github.{o}.{r}.{n}
+    else PASS (CI still running)
+        Q->>Bus: review_comment tool call → COMMENT<br/>(guardTerminalCi holds)
     else FAIL
         Q->>Bus: review_request_changes tool call → message.outbound.github.{o}.{r}.{n}
     end
 
     Bus->>GP: deliver outbound (correlationId match in pendingComments)
     GP->>GH: POST /repos/{o}/{r}/pulls/{n}/reviews
+
+    Note over GH,GP: Terminal-CI re-review path
+    GH->>GP: webhook (check_suite.completed / workflow_run.completed)
+    GP->>GP: _handleCiCompletion()<br/>terminal conclusion? SHA→PR lookup
+    GP->>GP: stale SHA guard + formal review check
+    GP->>GP: _handleAutoReview(ci-review: dedup key)
+    GP->>Bus: message.inbound.github.{o}.{r}.pull_request.{n}<br/>(skillHint=pr_review)
+    Bus->>Q: re-execute pr_review
+    Q->>Q: analyze (LLM)
+    Q->>Bus: review_approve / review_request_changes<br/>(guardTerminalCi now passes)
+    GP->>GH: POST /repos/{o}/{r}/pulls/{n}/reviews<br/>(formal APPROVE/CHANGES_REQUESTED)
 ```
 
 ---
@@ -174,6 +199,8 @@ authorLogins to drop: protoquinn[bot], ava[bot], protobot[bot], …
 ## Dedup window
 
 60s sliding window keyed by `(owner/repo, number)` ([github.ts:656](../../lib/plugins/github.ts)). Prevents fast-rebase floods (`git push --force` storms) from triggering N reviews. **Race:** if a real new commit lands within the 60s window, it doesn't trigger a review until the window clears. Acceptable today (PR review is best-effort, not real-time); revisit if it bites.
+
+**CI-completion dedup** uses a distinct prefix: `ci-review:owner/repo#N` (vs `pr-review:owner/repo#N` for commit-triggered). This allows CI completion to bypass the dedup window set by the initial review dispatch.
 
 Note this is separate from #437 cooldown (which is per-skill-per-repo and 30s) — both apply, dedup at the webhook tier and cooldown at the dispatcher tier.
 
