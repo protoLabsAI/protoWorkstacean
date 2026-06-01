@@ -87,6 +87,16 @@ export const ACTION_TOPICS = {
   COMMAND_A2A_UPSERT: "command.a2a.upsert",
   COMMAND_A2A_REMOVE: "command.a2a.remove",
 
+  /**
+   * MCP-server mutations (ADR-0005, ADR-0004 P4). The registrar persists the
+   * entry to workspace/mcp-servers.d/<name>.yaml; McpClientPlugin connects and
+   * registers/unregisters one McpExecutor per discovered tool live (no restart).
+   *   command.mcp.upsert — { name, file, yaml, entry }
+   *   command.mcp.remove — { name, file }
+   */
+  COMMAND_MCP_UPSERT: "command.mcp.upsert",
+  COMMAND_MCP_REMOVE: "command.mcp.remove",
+
   /** Wildcard subscription pattern — matches all cron events from SchedulerPlugin. */
   CRON_ALL: "cron.#",
 

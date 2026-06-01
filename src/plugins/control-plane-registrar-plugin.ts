@@ -27,13 +27,15 @@ export class ControlPlaneRegistrarPlugin implements Plugin {
   capabilities = ["control-plane", "config-writer"];
 
   /** Writes are confined to these roots — a path-traversal guard. */
-  private readonly agentsRoot: string;   // workspace/agents/   — in-process DeepAgents (P2)
-  private readonly agentsdRoot: string;  // workspace/agents.d/ — A2A endpoints (P3)
+  private readonly agentsRoot: string;     // workspace/agents/        — in-process DeepAgents (P2)
+  private readonly agentsdRoot: string;    // workspace/agents.d/      — A2A endpoints (P3)
+  private readonly mcpServersRoot: string; // workspace/mcp-servers.d/ — MCP servers (P4, ADR-0005)
   private subscriptionIds: string[] = [];
 
   constructor(workspaceDir: string) {
     this.agentsRoot = resolve(workspaceDir, "agents");
     this.agentsdRoot = resolve(workspaceDir, "agents.d");
+    this.mcpServersRoot = resolve(workspaceDir, "mcp-servers.d");
   }
 
   install(bus: EventBus): void {
@@ -42,6 +44,8 @@ export class ControlPlaneRegistrarPlugin implements Plugin {
       bus.subscribe("command.agent.remove", this.name, (msg) => this._delete(this.agentsRoot, msg)),
       bus.subscribe("command.a2a.upsert", this.name, (msg) => this._write(this.agentsdRoot, msg)),
       bus.subscribe("command.a2a.remove", this.name, (msg) => this._delete(this.agentsdRoot, msg)),
+      bus.subscribe("command.mcp.upsert", this.name, (msg) => this._write(this.mcpServersRoot, msg)),
+      bus.subscribe("command.mcp.remove", this.name, (msg) => this._delete(this.mcpServersRoot, msg)),
     );
   }
 

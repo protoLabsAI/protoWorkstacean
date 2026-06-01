@@ -12,6 +12,7 @@
  *     success: true,
  *     data: {
  *       agents: AgentSummary[],            // live registry + declared A2A (pendingDiscovery)
+ *       mcpServers: McpServerSummary[],    // registered MCP servers (ADR-0005 P4)
  *       health: FleetHealthSnapshot | null, // 24h rollups, durably-backed (P5a); null if the plugin isn't installed
  *       collectedAt: number,
  *     }
@@ -24,6 +25,7 @@
 
 import type { Route, ApiContext } from "./types.ts";
 import { collectFleetAgents } from "./agents-runtime.ts";
+import { listMcpServers } from "./mcp-crud.ts";
 import type { AgentFleetHealthPlugin } from "../plugins/agent-fleet-health-plugin.ts";
 import type { FleetHealthSnapshot } from "../plugins/agent-fleet-health-plugin.ts";
 
@@ -44,6 +46,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
           success: true,
           data: {
             agents: collectFleetAgents(ctx),
+            mcpServers: listMcpServers(ctx.workspaceDir),
             health,
             collectedAt: health?.collectedAt ?? Date.now(),
           },
