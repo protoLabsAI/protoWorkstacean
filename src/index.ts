@@ -117,6 +117,12 @@ import { TelemetryService } from "./telemetry/telemetry-service.js";
 const telemetry = new TelemetryService(`${dataDir}/knowledge.db`);
 telemetry.init();
 
+// Durable backing for fleet health — persists outcomes + rehydrates the 24h
+// window on restart, so fleet visibility survives redeploys (ADR-0004 P5).
+import { FleetStateRepository } from "./knowledge/fleet-state.js";
+const fleetStateRepo = new FleetStateRepository(`${dataDir}/knowledge.db`);
+fleetStateRepo.init();
+
 // Core plugins — always loaded, statically imported (no dynamic overhead needed)
 const debugPlugin = new DebugPlugin();
 debugPlugin.install(bus);
@@ -434,7 +440,8 @@ const pluginRegistry: PluginRegistryEntry[] = [
     factory: async () => {
       const { AgentFleetHealthPlugin } = await import("./plugins/agent-fleet-health-plugin.js");
       // executorRegistry wired for outcome attribution whitelist (#459).
-      return new AgentFleetHealthPlugin(executorRegistry);
+      // fleetStateRepo wired for durable persistence + restart hydration (ADR-0004 P5).
+      return new AgentFleetHealthPlugin(executorRegistry, fleetStateRepo);
     },
   },
   {
