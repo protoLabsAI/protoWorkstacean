@@ -5,9 +5,9 @@ relevantTo: [architecture]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 13
-  referenced: 0
-  successfulFeatures: 0
+  loaded: 14
+  referenced: 1
+  successfulFeatures: 1
 ---
 # architecture
 
@@ -56,3 +56,10 @@ usageStats:
 - **Problem solved:** System has both heuristic-based fallback path and explicit configuration; when external=true, uses WORKSTACEAN_BASE_URL without attempting hostname analysis
 - **Why this works:** Operator knows topology better than code; explicit config should be unambiguous and fully trusted rather than merged with heuristic logic
 - **Trade-offs:** Easier: clear semantics and single decision point. Harder: requires accurate configuration; no automatic detection or intelligent fallback
+
+### Implementing a 'drain-and-dispose' lifecycle for hot-reloading agents via an in-flight tracking mechanism in the ExecutorRegistry. (2026-06-01)
+- **Context:** Hot-reloading agent configurations (agents.yaml) requires replacing executors without dropping active skill dispatches or causing resource leaks.
+- **Why:** To ensure zero-downtime updates and graceful shutdown of old executor instances while allowing current requests to complete naturally.
+- **Rejected:** Immediate replacement of executors, which would cause in-flight requests to fail with 'executor not found' or 'connection closed' errors.
+- **Trade-offs:** Increases complexity by requiring a WeakMap for in-flight counting and adding asynchronous waiting logic to the unregistration process; however, it provides much higher system stability during configuration changes.
+- **Breaking if changed:** Removing the `unregisterAgent` drain logic or the `dispose()` hook would lead to either interrupted user requests or leaked resources (e.g., open sockets/processes) from old executors.
