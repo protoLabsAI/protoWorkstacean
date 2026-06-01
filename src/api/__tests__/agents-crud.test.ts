@@ -147,4 +147,24 @@ describe("agents-crud control-plane API", () => {
     const body = (await unreach.json()) as { reachable: boolean };
     expect(body.reachable).toBe(false);
   });
+
+  test("A2A endpoints: create → agents.d/ file (409 dup, 400 bad-url), delete removes", async () => {
+    const A2A = { name: "frank", url: "http://frank:7880/a2a", streaming: true };
+    const created = await route("POST", "/api/a2a-endpoints").handler(reqWith(A2A), {});
+    expect(created.status).toBe(201);
+    expect(existsSync(join(root, "agents.d", "frank.yaml"))).toBe(true);
+
+    const dup = await route("POST", "/api/a2a-endpoints").handler(reqWith(A2A), {});
+    expect(dup.status).toBe(409);
+
+    const bad = await route("POST", "/api/a2a-endpoints").handler(reqWith({ name: "x", url: "ftp://nope" }), {});
+    expect(bad.status).toBe(400);
+
+    const del = await route("DELETE", "/api/a2a-endpoints/:name").handler(reqWith(undefined), { name: "frank" });
+    expect(del.status).toBe(200);
+    expect(existsSync(join(root, "agents.d", "frank.yaml"))).toBe(false);
+
+    const missing = await route("DELETE", "/api/a2a-endpoints/:name").handler(reqWith(undefined), { name: "frank" });
+    expect(missing.status).toBe(404);
+  });
 });

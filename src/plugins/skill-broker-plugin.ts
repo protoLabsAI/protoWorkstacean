@@ -17,12 +17,12 @@
  * Config: workspace/agents.yaml (A2A URLs and optional skill overrides)
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { ClientFactory, JsonRpcTransportFactory } from "@a2a-js/sdk/client";
 import type { AgentCard } from "@a2a-js/sdk";
-import type { Plugin, EventBus } from "../../lib/types.ts";
+import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import { A2AExecutor } from "../executor/executors/a2a-executor.ts";
 import { resolveEnvVars } from "../utils/env-interpolation.ts";
@@ -103,6 +103,11 @@ export class SkillBrokerPlugin implements Plugin {
   private registeredSkills = new Map<string, Set<string>>();
   /** Per-agent liveness probe cache, refreshed every HEARTBEAT_INTERVAL_MS. */
   private fleetHealth = new Map<string, AgentHealthProbe>();
+  /** Live A2A agent set (def + executor) — the source for timers + control-plane reconcile. */
+  private readonly agentDefs = new Map<string, AgentDef>();
+  private readonly executors = new Map<string, A2AExecutor>();
+  private bus?: EventBus;
+  private opsChannel = "";
 
   constructor(workspaceDir: string, executorRegistry: ExecutorRegistry) {
     this.workspaceDir = workspaceDir;
@@ -119,78 +124,92 @@ export class SkillBrokerPlugin implements Plugin {
   }
 
   install(bus: EventBus): void {
-    const agents = this._loadAgents();
-    const opsChannel = process.env.DISCORD_AGENT_OPS_CHANNEL ?? "";
+    this.bus = bus;
+    this.opsChannel = process.env.DISCORD_AGENT_OPS_CHANNEL ?? "";
 
-    for (const agent of agents) {
-      const resolvedUrl = resolveEnvVars(agent.url, "skill-broker");
-      const executor = new A2AExecutor({
-        name: agent.name,
-        url: resolvedUrl,
-        apiKeyEnv: agent.apiKeyEnv,
-        auth: agent.auth,
-        extraHeaders: agent.headers,
-        streaming: agent.streaming ?? false,
-        external: agent.external ?? false,
-        onStreamUpdate: opsChannel
-          ? (update) => {
-              bus.publish(`message.outbound.discord.push.${opsChannel}`, {
-                id: crypto.randomUUID(),
-                correlationId: crypto.randomUUID(),
-                topic: `message.outbound.discord.push.${opsChannel}`,
-                timestamp: Date.now(),
-                payload: {
-                  content: `**${agent.name}** [${update.state ?? update.type}] ${(update.text ?? "").slice(0, 300)}`,
-                },
-              });
-            }
-          : undefined,
-      });
+    for (const agent of this._loadAgents()) this._registerAgent(agent);
+    console.log(`[skill-broker] Registered ${this.agentDefs.size} A2A agent(s) (skills from yaml + agents.d/; discovery in progress)`);
 
-      // Register yaml-declared skills synchronously (explicit overrides)
-      const explicitSkills = new Set<string>();
-      for (const s of agent.skills ?? []) {
-        const skillName = typeof s === "string" ? s : s.name;
-        this.executorRegistry.register(skillName, executor, {
-          agentName: agent.name,
-          priority: 5,
-        });
-        explicitSkills.add(skillName);
-      }
-      this.registeredSkills.set(agent.name, explicitSkills);
+    // Control-plane (ADR-0004 P3): live add/remove of A2A agents. The registrar
+    // persists the entry to workspace/agents.d/; we register/unregister the
+    // executor in the same bus turn, so the change is live without a restart.
+    bus.subscribe("command.a2a.upsert", this.name, (msg: BusMessage) => {
+      const entry = (msg.payload as { entry?: AgentDef })?.entry;
+      if (entry?.name && entry.url) this._registerAgent(entry);
+    });
+    bus.subscribe("command.a2a.remove", this.name, (msg: BusMessage) => {
+      const name = (msg.payload as { name?: string })?.name;
+      if (name) this._unregisterAgent(name);
+    });
 
-      // Kick off async card discovery for any skills not in yaml
-      void this._discoverSkills(agent, executor, resolvedUrl);
-    }
-
-    console.log(`[skill-broker] Registered ${agents.length} A2A agent(s) (skills from yaml; discovery in progress)`);
-
-    // Periodic refresh — picks up new skills without a restart
+    // Periodic skill rediscovery + liveness heartbeat — over the LIVE set, so
+    // control-plane-added agents are refreshed/probed too.
     this.refreshTimer = setInterval(() => {
-      for (const agent of agents) {
-        const executor = this.executorRegistry.list().find(r => r.agentName === agent.name)?.executor;
-        if (executor && executor.type === "a2a") {
-          void this._discoverSkills(agent, executor as A2AExecutor, resolveEnvVars(agent.url, "skill-broker"));
-        }
+      for (const [name, agent] of this.agentDefs) {
+        const executor = this.executors.get(name);
+        if (executor) void this._discoverSkills(agent, executor, resolveEnvVars(agent.url, "skill-broker"));
       }
     }, CARD_REFRESH_INTERVAL_MS);
     this.refreshTimer.unref?.();
 
-    // Fleet liveness heartbeat — probes each agent's card on a faster
-    // cadence than the 10-min skill-discovery refresh. Exposed via
-    // getFleetHealth() so /api/agent-health can report reachability +
-    // latency for on-demand agents alongside the persistent DeepAgents.
     this.heartbeatTimer = setInterval(() => {
-      for (const agent of agents) {
-        void this._probeAgentHealth(agent, resolveEnvVars(agent.url, "skill-broker"));
-      }
+      for (const agent of this.agentDefs.values()) void this._probeAgentHealth(agent, resolveEnvVars(agent.url, "skill-broker"));
     }, HEARTBEAT_INTERVAL_MS);
     this.heartbeatTimer.unref?.();
-    // Kick off an initial probe immediately so the first /api/agent-health
-    // request doesn't return an empty snapshot.
-    for (const agent of agents) {
-      void this._probeAgentHealth(agent, resolveEnvVars(agent.url, "skill-broker"));
+    for (const agent of this.agentDefs.values()) void this._probeAgentHealth(agent, resolveEnvVars(agent.url, "skill-broker"));
+  }
+
+  /** Create + register an A2A agent's executor. Idempotent — re-registers cleanly if the name already exists. */
+  private _registerAgent(agent: AgentDef): void {
+    if (this.agentDefs.has(agent.name)) this._unregisterAgent(agent.name);
+    const bus = this.bus;
+    const opsChannel = this.opsChannel;
+    const resolvedUrl = resolveEnvVars(agent.url, "skill-broker");
+    const executor = new A2AExecutor({
+      name: agent.name,
+      url: resolvedUrl,
+      apiKeyEnv: agent.apiKeyEnv,
+      auth: agent.auth,
+      extraHeaders: agent.headers,
+      streaming: agent.streaming ?? false,
+      external: agent.external ?? false,
+      onStreamUpdate: opsChannel && bus
+        ? (update) => {
+            bus.publish(`message.outbound.discord.push.${opsChannel}`, {
+              id: crypto.randomUUID(),
+              correlationId: crypto.randomUUID(),
+              topic: `message.outbound.discord.push.${opsChannel}`,
+              timestamp: Date.now(),
+              payload: { content: `**${agent.name}** [${update.state ?? update.type}] ${(update.text ?? "").slice(0, 300)}` },
+            });
+          }
+        : undefined,
+    });
+
+    const explicitSkills = new Set<string>();
+    for (const s of agent.skills ?? []) {
+      const skillName = typeof s === "string" ? s : s.name;
+      this.executorRegistry.register(skillName, executor, { agentName: agent.name, priority: 5 });
+      explicitSkills.add(skillName);
     }
+    this.registeredSkills.set(agent.name, explicitSkills);
+    this.agentDefs.set(agent.name, agent);
+    this.executors.set(agent.name, executor);
+    void this._discoverSkills(agent, executor, resolvedUrl);
+    void this._probeAgentHealth(agent, resolvedUrl);
+  }
+
+  /** Unregister an A2A agent and every skill it owns. */
+  private _unregisterAgent(name: string): void {
+    // Sweep ALL registrations for this agent (yaml + discovered), not just the tracked set.
+    for (const reg of this.executorRegistry.list()) {
+      if (reg.agentName === name && reg.skill) this.executorRegistry.unregister(reg.skill, name);
+    }
+    this.registeredSkills.delete(name);
+    this.agentDefs.delete(name);
+    this.executors.delete(name);
+    this.fleetHealth.delete(name);
+    console.log(`[skill-broker] - A2A agent "${name}" unregistered`);
   }
 
   uninstall(): void {
@@ -430,7 +449,7 @@ export class SkillBrokerPlugin implements Plugin {
    * If both are present, the env var wins. If neither resolves to a valid
    * list, the broker registers zero external agents and logs a warning.
    */
-  private _loadAgents(): AgentDef[] {
+  private _loadBaseAgents(): AgentDef[] {
     // Try the env-var path first — deployments use this to avoid file state
     const envOverride = process.env.PROTOLABS_AGENTS_JSON;
     if (envOverride && envOverride.trim()) {
@@ -460,5 +479,37 @@ export class SkillBrokerPlugin implements Plugin {
       console.error("[skill-broker] Failed to load agents.yaml:", err);
       return [];
     }
+  }
+
+  /**
+   * Control-plane-managed A2A entries (ADR-0004 P3): one AgentDef per file in
+   * workspace/agents.d/. Kept separate from the hand-maintained, comment-rich
+   * agents.yaml so writes never clobber its docs.
+   */
+  private _loadAgentsDir(): AgentDef[] {
+    const dir = join(this.workspaceDir, "agents.d");
+    if (!existsSync(dir)) return [];
+    const out: AgentDef[] = [];
+    try {
+      for (const f of readdirSync(dir)) {
+        if (!(f.endsWith(".yaml") || f.endsWith(".yml")) || f.endsWith(".example")) continue;
+        try {
+          const def = parseYaml(readFileSync(join(dir, f), "utf8")) as AgentDef;
+          if (def?.name && def.url) out.push(def);
+          else console.warn(`[skill-broker] agents.d/${f}: missing name/url — skipped`);
+        } catch (err) {
+          console.error(`[skill-broker] Skipping agents.d/${f}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    } catch { /* dir vanished mid-scan */ }
+    return out;
+  }
+
+  /** agents.yaml (or PROTOLABS_AGENTS_JSON) merged with control-plane agents.d/, deduped by name (managed wins). */
+  private _loadAgents(): AgentDef[] {
+    const byName = new Map<string, AgentDef>();
+    for (const a of this._loadBaseAgents()) byName.set(a.name, a);
+    for (const a of this._loadAgentsDir()) byName.set(a.name, a);
+    return [...byName.values()];
   }
 }
