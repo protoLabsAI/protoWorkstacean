@@ -3,7 +3,7 @@ import { Button, Badge, Card, Empty, Divider, type Status } from "@protolabsai/u
 import { RefreshCw, Plus, Trash2, CircleCheck, Pencil, X, Globe } from "lucide-react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import {
-  getAgentsRuntime,
+  getControlPlaneState,
   testAgent,
   createAgent,
   updateAgent,
@@ -15,6 +15,7 @@ import {
   getAdminKey,
   setAdminKey,
   type AgentsRuntimeResponse,
+  type AgentHealthMetrics,
 } from "../lib/api";
 
 // The Console is the fleet's WRITE surface (ADR-0004 P3) — distinct from the
@@ -40,8 +41,16 @@ function typeStatus(a: Agent): Status {
   return "neutral";
 }
 
+/** 24h health → a colored badge: red if any failures in the last hour, amber if <90% success. */
+function healthStatus(m: AgentHealthMetrics): Status {
+  if (m.failureRate1h > 0) return "error";
+  if (m.successRate < 0.9) return "warning";
+  return "success";
+}
+
 export default function Console() {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [health, setHealth] = useState<Map<string, AgentHealthMetrics>>(new Map());
   const [key, setKey] = useState(getAdminKey());
   const [draft, setDraft] = useState(TEMPLATE);
   const [busy, setBusy] = useState(false);
@@ -54,8 +63,9 @@ export default function Console() {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await getAgentsRuntime(true);
+      const data = await getControlPlaneState(true);
       setAgents(data.agents ?? []);
+      setHealth(new Map((data.health?.agents ?? []).map((h) => [h.agentName, h])));
     } catch (err) {
       setResult({ ok: false, msg: `Failed to load fleet: ${err instanceof Error ? err.message : String(err)}` });
     }
@@ -309,6 +319,14 @@ export default function Console() {
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                   <strong style={{ color: "var(--text-primary)", fontSize: "14px" }}>{a.name}</strong>
                   <Badge status={typeStatus(a)}>{a.pendingDiscovery ? "discovering" : a.type}</Badge>
+                  {(() => {
+                    const m = health.get(a.name);
+                    return m && m.totalOutcomes > 0 ? (
+                      <Badge status={healthStatus(m)}>
+                        {Math.round(m.successRate * 100)}% · {m.totalOutcomes} runs/24h
+                      </Badge>
+                    ) : null;
+                  })()}
                   <span style={{ flex: 1, display: "flex", gap: "6px", flexWrap: "wrap" }}>
                     {a.skills.map((s) => (
                       <Badge key={s} status="neutral">{s}</Badge>

@@ -30,12 +30,12 @@
  *   }
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { Route, ApiContext } from "./types.ts";
 
-interface AgentSummary {
+export interface AgentSummary {
   name: string;
   type: string;
   skills: string[];
@@ -49,17 +49,77 @@ interface YamlAgent {
   external?: boolean;
 }
 
-function loadYamlAgents(workspaceDir: string): YamlAgent[] {
-  const path = join(workspaceDir, "agents.yaml");
-  if (!existsSync(path)) return [];
-  try {
-    const parsed = parseYaml(readFileSync(path, "utf8")) as { agents?: YamlAgent[] };
-    return Array.isArray(parsed?.agents) ? parsed.agents : [];
-  } catch {
-    // Tolerate yaml parse errors — the live registry view is still useful
-    // and an over-noisy 500 on /api/agents/runtime breaks the dashboard.
-    return [];
+/**
+ * Names of A2A agents declared on disk: the hand-maintained agents.yaml plus
+ * each control-plane-managed agents.d/*.yaml (ADR-0004 P3). These may not be in
+ * the registry yet (card discovery in flight) but should render eagerly.
+ */
+function loadDeclaredA2aNames(workspaceDir: string): string[] {
+  const names: string[] = [];
+
+  const yamlPath = join(workspaceDir, "agents.yaml");
+  if (existsSync(yamlPath)) {
+    try {
+      const parsed = parseYaml(readFileSync(yamlPath, "utf8")) as { agents?: YamlAgent[] };
+      for (const a of Array.isArray(parsed?.agents) ? parsed.agents : []) {
+        if (a?.name) names.push(a.name);
+      }
+    } catch {
+      // Tolerate parse errors — the live registry view is still useful and an
+      // over-noisy 500 on /api/agents/runtime breaks the dashboard.
+    }
   }
+
+  const dir = join(workspaceDir, "agents.d");
+  if (existsSync(dir)) {
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".yaml"))) {
+      try {
+        const parsed = parseYaml(readFileSync(join(dir, file), "utf8")) as YamlAgent;
+        if (parsed?.name) names.push(parsed.name);
+      } catch {
+        // skip an unparseable managed file
+      }
+    }
+  }
+
+  return names;
+}
+
+/**
+ * The live fleet: every registered executor grouped by (agentName ?? type),
+ * merged with declared-but-not-yet-discovered A2A agents (pendingDiscovery).
+ * Shared by GET /api/agents/runtime and the unified control-plane read.
+ */
+export function collectFleetAgents(ctx: ApiContext): AgentSummary[] {
+  const byKey = new Map<string, { type: string; skills: Set<string> }>();
+  for (const reg of ctx.executorRegistry.list()) {
+    const key = reg.agentName ?? reg.executor.type;
+    let entry = byKey.get(key);
+    if (!entry) {
+      entry = { type: reg.executor.type, skills: new Set() };
+      byKey.set(key, entry);
+    }
+    if (reg.skill) entry.skills.add(reg.skill);
+  }
+
+  // Merge declared A2A agents. If already in the registry (discovered /
+  // in-process), the registry wins; otherwise mark pendingDiscovery so the
+  // dashboard renders a node with no skills yet.
+  for (const name of loadDeclaredA2aNames(ctx.workspaceDir)) {
+    if (byKey.has(name)) continue;
+    byKey.set(name, { type: "a2a", skills: new Set() });
+  }
+
+  return [...byKey.entries()]
+    .map(([name, { type, skills }]) => {
+      const skillList = [...skills].sort();
+      const summary: AgentSummary = { name, type, skills: skillList };
+      if (type === "a2a" && skillList.length === 0) {
+        summary.pendingDiscovery = true;
+      }
+      return summary;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function createRoutes(ctx: ApiContext): Route[] {
@@ -67,47 +127,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
     {
       method: "GET",
       path: "/api/agents/runtime",
-      handler: () => {
-        const registrations = ctx.executorRegistry.list();
-
-        // 1. Group registry entries by (agentName ?? executor.type).
-        const byKey = new Map<string, { type: string; skills: Set<string> }>();
-        for (const reg of registrations) {
-          const key = reg.agentName ?? reg.executor.type;
-          let entry = byKey.get(key);
-          if (!entry) {
-            entry = { type: reg.executor.type, skills: new Set() };
-            byKey.set(key, entry);
-          }
-          if (reg.skill) entry.skills.add(reg.skill);
-        }
-
-        // 2. Merge in yaml-declared A2A agents. If they already have a
-        // registry entry (skills discovered, in-process loaded), the
-        // registry data wins. Otherwise we mark them pendingDiscovery
-        // so the dashboard renders a node with no skills yet.
-        for (const ya of loadYamlAgents(ctx.workspaceDir)) {
-          if (!ya.name) continue;
-          if (byKey.has(ya.name)) continue;
-          byKey.set(ya.name, { type: "a2a", skills: new Set() });
-        }
-
-        const agents: AgentSummary[] = [...byKey.entries()]
-          .map(([name, { type, skills }]) => {
-            const skillList = [...skills].sort();
-            const summary: AgentSummary = { name, type, skills: skillList };
-            // Only A2A agents can be in "discovery pending" — others
-            // either declare their skills via yaml (deep-agents) or are
-            // synthetic plugin-level (function).
-            if (type === "a2a" && skillList.length === 0) {
-              summary.pendingDiscovery = true;
-            }
-            return summary;
-          })
-          .sort((a, b) => a.name.localeCompare(b.name));
-
-        return Response.json({ success: true, data: { agents } });
-      },
+      handler: () => Response.json({ success: true, data: { agents: collectFleetAgents(ctx) } }),
     },
   ];
 }
