@@ -64,6 +64,45 @@ export function createRoutes(ctx: ApiContext): Route[] {
 
   return [
     {
+      // Capability discovery (ADR-0004 P3): probe an A2A agent's card for
+      // reachability + skills, so the operator picks from real capabilities
+      // instead of a free-text guess. Admin-gated; 5s timeout; tries the
+      // canonical agent-card.json then the legacy agent.json.
+      method: "POST",
+      path: "/api/a2a/probe",
+      handler: async (req) => {
+        if (!authorized(req)) return unauthorized();
+        let body: { url?: string };
+        try { body = (await req.json()) as { url?: string }; } catch { return badJson(); }
+        const raw = (body.url ?? "").trim();
+        if (!/^https?:\/\//.test(raw)) {
+          return Response.json({ success: false, error: "url must be an http(s) URL" }, { status: 400 });
+        }
+        const base = raw.replace(/\/+$/, "");
+        for (const cardUrl of [`${base}/.well-known/agent-card.json`, `${base}/.well-known/agent.json`]) {
+          try {
+            const res = await fetch(cardUrl, { signal: AbortSignal.timeout(5000) });
+            if (!res.ok) continue;
+            const card = (await res.json()) as {
+              name?: string;
+              description?: string;
+              skills?: Array<{ id?: string; name?: string; description?: string }>;
+            };
+            const skills = (card.skills ?? [])
+              .map((s) => s.id ?? s.name ?? "")
+              .filter((s): s is string => Boolean(s));
+            return Response.json({
+              success: true, reachable: true, cardUrl,
+              name: card.name ?? base, description: card.description ?? "", skills,
+            });
+          } catch {
+            // try the next candidate
+          }
+        }
+        return Response.json({ success: true, reachable: false, error: `No agent card at ${base}/.well-known/agent-card.json` });
+      },
+    },
+    {
       // Read one agent's full definition (for the Console's edit form). The
       // earlier-registered GET /api/agents/runtime wins for the literal
       // "runtime", so this only sees real agent names.

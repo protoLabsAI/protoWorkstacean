@@ -137,4 +137,14 @@ describe("agents-crud control-plane API", () => {
     const missing = await route("GET", "/api/agents/:name").handler(reqWith(undefined), { name: "ghost" });
     expect(missing.status).toBe(404);
   });
+
+  test("POST /api/a2a/probe — rejects non-URL (400); unreachable host → reachable:false", async () => {
+    const bad = await route("POST", "/api/a2a/probe").handler(reqWith({ url: "not-a-url" }), {});
+    expect(bad.status).toBe(400);
+
+    // 127.0.0.1:1 refuses immediately → the card fetch throws → reachable:false (no hang).
+    const unreach = await route("POST", "/api/a2a/probe").handler(reqWith({ url: "http://127.0.0.1:1" }), {});
+    const body = (await unreach.json()) as { reachable: boolean };
+    expect(body.reachable).toBe(false);
+  });
 });
