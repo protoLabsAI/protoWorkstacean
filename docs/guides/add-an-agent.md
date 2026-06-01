@@ -78,7 +78,7 @@ When a `agent.skill.request` message arrives, `SkillDispatcherPlugin` calls `Exe
 
 ### Registering the executor
 
-`AgentRuntimePlugin` calls `executorRegistry.register(skill.name, executor, { agentName: agent.name })` for each skill in the YAML. No restart is required if you add a new agent file — restart is required currently; hot-reload is not implemented for agent definitions.
+`AgentRuntimePlugin` calls `executorRegistry.register(skill.name, executor, { agentName: agent.name })` for each skill in the YAML. **In-process agents hot-reload (ADR-0004 P1): adding, editing, or removing a `workspace/agents/*.yaml` is reconciled into the live registry within ~5s — no restart.** A file that fails to parse keeps the running agent and logs a warning (a typo never drops a live agent), and in-flight dispatches finish on the old executor before it's disposed. (Remote A2A agents in `workspace/agents.yaml` still need a restart to add/remove the entry — see [Deploy with Docker](./deploy-with-docker).)
 
 ### Minimal example
 

@@ -16,12 +16,13 @@ protoWorkstacean separates **code** from **config**:
 - **Code ships as an image.** Production runs `ghcr.io/protolabsai/workstacean:main`. [watchtower](https://containrrr.dev/watchtower/) watches that tag and auto-pulls + restarts the container whenever a new `:main` image is published (CI builds and pushes on every merge to `main`).
 - **Workspace config ships as a host bind-mount.** The `workspace/` directory (agent YAMLs, ceremonies, `channels.yaml`) is mounted into the container and updated on the host with `git pull` — it is *not* baked into the image. This means config changes don't require an image rebuild.
 
-Two config reload behaviours follow from that:
+Config reload behaviour by surface:
 
 - **Ceremonies hot-reload.** Editing or adding a file under `workspace/ceremonies/` (then `git pull` on the host) is picked up live — no restart.
-- **Agent YAMLs need a container restart.** Changes to `workspace/agents/*.yaml` or `workspace/agents.yaml` are read at startup; `docker compose restart workstacean` to apply them.
+- **In-process agents hot-reload.** Adding, editing, or removing a `workspace/agents/*.yaml` (DeepAgent) is reconciled live within ~5s — no restart (ADR-0004 P1). A YAML that fails to parse keeps the running agent + logs a warning; in-flight work is never interrupted.
+- **A2A agent entries still need a restart.** Changes to `workspace/agents.yaml` (remote A2A agents) are read at startup; `docker compose restart workstacean` to apply them. (Their *skills* still auto-refresh from the agent card every 10 min — only adding/removing the agent entry needs the restart, until the control-plane work extends hot-reload there.)
 
-So the operational model is: **code lands via watchtower automatically; config lands via `git pull` on the host, with a restart only when you touched agent YAMLs.**
+So the operational model is: **code lands via watchtower automatically; config lands via `git pull` on the host; ceremonies and in-process agents apply live, and only `workspace/agents.yaml` (A2A) edits need a restart.**
 
 ## Docker Compose
 
@@ -104,7 +105,7 @@ The `workspace/` directory is bind-mounted read-write, so configuration changes 
     security-triage.yaml
 ```
 
-After editing **agent** YAMLs, restart the container:
+In-process agents (`workspace/agents/*.yaml`) hot-reload — no restart. After editing **`workspace/agents.yaml`** (A2A entries), restart the container:
 
 ```bash
 docker compose restart workstacean
