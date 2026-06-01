@@ -122,10 +122,19 @@ export class EventViewerPlugin implements Plugin {
   private async proxyToMainServer(req: Request, url: URL): Promise<Response> {
     const target = `http://localhost:${this.mainServerPort}${url.pathname}${url.search}`;
     try {
+      // Buffer the request body before forwarding — never pass req.body as a
+      // stream. Bun pools the outbound keep-alive connection to the main server;
+      // if the backend rejects a request without draining its body (e.g. a 401
+      // before auth, or a 400 on validation), the half-consumed stream leaves the
+      // pooled connection corrupt and the NEXT proxied POST fails → 502. A fully
+      // buffered body is sent in one shot, so the connection stays clean.
+      // (Surfaced by control-plane QA: a no-key 401 then a create 502'd.)
+      const hasBody = req.method !== "GET" && req.method !== "HEAD";
+      const reqBody = hasBody ? await req.arrayBuffer() : undefined;
       const proxyReq = new Request(target, {
         method: req.method,
         headers: req.headers,
-        body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
+        body: reqBody && reqBody.byteLength > 0 ? reqBody : undefined,
       });
       const res = await fetch(proxyReq);
       const body = await res.arrayBuffer();
