@@ -6,7 +6,7 @@
  *
  *   after(ctx, result): reads the agent's observed deltas from the terminal
  *     artifact's worldstate-delta data part (MIME type
- *     application/vnd.protolabs.worldstate-delta+json) and publishes a
+ *     application/vnd.protolabs.worldstate-delta-v1+json) and publishes a
  *     `world.state.delta` event so downstream consumers can update its world-state
  *     snapshot without waiting for the next full poll.
  *

@@ -29,7 +29,7 @@ Call `registerEffectDomainExtension(bus)` once at startup (in `src/index.ts`) wi
 
 ## worldstate-delta artifact
 
-Agents report mutations via a structured `data` artifact part on their terminal Task, using MIME type `application/vnd.protolabs.worldstate-delta+json` (defined in [`packages/a2a/src/extensions.ts`](../../packages/a2a/src/extensions.ts)). The discriminator rides on the part's `metadata.mimeType`; the payload is in `content.value`. Each entry:
+Agents report mutations via a structured `data` artifact part on their terminal Task, using MIME type `application/vnd.protolabs.worldstate-delta-v1+json` (defined in [`packages/a2a/src/extensions.ts`](../../packages/a2a/src/extensions.ts)). The discriminator rides on the part's `metadata.mimeType`; the payload is in `content.value`. Each entry:
 
 | Field | Type | Description |
 |-------|------|-------------|

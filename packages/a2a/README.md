@@ -89,7 +89,7 @@ Each extension is also **declared** on the agent card's
 |---|---|---|
 | cost-v1 | `https://proto-labs.ai/a2a/ext/cost-v1` | `application/vnd.protolabs.cost-v1+json` |
 | confidence-v1 | `https://proto-labs.ai/a2a/ext/confidence-v1` | `application/vnd.protolabs.confidence-v1+json` |
-| worldstate-delta-v1 | `https://proto-labs.ai/a2a/ext/worldstate-delta-v1` | `application/vnd.protolabs.worldstate-delta+json` |
+| worldstate-delta-v1 | `https://proto-labs.ai/a2a/ext/worldstate-delta-v1` | `application/vnd.protolabs.worldstate-delta-v1+json` |
 | tool-call-v1 | `https://proto-labs.ai/a2a/ext/tool-call-v1` | `application/vnd.protolabs.tool-call-v1+json` |
 
 > The card URI and the per-part MIME discriminator are deliberately distinct

@@ -117,7 +117,7 @@ export function parseConfidence(parts: Part[]): ConfidenceArtifactData | undefin
 // --------------------------------------------------------------------------
 
 /** Registered MIME type (DataPart discriminator) for worldstate-delta parts. */
-export const WORLDSTATE_DELTA_MIME_TYPE = "application/vnd.protolabs.worldstate-delta+json";
+export const WORLDSTATE_DELTA_MIME_TYPE = "application/vnd.protolabs.worldstate-delta-v1+json";
 
 /**
  * The mutation operation to apply to the target path.
