@@ -414,7 +414,7 @@ skills:
       - searxng_search
       - react
       - send_update
-    maxTurns: 25
+    maxTurns: 50
     systemPromptOverride: |
       You are Quinn, performing **bug triage**.
 
