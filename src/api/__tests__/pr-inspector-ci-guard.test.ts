@@ -34,6 +34,11 @@ let ciForbidden: boolean;
 let ciPatFallbackSucceeds: boolean;
 // Track which tokens were used for check-runs calls (for test assertions)
 let checkRunsTokensUsed: string[];
+// When true, the PR detail endpoint returns 403 for the App token.
+// The PAT fallback succeeds if ciPatFallbackSucceeds is also true.
+let prDetailForbidden: boolean;
+// Track which tokens were used for PR detail calls (for test assertions)
+let prDetailTokensUsed: string[];
 
 function ctx(): ApiContext {
   return { bus: new InMemoryEventBus(), executorRegistry: {} as never } as unknown as ApiContext;
@@ -65,6 +70,8 @@ beforeEach(() => {
   ciForbidden = false;
   ciPatFallbackSucceeds = false;
   checkRunsTokensUsed = [];
+  prDetailForbidden = false;
+  prDetailTokensUsed = [];
   origFetch = globalThis.fetch;
 
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -76,6 +83,12 @@ beforeEach(() => {
 
     // PR detail → head SHA
     if (url.endsWith(`/pulls/${PR}`) && method === "GET") {
+      prDetailTokensUsed.push(token);
+      if (prDetailForbidden && token === "test-token") return new Response("Forbidden", { status: 403 });
+      if (prDetailForbidden && ciPatFallbackSucceeds && token !== "test-token") {
+        return new Response(JSON.stringify({ head: { sha: HEAD_SHA } }), { status: 200 });
+      }
+      if (prDetailForbidden) return new Response("Forbidden", { status: 403 });
       return new Response(JSON.stringify({ head: { sha: HEAD_SHA } }), { status: 200 });
     }
     // check-runs for head SHA
