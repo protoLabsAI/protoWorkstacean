@@ -1,7 +1,7 @@
 name: Release Notes
 
-# Fires on tag push to post Discord release notes via the
-# DISCORD_WEBHOOK_PROTOWORKSTACEAN_RELEASE webhook.
+# Fires on tag push to post Discord release notes via the org-level
+# DISCORD_RELEASE_WEBHOOK secret.
 #
 # Known gap: tags pushed by auto-release.yml using GITHUB_TOKEN do NOT
 # trigger this workflow (GitHub's recursion-prevention policy on
@@ -53,7 +53,6 @@ jobs:
           previous-version: ${{ steps.tags.outputs.previous }}
         env:
           GATEWAY_API_KEY: ${{ secrets.GATEWAY_API_KEY }}
-          # DISCORD_WEBHOOK_URL was the prior canonical name; the action
-          # reads DISCORD_RELEASE_WEBHOOK. We map the existing webhook
-          # secret across so no secret-renames are needed.
-          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_PROTOWORKSTACEAN_RELEASE }}
+          # Org-level secret — the canonical release webhook shared across the
+          # fleet, read by release-tools directly. Same name in every repo.
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
