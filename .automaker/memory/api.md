@@ -5,7 +5,7 @@ relevantTo: [api]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 7
+  loaded: 8
   referenced: 4
   successfulFeatures: 4
 ---
@@ -50,3 +50,10 @@ usageStats:
 - **Rejected:** Restarting the entire service for configuration or plugin changes.
 - **Trade-offs:** Increases complexity of the API surface but provides much higher availability during development and production tuning.
 - **Breaking if changed:** Removing these endpoints would force manual service restarts to apply any agent-level changes.
+
+### Implement a transparent, tiered authentication fallback mechanism (App Token -> PAT). (2026-06-02)
+- **Context:** The system needed to resolve CI status visibility issues without requiring immediate reconfiguration of the GitHub App.
+- **Why:** This allows the system to remain functional during the transition period while the App permissions are being updated, providing a graceful degradation/recovery path.
+- **Rejected:** Requiring manual intervention or failing immediately upon the first 403 was rejected because it blocks the automated review workflow.
+- **Trade-offs:** Easier deployment and higher availability; harder to debug if the logs don't explicitly state that a fallback occurred.
+- **Breaking if changed:** Changing the order (PAT first) would increase latency for the standard operating mode and potentially use more privileged credentials than necessary for routine tasks.
