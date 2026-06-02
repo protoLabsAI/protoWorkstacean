@@ -6,8 +6,8 @@ importance: 0.7
 relatedFiles: []
 usageStats:
   loaded: 7
-  referenced: 3
-  successfulFeatures: 3
+  referenced: 4
+  successfulFeatures: 4
 ---
 # api
 
@@ -29,3 +29,17 @@ usageStats:
 - **Rejected:** Using the same `pr-review:` prefix as standard PR reviews.
 - **Trade-offs:** Adds slight complexity to the key management but provides much higher observability and prevents collision-based logic errors.
 - **Breaking if changed:** If removed, the system might lose the ability to differentiate why a review was triggered, potentially leading to duplicate processing or inability to apply CI-specific logic.
+
+### Use of a specific 'ci-review:' dedup prefix for auto-generated reviews. (2026-06-01)
+- **Context:** Automated re-triggering of PR reviews via CI completion webhooks (workflow_run/check_suite).
+- **Why:** To prevent infinite loops and collisions between manual 'pr-review:' triggers and automated 'ci-review:' triggers during the same lifecycle.
+- **Rejected:** Using the standard 'pr-review:' prefix for both manual and automated triggers.
+- **Trade-offs:** Adds complexity to the deduplication logic but provides granular control over which type of review is being suppressed or allowed.
+- **Breaking if changed:** Removing the unique prefix would cause the system to incorrectly identify automated CI reviews as manual ones, potentially blocking legitimate subsequent reviews.
+
+### Filtering webhook triggers based on a 'TERMINAL_CONCLUSIONS' set. (2026-06-01)
+- **Context:** Determining whether a CI run result should trigger a formal Quinn review.
+- **Why:** Not all workflow completions are meaningful for a code review (e.g., linting failures vs. successful test suites). Only specific terminal states represent a valid state for re-evaluation.
+- **Rejected:** Triggering a review on any 'completed' status regardless of the outcome or type.
+- **Trade-offs:** Harder to maintain as new CI tools are added, but prevents noise and unnecessary automated comments.
+- **Breaking if changed:** Changing this set without updating CI configurations could lead to 'silent' successes where CI passes but no review is ever triggered.

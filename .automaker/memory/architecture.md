@@ -6,8 +6,8 @@ importance: 0.7
 relatedFiles: []
 usageStats:
   loaded: 20
-  referenced: 4
-  successfulFeatures: 4
+  referenced: 5
+  successfulFeatures: 5
 ---
 # architecture
 
@@ -87,3 +87,8 @@ usageStats:
 - **Problem solved:** CI completion webhooks can fire multiple times or for different check suites on the same commit.
 - **Why this works:** To prevent Quinn from repeatedly reviewing a PR that already has a definitive status (APPROVED or CHANGES_REQUESTED), saving compute and avoiding noise in the PR timeline.
 - **Trade-offs:** Requires the system to maintain/check the state of previous reviews, but significantly reduces redundant API calls and LLM usage.
+
+#### [Pattern] SHA-to-PR resolution with stale SHA guards in webhook handlers. (2026-06-01)
+- **Problem solved:** Handling asynchronous GitHub webhooks where the event payload might not directly contain the Pull Request object.
+- **Why this works:** GitHub's `workflow_run` and `check_suite` events focus on the commit SHA. Since multiple PRs can share a SHA (or a SHA can move), the system must explicitly resolve the current open PR and verify the SHA hasn't moved since the event was triggered.
+- **Trade-offs:** Requires extra API calls to fetch PR details and perform validation, increasing latency slightly.
