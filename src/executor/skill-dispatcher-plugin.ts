@@ -598,6 +598,8 @@ export class SkillDispatcherPlugin implements Plugin {
           ...(typeof result.data?.confidence === "number" ? { confidence: result.data.confidence } : {}),
           ...(typeof result.data?.confidenceExplanation === "string"
             ? { confidenceExplanation: result.data.confidenceExplanation } : {}),
+          ...(result.data?.resultData !== undefined && typeof result.data?.resultMime === "string"
+            ? { resultData: result.data.resultData, resultMime: result.data.resultMime } : {}),
           durationMs: Date.now() - dispatchedAt,
         },
       );

@@ -18,6 +18,15 @@
 // Part builders + readers (1.0 member-discriminated Part)
 export { textPart, dataPart, partText, partData, partsToText } from "./parts.ts";
 
+// Structured skill results (output_schema → forced-finalizer DataPart)
+export {
+  emitSkillResult,
+  readSkillResult,
+  submitToolName,
+  SUBMIT_TOOL_PREFIX,
+  SUBMIT_TOOL_NAME_RE,
+} from "./skill-result.ts";
+
 // The four protoLabs extensions
 export {
   // cost-v1

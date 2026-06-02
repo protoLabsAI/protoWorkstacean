@@ -85,6 +85,15 @@ export interface AgentSkillResponsePayload {
   confidence?: number;
   /** Free-text rationale for the confidence score, when emitted. */
   confidenceExplanation?: string;
+  /**
+   * Validated structured result, when the skill declared an `output_schema`
+   * and emitted a structured-result DataPart. Carried alongside `resultMime`
+   * (the DataPart discriminator). Consumers match on the MIME and read this
+   * object instead of parsing the free-text `content`.
+   */
+  resultData?: unknown;
+  /** MIME of the structured-result DataPart (pairs with `resultData`). */
+  resultMime?: string;
   /** Wall-clock execution time in ms, when known. */
   durationMs?: number;
 }

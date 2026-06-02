@@ -44,6 +44,44 @@ export interface AgentSkillDefinition {
    * tool calls (e.g. board sweeps), keep tight for narrow ones.
    */
   maxTurns?: number;
+  /**
+   * JSON-Schema description of this skill's structured result. When set, the
+   * runtime runs a forced structured finalizer after the agent's reasoning
+   * loop: it binds a `submit_<skill>` tool whose parameters ARE this schema,
+   * forces `tool_choice` to it, validates the returned args, and emits the
+   * validated object as a structured DataPart (discriminated by `resultMime`)
+   * instead of free text. Omit for the unchanged free-text behavior.
+   *
+   * Shape is a subset of JSON Schema: `{ type: "object", properties: {...},
+   * required: [...] }` with property types object | string | number | boolean |
+   * array (+ enum). Carried verbatim onto the forced tool's `parameters`.
+   */
+  outputSchema?: JsonSchema;
+  /**
+   * MIME type for this skill's structured-result DataPart (e.g.
+   * `application/vnd.protolabs.pr-diagnosis-v1+json`). Advertised on the
+   * skill's `output_modes` in the agent card. Required whenever `outputSchema`
+   * is set; the finalizer uses it as the DataPart's `metadata.mimeType`.
+   */
+  resultMime?: string;
+}
+
+/**
+ * The subset of JSON Schema we accept for skill `outputSchema`. Loose by
+ * design: it is passed verbatim to the gateway as a forced tool's `parameters`
+ * (OpenAI function-calling shape) and is also walked to build a zod validator
+ * for the runtime-local validation + repair step. The runtime only relies on
+ * `type`, `properties`, `required`, `items`, and `enum`.
+ */
+export interface JsonSchema {
+  type?: "object" | "string" | "number" | "integer" | "boolean" | "array";
+  description?: string;
+  properties?: Record<string, JsonSchema>;
+  required?: string[];
+  items?: JsonSchema;
+  enum?: unknown[];
+  /** Permit additional JSON-Schema keywords without typing every one. */
+  [k: string]: unknown;
 }
 
 /**
