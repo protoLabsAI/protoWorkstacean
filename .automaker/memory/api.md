@@ -5,7 +5,7 @@ relevantTo: [api]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 10
+  loaded: 11
   referenced: 7
   successfulFeatures: 7
 ---
@@ -80,3 +80,10 @@ usageStats:
 - **Rejected:** Assuming the agent can resolve the target project path based on the repository name alone.
 - **Trade-offs:** Requires more rigorous metadata management at the dispatch layer, but provides strict isolation between different target projects.
 - **Breaking if changed:** Removing `projectPath` from tool call requirements would allow agents to execute commands in the wrong working directory, potentially corrupting the orchestrator's environment.
+
+### Migrate from A2A (Agent-to-Agent) communication to standard HTTP + Webhooks for inter-service integration. (2026-06-02)
+- **Context:** The `_runTriageSweep` function in protoMaker was previously being triggered via an A2A skill request (`agent.skill.request` with `agentId: 'protomaker'`), which forced the receiver to implement defensive code to handle unexpected dispatch formats.
+- **Why:** Standardizing on HTTP/Webhooks provides a more robust, predictable, and decoupled integration boundary compared to agent-specific skill dispatching.
+- **Rejected:** Maintaining the A2A pattern would require both services to share deep knowledge of each other's internal agent skills and state, increasing coupling.
+- **Trade-offs:** HTTP is easier to monitor and integrate with standard tooling, but loses some of the high-level abstraction provided by the agentic skill framework.
+- **Breaking if changed:** Reverting to A2A would re-introduce the need for defensive coding in the receiving service (protoMaker) and break the existing HTTP signal/submit implementation.
