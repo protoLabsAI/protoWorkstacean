@@ -56,7 +56,10 @@ export function securitySchemeFor(scheme: A2AAuthScheme): Record<string, Securit
       },
     };
   }
-  // apiKey (default) — "hmac" has no static card scheme, so it also maps here.
+  // "hmac" is enforced by an extension interceptor, not a static header —
+  // advertise no static scheme for it.
+  if (scheme === "hmac") return {};
+  // apiKey (default)
   return {
     apiKey: {
       scheme: {

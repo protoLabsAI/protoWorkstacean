@@ -168,20 +168,25 @@ export const TOOL_CALL_V1_MIME_TYPE = "application/vnd.protolabs.tool-call-v1+js
  * running mid-task. The frame describes one tool invocation; multiple frames
  * with the same `toolCallId` describe its lifecycle (started → completed).
  */
-export interface ToolCallArtifactData {
+/** Fields shared by every tool-call frame. */
+interface ToolCallFrameBase {
   /** Stable id correlating frames of the same invocation. */
   toolCallId: string;
   /** Tool name (e.g. "github_create_issue"). */
   name: string;
-  /** Lifecycle phase of this frame. */
-  phase: "started" | "completed" | "failed";
-  /** Tool arguments (present on the "started" frame). */
-  args?: unknown;
-  /** Tool result summary (present on the "completed" frame). */
-  result?: unknown;
-  /** Error message (present on the "failed" frame). */
-  error?: string;
 }
+
+/**
+ * A single tool-call progress frame, discriminated by `phase` so each phase
+ * carries only its relevant payload:
+ *   "started"   → `args`
+ *   "completed" → `result`
+ *   "failed"    → `error`
+ */
+export type ToolCallArtifactData =
+  | (ToolCallFrameBase & { phase: "started"; args?: unknown })
+  | (ToolCallFrameBase & { phase: "completed"; result?: unknown })
+  | (ToolCallFrameBase & { phase: "failed"; error?: string });
 
 /** Build a tool-call-v1 DataPart (typically a streamed artifact-update part). */
 export function emitToolCall(data: ToolCallArtifactData): Part {
