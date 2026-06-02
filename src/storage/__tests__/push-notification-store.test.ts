@@ -9,11 +9,15 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { PushNotificationConfig } from "@a2a-js/sdk";
+import type { TaskPushNotificationConfig } from "@a2a-js/sdk";
+import { ServerCallContext } from "@a2a-js/sdk/server";
 import { SqlitePushNotificationStore } from "../push-notification-store.ts";
 
 let dir: string;
 let dbPath: string;
+
+// A2A 1.0: every store method takes a mandatory ServerCallContext 2nd arg.
+const cctx = new ServerCallContext();
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "push-store-test-"));
@@ -24,10 +28,16 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function makeConfig(overrides: Partial<PushNotificationConfig> = {}): PushNotificationConfig {
+// A2A 1.0: the config is the flat TaskPushNotificationConfig — tenant/id/taskId
+// are mandatory, plus url/token/authentication. configId keys on `id`.
+function makeConfig(overrides: Partial<TaskPushNotificationConfig> = {}): TaskPushNotificationConfig {
   return {
+    tenant: "",
+    id: "",
+    taskId: "task-1",
     url: "https://example.com/callback",
     token: "secret-token",
+    authentication: undefined,
     ...overrides,
   };
 }
@@ -35,8 +45,8 @@ function makeConfig(overrides: Partial<PushNotificationConfig> = {}): PushNotifi
 describe("SqlitePushNotificationStore — contract", () => {
   test("save then load returns the stored config", async () => {
     const store = new SqlitePushNotificationStore(dbPath);
-    await store.save("task-1", makeConfig({ url: "https://a.example.com/cb" }));
-    const loaded = await store.load("task-1");
+    await store.save("task-1", cctx, makeConfig({ url: "https://a.example.com/cb" }));
+    const loaded = await store.load("task-1", cctx);
     expect(loaded).toHaveLength(1);
     expect(loaded[0].url).toBe("https://a.example.com/cb");
     expect(loaded[0].token).toBe("secret-token");
@@ -45,9 +55,9 @@ describe("SqlitePushNotificationStore — contract", () => {
 
   test("multiple configs per task — keyed by config.id", async () => {
     const store = new SqlitePushNotificationStore(dbPath);
-    await store.save("task-1", makeConfig({ id: "primary", url: "https://a.example.com/cb" }));
-    await store.save("task-1", makeConfig({ id: "fallback", url: "https://b.example.com/cb" }));
-    const loaded = await store.load("task-1");
+    await store.save("task-1", cctx, makeConfig({ id: "primary", url: "https://a.example.com/cb" }));
+    await store.save("task-1", cctx, makeConfig({ id: "fallback", url: "https://b.example.com/cb" }));
+    const loaded = await store.load("task-1", cctx);
     expect(loaded).toHaveLength(2);
     expect(loaded.map(c => c.url).sort()).toEqual([
       "https://a.example.com/cb",
@@ -58,9 +68,9 @@ describe("SqlitePushNotificationStore — contract", () => {
 
   test("save with same (taskId, configId) overwrites the existing row", async () => {
     const store = new SqlitePushNotificationStore(dbPath);
-    await store.save("task-1", makeConfig({ id: "primary", url: "https://old.example.com/cb" }));
-    await store.save("task-1", makeConfig({ id: "primary", url: "https://new.example.com/cb" }));
-    const loaded = await store.load("task-1");
+    await store.save("task-1", cctx, makeConfig({ id: "primary", url: "https://old.example.com/cb" }));
+    await store.save("task-1", cctx, makeConfig({ id: "primary", url: "https://new.example.com/cb" }));
+    const loaded = await store.load("task-1", cctx);
     expect(loaded).toHaveLength(1);
     expect(loaded[0].url).toBe("https://new.example.com/cb");
     store.close();
@@ -68,17 +78,17 @@ describe("SqlitePushNotificationStore — contract", () => {
 
   test("load on unknown taskId returns empty array", async () => {
     const store = new SqlitePushNotificationStore(dbPath);
-    const loaded = await store.load("never-saved");
+    const loaded = await store.load("never-saved", cctx);
     expect(loaded).toEqual([]);
     store.close();
   });
 
   test("delete with configId removes only that config", async () => {
     const store = new SqlitePushNotificationStore(dbPath);
-    await store.save("task-1", makeConfig({ id: "primary", url: "https://a.example.com/cb" }));
-    await store.save("task-1", makeConfig({ id: "fallback", url: "https://b.example.com/cb" }));
-    await store.delete("task-1", "primary");
-    const loaded = await store.load("task-1");
+    await store.save("task-1", cctx, makeConfig({ id: "primary", url: "https://a.example.com/cb" }));
+    await store.save("task-1", cctx, makeConfig({ id: "fallback", url: "https://b.example.com/cb" }));
+    await store.delete("task-1", cctx, "primary");
+    const loaded = await store.load("task-1", cctx);
     expect(loaded).toHaveLength(1);
     expect(loaded[0].url).toBe("https://b.example.com/cb");
     store.close();
@@ -86,10 +96,10 @@ describe("SqlitePushNotificationStore — contract", () => {
 
   test("delete without configId removes ALL configs for the task", async () => {
     const store = new SqlitePushNotificationStore(dbPath);
-    await store.save("task-1", makeConfig({ id: "primary", url: "https://a.example.com/cb" }));
-    await store.save("task-1", makeConfig({ id: "fallback", url: "https://b.example.com/cb" }));
-    await store.delete("task-1");
-    const loaded = await store.load("task-1");
+    await store.save("task-1", cctx, makeConfig({ id: "primary", url: "https://a.example.com/cb" }));
+    await store.save("task-1", cctx, makeConfig({ id: "fallback", url: "https://b.example.com/cb" }));
+    await store.delete("task-1", cctx);
+    const loaded = await store.load("task-1", cctx);
     expect(loaded).toEqual([]);
     store.close();
   });
@@ -99,12 +109,12 @@ describe("SqlitePushNotificationStore — persistence", () => {
   test("configs survive close + reopen on the same db file (cross-restart)", async () => {
     // First lifecycle — save then close.
     const first = new SqlitePushNotificationStore(dbPath);
-    await first.save("task-1", makeConfig({ url: "https://persist.example.com/cb" }));
+    await first.save("task-1", cctx, makeConfig({ url: "https://persist.example.com/cb" }));
     first.close();
 
     // Second lifecycle — reopen the same path; data should still be there.
     const second = new SqlitePushNotificationStore(dbPath);
-    const loaded = await second.load("task-1");
+    const loaded = await second.load("task-1", cctx);
     expect(loaded).toHaveLength(1);
     expect(loaded[0].url).toBe("https://persist.example.com/cb");
     second.close();
@@ -121,34 +131,34 @@ describe("SqlitePushNotificationStore — TTL eviction", () => {
 
   test("expired configs are filtered from load() even before GC runs", async () => {
     const store = new SqlitePushNotificationStore(dbPath, { ttlMs: 1000, clock });
-    await store.save("task-1", makeConfig({ url: "https://expired.example.com/cb" }));
+    await store.save("task-1", cctx, makeConfig({ url: "https://expired.example.com/cb" }));
     now += 5000;
-    expect(await store.load("task-1")).toEqual([]);
+    expect(await store.load("task-1", cctx)).toEqual([]);
     store.close();
   });
 
   test("expired configs are GC'd from the table on the next save() call", async () => {
     const store = new SqlitePushNotificationStore(dbPath, { ttlMs: 1000, clock });
-    await store.save("task-old", makeConfig({ url: "https://expired.example.com/cb" }));
+    await store.save("task-old", cctx, makeConfig({ url: "https://expired.example.com/cb" }));
     expect(store.size()).toBe(1);
     now += 5000;
     // Saving a fresh entry triggers opportunistic purge of the old row.
-    await store.save("task-new", makeConfig({ url: "https://fresh.example.com/cb" }));
+    await store.save("task-new", cctx, makeConfig({ url: "https://fresh.example.com/cb" }));
     expect(store.size()).toBe(1); // only the fresh row survived
     store.close();
   });
 
   test("ttlMs=0 means no expiry", async () => {
     const store = new SqlitePushNotificationStore(dbPath, { ttlMs: 0, clock });
-    await store.save("task-1", makeConfig({ url: "https://forever.example.com/cb" }));
+    await store.save("task-1", cctx, makeConfig({ url: "https://forever.example.com/cb" }));
     now += 1_000_000_000;
-    expect(await store.load("task-1")).toHaveLength(1);
+    expect(await store.load("task-1", cctx)).toHaveLength(1);
     store.close();
   });
 
   test("cold-start purge clears stale rows before they reach load()", async () => {
     const first = new SqlitePushNotificationStore(dbPath, { ttlMs: 1000, clock });
-    await first.save("task-stale", makeConfig({ url: "https://stale.example.com/cb" }));
+    await first.save("task-stale", cctx, makeConfig({ url: "https://stale.example.com/cb" }));
     first.close();
     now += 5000;
 
@@ -164,9 +174,9 @@ describe("SqlitePushNotificationStore — degraded mode", () => {
   test("when init fails (e.g. unreachable path), all ops become no-ops returning empty", async () => {
     // Path that points into a file (not a directory) — Database open will fail.
     const store = new SqlitePushNotificationStore("/dev/null/cannot-create-here.db");
-    await store.save("task-1", makeConfig());
-    expect(await store.load("task-1")).toEqual([]);
-    await store.delete("task-1");
+    await store.save("task-1", cctx, makeConfig());
+    expect(await store.load("task-1", cctx)).toEqual([]);
+    await store.delete("task-1", cctx);
     expect(store.size()).toBe(0);
     // No throw — degraded silently.
   });

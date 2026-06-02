@@ -21,7 +21,11 @@
     "noPropertyAccessFromIndexSignature": false,
 
     "esModuleInterop": true,
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+
+    "paths": {
+      "@protolabs/a2a": ["./packages/a2a/src/index.ts"]
+    }
   },
-  "include": ["src/**/*", "lib/**/*"]
+  "include": ["src/**/*", "lib/**/*", "packages/**/*"]
 }

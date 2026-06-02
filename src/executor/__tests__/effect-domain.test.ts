@@ -2,15 +2,15 @@
  * Tests for the effect-domain v1 extension interceptor.
  *
  * Verifies that the `after` hook extracts worldstate-delta artifact data
- * (application/vnd.protolabs.worldstate-delta+json) from the executor result
+ * (application/vnd.protolabs.worldstate-delta-v1+json) from the executor result
  * and publishes a `world.state.delta` bus event.
  */
 
 import { describe, test, expect } from "bun:test";
 import { registerEffectDomainExtension } from "../extensions/effect-domain.ts";
 import { ExtensionRegistry } from "../extension-registry.ts";
-import { WORLDSTATE_DELTA_MIME_TYPE } from "../../../lib/types/worldstate-delta.ts";
-import type { WorldStateDeltaArtifactData } from "../../../lib/types/worldstate-delta.ts";
+import { WORLDSTATE_DELTA_MIME_TYPE } from "@protolabs/a2a";
+import type { WorldStateDeltaArtifactData } from "@protolabs/a2a";
 
 // Minimal in-memory event bus for testing
 interface BusEvent {
@@ -121,7 +121,7 @@ describe("effect-domain interceptor", () => {
 
   test("WORLDSTATE_DELTA_MIME_TYPE constant is correct", () => {
     expect(WORLDSTATE_DELTA_MIME_TYPE).toBe(
-      "application/vnd.protolabs.worldstate-delta+json",
+      "application/vnd.protolabs.worldstate-delta-v1+json",
     );
   });
 

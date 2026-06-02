@@ -1,7 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { A2AExecutor } from "../executors/a2a-executor.ts";
-import { COST_V1_MIME_TYPE } from "../../../lib/types/cost-v1.ts";
-import { CONFIDENCE_V1_MIME_TYPE } from "../../../lib/types/confidence-v1.ts";
+import { COST_V1_MIME_TYPE, CONFIDENCE_V1_MIME_TYPE } from "@protolabs/a2a";
 
 // Access the private extractors via `as any` — we're asserting pure-function
 // behavior on part arrays, not the full execute() plumbing.
@@ -25,13 +24,15 @@ describe("A2AExecutor cost-v1 / confidence-v1 extraction", () => {
   test("_costFromParts returns the cost payload on match", () => {
     const exec = makeExec();
     const parts = [
-      { kind: "text", text: "ignored" },
+      { content: { $case: "text", value: "ignored" } },
       {
-        kind: "data",
-        data: {
-          usage: { input_tokens: 1500, output_tokens: 420, cache_read_input_tokens: 120 },
-          durationMs: 4200,
-          costUsd: 0.0123,
+        content: {
+          $case: "data",
+          value: {
+            usage: { input_tokens: 1500, output_tokens: 420, cache_read_input_tokens: 120 },
+            durationMs: 4200,
+            costUsd: 0.0123,
+          },
         },
         metadata: { mimeType: COST_V1_MIME_TYPE },
       },
@@ -45,9 +46,9 @@ describe("A2AExecutor cost-v1 / confidence-v1 extraction", () => {
 
   test("_costFromParts returns undefined when no matching part", () => {
     const exec = makeExec();
-    expect(exec._costFromParts([{ kind: "text", text: "hi" }])).toBeUndefined();
+    expect(exec._costFromParts([{ content: { $case: "text", value: "hi" } }])).toBeUndefined();
     expect(exec._costFromParts([
-      { kind: "data", data: { foo: "bar" }, metadata: { mimeType: "application/other+json" } },
+      { content: { $case: "data", value: { foo: "bar" } }, metadata: { mimeType: "application/other+json" } },
     ])).toBeUndefined();
   });
 
@@ -55,8 +56,7 @@ describe("A2AExecutor cost-v1 / confidence-v1 extraction", () => {
     const exec = makeExec();
     const parts = [
       {
-        kind: "data",
-        data: { confidence: 0.88, explanation: "spec unambiguous; all tests pass" },
+        content: { $case: "data", value: { confidence: 0.88, explanation: "spec unambiguous; all tests pass" } },
         metadata: { mimeType: CONFIDENCE_V1_MIME_TYPE },
       },
     ];

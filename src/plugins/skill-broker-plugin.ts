@@ -309,12 +309,12 @@ export class SkillBrokerPlugin implements Plugin {
       // for streaming + push-notifications. Without this, executors keep using
       // the yaml bootstrap value even when the agent has changed its
       // advertisement. Cost: one setter call per agent per refresh cycle.
-      const caps = card.capabilities ?? {};
+      const caps = card.capabilities;
       const priorStreaming = executor.streaming;
       const priorPush = executor.pushNotifications;
       executor.setCapabilities({
-        streaming: caps.streaming === true,
-        pushNotifications: caps.pushNotifications === true,
+        streaming: caps?.streaming === true,
+        pushNotifications: caps?.pushNotifications === true,
       });
       if (priorStreaming !== executor.streaming || priorPush !== executor.pushNotifications) {
         console.log(

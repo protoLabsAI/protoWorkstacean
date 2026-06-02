@@ -29,9 +29,9 @@
 
 import type { Route, ApiContext } from "./types.ts";
 import type { AgentCard, AgentSkill } from "@a2a-js/sdk";
+import { buildAgentCard as buildProtolabsCard } from "@protolabs/a2a";
 
 const DEFAULT_VERSION = "1.0.0";
-const PROTOCOL_VERSION = "0.3.0";
 
 export function createRoutes(ctx: ApiContext): Route[] {
   const handler = () => {
@@ -73,30 +73,29 @@ export function buildAgentCard(ctx: ApiContext): AgentCard {
       name: reg.skill,
       description: `Skill routed by workstacean to ${reg.agentName ?? "default executor"}`,
       tags: ["routed", reg.agentName ?? "default"].filter(Boolean),
+      examples: [],
+      inputModes: [],
+      outputModes: [],
+      securityRequirements: [],
     });
   }
 
-  return {
+  // @protolabs/a2a applies the protoLabs card conventions: the single JSONRPC
+  // `supportedInterfaces[]` entry pinned to 1.0 (1.0 collapsed the old
+  // `url`/`preferredTransport`/`additionalInterfaces`/top-level
+  // `protocolVersion` into this list), the provider block, the four declared
+  // extensions (cost / confidence / worldstate-delta / tool-call), and the
+  // security scheme. We pass only workstacean's identity + skills.
+  return buildProtolabsCard({
     name: "workstacean",
     description:
       "protoLabs Studio operational gateway. Routes skill requests across the " +
       "agent fleet (Ava, Quinn, Frank, Jon, Cindi, Researcher, protopen, etc).",
-    protocolVersion: PROTOCOL_VERSION,
     version: DEFAULT_VERSION,
     url: a2aUrl,
-    preferredTransport: "JSONRPC",
-    additionalInterfaces: [{ transport: "JSONRPC", url: a2aUrl }],
-    provider: {
-      organization: "protoLabs AI",
-      url: "https://protolabs.ai",
-    },
-    defaultInputModes: ["text/plain"],
-    defaultOutputModes: ["text/plain"],
-    capabilities: {
-      streaming: true,
-      pushNotifications: true,
-      stateTransitionHistory: false,
-    },
     skills,
-  };
+    streaming: true,
+    pushNotifications: true,
+    authScheme: ctx.apiKey ? "bearer" : undefined,
+  });
 }

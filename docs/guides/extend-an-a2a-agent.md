@@ -149,7 +149,7 @@ For **effect-domain-v1** (the response side of it), attach a `worldstate-delta` 
               { "domain": "pr_pipeline", "path": "data.staleOpen", "op": "inc", "value": -3 }
             ]
           },
-          "metadata": { "mimeType": "application/vnd.protolabs.worldstate-delta+json" }
+          "metadata": { "mimeType": "application/vnd.protolabs.worldstate-delta-v1+json" }
         }
       ]
     }

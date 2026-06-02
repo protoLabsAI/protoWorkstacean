@@ -34,8 +34,8 @@
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import type { PushNotificationConfig } from "@a2a-js/sdk";
-import type { PushNotificationStore } from "@a2a-js/sdk/server";
+import type { TaskPushNotificationConfig } from "@a2a-js/sdk";
+import type { PushNotificationStore, ServerCallContext } from "@a2a-js/sdk/server";
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -92,7 +92,11 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
     }
   }
 
-  async save(taskId: string, config: PushNotificationConfig): Promise<void> {
+  async save(
+    taskId: string,
+    _context: ServerCallContext,
+    config: TaskPushNotificationConfig,
+  ): Promise<void> {
     if (!this.db) return;
     const configId = config.id ?? "";
     const now = this.clock();
@@ -117,7 +121,7 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
     }
   }
 
-  async load(taskId: string): Promise<PushNotificationConfig[]> {
+  async load(taskId: string, _context: ServerCallContext): Promise<TaskPushNotificationConfig[]> {
     if (!this.db) return [];
     try {
       const now = this.clock();
@@ -129,14 +133,14 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
               AND (expires_at IS NULL OR expires_at > ?)`,
         )
         .all(taskId, now);
-      return rows.map(r => JSON.parse(r.config_json) as PushNotificationConfig);
+      return rows.map(r => JSON.parse(r.config_json) as TaskPushNotificationConfig);
     } catch (err) {
       console.error(`[push-store] load() failed for task ${taskId.slice(0, 8)}…:`, err);
       return [];
     }
   }
 
-  async delete(taskId: string, configId?: string): Promise<void> {
+  async delete(taskId: string, _context: ServerCallContext, configId?: string): Promise<void> {
     if (!this.db) return;
     try {
       if (configId !== undefined) {
