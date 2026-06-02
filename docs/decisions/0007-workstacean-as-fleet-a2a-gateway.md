@@ -47,7 +47,7 @@ Resolved forks:
 
 ## 4. Architecture
 
-```
+```text
 external caller / peer node
         │  POST /a2a/<agent>           GET /a2a/<agent>/.well-known/agent-card.json
         ▼
