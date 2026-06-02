@@ -5,9 +5,9 @@ relevantTo: [architecture]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 23
-  referenced: 7
-  successfulFeatures: 7
+  loaded: 24
+  referenced: 8
+  successfulFeatures: 8
 ---
 # architecture
 
@@ -130,3 +130,10 @@ usageStats:
 - **Problem solved:** Updating A2A agent configurations in 'agents.yaml'.
 - **Why this works:** When an agent is added/deleted via the management API, the system performs three distinct actions: updates the persistent YAML file, triggers a 'skill-broker' plugin refresh, and unregisters from the 'executorRegistry'. This ensures the filesystem, the skill discovery service, and the active execution engine remain synchronized.
 - **Trade-offs:** Increases complexity in the management handler but eliminates the latency/inconsistency window inherent in polling.
+
+### Namespacing skills using `{serverName}.{toolName}` format. (2026-06-02)
+- **Context:** Multiple MCP servers might provide tools with identical names (e.g., two different 'read_file' tools).
+- **Why:** Ensures unique identifiers within the global `executorRegistry` and prevents collision between different MCP providers.
+- **Rejected:** Using just the tool name as the skill identifier.
+- **Trade-offs:** Makes the skill name slightly more verbose but guarantees uniqueness and allows the agent to distinguish between providers.
+- **Breaking if changed:** Changing the naming convention would break existing agent prompts or configurations that rely on specific tool identifiers.

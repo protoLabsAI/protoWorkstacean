@@ -5,9 +5,9 @@ relevantTo: [gotchas]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 87
-  referenced: 13
-  successfulFeatures: 13
+  loaded: 88
+  referenced: 14
+  successfulFeatures: 14
 ---
 # gotchas
 
@@ -44,3 +44,8 @@ usageStats:
 - **Situation:** Refactoring `_dispatchToAva` from a synchronous return of a correlation ID to an asynchronous operation returning a Promise.
 - **Root cause:** When transitioning from a fire-and-forget pattern to a reliable awaitable pattern, all upstream callers (like `_handleDiagnoseResponse`) must be verified as `async`. Failure to do so results in unhandled promise rejections or race conditions where `_recordDispatch` executes before the dispatch actually succeeds.
 - **How to avoid:** Makes the control flow harder to reason about if not properly awaited, but allows for robust error handling and guaranteed order of operations (Dispatch -> Record).
+
+#### [Gotcha] Handling failed connections by storing a 'failed state' object in the connection map. (2026-06-02)
+- **Situation:** When a server fails to connect, it shouldn't just be ignored; it needs to be visible for observability.
+- **Root cause:** By storing the error message and setting `connected: false`, the system can report *why* a server is missing rather than just appearing as if it wasn't configured.
+- **How to avoid:** Requires handling `@ts-expect-error` for null clients/transports in the connection object, but improves debugging significantly.
