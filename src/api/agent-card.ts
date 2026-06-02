@@ -31,7 +31,8 @@ import type { Route, ApiContext } from "./types.ts";
 import type { AgentCard, AgentSkill } from "@a2a-js/sdk";
 
 const DEFAULT_VERSION = "1.0.0";
-const PROTOCOL_VERSION = "0.3.0";
+// A2A protocol version (Major.Minor per §3.6) advertised on each interface.
+const PROTOCOL_VERSION = "1.0";
 
 export function createRoutes(ctx: ApiContext): Route[] {
   const handler = () => {
@@ -73,30 +74,45 @@ export function buildAgentCard(ctx: ApiContext): AgentCard {
       name: reg.skill,
       description: `Skill routed by workstacean to ${reg.agentName ?? "default executor"}`,
       tags: ["routed", reg.agentName ?? "default"].filter(Boolean),
+      examples: [],
+      inputModes: [],
+      outputModes: [],
+      securityRequirements: [],
     });
   }
 
+  // A2A 1.0: `url` / `preferredTransport` / `additionalInterfaces` /
+  // top-level `protocolVersion` collapse into `supportedInterfaces[]`, where
+  // each entry pins its own `protocolBinding` + `protocolVersion`. The first
+  // entry is the preferred one (replaces `preferredTransport`).
   return {
     name: "workstacean",
     description:
       "protoLabs Studio operational gateway. Routes skill requests across the " +
       "agent fleet (Ava, Quinn, Frank, Jon, Cindi, Researcher, protopen, etc).",
-    protocolVersion: PROTOCOL_VERSION,
     version: DEFAULT_VERSION,
-    url: a2aUrl,
-    preferredTransport: "JSONRPC",
-    additionalInterfaces: [{ transport: "JSONRPC", url: a2aUrl }],
+    supportedInterfaces: [
+      {
+        url: a2aUrl,
+        protocolBinding: "JSONRPC",
+        protocolVersion: PROTOCOL_VERSION,
+        tenant: "",
+      },
+    ],
     provider: {
       organization: "protoLabs AI",
       url: "https://protolabs.ai",
     },
-    defaultInputModes: ["text/plain"],
-    defaultOutputModes: ["text/plain"],
     capabilities: {
       streaming: true,
       pushNotifications: true,
-      stateTransitionHistory: false,
+      extensions: [],
     },
+    securitySchemes: {},
+    securityRequirements: [],
+    defaultInputModes: ["text/plain"],
+    defaultOutputModes: ["text/plain"],
     skills,
+    signatures: [],
   };
 }

@@ -12,11 +12,13 @@
  */
 
 import { ClientFactory, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
-import type {
-  Message,
-  Task,
-  TaskArtifactUpdateEvent,
-  TaskStatusUpdateEvent,
+import {
+  Role,
+  TaskState,
+  type Message,
+  type Part,
+  type StreamResponse,
+  type Task,
 } from "@a2a-js/sdk";
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
 import {
@@ -158,6 +160,81 @@ function buildFetch(
   return wrapped as typeof fetch;
 }
 
+/**
+ * A2A 1.0 Part is member-discriminated: `part.content` is a `$case`-tagged
+ * union ({ $case: "text", value } | { $case: "data", value } | …). There is no
+ * top-level `kind`/`text`/`data`. These helpers build + read parts so the
+ * member-discrimination lives in one place.
+ */
+function textPart(text: string): Part {
+  return {
+    content: { $case: "text", value: text },
+    metadata: undefined,
+    filename: "",
+    mediaType: "text/plain",
+  };
+}
+
+/** Pull the string value out of a text Part, or undefined if it isn't one. */
+function partText(part: Part): string | undefined {
+  return part.content?.$case === "text" ? part.content.value : undefined;
+}
+
+/** Pull the structured value out of a data Part, or undefined if it isn't one. */
+function partData(part: Part): unknown {
+  return part.content?.$case === "data" ? part.content.value : undefined;
+}
+
+/**
+ * A2A 1.0 dropped the `kind` discriminator from SendMessageResult (Message | Task).
+ * A Task has a string `id` + a `status` slot; a Message has a `messageId`.
+ * Discriminate structurally.
+ */
+function isTask(result: Message | Task): result is Task {
+  return "id" in result && "status" in result;
+}
+
+/**
+ * Terminal A2A task states (1.0 SCREAMING_SNAKE enum). The old code keyed
+ * terminality on `status-update.final`; 1.0 removed `final`, so we key on the
+ * task STATE being terminal (plus stream closure, handled by the for-await
+ * generator naturally ending).
+ */
+const TERMINAL_STATES: ReadonlySet<TaskState> = new Set([
+  TaskState.TASK_STATE_COMPLETED,
+  TaskState.TASK_STATE_FAILED,
+  TaskState.TASK_STATE_CANCELED,
+  TaskState.TASK_STATE_REJECTED,
+]);
+
+function isTerminalState(state: TaskState): boolean {
+  return TERMINAL_STATES.has(state);
+}
+
+function isErrorState(state: TaskState): boolean {
+  return state === TaskState.TASK_STATE_FAILED || state === TaskState.TASK_STATE_REJECTED;
+}
+
+/**
+ * Map the A2A 1.0 TaskState enum back to the lowercase state strings the rest
+ * of the codebase speaks ("submitted" / "working" / "completed" / …). This
+ * keeps the enum change contained to the A2A edge: the bus contract
+ * (SkillResult.data.taskState, WORKING_STATES, TaskTracker) stays string-typed.
+ */
+function stateToLegacyString(state: TaskState): string {
+  switch (state) {
+    case TaskState.TASK_STATE_SUBMITTED: return "submitted";
+    case TaskState.TASK_STATE_WORKING: return "working";
+    case TaskState.TASK_STATE_COMPLETED: return "completed";
+    case TaskState.TASK_STATE_FAILED: return "failed";
+    case TaskState.TASK_STATE_CANCELED: return "canceled";
+    case TaskState.TASK_STATE_REJECTED: return "rejected";
+    case TaskState.TASK_STATE_INPUT_REQUIRED: return "input-required";
+    case TaskState.TASK_STATE_AUTH_REQUIRED: return "auth-required";
+    default: return "unknown";
+  }
+}
+
 export class A2AExecutor implements IExecutor {
   readonly type = "a2a";
 
@@ -231,22 +308,13 @@ export class A2AExecutor implements IExecutor {
       // Per-request client so trace headers get stamped via the fetch wrapper.
       const client = await this._buildClient(req.correlationId, req.parentId);
 
-      const params = {
-        message: {
-          kind: "message" as const,
-          messageId: crypto.randomUUID(),
-          role: "user" as const,
-          parts: [{ kind: "text" as const, text }],
-          contextId: req.contextId ?? req.correlationId,
-        },
-        metadata: {
-          skillHint: req.skill,
-          correlationId: req.correlationId,
-          parentId: req.parentId,
-          ...req.payload,
-          ...extCtx.metadata,
-        },
-      };
+      const params = this._buildSendRequest(text, req.contextId ?? req.correlationId, {
+        skillHint: req.skill,
+        correlationId: req.correlationId,
+        parentId: req.parentId,
+        ...req.payload,
+        ...extCtx.metadata,
+      });
 
       let result = this.config.streaming
         ? await this._executeStream(client, params, req)
@@ -299,16 +367,7 @@ export class A2AExecutor implements IExecutor {
     parentId?: string,
   ): Promise<void> {
     const client = await this._buildClient(correlationId, parentId);
-    await client.sendMessage({
-      message: {
-        kind: "message",
-        messageId: crypto.randomUUID(),
-        role: "user",
-        parts: [{ kind: "text", text }],
-        taskId,
-        contextId,
-      },
-    });
+    await client.sendMessage(this._buildSendRequest(text, contextId, undefined, taskId));
   }
 
   /**
@@ -326,9 +385,16 @@ export class A2AExecutor implements IExecutor {
   ): Promise<boolean> {
     try {
       const client = await this._buildClient(correlationId, parentId);
-      await client.setTaskPushNotificationConfig({
+      // A2A 1.0: setTaskPushNotificationConfig → createTaskPushNotificationConfig,
+      // and the param is a flat TaskPushNotificationConfig (no nested
+      // pushNotificationConfig wrapper). `id` is the config id (empty = default).
+      await client.createTaskPushNotificationConfig({
+        tenant: "",
+        id: "",
         taskId,
-        pushNotificationConfig: { url: callbackUrl, token },
+        url: callbackUrl,
+        token,
+        authentication: undefined,
       });
       return true;
     } catch (err) {
@@ -347,21 +413,18 @@ export class A2AExecutor implements IExecutor {
   async pollTask(taskId: string, correlationId: string, parentId?: string): Promise<SkillResult> {
     try {
       const client = await this._buildClient(correlationId, parentId);
-      const task = await client.getTask({ id: taskId });
-      const artifactText = (task.artifacts ?? [])
-        .flatMap(a => a.parts)
-        .filter((p): p is { kind: "text"; text: string } => p.kind === "text" && typeof p.text === "string")
-        .map(p => p.text)
-        .join("\n");
-      const statusText = task.status.message ? this._textFromParts(task.status.message.parts) : "";
+      const task = await client.getTask({ tenant: "", id: taskId });
+      const state = task.status?.state ?? TaskState.TASK_STATE_UNSPECIFIED;
+      const artifactText = this._textFromParts((task.artifacts ?? []).flatMap(a => a.parts));
+      const statusText = task.status?.message ? this._textFromParts(task.status.message.parts) : "";
       return {
         text: artifactText || statusText || "",
-        isError: task.status.state === "failed" || task.status.state === "rejected",
+        isError: isErrorState(state),
         correlationId,
         data: {
           taskId: task.id,
           contextId: task.contextId,
-          taskState: task.status.state,
+          taskState: stateToLegacyString(state),
           artifacts: task.artifacts ?? [],
         },
       };
@@ -381,12 +444,16 @@ export class A2AExecutor implements IExecutor {
   async cancelTask(taskId: string, correlationId: string, parentId?: string): Promise<SkillResult> {
     try {
       const client = await this._buildClient(correlationId, parentId);
-      const task = await client.cancelTask({ id: taskId });
+      const task = await client.cancelTask({ tenant: "", id: taskId, metadata: undefined });
       return {
         text: `Task ${taskId} canceled`,
         isError: false,
         correlationId,
-        data: { taskId: task.id, contextId: task.contextId, taskState: task.status.state },
+        data: {
+          taskId: task.id,
+          contextId: task.contextId,
+          taskState: stateToLegacyString(task.status?.state ?? TaskState.TASK_STATE_CANCELED),
+        },
       };
     } catch (err) {
       return {
@@ -406,9 +473,9 @@ export class A2AExecutor implements IExecutor {
     taskId: string,
     correlationId: string,
     parentId?: string,
-  ): Promise<AsyncGenerator<Message | Task | TaskStatusUpdateEvent | TaskArtifactUpdateEvent, void, undefined>> {
+  ): Promise<AsyncGenerator<StreamResponse, void, undefined>> {
     const client = await this._buildClient(correlationId, parentId);
-    return client.resubscribeTask({ id: taskId });
+    return client.resubscribeTask({ tenant: "", id: taskId });
   }
 
   /**
@@ -421,8 +488,10 @@ export class A2AExecutor implements IExecutor {
   ): Promise<SkillResult> {
     const result = await client.sendMessage(params);
 
-    // Result can be a Message (immediate agent reply, no task) or a Task (may still be working).
-    if (result.kind === "message") {
+    // A2A 1.0: SendMessageResult is Message | Task with no `kind` discriminator.
+    // Discriminate structurally — a Task carries an `id` + `status`, a Message
+    // carries `messageId` + `parts`. A Message is an immediate agent reply (no task).
+    if (!isTask(result)) {
       const text = this._textFromParts(result.parts);
       return {
         text,
@@ -434,18 +503,14 @@ export class A2AExecutor implements IExecutor {
 
     // Task — extract text from artifacts or status.message.parts
     const task = result;
-    const artifactText = (task.artifacts ?? [])
-      .flatMap(a => a.parts)
-      .filter((p): p is { kind: "text"; text: string } => p.kind === "text" && typeof p.text === "string")
-      .map(p => p.text)
-      .join("\n");
-
-    const statusText = task.status.message
+    const artifactText = this._textFromParts((task.artifacts ?? []).flatMap(a => a.parts));
+    const statusText = task.status?.message
       ? this._textFromParts(task.status.message.parts)
       : "";
 
     const text = artifactText || statusText || `Skill "${req.skill}" accepted by ${this.config.name}`;
-    const taskState = task.status.state;
+    const state = task.status?.state ?? TaskState.TASK_STATE_UNSPECIFIED;
+    const taskState = stateToLegacyString(state);
 
     const worldStateDelta = this._extractWorldStateDelta(task);
     const allParts = (task.artifacts ?? []).flatMap(a => a.parts);
@@ -454,7 +519,7 @@ export class A2AExecutor implements IExecutor {
 
     return {
       text,
-      isError: taskState === "failed" || taskState === "rejected",
+      isError: isErrorState(state),
       correlationId: req.correlationId,
       data: {
         taskId: task.id,
@@ -477,30 +542,38 @@ export class A2AExecutor implements IExecutor {
   ): Promise<SkillResult> {
     let taskId: string | undefined;
     let contextId: string | undefined;
-    let taskState = "working";
+    let state: TaskState = TaskState.TASK_STATE_WORKING;
     let terminalMessage = "";
 
     // Artifact buffering — honors append + lastChunk per A2A spec.
     // - append: false (or undefined) → replace the artifact's parts
     // - append: true → concatenate incoming parts to existing buffer
     // - lastChunk: true → signal artifact is complete (we emit artifact_complete)
-    const artifactBuffers = new Map<string, Array<{ kind: string; text?: string }>>();
+    const artifactBuffers = new Map<string, Part[]>();
     // Collect worldstate-delta DataParts seen during streaming.
     const streamDeltaData: Record<string, unknown> = {};
 
+    // A2A 1.0: stream events are StreamResponse, member-discriminated via
+    // `payload.$case` ∈ message | task | statusUpdate | artifactUpdate. The old
+    // `final: true` flag is gone — terminal = the task STATE is terminal, or the
+    // stream simply closes (the for-await generator ending).
     for await (const event of client.sendMessageStream(params)) {
-      if (event.kind === "message") {
+      const payload = event.payload;
+      if (!payload) continue;
+
+      if (payload.$case === "message") {
         // Terminal message — stream ends
-        terminalMessage = this._textFromParts(event.parts);
-        taskState = "completed";
+        terminalMessage = this._textFromParts(payload.value.parts);
+        state = TaskState.TASK_STATE_COMPLETED;
         break;
       }
-      if (event.kind === "task") {
-        taskId = event.id;
-        contextId = event.contextId;
-        taskState = event.status.state;
+      if (payload.$case === "task") {
+        const task = payload.value;
+        taskId = task.id;
+        contextId = task.contextId;
+        state = task.status?.state ?? TaskState.TASK_STATE_WORKING;
         // Seed artifact buffers from task snapshot if present
-        for (const artifact of event.artifacts ?? []) {
+        for (const artifact of task.artifacts ?? []) {
           artifactBuffers.set(artifact.artifactId, [...artifact.parts]);
           // Extract worldstate-delta parts from seeded task snapshot
           const delta = this._worldStateDeltaFromParts(artifact.parts);
@@ -512,31 +585,33 @@ export class A2AExecutor implements IExecutor {
         // Holding the stream open longer forces slow agents to keep their
         // SSE generator alive for minutes, which crashes them when the
         // sync caller eventually times out and closes the connection.
-        if (taskState !== "completed" && taskState !== "failed"
-          && taskState !== "canceled" && taskState !== "rejected") {
-          break;
-        }
+        if (!isTerminalState(state)) break;
         continue;
       }
-      if (event.kind === "status-update") {
-        taskId = event.taskId;
-        contextId = event.contextId;
-        taskState = event.status.state;
-        const statusText = event.status.message ? this._textFromParts(event.status.message.parts) : "";
+      if (payload.$case === "statusUpdate") {
+        const upd = payload.value;
+        taskId = upd.taskId;
+        contextId = upd.contextId;
+        state = upd.status?.state ?? state;
+        const statusText = upd.status?.message ? this._textFromParts(upd.status.message.parts) : "";
         if (statusText) {
-          this.config.onStreamUpdate?.({ type: "status", text: statusText, state: taskState });
+          this.config.onStreamUpdate?.({ type: "status", text: statusText, state: stateToLegacyString(state) });
         }
-        if (event.final) break;
+        // Terminal state signals done (1.0 has no `final` flag).
+        if (isTerminalState(state)) break;
         continue;
       }
-      if (event.kind === "artifact-update") {
-        taskId = event.taskId;
-        contextId = event.contextId;
-        const aid = event.artifact.artifactId;
-        const incomingParts = event.artifact.parts;
+      if (payload.$case === "artifactUpdate") {
+        const upd = payload.value;
+        taskId = upd.taskId;
+        contextId = upd.contextId;
+        const artifact = upd.artifact;
+        if (!artifact) continue;
+        const aid = artifact.artifactId;
+        const incomingParts = artifact.parts;
         const incomingText = this._textFromParts(incomingParts);
 
-        if (event.append) {
+        if (upd.append) {
           const existing = artifactBuffers.get(aid) ?? [];
           artifactBuffers.set(aid, [...existing, ...incomingParts]);
         } else {
@@ -551,11 +626,11 @@ export class A2AExecutor implements IExecutor {
         // Emit chunk event — consumers see progressive updates in real time
         if (incomingText) {
           this.config.onStreamUpdate?.({
-            type: event.append ? "artifact_chunk" : "artifact",
+            type: upd.append ? "artifact_chunk" : "artifact",
             text: incomingText,
           });
         }
-        if (event.lastChunk) {
+        if (upd.lastChunk) {
           const finalText = this._textFromParts(artifactBuffers.get(aid) ?? []);
           this.config.onStreamUpdate?.({
             type: "artifact_complete",
@@ -577,10 +652,11 @@ export class A2AExecutor implements IExecutor {
     const allStreamParts = Array.from(artifactBuffers.values()).flat();
     const cost = this._costFromParts(allStreamParts);
     const confidence = this._confidenceFromParts(allStreamParts);
+    const taskState = stateToLegacyString(state);
 
     return {
       text: resultText || `Skill "${req.skill}" completed by ${this.config.name}`,
-      isError: taskState === "failed" || taskState === "rejected",
+      isError: isErrorState(state),
       correlationId: req.correlationId,
       data: {
         taskId,
@@ -592,10 +668,10 @@ export class A2AExecutor implements IExecutor {
     };
   }
 
-  private _textFromParts(parts: Array<{ kind: string; text?: string }>): string {
+  private _textFromParts(parts: Part[]): string {
     return parts
-      .filter((p): p is { kind: "text"; text: string } => p.kind === "text" && typeof p.text === "string")
-      .map(p => p.text)
+      .map(partText)
+      .filter((t): t is string => typeof t === "string")
       .join("");
   }
 
@@ -612,54 +688,36 @@ export class A2AExecutor implements IExecutor {
   }
 
   /**
-   * Scan a parts array for a worldstate-delta DataPart (kind: "data",
-   * metadata.mimeType === WORLDSTATE_DELTA_MIME_TYPE). Returns the first match.
+   * Scan a parts array for a structured DataPart whose `metadata.mimeType`
+   * matches the fleet-interop contract MIME (worldstate-delta-v1 / cost-v1 /
+   * confidence-v1). A2A 1.0: the structured payload lives in
+   * `part.content.value` (when `$case === "data"`); the MIME discriminator
+   * stays in our custom `part.metadata.mimeType` (unchanged by the migration —
+   * it is application metadata, NOT the SDK's `mediaType` field). Returns the
+   * first match's payload.
    */
-  private _worldStateDeltaFromParts(
-    parts: Array<{ kind: string; data?: Record<string, unknown>; metadata?: Record<string, unknown> }>,
-  ): WorldStateDeltaArtifactData | undefined {
+  private _dataPartByMime<T>(parts: Part[], mimeType: string): T | undefined {
     for (const part of parts) {
-      if (
-        part.kind === "data" &&
-        part.metadata?.["mimeType"] === WORLDSTATE_DELTA_MIME_TYPE &&
-        part.data
-      ) {
-        return part.data as unknown as WorldStateDeltaArtifactData;
+      const value = partData(part);
+      if (value !== undefined && part.metadata?.["mimeType"] === mimeType) {
+        return value as T;
       }
     }
     return undefined;
+  }
+
+  private _worldStateDeltaFromParts(parts: Part[]): WorldStateDeltaArtifactData | undefined {
+    return this._dataPartByMime<WorldStateDeltaArtifactData>(parts, WORLDSTATE_DELTA_MIME_TYPE);
   }
 
   /** Scan artifact parts for a cost-v1 DataPart and return the first match. */
-  private _costFromParts(
-    parts: Array<{ kind: string; data?: Record<string, unknown>; metadata?: Record<string, unknown> }>,
-  ): CostArtifactData | undefined {
-    for (const part of parts) {
-      if (
-        part.kind === "data" &&
-        part.metadata?.["mimeType"] === COST_V1_MIME_TYPE &&
-        part.data
-      ) {
-        return part.data as unknown as CostArtifactData;
-      }
-    }
-    return undefined;
+  private _costFromParts(parts: Part[]): CostArtifactData | undefined {
+    return this._dataPartByMime<CostArtifactData>(parts, COST_V1_MIME_TYPE);
   }
 
   /** Scan artifact parts for a confidence-v1 DataPart and return the first match. */
-  private _confidenceFromParts(
-    parts: Array<{ kind: string; data?: Record<string, unknown>; metadata?: Record<string, unknown> }>,
-  ): ConfidenceArtifactData | undefined {
-    for (const part of parts) {
-      if (
-        part.kind === "data" &&
-        part.metadata?.["mimeType"] === CONFIDENCE_V1_MIME_TYPE &&
-        part.data
-      ) {
-        return part.data as unknown as ConfidenceArtifactData;
-      }
-    }
-    return undefined;
+  private _confidenceFromParts(parts: Part[]): ConfidenceArtifactData | undefined {
+    return this._dataPartByMime<ConfidenceArtifactData>(parts, CONFIDENCE_V1_MIME_TYPE);
   }
 
   /**
@@ -728,6 +786,36 @@ export class A2AExecutor implements IExecutor {
         throw err;
       }
     }
+  }
+
+  /**
+   * Build a A2A 1.0 SendMessageRequest. The Message is fully-populated (1.0
+   * Message has no `kind`; `role` is the Role enum; parts are member-
+   * discriminated). Request-level `metadata` carries our routing hints
+   * (skillHint / correlationId / payload), matching the 0.3 behavior.
+   */
+  private _buildSendRequest(
+    text: string,
+    contextId: string,
+    metadata: Record<string, unknown> | undefined,
+    taskId = "",
+  ): import("@a2a-js/sdk").SendMessageRequest {
+    const message: Message = {
+      messageId: crypto.randomUUID(),
+      role: Role.ROLE_USER,
+      parts: [textPart(text)],
+      contextId,
+      taskId,
+      metadata: undefined,
+      extensions: [],
+      referenceTaskIds: [],
+    };
+    return {
+      tenant: "",
+      message,
+      configuration: undefined,
+      metadata,
+    };
   }
 
   private _buildText(req: SkillRequest): string {

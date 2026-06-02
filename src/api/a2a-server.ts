@@ -28,13 +28,15 @@ import {
   InMemoryPushNotificationStore,
   DefaultPushNotificationSender,
   JsonRpcTransportHandler,
+  ServerCallContext,
+  AgentEvent,
   type AgentExecutor,
   type ExecutionEventBus,
   type PushNotificationStore,
   type RequestContext,
 } from "@a2a-js/sdk/server";
 import { join } from "node:path";
-import type { Message, Task } from "@a2a-js/sdk";
+import { Role, TaskState, type Message, type Part } from "@a2a-js/sdk";
 import type { Route, ApiContext } from "./types.ts";
 import type { BusMessage } from "../../lib/types.ts";
 import { buildAgentCard } from "./agent-card.ts";
@@ -92,6 +94,35 @@ function sanitizeHtmlError(raw: string): string {
  * We don't produce partial Message events — all content comes back via the
  * terminal status event's message.parts.
  */
+/** Build a A2A 1.0 text Part ({ content: { $case: "text", value } }). */
+function textPart(text: string): Part {
+  return {
+    content: { $case: "text", value: text },
+    metadata: undefined,
+    filename: "",
+    mediaType: "text/plain",
+  };
+}
+
+/** Build a fully-populated agent Message carrying a single text part. */
+function agentTextMessage(
+  taskId: string,
+  contextId: string,
+  text: string,
+  metadata?: Record<string, unknown>,
+): Message {
+  return {
+    messageId: crypto.randomUUID(),
+    role: Role.ROLE_AGENT,
+    taskId,
+    contextId,
+    parts: [textPart(text)],
+    metadata,
+    extensions: [],
+    referenceTaskIds: [],
+  };
+}
+
 class BusAgentExecutor implements AgentExecutor {
   private readonly activeCancels = new Map<string, () => void>();
 
@@ -101,12 +132,11 @@ class BusAgentExecutor implements AgentExecutor {
     const { userMessage, taskId, contextId } = requestContext;
     const correlationId = taskId;
 
-    // Extract text from the incoming message parts
+    // Extract text from the incoming message parts. A2A 1.0: a text Part is
+    // `{ content: { $case: "text", value } }` — no top-level `kind`/`text`.
     const text = (userMessage.parts ?? [])
-      .filter((p): p is { kind: "text"; text: string } =>
-        "kind" in p && p.kind === "text" && typeof (p as { text?: unknown }).text === "string",
-      )
-      .map(p => p.text)
+      .map(p => (p.content?.$case === "text" ? p.content.value : undefined))
+      .filter((t): t is string => typeof t === "string")
       .join("\n");
 
     // Skill hint — from metadata or fallback to "chat"
@@ -130,17 +160,18 @@ class BusAgentExecutor implements AgentExecutor {
     }
 
     // Emit initial Task event so the caller gets a taskId immediately
-    eventBus.publish({
-      kind: "task",
+    eventBus.publish(AgentEvent.task({
       id: taskId,
       contextId,
       status: {
-        state: "submitted",
+        state: TaskState.TASK_STATE_SUBMITTED,
+        message: undefined,
         timestamp: new Date().toISOString(),
       },
       history: [userMessage],
       artifacts: [],
-    });
+      metadata: undefined,
+    }));
 
     const replyTopic = `agent.skill.response.${correlationId}`;
     const progressTopic = `agent.skill.progress.${correlationId}`;
@@ -163,40 +194,27 @@ class BusAgentExecutor implements AgentExecutor {
         // Only build a `message` body when the executor supplied `text`.
         // Some emitters may want to push pure-metadata progress (percent /
         // step) for clients that render affordances rather than free text.
-        const messageObj = p.text
-          ? {
-            message: {
-              kind: "message" as const,
-              messageId: crypto.randomUUID(),
-              role: "agent" as const,
-              taskId,
-              contextId,
-              parts: [{ kind: "text" as const, text: p.text }],
-            },
-          }
-          : {};
-        const metadataObj =
+        // A2A 1.0: TaskStatus carries only { state, message, timestamp };
+        // arbitrary progress metadata moves to the event's top-level metadata.
+        const message = p.text ? agentTextMessage(taskId, contextId, p.text) : undefined;
+        const metadata =
           p.percent !== undefined || p.step !== undefined || p.meta
             ? {
-              metadata: {
-                ...(p.percent !== undefined ? { percent: p.percent } : {}),
-                ...(p.step !== undefined ? { step: p.step } : {}),
-                ...(p.meta ?? {}),
-              },
+              ...(p.percent !== undefined ? { percent: p.percent } : {}),
+              ...(p.step !== undefined ? { step: p.step } : {}),
+              ...(p.meta ?? {}),
             }
-            : {};
-        eventBus.publish({
-          kind: "status-update",
+            : undefined;
+        eventBus.publish(AgentEvent.statusUpdate({
           taskId,
           contextId,
           status: {
-            state: "working",
+            state: TaskState.TASK_STATE_WORKING,
+            message,
             timestamp: new Date().toISOString(),
-            ...messageObj,
-            ...metadataObj,
           },
-          final: false,
-        });
+          metadata,
+        }));
       });
 
       // Input-required subscriber — when the in-process agent's `ask_human`
@@ -209,27 +227,21 @@ class BusAgentExecutor implements AgentExecutor {
       const inputReqSubId = this.ctx.bus.subscribe(inputReqTopic, "a2a-server-input", (msg: BusMessage) => {
         if (settled) return;
         const p = (msg.payload ?? {}) as { requestId?: string; question?: string };
-        eventBus.publish({
-          kind: "status-update",
+        eventBus.publish(AgentEvent.statusUpdate({
           taskId,
           contextId,
           status: {
-            state: "input-required",
+            state: TaskState.TASK_STATE_INPUT_REQUIRED,
+            // requestId rides on the message metadata so the caller can answer
+            // this specific request via POST /api/a2a/input.
+            message: agentTextMessage(taskId, contextId, p.question ?? "", {
+              requestId: p.requestId,
+              kind: "input-request",
+            }),
             timestamp: new Date().toISOString(),
-            message: {
-              kind: "message",
-              messageId: crypto.randomUUID(),
-              role: "agent",
-              taskId,
-              contextId,
-              parts: [{ kind: "text", text: p.question ?? "" }],
-              // requestId rides on the message metadata so the caller can answer
-              // this specific request via POST /api/a2a/input.
-              metadata: { requestId: p.requestId, kind: "input-request" },
-            },
           },
-          final: false,
-        });
+          metadata: undefined,
+        }));
       });
 
       const subId = this.ctx.bus.subscribe(replyTopic, "a2a-server", (msg: BusMessage) => {
@@ -265,27 +277,22 @@ class BusAgentExecutor implements AgentExecutor {
           contentText = "";
         }
 
-        const finalState = errorText ? "failed" : "completed";
+        // A2A 1.0: terminal state IS the done signal (the old `final: true`
+        // flag was removed). The terminal TASK_STATE_* + eventBus.finished()
+        // together close the stream.
+        const finalState = errorText ? TaskState.TASK_STATE_FAILED : TaskState.TASK_STATE_COMPLETED;
         const finalText = errorText || contentText || "";
 
-        eventBus.publish({
-          kind: "status-update",
+        eventBus.publish(AgentEvent.statusUpdate({
           taskId,
           contextId,
           status: {
             state: finalState,
+            message: agentTextMessage(taskId, contextId, finalText),
             timestamp: new Date().toISOString(),
-            message: {
-              kind: "message",
-              messageId: crypto.randomUUID(),
-              role: "agent",
-              taskId,
-              contextId,
-              parts: [{ kind: "text", text: finalText }],
-            },
           },
-          final: true,
-        });
+          metadata: undefined,
+        }));
         eventBus.finished();
         resolve();
       });
@@ -300,32 +307,32 @@ class BusAgentExecutor implements AgentExecutor {
         this.ctx.bus.unsubscribe(progressSubId);
         this.ctx.bus.unsubscribe(inputReqSubId);
         this.activeCancels.delete(taskId);
-        eventBus.publish({
-          kind: "status-update",
+        eventBus.publish(AgentEvent.statusUpdate({
           taskId,
           contextId,
           status: {
-            state: "canceled",
+            state: TaskState.TASK_STATE_CANCELED,
+            message: undefined,
             timestamp: new Date().toISOString(),
           },
-          final: true,
-        });
+          metadata: undefined,
+        }));
         eventBus.finished();
         resolve();
       });
     });
 
     // Transition to working before dispatching so the caller sees motion.
-    eventBus.publish({
-      kind: "status-update",
+    eventBus.publish(AgentEvent.statusUpdate({
       taskId,
       contextId,
       status: {
-        state: "working",
+        state: TaskState.TASK_STATE_WORKING,
+        message: undefined,
         timestamp: new Date().toISOString(),
       },
-      final: false,
-    });
+      metadata: undefined,
+    }));
 
     // Keep the stream warm. A long in-process turn (DeepAgent runs can take
     // 20–40s) emits no events between this `working` and the terminal status,
@@ -338,16 +345,16 @@ class BusAgentExecutor implements AgentExecutor {
     const heartbeatMs = Number(process.env.A2A_STREAM_HEARTBEAT_MS) || 8000;
     const heartbeat = setInterval(() => {
       if (settled) return;
-      eventBus.publish({
-        kind: "status-update",
+      eventBus.publish(AgentEvent.statusUpdate({
         taskId,
         contextId,
         status: {
-          state: "working",
+          state: TaskState.TASK_STATE_WORKING,
+          message: undefined,
           timestamp: new Date().toISOString(),
         },
-        final: false,
-      });
+        metadata: undefined,
+      }));
     }, heartbeatMs);
 
     // Dispatch to the bus. SkillDispatcherPlugin handles the rest.
@@ -432,7 +439,13 @@ export function createRoutes(ctx: ApiContext): Route[] {
         }
 
         try {
-          const result = await transport.handle(body);
+          // A2A 1.0: ServerCallContext is a mandatory 2nd arg (#405). Auth is
+          // already gated by authorize() above; we pass a default context (the
+          // store/executor here don't scope on user/tenant).
+          const result = await transport.handle(
+            body as Record<string, unknown>,
+            new ServerCallContext(),
+          );
 
           // Streaming: result is an AsyncGenerator of JSONRPCResponse. Pipe
           // each frame as a text/event-stream chunk so SSE clients see it.
