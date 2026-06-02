@@ -5,9 +5,9 @@ relevantTo: [gotchas]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 82
-  referenced: 8
-  successfulFeatures: 8
+  loaded: 83
+  referenced: 9
+  successfulFeatures: 9
 ---
 # gotchas
 
@@ -35,3 +35,7 @@ usageStats:
 - **Situation:** The `byAgent` map uses a fallback key `__anonymous__` for undefined agent names, but the registration object itself still carries the `undefined` type.
 - **Root cause:** The internal implementation logic handles the nullability by providing a default string, but the TypeScript compiler enforces strict type safety on the original property.
 - **How to avoid:** Requires explicit handling of the fallback key in both the insertion and retrieval logic to maintain type safety.
+
+#### [Gotcha] Type mismatch in array push operations involving nullable strings (2026-06-02)
+- **Situation:** In `executor-registry.ts`, a loop was pushing `r.skill` (which could be `string | null`) into `removedSkills` (a `string[]`).
+- **Root cause:** TypeScript's strict null checks prevent pushing nullable types into non-nullable arrays, which often occurs when registry metadata is partially populated or optional.

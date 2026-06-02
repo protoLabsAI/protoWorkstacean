@@ -109,3 +109,7 @@ usageStats:
 - **Problem solved:** Managing both in-process LangGraph agents and external HTTP-based A2A agents.
 - **Why this works:** By registering both types into a single `ExecutorRegistry`, the message bus can dispatch skills identically regardless of whether the target is a local function call or a remote HTTP request.
 - **Trade-offs:** Provides a clean, polymorphic interface for the rest of the system at the cost of slightly more complex registration logic.
+
+#### [Pattern] Registry-only MCP Client Plugin pattern (2026-06-02)
+- **Problem solved:** Implementing an MCP (Model Context Protocol) client plugin to integrate external tools into the agent ecosystem.
+- **Why this works:** By making the `McpClientPlugin` a 'registrar only' component that populates an `ExecutorRegistry`, it maintains a clean separation of concerns. The plugin handles discovery and configuration (via `mcp-servers.yaml`), while the `SkillDispatcherPlugin` remains the single source of truth for skill requests, preventing multiple plugins from competing for the same event bus signals.

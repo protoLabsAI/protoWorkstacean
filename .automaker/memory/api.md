@@ -64,3 +64,8 @@ usageStats:
 - **Rejected:** Legacy Branch Protection API; rejected because it is being phased out and rulesets offer superior targeting (e.g., via conditions).
 - **Trade-offs:** Rulesets require a different payload structure and endpoint compared to established branch protection scripts.
 - **Breaking if changed:** Changing back to branch protection might lose the ability to specifically target Quinn via App ID within the rule parameters.
+
+### Exposing static constants by removing 'private' visibility for testability (2026-06-02)
+- **Context:** A unit test was attempting to access a private static property `TERMINAL_CONCLUSIONS` in `GitHubPlugin` to verify CI state transitions.
+- **Why:** Removing the `private` modifier on a `static readonly` constant is a pragmatic way to allow package-level testing without adding complex getter methods or changing the object's internal state management. Since the set represents a fixed domain contract rather than mutable state, it doesn't violate encapsulation principles as severely as exposing instance variables.
+- **Breaking if changed:** If this were a mutable property instead of `readonly`, removing `private` would expose the internal state to unintended modification by consumers.
