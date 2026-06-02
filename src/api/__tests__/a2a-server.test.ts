@@ -11,7 +11,7 @@
 import { describe, test, expect } from "bun:test";
 import { DefaultExecutionEventBus } from "@a2a-js/sdk/server";
 import type { AgentExecutionEvent, RequestContext } from "@a2a-js/sdk/server";
-import type { Message } from "@a2a-js/sdk";
+import { Role, TaskState, type Message, type Part } from "@a2a-js/sdk";
 import { InMemoryEventBus } from "../../../lib/bus.ts";
 import { ExecutorRegistry } from "../../executor/executor-registry.ts";
 import { BusAgentExecutor } from "../a2a-server.ts";
@@ -19,12 +19,25 @@ import type { ApiContext } from "../types.ts";
 
 function makeUserMessage(text: string, metadata: Record<string, unknown> = {}): Message {
   return {
-    kind: "message",
     messageId: crypto.randomUUID(),
-    role: "user",
-    parts: [{ kind: "text", text }],
+    contextId: "",
+    taskId: "",
+    role: Role.ROLE_USER,
+    parts: [{
+      content: { $case: "text", value: text },
+      metadata: undefined,
+      filename: "",
+      mediaType: "text/plain",
+    }],
     metadata,
+    extensions: [],
+    referenceTaskIds: [],
   };
+}
+
+/** A2A 1.0: read a text Part's value via its `content.$case` discriminator. */
+function partText(p: Part): string {
+  return p.content?.$case === "text" ? p.content.value : "";
 }
 
 function makeRequestContext(text: string, metadata: Record<string, unknown> = {}): RequestContext {
@@ -82,18 +95,19 @@ describe("BusAgentExecutor (Phase 7)", () => {
     expect((requestPayload as { content: string }).content).toBe("What is the answer?");
     expect(replyTopic).toBe(`agent.skill.response.${reqCtx.taskId}`);
 
-    // Events in order: submitted task, working status, completed status (final)
+    // Events in order: submitted task, working status, completed status.
     const taskEvt = collected.find(e => e.kind === "task");
-    const workingEvt = collected.find(e => e.kind === "status-update" && "status" in e && (e as { status: { state: string } }).status.state === "working");
-    const completedEvt = collected.find(e => e.kind === "status-update" && "status" in e && (e as { status: { state: string } }).status.state === "completed");
+    const workingEvt = collected.find(e => e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_WORKING);
+    const completedEvt = collected.find(e => e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_COMPLETED);
     expect(taskEvt).toBeDefined();
     expect(workingEvt).toBeDefined();
     expect(completedEvt).toBeDefined();
 
-    // Terminal event should carry the reply content + final: true
-    const finalEvt = completedEvt as { final: boolean; status: { message?: { parts: Array<{ text?: string }> } } };
-    expect(finalEvt.final).toBe(true);
-    const terminalText = finalEvt.status.message?.parts?.map(p => p.text ?? "").join("") ?? "";
+    // A2A 1.0: terminal-ness is the state itself (the `final` flag was removed).
+    // The completed status carries the reply content.
+    if (completedEvt?.kind !== "statusUpdate") throw new Error("expected statusUpdate");
+    expect(completedEvt.data.status?.state).toBe(TaskState.TASK_STATE_COMPLETED);
+    const terminalText = (completedEvt.data.status?.message?.parts ?? []).map(partText).join("");
     expect(terminalText).toBe("42");
   });
 
@@ -129,11 +143,13 @@ describe("BusAgentExecutor (Phase 7)", () => {
     await done;
 
     const failedEvt = collected.find(
-      e => e.kind === "status-update" && "status" in e && (e as { status: { state: string } }).status.state === "failed",
-    ) as { final: boolean; status: { message?: { parts: Array<{ text?: string }> } } } | undefined;
+      e => e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_FAILED,
+    );
     expect(failedEvt).toBeDefined();
-    expect(failedEvt!.final).toBe(true);
-    const text = failedEvt!.status.message?.parts?.map(p => p.text ?? "").join("") ?? "";
+    if (failedEvt?.kind !== "statusUpdate") throw new Error("expected statusUpdate");
+    // Failed is a terminal state — that's the done signal in A2A 1.0.
+    expect(failedEvt.data.status?.state).toBe(TaskState.TASK_STATE_FAILED);
+    const text = (failedEvt.data.status?.message?.parts ?? []).map(partText).join("");
     expect(text).toBe("boom");
   });
 
@@ -261,12 +277,13 @@ describe("BusAgentExecutor (Phase 7)", () => {
       await done;
 
       const failedEvt = collected.find(
-        e => e.kind === "status-update" && "status" in e && (e as { status: { state: string } }).status.state === "failed",
-      ) as { final: boolean; status: { message?: { parts: Array<{ text?: string }> } } } | undefined;
+        e => e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_FAILED,
+      );
       expect(failedEvt).toBeDefined();
-      expect(failedEvt!.final).toBe(true);
+      if (failedEvt?.kind !== "statusUpdate") throw new Error("expected statusUpdate");
+      expect(failedEvt.data.status?.state).toBe(TaskState.TASK_STATE_FAILED);
 
-      const text = failedEvt!.status.message?.parts?.map(p => p.text ?? "").join("") ?? "";
+      const text = (failedEvt.data.status?.message?.parts ?? []).map(partText).join("");
       expect(text).not.toContain("<!DOCTYPE");
       expect(text).not.toContain("<html");
       expect(text.toLowerCase()).toContain("downstream agent returned an http error");
@@ -316,10 +333,11 @@ describe("BusAgentExecutor (Phase 7)", () => {
       await done;
 
       const failedEvt = collected.find(
-        e => e.kind === "status-update" && "status" in e && (e as { status: { state: string } }).status.state === "failed",
-      ) as { status: { message?: { parts: Array<{ text?: string }> } } } | undefined;
+        e => e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_FAILED,
+      );
       expect(failedEvt).toBeDefined();
-      const text = failedEvt!.status.message?.parts?.map(p => p.text ?? "").join("") ?? "";
+      if (failedEvt?.kind !== "statusUpdate") throw new Error("expected statusUpdate");
+      const text = (failedEvt.data.status?.message?.parts ?? []).map(partText).join("");
       expect(text).not.toContain("<!DOCTYPE");
       expect(text.toLowerCase()).toContain("downstream agent returned an http error");
     } finally {
@@ -371,37 +389,38 @@ describe("BusAgentExecutor (Phase 7)", () => {
     await adapter.execute(reqCtx, eventBus);
     await done;
 
-    type StatusUpdate = AgentExecutionEvent & { kind: "status-update"; final: boolean; status: { state: string; message?: { parts: Array<{ text?: string }> }; metadata?: Record<string, unknown> } };
+    type StatusUpdate = Extract<AgentExecutionEvent, { kind: "statusUpdate" }>;
     const workingEvts = collected.filter(
       (e): e is StatusUpdate =>
-        e.kind === "status-update" &&
-        "status" in e &&
-        (e as StatusUpdate).status.state === "working",
+        e.kind === "statusUpdate" &&
+        e.data.status?.state === TaskState.TASK_STATE_WORKING,
     );
 
     // Expect: initial "working" (pre-dispatch transition) + 3 progress streams
-    // = 4 working status updates, all final=false.
+    // = 4 working status updates. A2A 1.0: "working" is itself the non-terminal
+    // signal (the old `final: false` flag was removed), so the state filter is
+    // the assertion — every collected event here is a non-terminal working one.
     expect(workingEvts.length).toBe(4);
-    expect(workingEvts.every(e => e.final === false)).toBe(true);
+    expect(workingEvts.every(e => e.data.status?.state === TaskState.TASK_STATE_WORKING)).toBe(true);
 
     const texts = workingEvts.map(e =>
-      e.status.message?.parts?.map(p => ("text" in p ? (p as { text: string }).text : "")).join("") ?? "",
+      (e.data.status?.message?.parts ?? []).map(partText).join(""),
     );
     expect(texts).toContain("Reading the prompt…");
     expect(texts).toContain("Wrapping up…");
 
     // The percent+step event has no text but its metadata should reach the consumer.
-    const metaEvt = workingEvts.find(e => e.status.metadata && (e.status.metadata as { percent?: number }).percent === 50);
+    const metaEvt = workingEvts.find(e => e.data.metadata && (e.data.metadata as { percent?: number }).percent === 50);
     expect(metaEvt).toBeDefined();
-    expect((metaEvt!.status.metadata as { step?: string }).step).toBe("thinking");
+    expect((metaEvt!.data.metadata as { step?: string }).step).toBe("thinking");
 
-    // Terminal completed event arrives at the end with final=true.
+    // Terminal completed event arrives at the end — its state IS the terminal signal.
     const completedEvt = collected.find(
       (e): e is StatusUpdate =>
-        e.kind === "status-update" && (e as StatusUpdate).status.state === "completed",
-    ) as StatusUpdate | undefined;
+        e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_COMPLETED,
+    );
     expect(completedEvt).toBeDefined();
-    expect(completedEvt!.final).toBe(true);
+    expect(completedEvt!.data.status?.state).toBe(TaskState.TASK_STATE_COMPLETED);
   });
 
   test("progress events arriving after terminal are silently dropped (no extra status-update)", async () => {
@@ -440,9 +459,8 @@ describe("BusAgentExecutor (Phase 7)", () => {
     await new Promise(r => setTimeout(r, 30));
 
     const lateEvt = collected.find(e =>
-      e.kind === "status-update" &&
-      "status" in e &&
-      (e as { status: { message?: { parts: Array<{ text?: string }> } } }).status.message?.parts?.some(p => p.text === "late progress, should be ignored"),
+      e.kind === "statusUpdate" &&
+      (e.data.status?.message?.parts ?? []).some(p => partText(p) === "late progress, should be ignored"),
     );
     expect(lateEvt).toBeUndefined();
   });
@@ -473,7 +491,7 @@ describe("BusAgentExecutor (Phase 7)", () => {
     await executing;
 
     const canceledEvt = collected.find(
-      e => e.kind === "status-update" && "status" in e && (e as { status: { state: string } }).status.state === "canceled",
+      e => e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_CANCELED,
     );
     expect(canceledEvt).toBeDefined();
   });
@@ -514,26 +532,26 @@ describe("BusAgentExecutor (Phase 7)", () => {
       await adapter.execute(makeRequestContext("Slow silent task"), eventBus);
       await done;
 
-      type StatusUpdate = AgentExecutionEvent & { kind: "status-update"; final: boolean; status: { state: string } };
+      type StatusUpdate = Extract<AgentExecutionEvent, { kind: "statusUpdate" }>;
       const workingEvts = collected.filter(
         (e): e is StatusUpdate =>
-          e.kind === "status-update" &&
-          "status" in e &&
-          (e as StatusUpdate).status.state === "working",
+          e.kind === "statusUpdate" &&
+          e.data.status?.state === TaskState.TASK_STATE_WORKING,
       );
       // We emit no progress of our own, so every `working` beyond the initial
-      // pre-dispatch transition is a heartbeat. Expect ≥2 (initial + ≥1 beat),
-      // all non-final.
+      // pre-dispatch transition is a heartbeat. Expect ≥2 (initial + ≥1 beat).
+      // A2A 1.0: "working" is the non-terminal state, so every event here is
+      // non-terminal by construction (the `final: false` flag was removed).
       expect(workingEvts.length).toBeGreaterThanOrEqual(2);
-      expect(workingEvts.every(e => e.final === false)).toBe(true);
+      expect(workingEvts.every(e => e.data.status?.state === TaskState.TASK_STATE_WORKING)).toBe(true);
 
       // Heartbeats stop once settled — no `working` update after the terminal
       // completed event (the interval is cleared and guarded by `settled`).
       const completedIdx = collected.findIndex(
-        e => e.kind === "status-update" && "status" in e && (e as StatusUpdate).status.state === "completed",
+        e => e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_COMPLETED,
       );
       const workingAfterTerminal = collected.slice(completedIdx + 1).some(
-        e => e.kind === "status-update" && "status" in e && (e as StatusUpdate).status.state === "working",
+        e => e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_WORKING,
       );
       expect(workingAfterTerminal).toBe(false);
     } finally {
@@ -576,23 +594,24 @@ describe("BusAgentExecutor (Phase 7)", () => {
     await adapter.execute(makeRequestContext("Help me file an issue"), eventBus);
     await done;
 
-    type StatusUpdate = AgentExecutionEvent & { kind: "status-update"; final: boolean; status: { state: string; message?: { parts: Array<{ text?: string }>; metadata?: Record<string, unknown> } } };
+    type StatusUpdate = Extract<AgentExecutionEvent, { kind: "statusUpdate" }>;
 
-    // input-required event carries the question text + the requestId, non-final
-    // (the task is parked, not settled).
+    // input-required event carries the question text + the requestId. A2A 1.0:
+    // input-required is an interrupted (non-terminal) state — the task is parked,
+    // not settled — and that state itself is the signal (the `final` flag is gone).
     const inputReq = collected.find(
-      (e): e is StatusUpdate => e.kind === "status-update" && "status" in e && (e as StatusUpdate).status.state === "input-required",
+      (e): e is StatusUpdate => e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_INPUT_REQUIRED,
     );
     expect(inputReq).toBeDefined();
-    expect(inputReq!.final).toBe(false);
-    expect(inputReq!.status.message?.parts?.[0]?.text).toBe("Which repo should I file against?");
-    expect(inputReq!.status.message?.metadata?.requestId).toBe(requestId);
+    expect(inputReq!.data.status?.state).toBe(TaskState.TASK_STATE_INPUT_REQUIRED);
+    expect(partText(inputReq!.data.status!.message!.parts[0]!)).toBe("Which repo should I file against?");
+    expect(inputReq!.data.status?.message?.metadata?.requestId).toBe(requestId);
 
     // The task still reaches a terminal completed once the reply lands.
     const completed = collected.find(
-      (e): e is StatusUpdate => e.kind === "status-update" && "status" in e && (e as StatusUpdate).status.state === "completed",
+      (e): e is StatusUpdate => e.kind === "statusUpdate" && e.data.status?.state === TaskState.TASK_STATE_COMPLETED,
     );
     expect(completed).toBeDefined();
-    expect(completed!.final).toBe(true);
+    expect(completed!.data.status?.state).toBe(TaskState.TASK_STATE_COMPLETED);
   });
 });

@@ -14,14 +14,30 @@ function cardWithExtensions(uris: string[]): AgentCard {
   return {
     name: "fake",
     description: "test",
-    protocolVersion: "0.3.0",
     version: "1.0.0",
-    url: "http://localhost/a2a",
-    preferredTransport: "JSONRPC",
+    supportedInterfaces: [
+      {
+        url: "http://localhost/a2a",
+        protocolBinding: "JSONRPC",
+        protocolVersion: "1.0",
+        tenant: "",
+      },
+    ],
+    provider: undefined,
+    capabilities: {
+      extensions: uris.map(uri => ({
+        uri,
+        description: "",
+        required: false,
+        params: undefined,
+      })),
+    },
+    securitySchemes: {},
+    securityRequirements: [],
     defaultInputModes: ["text/plain"],
     defaultOutputModes: ["text/plain"],
-    capabilities: { extensions: uris.map(uri => ({ uri })) },
     skills: [],
+    signatures: [],
   };
 }
 

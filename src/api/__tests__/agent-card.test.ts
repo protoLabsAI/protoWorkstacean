@@ -5,12 +5,14 @@
  * bypassing Bun.serve. They lock down:
  *   - Skills deduplication when multiple agents register the same skill
  *   - The agent-card.json → agent.json legacy alias
- *   - The card's `url` resolves to the actual A2A endpoint, not the dashboard:
+ *   - The card's preferred interface (supportedInterfaces[0]) resolves to the
+ *     actual A2A endpoint, not the dashboard:
  *       * default → http://workstacean:${HTTP_PORT}/a2a
  *       * WORKSTACEAN_PUBLIC_BASE_URL set → ${publicBase}/a2a
  *       * WORKSTACEAN_INTERNAL_HOST overrides the docker-network host
  *       * WORKSTACEAN_HTTP_PORT overrides the port
- *   - additionalInterfaces[0] mirrors the top-level url under JSONRPC
+ *   - supportedInterfaces[0] pins the JSONRPC protocol binding (A2A 1.0:
+ *     replaces the old top-level url / preferredTransport / additionalInterfaces)
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
@@ -95,47 +97,48 @@ describe("GET /.well-known/agent-card.json", () => {
 
   test("default url is the docker-network workstacean:3000/a2a — never the dashboard", () => {
     const card = buildAgentCard(ctx);
-    expect(card.url).toBe("http://workstacean:3000/a2a");
-    expect(card.preferredTransport).toBe("JSONRPC");
+    expect(card.supportedInterfaces[0]?.url).toBe("http://workstacean:3000/a2a");
+    expect(card.supportedInterfaces[0]?.protocolBinding).toBe("JSONRPC");
   });
 
   test("WORKSTACEAN_PUBLIC_BASE_URL produces the canonical public URL", () => {
     process.env.WORKSTACEAN_PUBLIC_BASE_URL = "https://ava.proto-labs.ai";
     const card = buildAgentCard(ctx);
-    expect(card.url).toBe("https://ava.proto-labs.ai/a2a");
+    expect(card.supportedInterfaces[0]?.url).toBe("https://ava.proto-labs.ai/a2a");
   });
 
   test("WORKSTACEAN_PUBLIC_BASE_URL strips a trailing slash before appending /a2a", () => {
     process.env.WORKSTACEAN_PUBLIC_BASE_URL = "https://ava.proto-labs.ai/";
     const card = buildAgentCard(ctx);
-    expect(card.url).toBe("https://ava.proto-labs.ai/a2a");
+    expect(card.supportedInterfaces[0]?.url).toBe("https://ava.proto-labs.ai/a2a");
   });
 
   test("WORKSTACEAN_INTERNAL_HOST overrides the docker-network host", () => {
     process.env.WORKSTACEAN_INTERNAL_HOST = "ava-host";
     const card = buildAgentCard(ctx);
-    expect(card.url).toBe("http://ava-host:3000/a2a");
+    expect(card.supportedInterfaces[0]?.url).toBe("http://ava-host:3000/a2a");
   });
 
   test("WORKSTACEAN_HTTP_PORT overrides the port", () => {
     process.env.WORKSTACEAN_HTTP_PORT = "4000";
     const card = buildAgentCard(ctx);
-    expect(card.url).toBe("http://workstacean:4000/a2a");
+    expect(card.supportedInterfaces[0]?.url).toBe("http://workstacean:4000/a2a");
   });
 
-  test("additionalInterfaces lists the JSON-RPC transport at the same url", () => {
+  test("supportedInterfaces pins the JSON-RPC transport at the resolved url", () => {
     process.env.WORKSTACEAN_PUBLIC_BASE_URL = "https://ava.proto-labs.ai";
     const card = buildAgentCard(ctx);
-    expect(card.additionalInterfaces).toBeDefined();
-    expect(card.additionalInterfaces).toHaveLength(1);
-    expect(card.additionalInterfaces?.[0]?.transport).toBe("JSONRPC");
-    expect(card.additionalInterfaces?.[0]?.url).toBe(card.url);
+    expect(card.supportedInterfaces).toBeDefined();
+    expect(card.supportedInterfaces).toHaveLength(1);
+    expect(card.supportedInterfaces[0]?.protocolBinding).toBe("JSONRPC");
+    expect(card.supportedInterfaces[0]?.protocolVersion).toBe("1.0");
+    expect(card.supportedInterfaces[0]?.url).toBe("https://ava.proto-labs.ai/a2a");
   });
 
   test("declares streaming + push notification capabilities", () => {
     const card = buildAgentCard(ctx);
-    expect(card.capabilities.streaming).toBe(true);
-    expect(card.capabilities.pushNotifications).toBe(true);
+    expect(card.capabilities?.streaming).toBe(true);
+    expect(card.capabilities?.pushNotifications).toBe(true);
   });
 
   test("route handler returns cache-control + JSON body", async () => {
