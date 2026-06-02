@@ -35,6 +35,7 @@ import { withCircuitBreaker } from "./circuit-breaker.ts";
 import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
 import type { ReleasePublishedPayload } from "../../src/event-bus/payloads.ts";
 import { handlePRMerge, parsePRMergePayload } from "../../src/webhooks/github-pr-merge.ts";
+import { GitHubReviewSubmitter } from "../../src/github/reviewSubmitter.ts";
 import {
   handleCommentResponse,
   handleReviewDismissal,
@@ -176,6 +177,54 @@ export function quinnHasReviewed(reviews: Array<Record<string, unknown>> | undef
     const login = (r.user as Record<string, unknown> | undefined)?.login;
     return typeof login === "string" && login.toLowerCase().startsWith("protoquinn");
   });
+}
+
+/**
+ * Terminal-GREEN gate for the deterministic approve-on-green path (#748).
+ *
+ * A formal APPROVE enables auto-merge, so it must only fire when CI is not
+ * merely terminal but actually PASSING — every check completed with a benign
+ * conclusion (`success` / `neutral` / `skipped`), none failed/cancelled/
+ * timed_out/stale, and nothing still in flight.
+ *
+ * FAIL CLOSED: an empty / unknown check set is NOT green. `guardTerminalCi`
+ * treats no-checks as terminal (nothing to wait for), but "no checks" gives us
+ * no positive green signal to auto-approve on, so the deterministic path
+ * declines and the LLM re-dispatch handles it. A 403 / network failure on the
+ * fetch surfaces as `undefined` here → not green.
+ */
+const GREEN_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
+export function allChecksGreen(checkRuns: Array<Record<string, unknown>> | undefined): boolean {
+  if (!Array.isArray(checkRuns) || checkRuns.length === 0) return false;
+  return checkRuns.every((r) => {
+    if (r.status !== "completed") return false;
+    return typeof r.conclusion === "string" && GREEN_CONCLUSIONS.has(r.conclusion);
+  });
+}
+
+/**
+ * The state of @protoquinn[bot]'s LATEST review (by submission order), or
+ * `undefined` when she has not reviewed. Drives the deterministic approve gate
+ * (#748): only a latest `COMMENTED` review — Quinn reviewed, found no blockers,
+ * and was held by guardTerminalCi while CI ran — is eligible for auto-approve.
+ * A latest `CHANGES_REQUESTED` means blockers exist (never auto-approve); a
+ * latest `APPROVED` means we are already done.
+ *
+ * GitHub returns reviews oldest-first, so the last protoquinn review wins.
+ */
+export function quinnLatestReviewState(
+  reviews: Array<Record<string, unknown>> | undefined,
+): string | undefined {
+  if (!Array.isArray(reviews)) return undefined;
+  let state: string | undefined;
+  for (const r of reviews) {
+    const login = (r.user as Record<string, unknown> | undefined)?.login;
+    if (typeof login === "string" && login.toLowerCase().startsWith("protoquinn")) {
+      const s = r.state;
+      if (typeof s === "string") state = s.toUpperCase();
+    }
+  }
+  return state;
 }
 
 /**
@@ -893,9 +942,48 @@ export class GitHubPlugin implements Plugin {
       const number = pr.number as number;
       if (!prEligibleForCiReview(pr, headSha)) continue;
 
-      if (!(await this._quinnHasReviewed(getToken, owner, repo, number))) continue;
+      const reviews = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/pulls/${number}/reviews`)) as
+        | Array<Record<string, unknown>>
+        | null;
+      if (!quinnHasReviewed(reviews ?? undefined)) continue;
       if (!(await this._ciTerminal(getToken, owner, repo, headSha))) {
         console.log(`[github] CI-completion (${event}): ${owner}/${repo}#${number} — checks not all terminal yet, deferring`);
+        continue;
+      }
+
+      // ── Deterministic approve-on-terminal-green (#748) ───────────────────────
+      // Quinn reliably re-COMMENTs instead of choosing review_approve, so the
+      // merge-on-green gate never opens (approvedCount stays 0). When CI is
+      // terminal-GREEN and Quinn's latest review is a held COMMENT (no blockers),
+      // post the formal APPROVE programmatically rather than re-prompting the LLM.
+      //
+      // Fail closed: only the COMMENTED-latest + all-green case auto-approves.
+      // CHANGES_REQUESTED (blockers), an already-APPROVED PR, no prior Quinn
+      // review, or any non-green / unverifiable CI state falls through to the
+      // unchanged LLM re-dispatch below.
+      const latestState = quinnLatestReviewState(reviews ?? undefined);
+      if (latestState === "COMMENTED" && (await this._ciGreen(getToken, owner, repo, headSha))) {
+        try {
+          const submitter = new GitHubReviewSubmitter(getToken);
+          await submitter.submitReview(
+            owner,
+            repo,
+            number,
+            headSha,
+            "APPROVE",
+            "CI terminal-green, no blockers on prior review — auto-approving on green (#748).",
+            [],
+          );
+          console.log(
+            `[github] CI-completion (${event}): auto-approved ${owner}/${repo}#${number} @${headSha.slice(0, 7)} ` +
+              `(terminal-green, prior Quinn review COMMENTED) — #748`,
+          );
+        } catch (err) {
+          console.error(
+            `[github] CI-completion (${event}): auto-approve failed for ${owner}/${repo}#${number}: ` +
+              `${err instanceof Error ? err.message : err}`,
+          );
+        }
         continue;
       }
 
@@ -951,19 +1039,6 @@ export class GitHubPlugin implements Plugin {
     }
   }
 
-  /** True iff @protoquinn[bot] has already left a review on this PR. */
-  private async _quinnHasReviewed(
-    getToken: (owner: string, repo: string) => Promise<string>,
-    owner: string,
-    repo: string,
-    number: number,
-  ): Promise<boolean> {
-    const reviews = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/pulls/${number}/reviews`)) as
-      | Array<Record<string, unknown>>
-      | null;
-    return quinnHasReviewed(reviews ?? undefined);
-  }
-
   /**
    * True when every check-run for the SHA is terminal, so guardTerminalCi will
    * permit a formal verdict.
@@ -978,6 +1053,24 @@ export class GitHubPlugin implements Plugin {
       | { check_runs?: Array<Record<string, unknown>> }
       | null;
     return allChecksTerminal(data?.check_runs);
+  }
+
+  /**
+   * True only when every check-run for the SHA is terminal AND green (#748).
+   * Fail closed: `_ghGet` returns null on a 403 / network failure, and
+   * `allChecksGreen(undefined)` is false — an unverifiable or empty CI state
+   * never reads as green, so the deterministic auto-approve declines.
+   */
+  private async _ciGreen(
+    getToken: (owner: string, repo: string) => Promise<string>,
+    owner: string,
+    repo: string,
+    headSha: string,
+  ): Promise<boolean> {
+    const data = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/commits/${headSha}/check-runs`)) as
+      | { check_runs?: Array<Record<string, unknown>> }
+      | null;
+    return allChecksGreen(data?.check_runs);
   }
 
   /**
