@@ -5,9 +5,9 @@ relevantTo: [api]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 8
-  referenced: 4
-  successfulFeatures: 4
+  loaded: 9
+  referenced: 5
+  successfulFeatures: 5
 ---
 # api
 
@@ -57,3 +57,10 @@ usageStats:
 - **Rejected:** Requiring manual intervention or failing immediately upon the first 403 was rejected because it blocks the automated review workflow.
 - **Trade-offs:** Easier deployment and higher availability; harder to debug if the logs don't explicitly state that a fallback occurred.
 - **Breaking if changed:** Changing the order (PAT first) would increase latency for the standard operating mode and potentially use more privileged credentials than necessary for routine tasks.
+
+### Utilizing GitHub Rulesets API instead of the legacy Branch Protection API. (2026-06-02)
+- **Context:** Configuring mandatory review requirements for the main branch in protoMaker.
+- **Why:** Rulesets provide more granular control and are the modern replacement for branch protection, allowing for better enforcement through 'required_reviewer_ids'.
+- **Rejected:** Legacy Branch Protection API; rejected because it is being phased out and rulesets offer superior targeting (e.g., via conditions).
+- **Trade-offs:** Rulesets require a different payload structure and endpoint compared to established branch protection scripts.
+- **Breaking if changed:** Changing back to branch protection might lose the ability to specifically target Quinn via App ID within the rule parameters.
