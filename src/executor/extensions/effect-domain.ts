@@ -26,7 +26,7 @@ import {
   WORLDSTATE_DELTA_MIME_TYPE,
   type WorldStateDeltaArtifactData,
   type WorldStateDeltaEntry,
-} from "../../../lib/types/worldstate-delta.ts";
+} from "@protolabs/a2a";
 
 export const EFFECT_DOMAIN_URI = "https://proto-labs.ai/a2a/ext/effect-domain-v1";
 

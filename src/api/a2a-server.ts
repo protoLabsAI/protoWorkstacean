@@ -36,7 +36,8 @@ import {
   type RequestContext,
 } from "@a2a-js/sdk/server";
 import { join } from "node:path";
-import { Role, TaskState, type Message, type Part } from "@a2a-js/sdk";
+import { Role, TaskState, type Message } from "@a2a-js/sdk";
+import { textPart, partText } from "@protolabs/a2a";
 import type { Route, ApiContext } from "./types.ts";
 import type { BusMessage } from "../../lib/types.ts";
 import { buildAgentCard } from "./agent-card.ts";
@@ -94,16 +95,6 @@ function sanitizeHtmlError(raw: string): string {
  * We don't produce partial Message events — all content comes back via the
  * terminal status event's message.parts.
  */
-/** Build a A2A 1.0 text Part ({ content: { $case: "text", value } }). */
-function textPart(text: string): Part {
-  return {
-    content: { $case: "text", value: text },
-    metadata: undefined,
-    filename: "",
-    mediaType: "text/plain",
-  };
-}
-
 /** Build a fully-populated agent Message carrying a single text part. */
 function agentTextMessage(
   taskId: string,
@@ -135,7 +126,7 @@ class BusAgentExecutor implements AgentExecutor {
     // Extract text from the incoming message parts. A2A 1.0: a text Part is
     // `{ content: { $case: "text", value } }` — no top-level `kind`/`text`.
     const text = (userMessage.parts ?? [])
-      .map(p => (p.content?.$case === "text" ? p.content.value : undefined))
+      .map(partText)
       .filter((t): t is string => typeof t === "string")
       .join("\n");
 

@@ -1,7 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { A2AExecutor } from "../executors/a2a-executor.ts";
-import { COST_V1_MIME_TYPE } from "../../../lib/types/cost-v1.ts";
-import { CONFIDENCE_V1_MIME_TYPE } from "../../../lib/types/confidence-v1.ts";
+import { COST_V1_MIME_TYPE, CONFIDENCE_V1_MIME_TYPE } from "@protolabs/a2a";
 
 // Access the private extractors via `as any` — we're asserting pure-function
 // behavior on part arrays, not the full execute() plumbing.

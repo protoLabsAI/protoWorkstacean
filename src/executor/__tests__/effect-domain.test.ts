@@ -9,8 +9,8 @@
 import { describe, test, expect } from "bun:test";
 import { registerEffectDomainExtension } from "../extensions/effect-domain.ts";
 import { ExtensionRegistry } from "../extension-registry.ts";
-import { WORLDSTATE_DELTA_MIME_TYPE } from "../../../lib/types/worldstate-delta.ts";
-import type { WorldStateDeltaArtifactData } from "../../../lib/types/worldstate-delta.ts";
+import { WORLDSTATE_DELTA_MIME_TYPE } from "@protolabs/a2a";
+import type { WorldStateDeltaArtifactData } from "@protolabs/a2a";
 
 // Minimal in-memory event bus for testing
 interface BusEvent {

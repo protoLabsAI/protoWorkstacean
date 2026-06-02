@@ -23,16 +23,20 @@ import {
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
 import {
   WORLDSTATE_DELTA_MIME_TYPE,
+  parseWorldStateDelta,
+  parseCost,
+  parseConfidence,
+  textPart,
+  partText,
+  stampAuthHeader,
+  isTerminalState,
+  isErrorState,
+  stateToLegacyString,
   type WorldStateDeltaArtifactData,
-} from "../../../lib/types/worldstate-delta.ts";
-import {
-  COST_V1_MIME_TYPE,
   type CostArtifactData,
-} from "../../../lib/types/cost-v1.ts";
-import {
-  CONFIDENCE_V1_MIME_TYPE,
   type ConfidenceArtifactData,
-} from "../../../lib/types/confidence-v1.ts";
+  type A2AAuthScheme,
+} from "@protolabs/a2a";
 import {
   defaultExtensionRegistry,
   type ExtensionContext,
@@ -50,8 +54,6 @@ import {
  * otherwise we fall back to the agent-level `apiKeyEnv` for backward compat.
  * Unset → no auth header stamped.
  */
-export type A2AAuthScheme = "apiKey" | "bearer" | "hmac";
-
 export interface A2AAuthConfig {
   scheme: A2AAuthScheme;
   /** Environment variable holding the credential value. */
@@ -130,12 +132,7 @@ function buildFetch(
 
     // Auth header selection — scheme drives the header name.
     if (auth && auth.value) {
-      if (auth.scheme === "bearer") {
-        headers.set("Authorization", `Bearer ${auth.value}`);
-      } else if (auth.scheme === "apiKey") {
-        headers.set("X-API-Key", auth.value);
-      }
-      // "hmac" is handled by an extension interceptor, not here.
+      stampAuthHeader(headers, auth.scheme, auth.value);
     }
 
     // Static extra headers (e.g. a2a-extensions opt-in list). Don't overwrite
@@ -161,78 +158,12 @@ function buildFetch(
 }
 
 /**
- * A2A 1.0 Part is member-discriminated: `part.content` is a `$case`-tagged
- * union ({ $case: "text", value } | { $case: "data", value } | …). There is no
- * top-level `kind`/`text`/`data`. These helpers build + read parts so the
- * member-discrimination lives in one place.
- */
-function textPart(text: string): Part {
-  return {
-    content: { $case: "text", value: text },
-    metadata: undefined,
-    filename: "",
-    mediaType: "text/plain",
-  };
-}
-
-/** Pull the string value out of a text Part, or undefined if it isn't one. */
-function partText(part: Part): string | undefined {
-  return part.content?.$case === "text" ? part.content.value : undefined;
-}
-
-/** Pull the structured value out of a data Part, or undefined if it isn't one. */
-function partData(part: Part): unknown {
-  return part.content?.$case === "data" ? part.content.value : undefined;
-}
-
-/**
  * A2A 1.0 dropped the `kind` discriminator from SendMessageResult (Message | Task).
  * A Task has a string `id` + a `status` slot; a Message has a `messageId`.
- * Discriminate structurally.
+ * Discriminate structurally. (Part/state helpers live in @protolabs/a2a.)
  */
 function isTask(result: Message | Task): result is Task {
   return "id" in result && "status" in result;
-}
-
-/**
- * Terminal A2A task states (1.0 SCREAMING_SNAKE enum). The old code keyed
- * terminality on `status-update.final`; 1.0 removed `final`, so we key on the
- * task STATE being terminal (plus stream closure, handled by the for-await
- * generator naturally ending).
- */
-const TERMINAL_STATES: ReadonlySet<TaskState> = new Set([
-  TaskState.TASK_STATE_COMPLETED,
-  TaskState.TASK_STATE_FAILED,
-  TaskState.TASK_STATE_CANCELED,
-  TaskState.TASK_STATE_REJECTED,
-]);
-
-function isTerminalState(state: TaskState): boolean {
-  return TERMINAL_STATES.has(state);
-}
-
-function isErrorState(state: TaskState): boolean {
-  return state === TaskState.TASK_STATE_FAILED || state === TaskState.TASK_STATE_REJECTED;
-}
-
-/**
- * Map the A2A 1.0 TaskState enum back to the lowercase state strings the rest
- * of the codebase speaks ("submitted" / "working" / "completed" / …). This
- * keeps the enum change contained to the A2A edge: the bus contract
- * (SkillResult.data.taskState, WORKING_STATES, TaskTracker) stays string-typed.
- */
-function stateToLegacyString(state: TaskState): string {
-  switch (state) {
-    case TaskState.TASK_STATE_SUBMITTED: return "submitted";
-    case TaskState.TASK_STATE_WORKING: return "working";
-    case TaskState.TASK_STATE_COMPLETED: return "completed";
-    case TaskState.TASK_STATE_FAILED: return "failed";
-    case TaskState.TASK_STATE_CANCELED: return "canceled";
-    case TaskState.TASK_STATE_REJECTED: return "rejected";
-    case TaskState.TASK_STATE_INPUT_REQUIRED: return "input-required";
-    case TaskState.TASK_STATE_AUTH_REQUIRED: return "auth-required";
-    default: return "unknown";
-  }
 }
 
 export class A2AExecutor implements IExecutor {
@@ -687,37 +618,22 @@ export class A2AExecutor implements IExecutor {
     return undefined;
   }
 
-  /**
-   * Scan a parts array for a structured DataPart whose `metadata.mimeType`
-   * matches the fleet-interop contract MIME (worldstate-delta-v1 / cost-v1 /
-   * confidence-v1). A2A 1.0: the structured payload lives in
-   * `part.content.value` (when `$case === "data"`); the MIME discriminator
-   * stays in our custom `part.metadata.mimeType` (unchanged by the migration —
-   * it is application metadata, NOT the SDK's `mediaType` field). Returns the
-   * first match's payload.
-   */
-  private _dataPartByMime<T>(parts: Part[], mimeType: string): T | undefined {
-    for (const part of parts) {
-      const value = partData(part);
-      if (value !== undefined && part.metadata?.["mimeType"] === mimeType) {
-        return value as T;
-      }
-    }
-    return undefined;
-  }
+  // Extension DataPart extraction delegates to @protolabs/a2a parse helpers:
+  // the structured payload lives in `part.content.value` (when `$case ===
+  // "data"`) and the MIME discriminator stays in `part.metadata.mimeType`.
 
   private _worldStateDeltaFromParts(parts: Part[]): WorldStateDeltaArtifactData | undefined {
-    return this._dataPartByMime<WorldStateDeltaArtifactData>(parts, WORLDSTATE_DELTA_MIME_TYPE);
+    return parseWorldStateDelta(parts);
   }
 
   /** Scan artifact parts for a cost-v1 DataPart and return the first match. */
   private _costFromParts(parts: Part[]): CostArtifactData | undefined {
-    return this._dataPartByMime<CostArtifactData>(parts, COST_V1_MIME_TYPE);
+    return parseCost(parts);
   }
 
   /** Scan artifact parts for a confidence-v1 DataPart and return the first match. */
   private _confidenceFromParts(parts: Part[]): ConfidenceArtifactData | undefined {
-    return this._dataPartByMime<ConfidenceArtifactData>(parts, CONFIDENCE_V1_MIME_TYPE);
+    return parseConfidence(parts);
   }
 
   /**

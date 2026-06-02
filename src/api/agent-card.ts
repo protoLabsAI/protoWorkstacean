@@ -29,10 +29,9 @@
 
 import type { Route, ApiContext } from "./types.ts";
 import type { AgentCard, AgentSkill } from "@a2a-js/sdk";
+import { buildAgentCard as buildProtolabsCard } from "@protolabs/a2a";
 
 const DEFAULT_VERSION = "1.0.0";
-// A2A protocol version (Major.Minor per §3.6) advertised on each interface.
-const PROTOCOL_VERSION = "1.0";
 
 export function createRoutes(ctx: ApiContext): Route[] {
   const handler = () => {
@@ -81,38 +80,22 @@ export function buildAgentCard(ctx: ApiContext): AgentCard {
     });
   }
 
-  // A2A 1.0: `url` / `preferredTransport` / `additionalInterfaces` /
-  // top-level `protocolVersion` collapse into `supportedInterfaces[]`, where
-  // each entry pins its own `protocolBinding` + `protocolVersion`. The first
-  // entry is the preferred one (replaces `preferredTransport`).
-  return {
+  // @protolabs/a2a applies the protoLabs card conventions: the single JSONRPC
+  // `supportedInterfaces[]` entry pinned to 1.0 (1.0 collapsed the old
+  // `url`/`preferredTransport`/`additionalInterfaces`/top-level
+  // `protocolVersion` into this list), the provider block, the four declared
+  // extensions (cost / confidence / worldstate-delta / tool-call), and the
+  // security scheme. We pass only workstacean's identity + skills.
+  return buildProtolabsCard({
     name: "workstacean",
     description:
       "protoLabs Studio operational gateway. Routes skill requests across the " +
       "agent fleet (Ava, Quinn, Frank, Jon, Cindi, Researcher, protopen, etc).",
     version: DEFAULT_VERSION,
-    supportedInterfaces: [
-      {
-        url: a2aUrl,
-        protocolBinding: "JSONRPC",
-        protocolVersion: PROTOCOL_VERSION,
-        tenant: "",
-      },
-    ],
-    provider: {
-      organization: "protoLabs AI",
-      url: "https://protolabs.ai",
-    },
-    capabilities: {
-      streaming: true,
-      pushNotifications: true,
-      extensions: [],
-    },
-    securitySchemes: {},
-    securityRequirements: [],
-    defaultInputModes: ["text/plain"],
-    defaultOutputModes: ["text/plain"],
+    url: a2aUrl,
     skills,
-    signatures: [],
-  };
+    streaming: true,
+    pushNotifications: true,
+    authScheme: ctx.apiKey ? "bearer" : undefined,
+  });
 }
