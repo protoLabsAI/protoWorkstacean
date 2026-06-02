@@ -5,7 +5,7 @@ relevantTo: [api]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 9
+  loaded: 10
   referenced: 6
   successfulFeatures: 6
 ---
@@ -69,3 +69,7 @@ usageStats:
 - **Context:** A unit test was attempting to access a private static property `TERMINAL_CONCLUSIONS` in `GitHubPlugin` to verify CI state transitions.
 - **Why:** Removing the `private` modifier on a `static readonly` constant is a pragmatic way to allow package-level testing without adding complex getter methods or changing the object's internal state management. Since the set represents a fixed domain contract rather than mutable state, it doesn't violate encapsulation principles as severely as exposing instance variables.
 - **Breaking if changed:** If this were a mutable property instead of `readonly`, removing `private` would expose the internal state to unintended modification by consumers.
+
+#### [Gotcha] Partial implementation of fallback mechanisms can create 'silent' failure paths where one part of a dependency chain works while another fails. (2026-06-02)
+- **Situation:** The PAT (Personal Access Token) fallback was implemented for the GitHub Check Runs endpoint but omitted for the PR Detail endpoint.
+- **Root cause:** The App token would fail with a 403 on the PR detail fetch (needed to resolve the head SHA), causing the entire CI inspection process to crash before it ever reached the endpoint that actually had the fallback logic.
