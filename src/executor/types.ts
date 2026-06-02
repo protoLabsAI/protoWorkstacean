@@ -73,6 +73,15 @@ export interface SkillResult {
     confidence?: number;
     /** Free-text confidence explanation, from a confidence-v1 DataPart. */
     confidenceExplanation?: string;
+    /**
+     * Validated structured result, when the skill declared an `outputSchema`
+     * and the forced finalizer ran. Carried alongside `resultMime` (the
+     * DataPart discriminator). Consumers read this by MIME instead of parsing
+     * prose. Absent for schema-less (free-text) skills.
+     */
+    resultData?: unknown;
+    /** MIME of the structured result DataPart (pairs with `resultData`). */
+    resultMime?: string;
   };
 }
 

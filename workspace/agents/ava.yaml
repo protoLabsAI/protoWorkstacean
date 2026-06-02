@@ -226,6 +226,31 @@ skills:
   - name: diagnose_pr_stuck
     description: Diagnose a stuck PR with merge conflicts and return a structured verdict (redundant, rebasable, decomposable, genuine) with evidence to drive autonomous recovery.
     keywords: [diagnose, conflict, stuck, merge, rebase, pr, dirty]
+    # Structured output: after the analysis loop, a forced submit_diagnose_pr_stuck
+    # tool call distills the verdict into this schema, validated + emitted as a
+    # typed DataPart (resultMime) the pr-remediator reads directly — no prose parsing.
+    resultMime: application/vnd.protolabs.pr-diagnosis-v1+json
+    outputSchema:
+      type: object
+      required: [verdict, evidence]
+      properties:
+        verdict:
+          type: string
+          enum: [redundant, rebasable, decomposable, genuine]
+          description: The least-destructive verdict that fits the evidence.
+        evidence:
+          type: string
+          description: Brief explanation of the verdict (1-3 sentences).
+        conflictingFiles:
+          type: array
+          items:
+            type: string
+          description: Paths of the files whose conflicts drove the verdict.
+        supersededBy:
+          type: array
+          items:
+            type: string
+          description: Commit SHAs/descriptions that already satisfy the PR — only for the redundant verdict.
     systemPromptOverride: |
       You are a PR conflict diagnostician. Analyze the given PR and return ONLY a JSON verdict.
 

@@ -12,7 +12,7 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { AgentDefinition, AgentRole, AgentSkillDefinition, RawAgentYaml } from "./types.ts";
+import type { AgentDefinition, AgentRole, AgentSkillDefinition, JsonSchema, RawAgentYaml } from "./types.ts";
 
 const VALID_ROLES: AgentRole[] = [
   "orchestrator",
@@ -94,6 +94,23 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
             typeof s.maxTurns === "number" && (s.maxTurns === -1 || s.maxTurns > 0)
               ? s.maxTurns
               : undefined;
+          // Structured output: outputSchema (a JSON-Schema object) + resultMime
+          // travel together. A schema without a MIME has nowhere to land its
+          // DataPart, so reject it loudly rather than silently dropping the
+          // contract.
+          const outputSchema =
+            typeof s.outputSchema === "object" && s.outputSchema !== null && !Array.isArray(s.outputSchema)
+              ? (s.outputSchema as JsonSchema)
+              : undefined;
+          const resultMime = typeof s.resultMime === "string" && s.resultMime.length > 0
+            ? s.resultMime
+            : undefined;
+          if (outputSchema && !resultMime) {
+            throw new Error(`[${fileName}] skill "${name}" declares outputSchema but no resultMime`);
+          }
+          if (resultMime && !outputSchema) {
+            throw new Error(`[${fileName}] skill "${name}" declares resultMime but no outputSchema`);
+          }
           return {
             name,
             ...(typeof s.description === "string" ? { description: s.description } : {}),
@@ -103,6 +120,7 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
               : {}),
             ...(skillTools ? { tools: skillTools } : {}),
             ...(skillMaxTurns !== undefined ? { maxTurns: skillMaxTurns } : {}),
+            ...(outputSchema && resultMime ? { outputSchema, resultMime } : {}),
           };
         })
         .filter((s): s is AgentSkillDefinition => s !== null)

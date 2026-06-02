@@ -8,13 +8,14 @@
 
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
-import { SystemMessage } from "@langchain/core/messages";
+import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { tool, type StructuredToolInterface } from "@langchain/core/tools";
 import { z } from "zod";
 import { CallbackHandler as LangfuseCallbackHandler } from "@langfuse/langchain";
 import { HttpClient } from "../../services/http-client.ts";
 import type { AgentDefinition } from "../../agent-runtime/types.ts";
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
+import { runStructuredFinalizer, type ForcedToolCaller } from "./structured-finalizer.ts";
 
 const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
 
@@ -902,8 +903,32 @@ export class DeepAgentExecutor implements IExecutor {
         }
       }
 
+      const finalText = text || "No response generated.";
+
+      // Structured finalizer: when the skill declares an outputSchema, distill
+      // the analysis into a schema-shaped object via a forced submit_<skill>
+      // tool call (NOT response_format — the reasoning backend ignores that).
+      // No schema ⇒ unchanged free-text behavior.
+      if (skillDef?.outputSchema && skillDef.resultMime && req.skill) {
+        const finalized = await runStructuredFinalizer(
+          req.skill,
+          skillDef.outputSchema,
+          finalText,
+          this._forcedToolCaller(llm),
+        );
+        console.log(
+          `[deep-agent:${this.agentDef.name}] structured finalizer for "${req.skill}" → ${skillDef.resultMime}${finalized.repaired ? " (repaired)" : ""}`,
+        );
+        return {
+          text: JSON.stringify(finalized.value),
+          isError: false,
+          correlationId: req.correlationId,
+          data: { resultData: finalized.value, resultMime: skillDef.resultMime },
+        };
+      }
+
       return {
-        text: text || "No response generated.",
+        text: finalText,
         isError: false,
         correlationId: req.correlationId,
       };
@@ -915,6 +940,31 @@ export class DeepAgentExecutor implements IExecutor {
         correlationId: req.correlationId,
       };
     }
+  }
+
+  /**
+   * Build a `ForcedToolCaller` over a ChatOpenAI instance. This is the seam
+   * for tool_choice forcing through the LangGraph/LiteLLM gateway: the prebuilt
+   * ReAct agent does not expose tool_choice, so the finalizer is a *direct*
+   * `bindTools(..., { tool_choice })` call. We bind a single OpenAI-style
+   * function tool whose `parameters` ARE the skill's JSON Schema and pin
+   * `tool_choice` to it, then read the parsed args off the response's
+   * `tool_calls[0].args`.
+   */
+  private _forcedToolCaller(llm: ChatOpenAI): ForcedToolCaller {
+    return async ({ system, user, toolName, parameters }) => {
+      const bound = llm.bindTools(
+        [{ type: "function", function: { name: toolName, parameters: parameters as Record<string, unknown> } }],
+        { tool_choice: { type: "function", function: { name: toolName } } },
+      );
+      const response = await bound.invoke([new SystemMessage(system), new HumanMessage(user)]);
+      const toolCalls = (response as unknown as { tool_calls?: Array<{ name?: string; args?: unknown }> }).tool_calls;
+      const call = toolCalls?.find((t) => t.name === toolName) ?? toolCalls?.[0];
+      if (!call) {
+        throw new Error(`forced tool "${toolName}" produced no tool call`);
+      }
+      return call.args;
+    };
   }
 
   private _buildPrompt(req: SkillRequest): string {

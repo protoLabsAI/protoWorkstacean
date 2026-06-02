@@ -124,6 +124,17 @@ const DIAGNOSE_AFTER_ATTEMPTS = 2;
 type RemediationKind = "fix_ci" | "address_feedback" | "merge_ready" | "update_branch";
 type DiagnosisVerdict = "redundant" | "rebasable" | "decomposable" | "genuine";
 
+/** MIME of diagnose_pr_stuck's structured-result DataPart (ava.yaml outputSchema). */
+const PR_DIAGNOSIS_MIME = "application/vnd.protolabs.pr-diagnosis-v1+json";
+
+/** The structured shape diagnose_pr_stuck's outputSchema produces. */
+interface DiagnosisResult {
+  verdict: DiagnosisVerdict;
+  evidence: string;
+  conflictingFiles?: string[];
+  supersededBy?: string[];
+}
+
 interface InFlightEntry {
   kind: RemediationKind;
   /** Timestamp the most recent dispatch was issued. */
@@ -1338,9 +1349,18 @@ Critical rules:
       (msg) => {
         this.bus?.unsubscribe(subId);
         this.diagnosisInFlight.delete(prKey);
-        const responsePayload = msg.payload as { text?: string; result?: string; content?: string };
-        const responseText = responsePayload.text ?? responsePayload.result ?? responsePayload.content ?? "";
-        void this._handleDiagnoseResponse(pr, responseText, parentCorrelationId).catch((err) =>
+        const responsePayload = msg.payload as {
+          text?: string; result?: string; content?: string;
+          resultData?: unknown; resultMime?: string;
+        };
+        // Prefer the typed structured-result DataPart (diagnose_pr_stuck declares
+        // an outputSchema, so the forced finalizer emits a validated object keyed
+        // by PR_DIAGNOSIS_MIME). Fall back to parsing prose only when it's absent.
+        const structured = responsePayload.resultMime === PR_DIAGNOSIS_MIME
+          ? (responsePayload.resultData as DiagnosisResult | undefined)
+          : undefined;
+        const responseText = responsePayload.content ?? responsePayload.text ?? responsePayload.result ?? "";
+        void this._handleDiagnoseResponse(pr, structured, responseText, parentCorrelationId).catch((err) =>
           console.error(`[pr-remediator] diagnose response handler error for ${prKey}:`, err),
         );
       },
@@ -1406,22 +1426,22 @@ Return ONLY the JSON block. No other text.`,
 
   private async _handleDiagnoseResponse(
     pr: PrDomainEntry,
+    structured: DiagnosisResult | undefined,
     responseText: string,
     parentCorrelationId: string,
   ): Promise<void> {
     const prKey = `${pr.repo}#${pr.number}`;
 
-    type DiagnosisResult = {
-      verdict: DiagnosisVerdict;
-      evidence: string;
-      conflictingFiles?: string[];
-      supersededBy?: string[];
-    };
-
     let diagnosis: DiagnosisResult | null = null;
 
+    // Typed structured-result DataPart wins — it's already validated against the
+    // skill's outputSchema, so no prose parsing is needed.
+    if (structured && typeof structured.verdict === "string") {
+      diagnosis = structured;
+    }
+
     // Try to parse JSON from code block first, then bare object
-    const jsonBlockMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+    const jsonBlockMatch = !diagnosis ? responseText.match(/```json\s*([\s\S]*?)\s*```/) : null;
     if (jsonBlockMatch?.[1]) {
       try {
         diagnosis = JSON.parse(jsonBlockMatch[1]) as DiagnosisResult;
