@@ -5,9 +5,9 @@ relevantTo: [api]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 11
-  referenced: 7
-  successfulFeatures: 7
+  loaded: 12
+  referenced: 8
+  successfulFeatures: 8
 ---
 # api
 
@@ -87,3 +87,10 @@ usageStats:
 - **Rejected:** Maintaining the A2A pattern would require both services to share deep knowledge of each other's internal agent skills and state, increasing coupling.
 - **Trade-offs:** HTTP is easier to monitor and integrate with standard tooling, but loses some of the high-level abstraction provided by the agentic skill framework.
 - **Breaking if changed:** Reverting to A2A would re-introduce the need for defensive coding in the receiving service (protoMaker) and break the existing HTTP signal/submit implementation.
+
+### Agent capability discovery uses a standardized '.well-known' endpoint pattern for probing. (2026-06-02)
+- **Context:** Implementing capability discovery for remote A2A (Agent-to-Agent) endpoints.
+- **Why:** Leveraging '.well-known/agent-card.json' and '.well-known/agent.json' provides a predictable, discoverable way for the management console to fetch agent metadata (skills, description, etc.) without requiring manual configuration for every new endpoint.
+- **Rejected:** Hardcoded API routes per agent or requiring agents to register their full schema via a central database.
+- **Trade-offs:** Easier for decentralized agent deployment but requires all agents to adhere to the specific '.well-known' convention.
+- **Breaking if changed:** If the convention changes, the probe mechanism will fail to identify skills or reachability for existing agents.

@@ -5,9 +5,9 @@ relevantTo: [architecture]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 22
-  referenced: 6
-  successfulFeatures: 6
+  loaded: 23
+  referenced: 7
+  successfulFeatures: 7
 ---
 # architecture
 
@@ -125,3 +125,8 @@ usageStats:
 - **Rejected:** Using a simple timer or single-shot execution.
 - **Trade-offs:** Adds overhead of checking state on every cycle, but ensures eventual consistency in highly autonomous environments.
 - **Breaking if changed:** If the 'Check for existing work' step is removed, the system will enter a loop of creating infinite 'address review' features for the same PR.
+
+#### [Pattern] Event-driven synchronization between configuration files and runtime plugin state. (2026-06-02)
+- **Problem solved:** Updating A2A agent configurations in 'agents.yaml'.
+- **Why this works:** When an agent is added/deleted via the management API, the system performs three distinct actions: updates the persistent YAML file, triggers a 'skill-broker' plugin refresh, and unregisters from the 'executorRegistry'. This ensures the filesystem, the skill discovery service, and the active execution engine remain synchronized.
+- **Trade-offs:** Increases complexity in the management handler but eliminates the latency/inconsistency window inherent in polling.
