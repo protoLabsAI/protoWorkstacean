@@ -6,8 +6,8 @@ importance: 0.7
 relatedFiles: []
 usageStats:
   loaded: 10
-  referenced: 6
-  successfulFeatures: 6
+  referenced: 7
+  successfulFeatures: 7
 ---
 # api
 
@@ -73,3 +73,10 @@ usageStats:
 #### [Gotcha] Partial implementation of fallback mechanisms can create 'silent' failure paths where one part of a dependency chain works while another fails. (2026-06-02)
 - **Situation:** The PAT (Personal Access Token) fallback was implemented for the GitHub Check Runs endpoint but omitted for the PR Detail endpoint.
 - **Root cause:** The App token would fail with a 403 on the PR detail fetch (needed to resolve the head SHA), causing the entire CI inspection process to crash before it ever reached the endpoint that actually had the fallback logic.
+
+### Mandatory projectPath propagation in multi-tenant/multi-repo orchestration (2026-06-02)
+- **Context:** The `pr-remediator` tool calls must explicitly pass `projectPath` extracted from metadata.
+- **Why:** To prevent 'context bleeding' where an agent operating on one repository accidentally executes tools against the orchestrator's own codebase or a default project path.
+- **Rejected:** Assuming the agent can resolve the target project path based on the repository name alone.
+- **Trade-offs:** Requires more rigorous metadata management at the dispatch layer, but provides strict isolation between different target projects.
+- **Breaking if changed:** Removing `projectPath` from tool call requirements would allow agents to execute commands in the wrong working directory, potentially corrupting the orchestrator's environment.

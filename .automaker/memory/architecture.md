@@ -113,3 +113,15 @@ usageStats:
 #### [Pattern] Registry-only MCP Client Plugin pattern (2026-06-02)
 - **Problem solved:** Implementing an MCP (Model Context Protocol) client plugin to integrate external tools into the agent ecosystem.
 - **Why this works:** By making the `McpClientPlugin` a 'registrar only' component that populates an `ExecutorRegistry`, it maintains a clean separation of concerns. The plugin handles discovery and configuration (via `mcp-servers.yaml`), while the `SkillDispatcherPlugin` remains the single source of truth for skill requests, preventing multiple plugins from competing for the same event bus signals.
+
+#### [Pattern] Autonomous Agent Instruction Injection via Dispatch Metadata (2026-06-02)
+- **Problem solved:** Implementing a PR remediator that dispatches tasks to an autonomous agent (Ava).
+- **Why this works:** By embedding high-fidelity, step-by-step execution protocols (Triage -> Assign -> Kick off -> Review) directly into the dispatch payload, the system ensures the agent operates with a deterministic state machine rather than relying on vague prompts.
+- **Trade-offs:** Increases payload size and complexity of the orchestrator, but significantly reduces 'hallucination loops' where agents fail to follow multi-step processes.
+
+### Idempotent Remediation via State Reconciliation (2026-06-02)
+- **Context:** The remediator re-dispatches every ~5 minutes.
+- **Why:** To handle transient failures or agent crashes without creating duplicate work. The agent is instructed to check for existing features (`list_features`) before creating new ones.
+- **Rejected:** Using a simple timer or single-shot execution.
+- **Trade-offs:** Adds overhead of checking state on every cycle, but ensures eventual consistency in highly autonomous environments.
+- **Breaking if changed:** If the 'Check for existing work' step is removed, the system will enter a loop of creating infinite 'address review' features for the same PR.
