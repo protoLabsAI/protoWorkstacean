@@ -6,8 +6,8 @@ importance: 0.7
 relatedFiles: []
 usageStats:
   loaded: 21
-  referenced: 5
-  successfulFeatures: 5
+  referenced: 6
+  successfulFeatures: 6
 ---
 # architecture
 
@@ -97,3 +97,15 @@ usageStats:
 - **Problem solved:** Preventing data loss or inconsistent states when unregistering executors that may have in-flight requests.
 - **Why this works:** Ensures that active dispatches are allowed to complete before the executor is destroyed, preventing abrupt termination of tasks.
 - **Trade-offs:** Introduces latency during unregistration if many tasks are in flight, but ensures task integrity.
+
+### Hybrid Agent Runtime Model: Distinguishing between 'In-process' agents (running via DeepAgentExecutor/LangGraph) and 'External A2A' agents (running via A2AExecutor). (2026-06-02)
+- **Context:** The system evolved from having all agents as external A2A services to moving some (like Quinn and Ava) into the core workspace process.
+- **Why:** Moving agents in-process reduces network latency and simplifies orchestration for core lifecycle tasks, while keeping complex or heavy-duty teams (like protoMaker) as external A2A services allows for independent scaling and deployment.
+- **Rejected:** Keeping all agents as external A2A services (which was the previous state), which added unnecessary overhead for tightly coupled agents.
+- **Trade-offs:** Easier local development and faster execution for in-process agents, but increased complexity in the codebase due to managing two different executor types (DeepAgentExecutor vs A2AExecutor).
+- **Breaking if changed:** Changing this would require a complete rewrite of the ExecutorRegistry and how the message bus dispatches skills to agents.
+
+#### [Pattern] Unified Executor Registry abstraction for heterogeneous agent runtimes. (2026-06-02)
+- **Problem solved:** Managing both in-process LangGraph agents and external HTTP-based A2A agents.
+- **Why this works:** By registering both types into a single `ExecutorRegistry`, the message bus can dispatch skills identically regardless of whether the target is a local function call or a remote HTTP request.
+- **Trade-offs:** Provides a clean, polymorphic interface for the rest of the system at the cost of slightly more complex registration logic.
