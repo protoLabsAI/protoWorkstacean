@@ -92,3 +92,8 @@ usageStats:
 - **Problem solved:** Handling asynchronous GitHub webhooks where the event payload might not directly contain the Pull Request object.
 - **Why this works:** GitHub's `workflow_run` and `check_suite` events focus on the commit SHA. Since multiple PRs can share a SHA (or a SHA can move), the system must explicitly resolve the current open PR and verify the SHA hasn't moved since the event was triggered.
 - **Trade-offs:** Requires extra API calls to fetch PR details and perform validation, increasing latency slightly.
+
+#### [Pattern] Graceful executor disposal using a 'drain and dispose' pattern with a timeout. (2026-06-02)
+- **Problem solved:** Preventing data loss or inconsistent states when unregistering executors that may have in-flight requests.
+- **Why this works:** Ensures that active dispatches are allowed to complete before the executor is destroyed, preventing abrupt termination of tasks.
+- **Trade-offs:** Introduces latency during unregistration if many tasks are in flight, but ensures task integrity.

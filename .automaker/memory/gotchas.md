@@ -5,9 +5,9 @@ relevantTo: [gotchas]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 78
-  referenced: 4
-  successfulFeatures: 4
+  loaded: 79
+  referenced: 5
+  successfulFeatures: 5
 ---
 # gotchas
 
@@ -30,3 +30,8 @@ usageStats:
 - **Situation:** In active development, a developer might push a new commit while a CI run for an older commit is still finishing.
 - **Root cause:** Webhooks for older commits can arrive late. If the system processes a 'success' for an old SHA, it might attempt to review a PR that has already moved forward, causing context mismatch.
 - **How to avoid:** Increases implementation complexity by requiring SHA verification against the current PR head, but ensures review accuracy.
+
+#### [Gotcha] Type mismatch between registration metadata (string | undefined) and internal mapping keys (string). (2026-06-02)
+- **Situation:** The `byAgent` map uses a fallback key `__anonymous__` for undefined agent names, but the registration object itself still carries the `undefined` type.
+- **Root cause:** The internal implementation logic handles the nullability by providing a default string, but the TypeScript compiler enforces strict type safety on the original property.
+- **How to avoid:** Requires explicit handling of the fallback key in both the insertion and retrieval logic to maintain type safety.

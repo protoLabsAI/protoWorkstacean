@@ -43,3 +43,10 @@ usageStats:
 - **Rejected:** Triggering a review on any 'completed' status regardless of the outcome or type.
 - **Trade-offs:** Harder to maintain as new CI tools are added, but prevents noise and unnecessary automated comments.
 - **Breaking if changed:** Changing this set without updating CI configurations could lead to 'silent' successes where CI passes but no review is ever triggered.
+
+### Implementation of a Management API for runtime control (reload/unregister) and diagnostics. (2026-06-02)
+- **Context:** Need for operational control over dynamic agent lifecycles without full system restarts.
+- **Why:** Decouples the management of individual agents from the main process lifecycle, allowing hot-reloading of specific plugins/agents.
+- **Rejected:** Restarting the entire service for configuration or plugin changes.
+- **Trade-offs:** Increases complexity of the API surface but provides much higher availability during development and production tuning.
+- **Breaking if changed:** Removing these endpoints would force manual service restarts to apply any agent-level changes.
