@@ -124,6 +124,32 @@ async function ghFetch(
 }
 
 /**
+ * Fetch using the raw GITHUB_TOKEN PAT directly (bypassing the App token).
+ * Used as a fallback when the App installation token lacks permission to read
+ * check-runs (403). The PAT typically has broader repo read access.
+ */
+async function ghFetchWithPat(
+  owner: string,
+  name: string,
+  url: string,
+  init: RequestInit = {},
+): Promise<Response | null> {
+  const pat = process.env.GITHUB_TOKEN;
+  if (!pat) return null;
+  return fetch(url, {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(GH_FETCH_TIMEOUT_MS),
+    headers: {
+      ...(init.headers ?? {}),
+      Authorization: `Bearer ${pat}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "protoquinn",
+    },
+  });
+}
+
+/**
  * Verify whether a path exists in a repo at a given ref. Read-only, single
  * GitHub call — used by Quinn to check cross-repo assumptions a diff depends
  * on (a `COPY --from` source path, a filtered workspace package directory, a
@@ -197,6 +223,9 @@ class CiAccessError extends Error {
  * the pending set). Throws `CiAccessError` on a 403 (reviewer can't see CI);
  * throws a generic Error on any other GitHub error so the caller surfaces it
  * loudly rather than treating an unknown CI state as "all clear".
+ *
+ * When the App installation token gets 403 on check-runs, falls back to the
+ * GITHUB_TOKEN PAT (which typically has broader read access) before giving up.
  */
 async function fetchCheckRuns(
   owner: string,
@@ -208,12 +237,32 @@ async function fetchCheckRuns(
   if (!prResp.ok) throw new Error(`GitHub API error fetching PR#${pr}: ${prResp.status} ${await prResp.text()}`);
   const { head } = (await prResp.json()) as { head: { sha: string } };
 
-  const checksResp = await ghFetch(
-    owner,
-    name,
-    `https://api.github.com/repos/${owner}/${name}/commits/${head.sha}/check-runs?per_page=100`,
-  );
-  if (checksResp.status === 403) throw new CiAccessError(403, `GitHub 403 fetching check-runs for ${owner}/${name}#${pr} — reviewer token lacks access`);
+  const checksUrl = `https://api.github.com/repos/${owner}/${name}/commits/${head.sha}/check-runs?per_page=100`;
+
+  // Try the App installation token first
+  let checksResp = await ghFetch(owner, name, checksUrl);
+
+  // If the App token gets 403 on check-runs, try the PAT as a fallback.
+  // The PAT typically has broader repo read access than an App installation
+  // token that may lack checks:read permission.
+  if (checksResp.status === 403) {
+    const patResp = await ghFetchWithPat(owner, name, checksUrl);
+    if (patResp) {
+      checksResp = patResp;
+      if (checksResp.status === 403) {
+        throw new CiAccessError(403, `GitHub 403 fetching check-runs for ${owner}/${name}#${pr} — both App and PAT tokens lack access`);
+      }
+      if (!checksResp.ok) {
+        throw new Error(`GitHub API error fetching check-runs (PAT fallback): ${checksResp.status} ${await checksResp.text()}`);
+      }
+      const { check_runs } = (await checksResp.json()) as { check_runs: CheckRun[] };
+      console.log(`[pr-inspector] check-runs for ${owner}/${name}#${pr} succeeded via PAT fallback after App 403`);
+      return { headSha: head.sha, runs: check_runs };
+    }
+    // No PAT available — throw the CiAccessError for the original 403
+    throw new CiAccessError(403, `GitHub 403 fetching check-runs for ${owner}/${name}#${pr} — reviewer token lacks access`);
+  }
+
   if (!checksResp.ok) throw new Error(`GitHub API error fetching check-runs: ${checksResp.status} ${await checksResp.text()}`);
   const { check_runs } = (await checksResp.json()) as { check_runs: CheckRun[] };
   return { headSha: head.sha, runs: check_runs };

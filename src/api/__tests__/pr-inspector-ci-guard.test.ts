@@ -29,6 +29,11 @@ let origFetch: typeof globalThis.fetch;
 // When true, the check-runs endpoint returns 403 — the reviewer-can't-see-CI
 // access gap (#fix: CI-403 → Gap, not a blocking FAIL).
 let ciForbidden: boolean;
+// When true, the PAT fallback (detected by a different token) succeeds even
+// when the App token is forbidden. Used to verify the PAT fallback path.
+let ciPatFallbackSucceeds: boolean;
+// Track which tokens were used for check-runs calls (for test assertions)
+let checkRunsTokensUsed: string[];
 
 function ctx(): ApiContext {
   return { bus: new InMemoryEventBus(), executorRegistry: {} as never } as unknown as ApiContext;
@@ -58,11 +63,16 @@ beforeEach(() => {
   checkRuns = [];
   reviewsPosted = [];
   ciForbidden = false;
+  ciPatFallbackSucceeds = false;
+  checkRunsTokensUsed = [];
   origFetch = globalThis.fetch;
 
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const method = init?.method ?? "GET";
+    const authHeader = (init?.headers as Record<string, string> | Headers | undefined)?.Authorization
+      ?? (init?.headers instanceof Headers ? init.headers.get("Authorization") : "");
+    const token = typeof authHeader === "string" ? authHeader.replace("Bearer ", "") : "";
 
     // PR detail → head SHA
     if (url.endsWith(`/pulls/${PR}`) && method === "GET") {
@@ -70,6 +80,13 @@ beforeEach(() => {
     }
     // check-runs for head SHA
     if (url.includes(`/commits/${HEAD_SHA}/check-runs`)) {
+      checkRunsTokensUsed.push(token);
+      // ciForbidden applies to the App token (test-token); if PAT fallback
+      // is enabled and the token is NOT the app token, succeed.
+      if (ciForbidden && token === "test-token") return new Response("Forbidden", { status: 403 });
+      if (ciForbidden && ciPatFallbackSucceeds && token !== "test-token") {
+        return new Response(JSON.stringify({ check_runs: checkRuns }), { status: 200 });
+      }
       if (ciForbidden) return new Response("Forbidden", { status: 403 });
       return new Response(JSON.stringify({ check_runs: checkRuns }), { status: 200 });
     }
@@ -81,11 +98,15 @@ beforeEach(() => {
     }
     throw new Error(`unexpected fetch in test: ${method} ${url}`);
   }) as typeof globalThis.fetch;
+
+  // Set GITHUB_TOKEN for PAT fallback tests
+  process.env.GITHUB_TOKEN = "test-pat-token";
 });
 
 afterEach(() => {
   globalThis.fetch = origFetch;
   setGithubAuthForTesting(undefined); // reset to lazy makeGitHubAuth()
+  delete process.env.GITHUB_TOKEN;
 });
 
 const PENDING: CheckRun[] = [
@@ -205,5 +226,89 @@ describe("pr-inspector CI inaccessible (403) → Gap, not a blocking FAIL", () =
     }), {});
     expect(res.status).toBe(200);
     expect(reviewsPosted).toEqual([{ event: "COMMENT", body: "review with CI-access gap noted" }]);
+  });
+});
+
+describe("pr-inspector CI 403 → PAT fallback succeeds", () => {
+  beforeEach(() => {
+    ciForbidden = true;
+    ciPatFallbackSucceeds = true;
+  });
+
+  test("check_ci succeeds via PAT fallback when App token is 403", async () => {
+    checkRuns = TERMINAL_GREEN;
+    const res = await getHandler()(inspect({
+      action: "check_ci", repo: REPO, pr_number: PR,
+    }), {});
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { success: boolean; data: { result: string } };
+    expect(json.success).toBe(true);
+    expect(json.data.result).toContain("CI Checks for PR#42");
+    expect(json.data.result).toContain("success");
+    // Verify both tokens were tried: App first, then PAT
+    expect(checkRunsTokensUsed).toHaveLength(2);
+    expect(checkRunsTokensUsed[0]).toBe("test-token");
+    expect(checkRunsTokensUsed[1]).toBe("test-pat-token");
+  });
+
+  test("APPROVE proceeds via PAT fallback when CI is terminal (no 409)", async () => {
+    checkRuns = TERMINAL_GREEN;
+    const res = await getHandler()(inspect({
+      action: "review_approve", repo: REPO, pr_number: PR,
+    }), {});
+    expect(res.status).toBe(200);
+    expect(reviewsPosted).toEqual([{ event: "APPROVE", body: "" }]);
+  });
+
+  test("REQUEST_CHANGES proceeds via PAT fallback when CI is terminal", async () => {
+    checkRuns = TERMINAL_RED;
+    const res = await getHandler()(inspect({
+      action: "review_request_changes", repo: REPO, pr_number: PR, body: "test failed",
+    }), {});
+    expect(res.status).toBe(200);
+    expect(reviewsPosted).toEqual([{ event: "REQUEST_CHANGES", body: "test failed" }]);
+  });
+
+  test("APPROVE held with 409 when CI is still pending (even via PAT fallback)", async () => {
+    checkRuns = PENDING;
+    const res = await getHandler()(inspect({
+      action: "review_approve", repo: REPO, pr_number: PR,
+    }), {});
+    expect(res.status).toBe(409);
+    expect(reviewsPosted).toHaveLength(0);
+  });
+});
+
+describe("pr-inspector CI 403 → no PAT → Gap (unchanged behavior)", () => {
+  test("check_ci returns Gap when App is 403 and no PAT is configured", async () => {
+    ciForbidden = true;
+    ciPatFallbackSucceeds = false;
+    delete process.env.GITHUB_TOKEN;
+    const res = await getHandler()(inspect({
+      action: "check_ci", repo: REPO, pr_number: PR,
+    }), {});
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { success: boolean; data: { result: string } };
+    expect(json.success).toBe(true);
+    expect(json.data.result).toContain("not accessible");
+    expect(json.data.result).toContain("403");
+    expect(json.data.result).toContain("Gap");
+    // Only the App token was tried (no PAT to fall back to)
+    expect(checkRunsTokensUsed).toHaveLength(1);
+    expect(checkRunsTokensUsed[0]).toBe("test-token");
+  });
+
+  test("check_ci returns Gap when both App and PAT are 403", async () => {
+    ciForbidden = true;
+    ciPatFallbackSucceeds = false; // PAT also returns 403
+    const res = await getHandler()(inspect({
+      action: "check_ci", repo: REPO, pr_number: PR,
+    }), {});
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { success: boolean; data: { result: string } };
+    expect(json.success).toBe(true);
+    expect(json.data.result).toContain("not accessible");
+    // Both tokens were tried
+    expect(checkRunsTokensUsed).toHaveLength(2);
   });
 });
