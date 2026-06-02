@@ -17,11 +17,11 @@ schedule: "0 13 * * 1-5"
 skill: portfolio_sitrep
 targets:
   - roxy
-# Roxy's updates land in the dev channel (1509787856351133746). The notifier
-# resolves the slug → DISCORD_WEBHOOK_ROXY (a webhook URL, NOT a channel id) and
-# posts an embed that includes her sitrep result. OPS: create a Discord webhook
-# on channel 1509787856351133746 and set DISCORD_WEBHOOK_ROXY (Infisical ai/prod);
-# until it exists the notifier falls back to the default webhook.
-notifyChannel: "roxy"
+# Roxy's updates land in the dev channel. The notifier resolves the slug →
+# DISCORD_WEBHOOK_DEV (a webhook URL) and posts an embed including her sitrep
+# result. Sourced from the DISCORD_DEV_CHANNEL Infisical secret, mapped to
+# DISCORD_WEBHOOK_DEV in workstacean's env (homelab stacks/ai). Until that's
+# wired the notifier falls back to the default webhook.
+notifyChannel: "dev"
 timeoutMs: 300000
 enabled: false
