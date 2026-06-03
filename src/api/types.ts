@@ -18,6 +18,7 @@ import type { BusHistoryRecorder } from "../event-bus/history-recorder.ts";
 import type { SkillResponseCache } from "../event-bus/skill-response-cache.ts";
 import type { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
 import type { ProjectRegistry } from "../plugins/project-registry.ts";
+import type { ResearchStore } from "../knowledge/research-store.ts";
 
 export type Params = Record<string, string>;
 export type RouteHandler = (req: Request, params: Params) => Response | Promise<Response>;
@@ -73,6 +74,8 @@ export interface ApiContext {
   projectRegistry?: ProjectRegistry;
   /** Channels registry — used by routes that need per-project channel lookups. */
   channelRegistry?: ChannelRegistry;
+  /** Researcher agent's hybrid knowledge base — backs /api/research/*. */
+  researchStore?: ResearchStore;
 }
 
 /** Match a path against a pattern like "/api/foo/:id/run". Returns params or null. */

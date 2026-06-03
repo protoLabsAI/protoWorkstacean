@@ -424,6 +424,115 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
         }),
       },
     ),
+    // ── Research: knowledge base + source connectors (researcher agent) ───────
+    research_search: tool(
+      async (input) => JSON.stringify(await http.post("/api/research/search", input)),
+      {
+        name: "research_search",
+        description: "Hybrid (semantic + keyword) search over the research knowledge base — prior papers, findings, digests, and model releases. Use this BEFORE external searches to reuse what's already been gathered.",
+        schema: z.object({
+          query: z.string().describe("What to look for."),
+          k: z.number().optional().describe("Max results (default 5)."),
+          kind: z.enum(["paper", "finding", "digest", "model_release"]).optional().describe("Restrict to one kind."),
+        }),
+      },
+    ),
+    research_ingest: tool(
+      async (input) => JSON.stringify(await http.post("/api/research/ingest", input)),
+      {
+        name: "research_ingest",
+        description: "Store a research item (paper, finding, digest, or model_release) into the searchable knowledge base so it's recallable in future research.",
+        schema: z.object({
+          kind: z.enum(["paper", "finding", "digest", "model_release"]).describe("What this item is."),
+          content: z.string().describe("The substance — abstract, finding text, digest body, or model summary."),
+          title: z.string().optional(),
+          source: z.string().optional().describe("Where it came from (e.g. arxiv, huggingface, github, discord)."),
+          url: z.string().optional(),
+          metadata: z.record(z.unknown()).optional(),
+        }),
+      },
+    ),
+    research_stats: tool(
+      async () => JSON.stringify(await http.get("/api/research/stats")),
+      { name: "research_stats", description: "Counts of stored research items per kind.", schema: z.object({}) },
+    ),
+    huggingface_search: tool(
+      async (input) => {
+        const type = input.type ?? "models";
+        const params = new URLSearchParams({ search: input.query, limit: String(input.limit ?? 10), full: "false" });
+        if (input.sort) params.set("sort", input.sort);
+        try {
+          const res = await fetch(`https://huggingface.co/api/${type}?${params}`, { headers: { Accept: "application/json" } });
+          if (!res.ok) return JSON.stringify({ error: `HuggingFace ${res.status}` });
+          const data = (await res.json()) as Array<Record<string, unknown>>;
+          return JSON.stringify({ results: data.slice(0, input.limit ?? 10).map(d => ({ id: d.id ?? d.modelId, downloads: d.downloads, likes: d.likes, pipeline_tag: d.pipeline_tag, updated: d.lastModified })) });
+        } catch (e) { return JSON.stringify({ error: e instanceof Error ? e.message : String(e) }); }
+      },
+      {
+        name: "huggingface_search",
+        description: "Search HuggingFace Hub for models or datasets (trending / by downloads / likes). Public — no auth.",
+        schema: z.object({
+          query: z.string().describe("Search terms."),
+          type: z.enum(["models", "datasets"]).optional().describe("Default: models."),
+          sort: z.enum(["downloads", "likes", "lastModified"]).optional().describe("Sort order."),
+          limit: z.number().optional().describe("Max results (default 10)."),
+        }),
+      },
+    ),
+    github_trending: tool(
+      async (input) => {
+        const q = [input.query, input.language ? `language:${input.language}` : ""].filter(Boolean).join(" ");
+        const params = new URLSearchParams({ q: q || "stars:>1000", sort: input.sort ?? "stars", order: "desc", per_page: String(input.limit ?? 10) });
+        const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
+        if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+        try {
+          const res = await fetch(`https://api.github.com/search/repositories?${params}`, { headers });
+          if (!res.ok) return JSON.stringify({ error: `GitHub ${res.status}` });
+          const data = (await res.json()) as { items?: Array<Record<string, unknown>> };
+          return JSON.stringify({ results: (data.items ?? []).slice(0, input.limit ?? 10).map(r => ({ full_name: r.full_name, stars: r.stargazers_count, description: r.description, url: r.html_url, language: r.language, pushed_at: r.pushed_at })) });
+        } catch (e) { return JSON.stringify({ error: e instanceof Error ? e.message : String(e) }); }
+      },
+      {
+        name: "github_trending",
+        description: "Search GitHub repositories by topic/language sorted by stars or recent activity — find trending AI/ML projects and releases.",
+        schema: z.object({
+          query: z.string().describe("Search terms (e.g. 'llm inference', 'diffusion')."),
+          language: z.string().optional().describe("Restrict to a language (e.g. python, rust)."),
+          sort: z.enum(["stars", "updated"]).optional().describe("Default: stars."),
+          limit: z.number().optional().describe("Max results (default 10)."),
+        }),
+      },
+    ),
+    discord_scan_feed: tool(
+      async (input) => {
+        const token = process.env.DISCORD_BOT_TOKEN;
+        if (!token) return JSON.stringify({ error: "DISCORD_BOT_TOKEN not set" });
+        try {
+          const res = await fetch(`https://discord.com/api/v10/channels/${input.channelId}/messages?limit=${input.limit ?? 30}`, {
+            headers: { Authorization: `Bot ${token}` },
+          });
+          if (!res.ok) return JSON.stringify({ error: `Discord ${res.status}` });
+          const msgs = (await res.json()) as Array<{ content?: string; embeds?: Array<{ url?: string; title?: string }>; author?: { username?: string } }>;
+          const urlRe = /https?:\/\/[^\s<>")]+/g;
+          const classify = (u: string): string =>
+            /arxiv\.org/.test(u) ? "arxiv" : /huggingface\.co/.test(u) ? "huggingface" : /github\.com/.test(u) ? "github" : /(youtube|youtu\.be)/.test(u) ? "video" : "web";
+          const links: Array<{ url: string; type: string; from?: string }> = [];
+          for (const m of msgs) {
+            for (const u of (m.content ?? "").match(urlRe) ?? []) links.push({ url: u, type: classify(u), from: m.author?.username });
+            for (const e of m.embeds ?? []) if (e.url) links.push({ url: e.url, type: classify(e.url), from: m.author?.username });
+          }
+          return JSON.stringify({ scanned: msgs.length, links: links.slice(0, 50) });
+        } catch (e) { return JSON.stringify({ error: e instanceof Error ? e.message : String(e) }); }
+      },
+      {
+        name: "discord_scan_feed",
+        description: "Scan a Discord channel's recent messages and extract + classify shared links (arxiv, huggingface, github, video, web) — the team's research feed.",
+        schema: z.object({
+          channelId: z.string().describe("Discord channel ID to scan."),
+          limit: z.number().optional().describe("Messages to scan (default 30, max 100)."),
+        }),
+      },
+    ),
     // ── Discord operations (protoBot agent) ──────────────────────────────────
     discord_server_stats: tool(
       async () => JSON.stringify(await http.get("/api/discord/server-stats")),

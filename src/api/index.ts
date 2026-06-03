@@ -32,12 +32,14 @@ import { createRoutes as humanInputRoutes } from "./human-input.ts";
 import { createRoutes as agentsCrudRoutes } from "./agents-crud.ts";
 import { createRoutes as controlPlaneRoutes } from "./control-plane.ts";
 import { createRoutes as mcpCrudRoutes } from "./mcp-crud.ts";
+import { createRoutes as researchRoutes } from "./research.ts";
 
 export { matchPath } from "./types.ts";
 export type { Route, ApiContext } from "./types.ts";
 
 export function createAllRoutes(ctx: ApiContext): Route[] {
   return [
+    ...researchRoutes(ctx),
     ...operationRoutes(ctx),
     ...githubRoutes(ctx),
     ...incidentRoutes(ctx),
