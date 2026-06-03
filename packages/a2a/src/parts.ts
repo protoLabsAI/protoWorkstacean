@@ -41,6 +41,23 @@ export function textArtifact(text: string, opts: { artifactId?: string; name?: s
 }
 
 /**
+ * Wrap one or more Parts into an Artifact — the generic counterpart to
+ * `textArtifact`, for streaming structured (DataPart) artifact-updates such as
+ * tool-call-v1 progress frames. Defaults give each frame a fresh artifactId so
+ * consumers treat them as distinct streamed artifacts rather than appends.
+ */
+export function dataArtifact(parts: Part[], opts: { artifactId?: string; name?: string } = {}): Artifact {
+  return {
+    artifactId: opts.artifactId ?? crypto.randomUUID(),
+    name: opts.name ?? "data",
+    description: "",
+    parts,
+    metadata: undefined,
+    extensions: [],
+  };
+}
+
+/**
  * Build a structured data Part: `{ content: { $case: "data", value } }`.
  *
  * The protoLabs convention carries the application-level discriminator in

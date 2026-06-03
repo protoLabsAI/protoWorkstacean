@@ -16,6 +16,7 @@ import { InMemoryEventBus } from "../../../lib/bus.ts";
 import { ExecutorRegistry } from "../../executor/executor-registry.ts";
 import { BusAgentExecutor } from "../a2a-server.ts";
 import type { ApiContext } from "../types.ts";
+import { parseToolCall } from "@protolabs/a2a";
 
 function makeUserMessage(text: string, metadata: Record<string, unknown> = {}): Message {
   return {
@@ -431,6 +432,55 @@ describe("BusAgentExecutor (Phase 7)", () => {
     );
     expect(completedEvt).toBeDefined();
     expect(completedEvt!.data.status?.state).toBe(TaskState.TASK_STATE_COMPLETED);
+  });
+
+  test("tool-call-v1 frames stream as artifact-update DataParts (#781)", async () => {
+    const bus = new InMemoryEventBus();
+    const ctx: ApiContext = {
+      workspaceDir: "/tmp",
+      bus,
+      plugins: [],
+      executorRegistry: new ExecutorRegistry(),
+    };
+
+    bus.subscribe("agent.skill.request", "test", (msg) => {
+      const cid = msg.correlationId!;
+      const frameTopic = `agent.skill.toolframe.${cid}`;
+      const replyTopic = msg.reply!.topic!;
+      setTimeout(() => bus.publish(frameTopic, {
+        id: crypto.randomUUID(), correlationId: cid, topic: frameTopic, timestamp: Date.now(),
+        payload: { frame: { toolCallId: "c1", name: "get_ci_health", phase: "started", args: { repo: "x" } } },
+      }), 0);
+      setTimeout(() => bus.publish(frameTopic, {
+        id: crypto.randomUUID(), correlationId: cid, topic: frameTopic, timestamp: Date.now(),
+        payload: { frame: { toolCallId: "c1", name: "get_ci_health", phase: "completed", result: "green" } },
+      }), 5);
+      setTimeout(() => bus.publish(replyTopic, {
+        id: crypto.randomUUID(), correlationId: cid, topic: replyTopic, timestamp: Date.now(),
+        payload: { content: "done", correlationId: cid },
+      }), 10);
+    });
+
+    const adapter = new BusAgentExecutor(ctx);
+    const eventBus = new DefaultExecutionEventBus();
+    const collected: AgentExecutionEvent[] = [];
+    eventBus.on("event", (e) => collected.push(e));
+    const done = new Promise<void>(resolve => eventBus.on("finished", () => resolve()));
+
+    await adapter.execute(makeRequestContext("Tool task"), eventBus);
+    await done;
+
+    type ArtifactUpdate = Extract<AgentExecutionEvent, { kind: "artifactUpdate" }>;
+    const frames = collected
+      .filter((e): e is ArtifactUpdate => e.kind === "artifactUpdate")
+      .map(e => parseToolCall(e.data.artifact?.parts ?? []))
+      .filter((f): f is NonNullable<typeof f> => Boolean(f));
+
+    // Two tool-call frames (started → completed); the terminal text answer is a
+    // separate artifact and carries no tool-call DataPart.
+    expect(frames).toHaveLength(2);
+    expect(frames[0]).toMatchObject({ toolCallId: "c1", name: "get_ci_health", phase: "started" });
+    expect(frames[1]).toMatchObject({ toolCallId: "c1", phase: "completed", result: "green" });
   });
 
   test("progress events arriving after terminal are silently dropped (no extra status-update)", async () => {
