@@ -16,8 +16,14 @@ export interface Ceremony {
   skill: string;
   /** Project paths to target, or ['all'] for all projects */
   targets: string[];
-  /** Optional Discord channel slug for outcome notifications */
+  /** Optional Discord channel slug for outcome notifications (→ DISCORD_WEBHOOK_<SLUG>) */
   notifyChannel?: string;
+  /**
+   * Optional explicit env var holding the notification webhook URL — takes
+   * precedence over notifyChannel's derived DISCORD_WEBHOOK_<SLUG>. Use when the
+   * webhook secret follows a different naming pattern (e.g. DISCORD_RESEARCH_WEBHOOK).
+   */
+  notifyWebhookEnv?: string;
   /** Whether this ceremony is active */
   enabled: boolean;
   /** Optional per-ceremony timeout in milliseconds. Defaults to no timeout. */

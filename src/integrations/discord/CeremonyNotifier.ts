@@ -33,8 +33,8 @@ export class CeremonyNotifier {
    * If notifyChannel is provided, attempts to resolve a channel-specific webhook.
    * Returns true on success, false on fallback.
    */
-  async notify(outcome: CeremonyOutcome, ceremonyName: string, notifyChannel?: string): Promise<boolean> {
-    const webhookUrl = this._resolveWebhook(notifyChannel);
+  async notify(outcome: CeremonyOutcome, ceremonyName: string, notifyChannel?: string, webhookEnv?: string): Promise<boolean> {
+    const webhookUrl = this._resolveWebhook(notifyChannel, webhookEnv);
 
     if (!webhookUrl) {
       this._logFallback(outcome, ceremonyName);
@@ -64,9 +64,11 @@ export class CeremonyNotifier {
     }
   }
 
-  private _resolveWebhook(channelSlug?: string): string | null {
+  private _resolveWebhook(channelSlug?: string, webhookEnv?: string): string | null {
+    // Explicit env var override (e.g. DISCORD_RESEARCH_WEBHOOK) wins.
+    if (webhookEnv && process.env[webhookEnv]) return process.env[webhookEnv]!;
     if (channelSlug) {
-      // Try channel-specific webhook env var
+      // Channel-specific webhook env var: DISCORD_WEBHOOK_<SLUG>.
       const envKey = `DISCORD_WEBHOOK_${channelSlug.toUpperCase().replace(/-/g, "_")}`;
       const channelUrl = process.env[envKey];
       if (channelUrl) return channelUrl;

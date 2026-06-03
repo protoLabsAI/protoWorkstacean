@@ -474,7 +474,7 @@ export class CeremonyPlugin implements Plugin {
     // Send Discord notification (non-blocking)
     if (ceremony) {
       this.notifier
-        .notify(outcome, ceremony.name, ceremony.notifyChannel)
+        .notify(outcome, ceremony.name, ceremony.notifyChannel, ceremony.notifyWebhookEnv)
         .catch((err) => {
           console.error("[ceremony] Discord notification error:", err);
         });

@@ -13,11 +13,12 @@ schedule: "0 9 * * 1"
 skill: research_digest
 targets:
   - researcher
-# Posts the digest to the research channel via DISCORD_WEBHOOK_RESEARCH.
-# NOTE: set that webhook env (Discord webhook → Infisical secret) for the post
-# to land; until then the digest still runs + is stored in the KB, the publish
-# step just no-ops. Switch to "updates" to reuse the existing fleet channel.
+# Posts the digest to the research channel. Uses the explicit webhook env
+# DISCORD_RESEARCH_WEBHOOK (set as an Infisical secret in workstacean's prod env).
+# Until that env is injected the digest still runs + is stored in the KB; the
+# publish step just no-ops. notifyChannel is the fallback derivation.
 notifyChannel: "research"
+notifyWebhookEnv: "DISCORD_RESEARCH_WEBHOOK"
 # Research scans multiple sources + synthesizes — give it room.
 timeoutMs: 600000
 enabled: true
