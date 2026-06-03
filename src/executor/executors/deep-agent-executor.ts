@@ -885,8 +885,16 @@ export class DeepAgentExecutor implements IExecutor {
       // Within-conversation history (Phase 1): replay recent turns so the agent
       // sees the conversation, not just the latest message.
       const history = memoryOn ? this.memory!.history(memCtxId, memCfg) : [];
+
+      // Ephemeral surrounding context (Phase 4): a trigger surface (e.g. Discord
+      // reply-chain / scrollback / thread / attachments) can attach a
+      // `contextPreamble`. Inject it into THIS turn's user message only — it is
+      // never persisted as conversation history (memory.record stores `prompt`).
+      const preamble = typeof req.payload?.contextPreamble === "string" ? req.payload.contextPreamble : "";
+      const userContent = preamble ? `${preamble}\n\n${prompt}` : prompt;
+
       const result = await agent.invoke(
-        { messages: [...history.map(t => ({ role: t.role, content: t.content })), { role: "user", content: prompt }] },
+        { messages: [...history.map(t => ({ role: t.role, content: t.content })), { role: "user", content: userContent }] },
         { recursionLimit: effectiveMaxTurns * 2 + 1, callbacks },
       );
 

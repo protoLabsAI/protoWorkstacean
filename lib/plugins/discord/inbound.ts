@@ -10,6 +10,7 @@ import { DmAccumulator, type AccumulatorEntry } from "../../dm/dm-accumulator.ts
 import { makeId, type DiscordContext } from "./core.ts";
 import { isRateLimited, isSpam } from "./rate-limit.ts";
 import { pendingReplies } from "./outbound.ts";
+import { buildMessageContext } from "./context.ts";
 
 // ── Admin check ───────────────────────────────────────────────────────────────
 
@@ -91,6 +92,9 @@ export async function handleDMFlush(
   } else {
     console.warn(`[discord] Could not fetch message for ${conversationId} via ${agentName ?? "main"} — reply will use unprompted push`);
   }
+
+  // Surrounding context for the DM (reply-to / scrollback / attachments).
+  const contextPreamble = discordMessage ? await buildMessageContext(discordMessage).catch(() => "") : "";
   if (agentName) ctx.pendingAgents.set(conversationId, agentName);
 
   if (isNew) {
@@ -122,6 +126,7 @@ export async function handleDMFlush(
         content: batchedContent,
         targets: [agentName],
         isDM: true,
+        ...(contextPreamble ? { contextPreamble } : {}),
       },
       source: { interface: "discord" as const, channelId, userId },
       reply: { topic: `message.outbound.discord.${channelId}` },
@@ -137,6 +142,7 @@ export async function handleDMFlush(
         channel: channelId,
         content: batchedContent,
         isDM: true,
+        ...(contextPreamble ? { contextPreamble } : {}),
       },
       source: { interface: "discord" as const, channelId, userId },
       reply: { topic: `message.outbound.discord.${channelId}` },
@@ -195,6 +201,9 @@ export function registerInboundHandlers(ctx: DiscordContext): void {
     }
 
     await message.react("👀").catch(() => {});
+
+    // Surrounding context (reply-to, scrollback, thread, attachments) — best-effort.
+    const contextPreamble = await buildMessageContext(message).catch(() => "");
 
     let correlationId: string;
     let isNewConversation = false;
@@ -255,6 +264,7 @@ export function registerInboundHandlers(ctx: DiscordContext): void {
         content,
         isThread: message.channel.isThread(),
         guildId: message.guildId,
+        ...(contextPreamble ? { contextPreamble } : {}),
         ...(channelEntry?.agent ? { agentId: channelEntry.agent } : {}),
       },
       source: { interface: "discord" as const, channelId: message.channelId, userId },
