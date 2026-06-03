@@ -340,16 +340,16 @@ describe("AgentFleetHealthPlugin", () => {
       expect(snap.systemActors[0].failureCount).toBe(1);
     });
 
-    test("outcome from pr-remediator does NOT pollute agents[]", async () => {
+    test("outcome from feature-remediation does NOT pollute agents[]", async () => {
       wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
-        systemActor: "pr-remediator", skill: "bug_triage", success: false, durationMs: 500,
+        systemActor: "feature-remediation", skill: "bug_triage", success: false, durationMs: 500,
       }));
       await new Promise(r => setTimeout(r, 10));
 
       const snap = wlPlugin.getFleetHealth();
       expect(snap.agents).toHaveLength(0);
-      expect(snap.agents.find(a => a.agentName === "pr-remediator")).toBeUndefined();
-      expect(snap.systemActors.find(s => s.systemActor === "pr-remediator")).toBeDefined();
+      expect(snap.agents.find(a => a.agentName === "feature-remediation")).toBeUndefined();
+      expect(snap.systemActors.find(s => s.systemActor === "feature-remediation")).toBeDefined();
     });
 
     test("agentCount after mixed outcomes = count of real agents only", async () => {
@@ -362,7 +362,7 @@ describe("AgentFleetHealthPlugin", () => {
       }));
       // Synthetic / plugin actors
       wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
-        systemActor: "pr-remediator", skill: "bug_triage", success: false, durationMs: 100,
+        systemActor: "feature-remediation", skill: "bug_triage", success: false, durationMs: 100,
       }));
       wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
         systemActor: "outcome-analysis", skill: "analyze", success: false, durationMs: 100,
@@ -377,7 +377,7 @@ describe("AgentFleetHealthPlugin", () => {
       expect(new Set(snap.agents.map(a => a.agentName))).toEqual(new Set(["ava", "quinn"]));
       expect(snap.systemActors).toHaveLength(3);
       expect(new Set(snap.systemActors.map(s => s.systemActor))).toEqual(
-        new Set(["pr-remediator", "outcome-analysis", "user"]),
+        new Set(["feature-remediation", "outcome-analysis", "user"]),
       );
     });
 
@@ -388,7 +388,7 @@ describe("AgentFleetHealthPlugin", () => {
       }));
       // Synthetic actor with 100% failure — must not leak into maxFailureRate1h
       wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
-        systemActor: "pr-remediator", skill: "bug_triage", success: false, durationMs: 100,
+        systemActor: "feature-remediation", skill: "bug_triage", success: false, durationMs: 100,
       }));
       await new Promise(r => setTimeout(r, 10));
 
@@ -403,7 +403,7 @@ describe("AgentFleetHealthPlugin", () => {
       }));
       // Synthetic actor fails a skill nobody else runs — shouldn't count as orphaned
       wlBus.publish("autonomous.outcome.failed", makeOutcomeMsg({
-        systemActor: "pr-remediator", skill: "bug_triage", success: false, durationMs: 100,
+        systemActor: "feature-remediation", skill: "bug_triage", success: false, durationMs: 100,
       }));
       await new Promise(r => setTimeout(r, 10));
 
@@ -548,14 +548,14 @@ describe("AgentFleetHealthPlugin", () => {
     });
 
     test("hydration routes unregistered actors to systemActors[]", async () => {
-      const registry = makeRegistry(["ava"]); // pr-remediator is NOT registered
+      const registry = makeRegistry(["ava"]); // feature-remediation is NOT registered
 
       const repo1 = new FleetStateRepository(DB);
       repo1.init();
       const p1 = new AgentFleetHealthPlugin(registry, repo1);
       p1.install(bus);
       bus.publish("autonomous.outcome.completed", makeOutcomeMsg({
-        systemActor: "pr-remediator",
+        systemActor: "feature-remediation",
         skill: "remediate",
         success: true,
       }));
@@ -570,8 +570,8 @@ describe("AgentFleetHealthPlugin", () => {
       p2.install(bus2);
 
       const snap = p2.getFleetHealth();
-      expect(snap.agents.find((a) => a.agentName === "pr-remediator")).toBeUndefined();
-      expect(snap.systemActors.find((s) => s.systemActor === "pr-remediator")).toBeDefined();
+      expect(snap.agents.find((a) => a.agentName === "feature-remediation")).toBeUndefined();
+      expect(snap.systemActors.find((s) => s.systemActor === "feature-remediation")).toBeDefined();
       p2.uninstall();
       repo2.close();
     });

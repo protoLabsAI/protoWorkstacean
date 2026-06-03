@@ -4,7 +4,7 @@
  * Wraps the GitHub REST + GraphQL APIs behind one action-shaped endpoint.
  * Authenticates as `@protoquinn[bot]` via the GitHub App credentials
  * (`QUINN_APP_ID` + `QUINN_APP_PRIVATE_KEY`) — reuses the same
- * `makeGitHubAuth` helper as pr-remediator. Falls back to `GITHUB_TOKEN`
+ * shared `makeGitHubAuth` helper (`lib/github-auth.ts`). Falls back to `GITHUB_TOKEN`
  * when the App credentials aren't set.
  *
  * The `repo` argument is REQUIRED on every call. There is no default —

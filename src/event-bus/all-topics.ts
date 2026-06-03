@@ -173,3 +173,19 @@ export const REVIEW_TOPICS = {
    */
   QUINN_REVIEW_SUBMITTED: "quinn.review.submitted",
 } as const;
+
+export const FEATURE_TOPICS = {
+  /**
+   * Published when a protoMaker feature transitions to blocked — the canonical
+   * auto-remediation signal. Raised by protoMaker's automode via the workstacean
+   * `/publish` ingress; consumed by FeatureRemediationPlugin which routes by
+   * `kind` to Roxy `unblock_feature` or operator HITL (bounded + escalating).
+   *
+   * Payload shape: see `FeatureBlockedPayload`
+   *   { projectSlug?, projectPath?, featureId, featureTitle?, kind?, reason?,
+   *     prNumber?, branchName?, retryCount?, retryable?, failureCategory?, detail? }.
+   */
+  FEATURE_BLOCKED: "feature.blocked",
+  /** Published when a feature recovers — clears its remediation tracker. */
+  FEATURE_UNBLOCKED: "feature.unblocked",
+} as const;

@@ -4,8 +4,7 @@
  *
  * We don't spin up Bun.serve here — install() has HTTP wiring side effects
  * that complicate hermetic tests, so we reach into the plugin via private
- * `_handleWebhook` and `_wireOutbound` through an `as unknown as` cast. Same
- * pattern as pr-remediator tests.
+ * `_handleWebhook` and `_wireOutbound` through an `as unknown as` cast.
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
