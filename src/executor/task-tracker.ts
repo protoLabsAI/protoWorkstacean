@@ -240,6 +240,10 @@ export class TaskTracker {
         if (state && TERMINAL_STATES.has(state)) {
           const rawArtifacts = (result.data?.artifacts ?? []) as Array<{ extensions?: string[]; parts?: Array<{ kind?: string; text?: string; data?: Record<string, unknown> }> }>;
           this._extractAndPublishDeltas(task.taskId, task.agentName, rawArtifacts);
+          // Record cost-v1/confidence-v1 samples here: execute() returned
+          // non-terminal (it handed off to us) so it skipped its after-hooks.
+          // result.data carries the extension payloads pollTask extracted.
+          await task.executor.recordTerminalExtensions(task.skillName ?? "unknown", task.correlationId, result.data);
           this._publishResponse(task, result.text, result.isError ? result.text : undefined, state, result.data);
           this.tasks.delete(task.correlationId);
           console.log(

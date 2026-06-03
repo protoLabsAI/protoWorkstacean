@@ -287,11 +287,19 @@ export class A2AExecutor implements IExecutor {
 
       // Run extension after-hooks — they read result.data (usage, confidence,
       // worldstate-delta) and emit observability events or record samples.
-      for (const i of interceptors) {
-        try {
-          await i.after?.(extCtx, { text: result.text, data: result.data });
-        } catch (err) {
-          console.debug(`[a2a-executor] extension after-hook error:`, err);
+      // Only on TERMINAL results: when the stream breaks to TaskTracker polling
+      // the result here is non-terminal ("working"/"submitted") with no cost/
+      // confidence yet — recording it would log a premature zero sample. The
+      // real terminal result is recorded by TaskTracker on async completion.
+      const ts = result.data?.taskState;
+      const nonTerminal = ts === "working" || ts === "submitted" || ts === "input-required";
+      if (!nonTerminal) {
+        for (const i of interceptors) {
+          try {
+            await i.after?.(extCtx, { text: result.text, data: result.data });
+          } catch (err) {
+            console.debug(`[a2a-executor] extension after-hook error:`, err);
+          }
         }
       }
 
@@ -302,6 +310,39 @@ export class A2AExecutor implements IExecutor {
         isError: true,
         correlationId: req.correlationId,
       };
+    }
+  }
+
+  /**
+   * Run the extension after-hooks (cost-v1/confidence-v1/worldstate-delta
+   * recording + observability events) for a result that completed
+   * ASYNCHRONOUSLY — i.e. execute() returned non-terminal and TaskTracker
+   * later polled/received the terminal Task. execute()'s own after-hook pass
+   * skips non-terminal returns, so without this the async-completion path
+   * (which most real tasks take) never records its extension samples.
+   * Builds the same ExtensionContext shape as the sync pass.
+   */
+  async recordTerminalExtensions(
+    skill: string,
+    correlationId: string,
+    data: Record<string, unknown> | undefined,
+  ): Promise<void> {
+    if (!data) return;
+    const ctx: ExtensionContext = {
+      agentName: this.config.name,
+      skill,
+      correlationId,
+      metadata: {},
+    };
+    const interceptors = defaultExtensionRegistry.list()
+      .map(d => d.interceptor)
+      .filter((i): i is ExtensionInterceptor => !!i);
+    for (const i of interceptors) {
+      try {
+        await i.after?.(ctx, { text: "", data });
+      } catch (err) {
+        console.debug(`[a2a-executor] extension after-hook error (async):`, err);
+      }
     }
   }
 
