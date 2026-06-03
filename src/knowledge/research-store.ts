@@ -20,7 +20,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import * as sqliteVec from "sqlite-vec";
-import { embed } from "../services/embeddings/ollama-client.ts";
+import { gatewayEmbed as embed } from "../services/embeddings/gateway-embed.ts";
 
 /** What a chunk represents — drives filtering + how the agent reads it back. */
 export type ResearchKind = "paper" | "finding" | "digest" | "model_release";
@@ -46,8 +46,8 @@ export interface ResearchHit {
   score: number;
 }
 
-/** nomic-embed-text is 768-dim; override if pointing OLLAMA_EMBED_MODEL elsewhere. */
-const EMBED_DIM = Number(process.env.RESEARCH_EMBED_DIM ?? 768);
+/** Gateway text-embedding-3-small is 1024-dim as served; override via env if RESEARCH_EMBED_MODEL changes. */
+const EMBED_DIM = Number(process.env.RESEARCH_EMBED_DIM ?? 1024);
 const RRF_K = 60;
 const PREVIEW_CHARS = 280;
 
@@ -102,6 +102,15 @@ export class ResearchStore {
       // keyword-only (still fully functional).
       try {
         sqliteVec.load(this.db);
+        // Rebuild the vec table if its declared dimension changed (e.g. the
+        // embedding model was swapped). Vectors are regenerable, so dropping a
+        // stale-dim table is safe — and we only do it on a real mismatch, so
+        // vectors survive ordinary restarts.
+        const existing = this.db.query<{ sql: string }, []>(`SELECT sql FROM sqlite_master WHERE name='research_vec'`).get();
+        if (existing && !existing.sql.includes(`float[${EMBED_DIM}]`)) {
+          console.warn(`[research-store] research_vec dimension changed → rebuilding as float[${EMBED_DIM}]`);
+          this.db.exec(`DROP TABLE research_vec`);
+        }
         this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS research_vec USING vec0(embedding float[${EMBED_DIM}])`);
         this.vecAvailable = true;
       } catch (err) {
