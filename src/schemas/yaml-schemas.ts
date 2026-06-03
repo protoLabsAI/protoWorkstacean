@@ -42,6 +42,15 @@ export const AgentDefinitionSchema = z.object({
     "maxTurns must be -1 (unlimited) or a positive integer",
   ).default(10),
   skills: z.array(AgentSkillDefinitionSchema).default([]),
+  memory: z
+    .object({
+      enabled: z.boolean(),
+      skills: z.array(z.string()).optional(),
+      historyTurns: z.number().int().positive().optional(),
+      recallTopK: z.number().int().positive().optional(),
+      harvest: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 export type AgentDefinitionInput = z.input<typeof AgentDefinitionSchema>;

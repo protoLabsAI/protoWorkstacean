@@ -16,6 +16,7 @@ import { HttpClient } from "../../services/http-client.ts";
 import type { AgentDefinition } from "../../agent-runtime/types.ts";
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
 import { runStructuredFinalizer, type ForcedToolCaller } from "./structured-finalizer.ts";
+import { AgentMemory, memoryAppliesTo } from "../../knowledge/agent-memory.ts";
 
 const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
 
@@ -101,6 +102,13 @@ export interface DeepAgentConfig {
    * SkillDispatcher across ALL executor types and does not need this hook.
    */
   onToolCall?: (event: { agentName: string; correlationId: string; skill?: string; toolNames: string[] }) => void;
+
+  /**
+   * Shared memory flywheel. When provided AND the agent declares `memory`,
+   * conversational skills replay recent turns + recalled knowledge into each
+   * invocation and persist the turn afterward. One instance backs all agents.
+   */
+  memory?: AgentMemory;
 }
 
 // Each tool() call infers a unique DynamicStructuredTool<ZodObject<{specific fields}>, ...>.
@@ -749,6 +757,7 @@ export class DeepAgentExecutor implements IExecutor {
   private readonly onToolCall: DeepAgentConfig["onToolCall"];
   private readonly gatewayUrl: string | undefined;
   private readonly apiKey: string;
+  private readonly memory: AgentMemory | undefined;
   /**
    * Cache of ChatOpenAI instances by model name — `agentDef.model` always
    * resolves to `this.model`, but per-call overrides (`payload.model`) get
@@ -762,6 +771,7 @@ export class DeepAgentExecutor implements IExecutor {
     this.onToolCall = config.onToolCall;
     this.gatewayUrl = config.gatewayUrl ?? process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL;
     this.apiKey = config.gatewayApiKey ?? process.env.OPENAI_API_KEY ?? "unused";
+    this.memory = config.memory;
 
     this.model = this._buildModel(agentDef.model);
     this.modelCache.set(agentDef.model, this.model);
@@ -814,6 +824,13 @@ export class DeepAgentExecutor implements IExecutor {
       ? this.agentDef.skills.find(s => s.name === req.skill)
       : undefined;
 
+    // Memory flywheel — only when the agent opts in AND this is a conversational
+    // skill. The conversation key is contextId (multi-turn chat) falling back to
+    // correlationId (a one-off, which simply has no prior history).
+    const memoryOn = !!this.memory && memoryAppliesTo(this.agentDef.memory, req.skill);
+    const memCfg = this.agentDef.memory;
+    const memCtxId = req.contextId ?? req.correlationId;
+
     // Skill-level tools override: intersect with agent.tools (a skill can't
     // grant access to tools the agent doesn't declare). When skill.tools is
     // unset, all of agent.tools are available. This is the structural way
@@ -837,7 +854,14 @@ export class DeepAgentExecutor implements IExecutor {
       // Resolve skill-level systemPromptOverride if this skill defines one.
       // Skills like diagnose_pr_stuck have narrow, structured output requirements
       // that replace the agent's general-purpose prompt.
-      const basePrompt = skillDef?.systemPromptOverride ?? this.agentDef.systemPrompt;
+      let basePrompt = skillDef?.systemPromptOverride ?? this.agentDef.systemPrompt;
+
+      // Cross-conversation recall (Phase 2): inject hot memory + BM25 hits for
+      // this turn's prompt into the system message.
+      if (memoryOn) {
+        const recall = this.memory!.recallBlock(prompt, memCfg);
+        if (recall) basePrompt += `\n\n## Recalled context\n${recall}`;
+      }
 
       // Per-call model override via payload.model — see effectiveModelFor
       // + the matching path in ProtoSdkExecutor. Lets a caller escalate to
@@ -858,8 +882,11 @@ export class DeepAgentExecutor implements IExecutor {
         : "";
       console.log(`[deep-agent:${this.agentDef.name}] invoke skill="${req.skill ?? "?"}" tools=${tools.length}/${agentTools.length} maxTurns=${effectiveMaxTurns} promptLen=${prompt.length} langfuse=${LANGFUSE_ENABLED}${usingModel}`);
 
+      // Within-conversation history (Phase 1): replay recent turns so the agent
+      // sees the conversation, not just the latest message.
+      const history = memoryOn ? this.memory!.history(memCtxId, memCfg) : [];
       const result = await agent.invoke(
-        { messages: [{ role: "user", content: prompt }] },
+        { messages: [...history.map(t => ({ role: t.role, content: t.content })), { role: "user", content: prompt }] },
         { recursionLimit: effectiveMaxTurns * 2 + 1, callbacks },
       );
 
@@ -904,6 +931,17 @@ export class DeepAgentExecutor implements IExecutor {
       }
 
       const finalText = text || "No response generated.";
+
+      // Persist the turn + extract a finding (Phases 1+2). Best-effort; the
+      // store never throws into the caller.
+      if (memoryOn) {
+        this.memory!.record(memCtxId, {
+          agent: this.agentDef.name,
+          skill: req.skill,
+          userText: prompt,
+          aiText: finalText,
+        });
+      }
 
       // Structured finalizer: when the skill declares an outputSchema, distill
       // the analysis into a schema-shaped object via a forced submit_<skill>

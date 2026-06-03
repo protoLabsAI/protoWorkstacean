@@ -25,6 +25,9 @@ import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { IExecutor } from "../executor/types.ts";
 import { DeepAgentExecutor } from "../executor/executors/deep-agent-executor.ts";
 import { ProtoSdkExecutor } from "../executor/executors/proto-sdk-executor.ts";
+import { AgentMemory } from "../knowledge/agent-memory.ts";
+import { ConversationStore } from "../knowledge/conversation-store.ts";
+import { KnowledgeStore } from "../knowledge/knowledge-store.ts";
 import { loadAgentEntries, type AgentEntry } from "./agent-definition-loader.ts";
 import type { AgentDefinition } from "./types.ts";
 import { WorkspaceWatcher } from "../../lib/workspace-watcher.ts";
@@ -62,15 +65,27 @@ export class AgentRuntimePlugin implements Plugin {
   private watcher?: WorkspaceWatcher;
   /** Executor factory — injectable for tests; defaults to the real DeepAgent / ProtoSDK builder. */
   private readonly buildExecutor: (def: AgentDefinition) => IExecutor;
+  /** Shared memory flywheel for memory-enabled agents. Lazily created on first real build (or injected for tests). */
+  private memory?: AgentMemory;
 
   constructor(
     config: AgentRuntimeConfig,
     executorRegistry: ExecutorRegistry,
-    opts: { buildExecutor?: (def: AgentDefinition) => IExecutor } = {},
+    opts: { buildExecutor?: (def: AgentDefinition) => IExecutor; memory?: AgentMemory } = {},
   ) {
     this.config = config;
     this.executorRegistry = executorRegistry;
     this.buildExecutor = opts.buildExecutor ?? ((def) => this._buildExecutor(def));
+    this.memory = opts.memory;
+  }
+
+  /** The shared memory instance (lazily created), for the harvester to share. */
+  private _memory(): AgentMemory {
+    if (!this.memory) {
+      this.memory = new AgentMemory(new ConversationStore(), new KnowledgeStore());
+      this.memory.init();
+    }
+    return this.memory;
   }
 
   install(bus: EventBus): void {
@@ -235,6 +250,8 @@ export class AgentRuntimePlugin implements Plugin {
       apiBaseUrl: this.config.apiBaseUrl ?? "http://localhost:3000",
       apiKey: this.config.apiKey ?? process.env.WORKSTACEAN_API_KEY,
       onToolCall: this._publishToolCall,
+      // Share one memory instance across agents; only memory-enabled agents use it.
+      memory: def.memory?.enabled ? this._memory() : undefined,
     });
   }
 }

@@ -6,6 +6,10 @@
  * selection, delegation rules, and bus subscription patterns.
  */
 
+import type { AgentMemoryConfig } from "../knowledge/agent-memory.ts";
+
+export type { AgentMemoryConfig };
+
 export type AgentRole =
   | "orchestrator"   // Ava — delegates to subagents, drives plans
   | "qa"             // Quinn — code review, bug triage
@@ -157,6 +161,13 @@ export interface AgentDefinition {
 
   /** Skills this agent can handle (maps skill.name → AgentSkillDefinition). */
   skills: AgentSkillDefinition[];
+
+  /**
+   * Opt-in memory flywheel (within-conversation history + cross-conversation
+   * recall + harvest). Off unless declared. Only conversational skills get it
+   * (default ["chat"]) so narrow skills like pr_review stay stateless.
+   */
+  memory?: AgentMemoryConfig;
 
   /**
    * Optional Discord bot token env var. When set, DiscordPlugin's agent

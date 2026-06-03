@@ -139,6 +139,21 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
       );
     })();
 
+  const rawMemory = (raw as Record<string, unknown>).memory;
+  const memory =
+    rawMemory && typeof rawMemory === "object" && (rawMemory as { enabled?: unknown }).enabled === true
+      ? (() => {
+          const m = rawMemory as Record<string, unknown>;
+          return {
+            enabled: true as const,
+            ...(Array.isArray(m.skills) ? { skills: m.skills.filter((s): s is string => typeof s === "string") } : {}),
+            ...(typeof m.historyTurns === "number" && m.historyTurns > 0 ? { historyTurns: m.historyTurns } : {}),
+            ...(typeof m.recallTopK === "number" && m.recallTopK > 0 ? { recallTopK: m.recallTopK } : {}),
+            ...(typeof m.harvest === "boolean" ? { harvest: m.harvest } : {}),
+          };
+        })()
+      : undefined;
+
   return {
     name: raw.name,
     role: raw.role,
@@ -151,6 +166,7 @@ export function parseAgentYaml(raw: RawAgentYaml, fileName: string): AgentDefini
     ...(canDelegate !== undefined ? { canDelegate } : {}),
     maxTurns,
     skills,
+    ...(memory ? { memory } : {}),
     ...(discordBotTokenEnvKey ? { discordBotTokenEnvKey } : {}),
   };
 }
