@@ -216,6 +216,16 @@ tools:
 
 maxTurns: 25
 
+# Memory flywheel — Ava remembers within a conversation, recalls relevant facts
+# from past ones, and harvests aged-out conversations into searchable memory.
+# Scoped to the conversational `chat` skill; narrow skills stay stateless.
+memory:
+  enabled: true
+  skills: [chat]
+  historyTurns: 12
+  recallTopK: 5
+  harvest: true
+
 discordBotTokenEnvKey: DISCORD_BOT_TOKEN_AVA
 
 skills:

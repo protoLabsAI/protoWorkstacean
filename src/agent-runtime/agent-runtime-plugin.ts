@@ -25,6 +25,12 @@ import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { IExecutor } from "../executor/types.ts";
 import { DeepAgentExecutor } from "../executor/executors/deep-agent-executor.ts";
 import { ProtoSdkExecutor } from "../executor/executors/proto-sdk-executor.ts";
+import { AgentMemory } from "../knowledge/agent-memory.ts";
+import { ConversationStore } from "../knowledge/conversation-store.ts";
+import { KnowledgeStore } from "../knowledge/knowledge-store.ts";
+import { ConversationHarvester } from "../knowledge/conversation-harvester.ts";
+import { ChatOpenAI } from "@langchain/openai";
+import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { loadAgentEntries, type AgentEntry } from "./agent-definition-loader.ts";
 import type { AgentDefinition } from "./types.ts";
 import { WorkspaceWatcher } from "../../lib/workspace-watcher.ts";
@@ -62,15 +68,34 @@ export class AgentRuntimePlugin implements Plugin {
   private watcher?: WorkspaceWatcher;
   /** Executor factory — injectable for tests; defaults to the real DeepAgent / ProtoSDK builder. */
   private readonly buildExecutor: (def: AgentDefinition) => IExecutor;
+  /** Shared memory flywheel for memory-enabled agents. Lazily created on first real build (or injected for tests). */
+  private memory?: AgentMemory;
+  /** Background harvester retiring aged-out conversations into the KB (Phase 3). */
+  private harvester?: ConversationHarvester;
 
   constructor(
     config: AgentRuntimeConfig,
     executorRegistry: ExecutorRegistry,
-    opts: { buildExecutor?: (def: AgentDefinition) => IExecutor } = {},
+    opts: { buildExecutor?: (def: AgentDefinition) => IExecutor; memory?: AgentMemory } = {},
   ) {
     this.config = config;
     this.executorRegistry = executorRegistry;
     this.buildExecutor = opts.buildExecutor ?? ((def) => this._buildExecutor(def));
+    this.memory = opts.memory;
+    // Tests inject buildExecutor; the harvester (real DB + LLM) only runs under
+    // the real runtime so unit tests don't open a DB or start a sweep timer.
+    this.realRuntime = !opts.buildExecutor;
+  }
+
+  private readonly realRuntime: boolean;
+
+  /** The shared memory instance (lazily created), for the harvester to share. */
+  private _memory(): AgentMemory {
+    if (!this.memory) {
+      this.memory = new AgentMemory(new ConversationStore(), new KnowledgeStore());
+      this.memory.init();
+    }
+    return this.memory;
   }
 
   install(bus: EventBus): void {
@@ -97,6 +122,43 @@ export class AgentRuntimePlugin implements Plugin {
       onChange: () => this._applyAgentChanges(),
     });
     this.watcher.start();
+
+    // Phase 3: harvest aged-out conversations into searchable memory. Start one
+    // background sweeper when any agent opts into harvest (default on for
+    // memory-enabled agents). Skipped under an injected test executor.
+    const wantsHarvest = entries.some(e => e.def.memory?.enabled && e.def.memory.harvest !== false);
+    if (wantsHarvest && this.realRuntime && !this.harvester) {
+      this._startHarvester();
+    }
+  }
+
+  private _startHarvester(): void {
+    const memory = this._memory();
+    const gatewayUrl = this.config.gatewayUrl ?? process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL;
+    const apiKey = this.config.gatewayApiKey ?? process.env.OPENAI_API_KEY ?? "unused";
+    const model = process.env.MEMORY_SUMMARY_MODEL ?? "protolabs/reasoning";
+    const llm = new ChatOpenAI({
+      model,
+      temperature: 0,
+      configuration: gatewayUrl ? { baseURL: gatewayUrl } : undefined,
+      apiKey,
+    });
+    const SUMMARY_PROMPT =
+      "Summarize this conversation for long-term, searchable memory. Capture the " +
+      "user's goals, the concrete facts/preferences/decisions, and outcomes — " +
+      "anything worth recalling in a future conversation. Write a concise factual " +
+      "summary (a few sentences). Omit pleasantries and meta-commentary.";
+    const maxAgeDays = Number(process.env.MEMORY_HARVEST_MAX_AGE_DAYS ?? 7);
+    const sweepHours = Number(process.env.MEMORY_HARVEST_SWEEP_HOURS ?? 6);
+    this.harvester = new ConversationHarvester(memory, {
+      summarize: async (transcript) => {
+        const resp = await llm.invoke([new SystemMessage(SUMMARY_PROMPT), new HumanMessage(transcript)]);
+        return typeof resp.content === "string" ? resp.content : String(resp.content);
+      },
+      maxAgeMs: maxAgeDays * 86_400_000,
+      sweepIntervalMs: sweepHours * 3_600_000,
+    });
+    this.harvester.start();
   }
 
   /** Build an executor for `def`, register its skills, and record it as running. */
@@ -179,6 +241,10 @@ export class AgentRuntimePlugin implements Plugin {
   uninstall(): void {
     this.watcher?.stop();
     this.watcher = undefined;
+    this.harvester?.stop();
+    this.harvester = undefined;
+    this.memory?.close();
+    this.memory = undefined;
   }
 
   /**
@@ -235,6 +301,8 @@ export class AgentRuntimePlugin implements Plugin {
       apiBaseUrl: this.config.apiBaseUrl ?? "http://localhost:3000",
       apiKey: this.config.apiKey ?? process.env.WORKSTACEAN_API_KEY,
       onToolCall: this._publishToolCall,
+      // Share one memory instance across agents; only memory-enabled agents use it.
+      memory: def.memory?.enabled ? this._memory() : undefined,
     });
   }
 }
