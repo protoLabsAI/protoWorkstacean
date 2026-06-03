@@ -11,6 +11,7 @@ import { makeId, type DiscordContext } from "./core.ts";
 import { isRateLimited, isSpam } from "./rate-limit.ts";
 import { pendingReplies } from "./outbound.ts";
 import { buildMessageContext } from "./context.ts";
+import { alreadyHandled } from "./dedup.ts";
 
 // ── Admin check ───────────────────────────────────────────────────────────────
 
@@ -166,6 +167,9 @@ export function registerInboundHandlers(ctx: DiscordContext): void {
   // ── DM and guild message handling ────────────────────────────────────────
   ctx.client.on(Events.MessageCreate, async message => {
     if (message.author.bot) return;
+    // Skip gateway RESUME replays of an already-handled message (else Ava
+    // responds twice after a reconnect).
+    if (alreadyHandled(`msg:${message.id}`)) return;
 
     if (!message.guild) {
       await handleDM(ctx, message, undefined);
@@ -276,6 +280,7 @@ export function registerInboundHandlers(ctx: DiscordContext): void {
   ctx.client.on(Events.MessageReactionAdd, async (reaction, user) => {
     if (user.bot) return;
     if (reaction.emoji.name !== "📋") return;
+    if (alreadyHandled(`react:${reaction.message.id}:${user.id}:📋`)) return;
     if (!isAdmin(ctx, user.id)) {
       console.log(`[discord] reaction from ${user.id} ignored — not in admins list`);
       return;

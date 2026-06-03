@@ -21,6 +21,7 @@ import { initAgentPool, reloadAgentPool } from "./discord/agent-pool.ts";
 import { registerInboundHandlers, handleDM, setupDmAccumulator } from "./discord/inbound.ts";
 import { registerSlashCommandHandlers, registerSlashCommands } from "./discord/slash-commands.ts";
 import { registerOutboundHandlers } from "./discord/outbound.ts";
+import { registerLifecycleHandlers } from "./discord/lifecycle.ts";
 
 // Re-export for API routes (discord operations agent)
 export { pendingReplies, canSendProgress } from "./discord/outbound.ts";
@@ -112,6 +113,7 @@ export class DiscordPlugin implements Plugin {
     setupDmAccumulator(ctx);
 
     // Register event handlers
+    registerLifecycleHandlers(this.client);
     registerInboundHandlers(ctx);
     registerSlashCommandHandlers(ctx);
     registerOutboundHandlers(ctx);
