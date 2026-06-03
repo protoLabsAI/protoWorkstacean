@@ -124,12 +124,21 @@ export class AgentRuntimePlugin implements Plugin {
     this.watcher.start();
 
     // Phase 3: harvest aged-out conversations into searchable memory. Start one
-    // background sweeper when any agent opts into harvest (default on for
-    // memory-enabled agents). Skipped under an injected test executor.
+    // background sweeper when any agent opts into harvest.
+    this._ensureHarvester(entries);
+  }
+
+  /**
+   * Start the harvester if any current agent opts into harvest and it isn't
+   * already running. Called from install() AND the hot-reload path, so an agent
+   * that gains a `memory` block at runtime (e.g. ava.yaml edited live) starts
+   * harvesting without waiting for a restart. Skipped under an injected test
+   * executor. Idempotent — never starts a second sweeper.
+   */
+  private _ensureHarvester(entries: AgentEntry[]): void {
+    if (this.harvester || !this.realRuntime) return;
     const wantsHarvest = entries.some(e => e.def.memory?.enabled && e.def.memory.harvest !== false);
-    if (wantsHarvest && this.realRuntime && !this.harvester) {
-      this._startHarvester();
-    }
+    if (wantsHarvest) this._startHarvester();
   }
 
   private _startHarvester(): void {
@@ -220,6 +229,10 @@ export class AgentRuntimePlugin implements Plugin {
       this._disposeExecutor(def.name, old.executor);
       console.log(`[agent-runtime] ~ "${def.name}" reloaded (${def.skills.length} skill(s)) — no restart`);
     }
+
+    // An agent may have just gained a `memory` block via the live edit — start
+    // the harvester now instead of waiting for the next restart.
+    this._ensureHarvester(entries);
   }
 
   private _removeAgent(name: string, reg: RegisteredAgent): void {
