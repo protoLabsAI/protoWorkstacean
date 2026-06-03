@@ -109,6 +109,16 @@ describe("BusAgentExecutor (Phase 7)", () => {
     expect(completedEvt.data.status?.state).toBe(TaskState.TASK_STATE_COMPLETED);
     const terminalText = (completedEvt.data.status?.message?.parts ?? []).map(partText).join("");
     expect(terminalText).toBe("42");
+
+    // #773: the answer is ALSO emitted as a terminal Artifact (the A2A-canonical
+    // result location) so clients reading task.artifacts get it, not only
+    // status.message.
+    const artifactEvt = collected.find(e => e.kind === "artifactUpdate");
+    expect(artifactEvt).toBeDefined();
+    if (artifactEvt?.kind !== "artifactUpdate") throw new Error("expected artifactUpdate");
+    expect(artifactEvt.data.lastChunk).toBe(true);
+    const artifactText = (artifactEvt.data.artifact?.parts ?? []).map(partText).join("");
+    expect(artifactText).toBe("42");
   });
 
   test("error response maps to failed status-update", async () => {

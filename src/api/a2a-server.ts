@@ -37,7 +37,7 @@ import {
 } from "@a2a-js/sdk/server";
 import { join } from "node:path";
 import { Role, TaskState, type Message } from "@a2a-js/sdk";
-import { textPart, partText } from "@protolabs/a2a";
+import { textPart, partText, textArtifact } from "@protolabs/a2a";
 import type { Route, ApiContext } from "./types.ts";
 import type { BusMessage } from "../../lib/types.ts";
 import { buildAgentCard } from "./agent-card.ts";
@@ -273,6 +273,22 @@ class BusAgentExecutor implements AgentExecutor {
         // together close the stream.
         const finalState = errorText ? TaskState.TASK_STATE_FAILED : TaskState.TASK_STATE_COMPLETED;
         const finalText = errorText || contentText || "";
+
+        // Emit the answer as a terminal Artifact — the A2A-canonical result
+        // location clients read from `task.artifacts`. Without this, clients
+        // that don't fall back to `status.message` get an empty answer. Matches
+        // protolabs-a2a (Python). Only on success with real text; failures carry
+        // the error on status.message below. (#773)
+        if (finalState === TaskState.TASK_STATE_COMPLETED && finalText) {
+          eventBus.publish(AgentEvent.artifactUpdate({
+            taskId,
+            contextId,
+            artifact: textArtifact(finalText),
+            append: false,
+            lastChunk: true,
+            metadata: undefined,
+          }));
+        }
 
         eventBus.publish(AgentEvent.statusUpdate({
           taskId,

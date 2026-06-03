@@ -8,7 +8,7 @@
  * discrimination in one place so callers never hand-assemble a Part.
  */
 
-import type { Part } from "@a2a-js/sdk";
+import type { Part, Artifact } from "@a2a-js/sdk";
 
 /** Build a text Part: `{ content: { $case: "text", value } }`. */
 export function textPart(text: string): Part {
@@ -17,6 +17,26 @@ export function textPart(text: string): Part {
     metadata: undefined,
     filename: "",
     mediaType: "text/plain",
+  };
+}
+
+/**
+ * Build a terminal text Artifact carrying an agent's final answer.
+ *
+ * A2A clients read a task's result from `task.artifacts[].parts[].text` — the
+ * canonical "agent output" location. Emitting the answer as an artifact (in
+ * addition to the completion `status.message`) is the fleet-canonical placement
+ * so every A2A consumer gets the answer the same way, matching the Python
+ * `protolabs-a2a` executor. (#773)
+ */
+export function textArtifact(text: string, opts: { artifactId?: string; name?: string } = {}): Artifact {
+  return {
+    artifactId: opts.artifactId ?? crypto.randomUUID(),
+    name: opts.name ?? "answer",
+    description: "",
+    parts: [textPart(text)],
+    metadata: undefined,
+    extensions: [],
   };
 }
 
