@@ -101,7 +101,7 @@ export interface DeepAgentConfig {
    * Skill-level lifecycle (start / complete / error) is emitted by the
    * SkillDispatcher across ALL executor types and does not need this hook.
    */
-  onToolCall?: (event: { agentName: string; correlationId: string; skill?: string; toolNames: string[] }) => void;
+  onToolCall?: (event: { agentName: string; correlationId: string; skill?: string; toolNames: string[]; toolCalls?: Array<{ name: string; args?: unknown }> }) => void;
 
   /**
    * Shared memory flywheel. When provided AND the agent declares `memory`,
@@ -1016,7 +1016,9 @@ export class DeepAgentExecutor implements IExecutor {
         if (type === "ai" || type === "AIMessage") {
           const tc = (msg as unknown as Record<string, unknown>).tool_calls;
           if (Array.isArray(tc) && tc.length > 0) {
-            const toolNames = tc.map((t: { name?: string }) => t.name).filter((n): n is string => !!n);
+            const calls = tc.map((t: { name?: string; args?: unknown }) => ({ name: t.name ?? "", args: t.args }))
+              .filter((c) => c.name);
+            const toolNames = calls.map((c) => c.name);
             console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${toolNames.join(", ")}`);
             if (this.onToolCall && toolNames.length > 0) {
               try {
@@ -1025,6 +1027,7 @@ export class DeepAgentExecutor implements IExecutor {
                   correlationId: req.correlationId,
                   skill: req.skill,
                   toolNames,
+                  toolCalls: calls,
                 });
               } catch (cbErr) {
                 // Telemetry must never break a running skill.

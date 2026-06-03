@@ -46,6 +46,41 @@ export interface AgentRuntimeConfig {
   apiKey?: string;
 }
 
+/**
+ * Turn a turn's tool calls into a short human progress line for A2A streaming
+ * (#777) — e.g. chat_with_agent(agent="quinn") → "routing to quinn". Returns ""
+ * when there's nothing worth narrating (tools that surface their own text).
+ */
+export function humanizeToolProgress(calls: Array<{ name: string; args?: unknown }>): string {
+  const phrases: string[] = [];
+  for (const c of calls) {
+    const args = (c.args ?? {}) as Record<string, unknown>;
+    const name = c.name;
+    if (name === "chat_with_agent" || name === "delegate_task") {
+      const target = typeof args.agent === "string" ? args.agent
+        : typeof args.target === "string" ? args.target : undefined;
+      phrases.push(target ? `routing to ${target}` : "delegating to an agent");
+    } else if (name === "searxng_search" || name === "web_search") {
+      phrases.push("searching the web");
+    } else if (name === "huggingface_search") {
+      phrases.push("searching HuggingFace");
+    } else if (name === "github_trending") {
+      phrases.push("scanning GitHub");
+    } else if (name.startsWith("research_")) {
+      phrases.push("searching the research knowledge base");
+    } else if (name.startsWith("github_") || name === "create_github_issue") {
+      phrases.push("working with GitHub");
+    } else if (name.startsWith("linear_")) {
+      phrases.push("working with Linear");
+    } else if (name === "send_update" || name === "msg_operator" || name === "ask_human") {
+      // These surface their own user-facing text — don't double-narrate.
+    } else {
+      phrases.push(`running ${name}`);
+    }
+  }
+  return [...new Set(phrases)].join("; ");
+}
+
 /** A running agent: its executor, the skills it's registered for, content hash, and source file. */
 interface RegisteredAgent {
   executor: IExecutor;
@@ -272,6 +307,7 @@ export class AgentRuntimePlugin implements Plugin {
     correlationId: string;
     skill?: string;
     toolNames: string[];
+    toolCalls?: Array<{ name: string; args?: unknown }>;
   }): void => {
     if (!this.bus) return;
     const topic = "agent.runtime.activity.tool.call";
@@ -292,6 +328,25 @@ export class AgentRuntimePlugin implements Plugin {
       });
     } catch (err) {
       console.warn(`[agent-runtime] tool.call publish failed for ${event.agentName}:`, err);
+    }
+
+    // Also emit real streaming progress: a2a-server translates
+    // agent.skill.progress.{correlationId} {text} into a `working` status-update
+    // with status.message, so A2A clients narrate actual steps instead of bare
+    // heartbeats. (#777) Best-effort — never breaks a running skill.
+    const text = humanizeToolProgress(event.toolCalls ?? event.toolNames.map(name => ({ name })));
+    if (!text) return;
+    const progressTopic = `agent.skill.progress.${event.correlationId}`;
+    try {
+      this.bus.publish(progressTopic, {
+        id: crypto.randomUUID(),
+        correlationId: event.correlationId,
+        topic: progressTopic,
+        timestamp: Date.now(),
+        payload: { text, step: "tool_call", meta: { tools: event.toolNames } },
+      });
+    } catch (err) {
+      console.warn(`[agent-runtime] progress publish failed for ${event.agentName}:`, err);
     }
   };
 
