@@ -12,6 +12,7 @@
  */
 
 import { ClientFactory, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
+import type { AgentCard } from "@a2a-js/sdk";
 import {
   Role,
   TaskState,
@@ -164,6 +165,24 @@ function buildFetch(
  */
 function isTask(result: Message | Task): result is Task {
   return "id" in result && "status" in result;
+}
+
+/**
+ * Pin an agent card's transport URL(s) to `url`. Agents — especially
+ * containerized / NAT'd ones — sometimes self-advertise an unreachable
+ * interface URL in their card (e.g. `http://127.0.0.1:7870/a2a`). The
+ * operator-configured `agents.d` URL is authoritative for reachability, so we
+ * use the card for discovery (skills/extensions/capabilities) but connect to
+ * the configured URL. Returns a shallow copy; does not mutate the input. (#760)
+ */
+export function pinCardTransportUrl(card: AgentCard, url: string): AgentCard {
+  const pinned: AgentCard = { ...card };
+  if (Array.isArray(card.supportedInterfaces)) {
+    pinned.supportedInterfaces = card.supportedInterfaces.map(iface => ({ ...iface, url }));
+  }
+  // Legacy 0.3 top-level `url`, if a server still emits it.
+  if ((card as { url?: string }).url) (pinned as { url?: string }).url = url;
+  return pinned;
 }
 
 export class A2AExecutor implements IExecutor {
@@ -691,17 +710,35 @@ export class A2AExecutor implements IExecutor {
       transports: [new JsonRpcTransportFactory({ fetchImpl: customFetch })],
     });
 
-    try {
-      return await factory.createFromUrl(baseUrl);
-    } catch (err) {
-      // Fallback to legacy path — some servers still serve /.well-known/agent.json
-      // instead of the newer /.well-known/agent-card.json
+    // Resolve the card for discovery, then PIN the transport URL to the
+    // configured `url`. createFromUrl would connect to the card's self-advertised
+    // interface URL, which containerized/NAT'd agents often set to loopback
+    // (e.g. http://127.0.0.1:7870/a2a) — unreachable from here, and a single
+    // point of failure for the whole edge (#760). The agents.d URL is
+    // authoritative for reachability; the card stays the source for skills/extensions.
+    const card = await this._fetchAgentCard(baseUrl, customFetch);
+    return await factory.createFromAgentCard(pinCardTransportUrl(card, this.config.url));
+  }
+
+  /** Fetch the agent card from `baseUrl`, trying the 1.0 path then the legacy 0.3 path. */
+  private async _fetchAgentCard(
+    baseUrl: string,
+    fetchImpl: (url: string, init?: RequestInit) => Promise<Response>,
+  ): Promise<AgentCard> {
+    let lastErr: unknown;
+    for (const path of ["/.well-known/agent-card.json", "/.well-known/agent.json"]) {
       try {
-        return await factory.createFromUrl(baseUrl, "/.well-known/agent.json");
-      } catch {
-        throw err;
+        const res = await fetchImpl(`${baseUrl}${path}`);
+        if (res.ok) return (await res.json()) as AgentCard;
+        lastErr = new Error(`HTTP ${res.status} from ${path}`);
+      } catch (err) {
+        lastErr = err;
       }
     }
+    throw new Error(
+      `[a2a] could not resolve agent card for ${baseUrl} (tried agent-card.json + agent.json): ` +
+      (lastErr instanceof Error ? lastErr.message : String(lastErr)),
+    );
   }
 
   /**
