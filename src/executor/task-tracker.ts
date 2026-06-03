@@ -15,11 +15,29 @@
 import type { EventBus } from "../../lib/types.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
 import type { AgentSkillResponsePayload } from "../event-bus/payloads.ts";
+import { Part } from "@a2a-js/sdk";
+import { partText, parseWorldStateDelta } from "@protolabs/a2a";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled", "rejected"]);
 
-/** Extension URI for worldstate-delta-v1 artifacts. */
-const WORLDSTATE_DELTA_URI = "https://proto-labs.ai/a2a/ext/worldstate-delta-v1";
+/**
+ * Normalize parts that may arrive raw (proto3-JSON wire, from a push-notification
+ * callback body) OR already SDK-deserialized (`content.$case`, from the poll
+ * path) into a uniform SDK Part[] so the `@protolabs/a2a` helpers work on both.
+ * Defensive: a malformed part is dropped, never thrown. (#765)
+ */
+function normalizeParts(raw: unknown): Part[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Part[] = [];
+  for (const p of raw) {
+    try {
+      out.push((p as { content?: unknown })?.content ? (p as Part) : Part.fromJSON(p));
+    } catch { /* skip malformed */ }
+  }
+  return out;
+}
+
+const textOf = (parts: Part[]): string => parts.map(partText).filter((t): t is string => !!t).join("");
 
 export interface TrackedTask {
   correlationId: string;
@@ -139,15 +157,13 @@ export class TaskTracker {
     const task = this.tasks.get(correlationId);
     if (!task) return;
 
-    const status = (body.status ?? {}) as { state?: string; message?: { parts?: Array<{ kind?: string; text?: string }> } };
+    const status = (body.status ?? {}) as { state?: string; message?: { parts?: unknown[] } };
     const state = typeof status.state === "string" ? status.state : undefined;
 
     task.lastPolledAt = Date.now();
 
     if (state === "input-required") {
-      const statusText = status.message?.parts
-        ? status.message.parts.filter(p => p.kind === "text").map(p => p.text ?? "").join("")
-        : "";
+      const statusText = textOf(normalizeParts(status.message?.parts));
       console.warn(
         `[task-tracker] ${task.agentName} task ${task.taskId.slice(0, 8)}… is input-required ` +
         `but no approval gate is wired — terminating with failure. Question: ${statusText || "(none)"}`,
@@ -162,16 +178,13 @@ export class TaskTracker {
       return;
     }
 
-    // Extract text from artifacts (primary) or status.message (fallback)
-    const artifacts = (body.artifacts ?? []) as Array<{ extensions?: string[]; parts?: Array<{ kind?: string; text?: string; data?: Record<string, unknown> }> }>;
-    const artifactText = artifacts
-      .flatMap(a => a.parts ?? [])
-      .filter((p): p is { kind: "text"; text: string } => p.kind === "text" && typeof p.text === "string")
-      .map(p => p.text)
-      .join("\n");
-    const statusText = status.message?.parts
-      ? status.message.parts.filter(p => p.kind === "text").map(p => p.text ?? "").join("")
-      : "";
+    // Extract text from artifacts (primary) or status.message (fallback).
+    // The callback body is RAW wire proto3-JSON, so normalize parts to SDK
+    // shape (content.$case) before reading them. (#765)
+    const rawArtifacts = (body.artifacts ?? []) as Array<{ parts?: unknown }>;
+    const artifacts = rawArtifacts.map(a => ({ parts: normalizeParts(a.parts) }));
+    const artifactText = artifacts.flatMap(a => a.parts).map(partText).filter((t): t is string => !!t).join("\n");
+    const statusText = textOf(normalizeParts(status.message?.parts));
     const content = artifactText || statusText;
     const isError = state === "failed" || state === "rejected";
 
@@ -238,8 +251,11 @@ export class TaskTracker {
         }
 
         if (state && TERMINAL_STATES.has(state)) {
-          const rawArtifacts = (result.data?.artifacts ?? []) as Array<{ extensions?: string[]; parts?: Array<{ kind?: string; text?: string; data?: Record<string, unknown> }> }>;
-          this._extractAndPublishDeltas(task.taskId, task.agentName, rawArtifacts);
+          // pollTask returns SDK-deserialized (content.$case) artifacts; normalize
+          // is a no-op for those but keeps _extractAndPublishDeltas shape-uniform.
+          const polledArtifacts = (result.data?.artifacts ?? []) as Array<{ parts?: unknown }>;
+          const artifacts = polledArtifacts.map(a => ({ parts: normalizeParts(a.parts) }));
+          this._extractAndPublishDeltas(task.taskId, task.agentName, artifacts);
           // Record cost-v1/confidence-v1 samples here: execute() returned
           // non-terminal (it handed off to us) so it skipped its after-hooks.
           // result.data carries the extension payloads pollTask extracted.
@@ -260,26 +276,24 @@ export class TaskTracker {
   }
 
   /**
-   * Scan terminal task artifacts for worldstate-delta-v1 data parts and publish
-   * a `world.state.delta` event for each one. Idempotent: a given taskId is
-   * processed at most once even if both the callback and sweep paths fire.
+   * Scan terminal task artifacts for a worldstate-delta-v1 DataPart and publish
+   * a `world.state.delta` event per delta entry. Parts are SDK-shaped
+   * (content.$case) — callers normalize raw-wire bodies first. Idempotent: a
+   * given taskId is processed at most once even if both the callback and sweep
+   * paths fire. (#765 — was reading the legacy 0.3 `kind`/`data` shape.)
    */
   private _extractAndPublishDeltas(
     taskId: string,
     agentName: string,
-    artifacts: Array<{
-      extensions?: string[];
-      parts?: Array<{ kind?: string; text?: string; data?: Record<string, unknown> }>;
-    }>,
+    artifacts: Array<{ parts?: Part[] }>,
   ): void {
     if (this.publishedDeltaTaskIds.has(taskId)) return;
     this.publishedDeltaTaskIds.add(taskId);
 
     for (const artifact of artifacts) {
-      if (!artifact.extensions?.includes(WORLDSTATE_DELTA_URI)) continue;
-      for (const part of artifact.parts ?? []) {
-        if (part.kind !== "data" || !part.data) continue;
-        const { domain, path, op, value } = part.data;
+      const delta = parseWorldStateDelta(artifact.parts ?? []);
+      for (const entry of delta?.deltas ?? []) {
+        const { domain, path, op, value } = entry;
         if (typeof domain !== "string" || typeof path !== "string" || typeof op !== "string") continue;
 
         const topic = "world.state.delta";
@@ -288,14 +302,7 @@ export class TaskTracker {
           correlationId: taskId,
           topic,
           timestamp: Date.now(),
-          payload: {
-            domain,
-            path,
-            op,
-            value,
-            sourceTaskId: taskId,
-            sourceAgent: agentName,
-          },
+          payload: { domain, path, op, value, sourceTaskId: taskId, sourceAgent: agentName },
         });
         console.log(
           `[task-tracker] world.state.delta: ${domain}.${path} op=${op} from ${agentName} (task ${taskId.slice(0, 8)}…)`,
