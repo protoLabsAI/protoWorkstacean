@@ -185,6 +185,7 @@ export const CeremonySchema = z.object({
   skill: z.string().min(1, "Ceremony skill must not be empty"),
   targets: z.array(z.string()).min(1, "Ceremony targets must be a non-empty array"),
   notifyChannel: z.string().optional(),
+  notifyWebhookEnv: z.string().optional(),
   enabled: z.boolean().default(true),
 });
 

@@ -153,6 +153,7 @@ export class CeremonyYamlLoader {
       skill: c.skill,
       targets: c.targets as string[],
       notifyChannel: typeof c.notifyChannel === "string" ? c.notifyChannel : undefined,
+      notifyWebhookEnv: typeof c.notifyWebhookEnv === "string" ? c.notifyWebhookEnv : undefined,
       enabled: c.enabled !== false,
       timeoutMs: typeof c.timeoutMs === "number" && c.timeoutMs > 0 ? c.timeoutMs : undefined,
     };

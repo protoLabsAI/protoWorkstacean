@@ -92,4 +92,20 @@ describe("Discord ceremony notifications", () => {
 
     delete process.env.DISCORD_WEBHOOK_GENERAL;
   });
+
+  test("Discord notify: explicit webhookEnv overrides the channel-derived env", async () => {
+    process.env.DISCORD_WEBHOOK_RESEARCH = "http://localhost:0/derived";
+    process.env.DISCORD_RESEARCH_WEBHOOK = "http://localhost:0/explicit-override";
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 204 }));
+
+    const notifier = new CeremonyNotifier(undefined);
+    const ok = await notifier.notify(makeOutcome(), "Research Digest", "research", "DISCORD_RESEARCH_WEBHOOK");
+
+    expect(ok).toBe(true);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("http://localhost:0/explicit-override");
+
+    fetchSpy.mockRestore();
+    delete process.env.DISCORD_WEBHOOK_RESEARCH;
+    delete process.env.DISCORD_RESEARCH_WEBHOOK;
+  });
 });
