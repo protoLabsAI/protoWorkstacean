@@ -365,8 +365,18 @@ export class A2AExecutor implements IExecutor {
       const client = await this._buildClient(correlationId, parentId);
       const task = await client.getTask({ tenant: "", id: taskId });
       const state = task.status?.state ?? TaskState.TASK_STATE_UNSPECIFIED;
-      const artifactText = this._textFromParts((task.artifacts ?? []).flatMap(a => a.parts));
+      const allParts = (task.artifacts ?? []).flatMap(a => a.parts);
+      const artifactText = this._textFromParts(allParts);
       const statusText = task.status?.message ? this._textFromParts(task.status.message.parts) : "";
+      // Extract extension DataParts here too — most real tasks complete via this
+      // poll path (the stream loop breaks to tasks/get on the first non-terminal
+      // task event), so without this the cost-v1/confidence-v1/worldstate-delta
+      // parts an agent emits never reach result.data and are silently dropped.
+      // Mirrors the blocking + stream-to-terminal paths.
+      const taskState = stateToLegacyString(state);
+      const worldStateDelta = this._extractWorldStateDelta(task);
+      const cost = this._costFromParts(allParts);
+      const confidence = this._confidenceFromParts(allParts);
       return {
         text: artifactText || statusText || "",
         isError: isErrorState(state),
@@ -374,8 +384,10 @@ export class A2AExecutor implements IExecutor {
         data: {
           taskId: task.id,
           contextId: task.contextId,
-          taskState: stateToLegacyString(state),
+          taskState,
           artifacts: task.artifacts ?? [],
+          ...(worldStateDelta ? { [WORLDSTATE_DELTA_MIME_TYPE]: worldStateDelta } : {}),
+          ...this._flattenExtensionData(cost, confidence, taskState),
         },
       };
     } catch (err) {
