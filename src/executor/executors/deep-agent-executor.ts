@@ -86,6 +86,38 @@ export function extractAiText(content: unknown): string {
   return parts.join("").trim();
 }
 
+/** A tool-call turn worth narrating — the names + their parsed calls. */
+export interface ToolCallNarration {
+  toolNames: string[];
+  toolCalls: Array<{ name: string; args?: unknown }>;
+}
+
+/**
+ * Scan `messages[fromIndex..]` for AI messages carrying `tool_calls` and return
+ * one narration per such message, in order. Drives live progress narration as
+ * the graph streams: the caller advances `fromIndex` past everything already
+ * seen, so each tool-call turn is narrated exactly once — no double-fire when
+ * the same accumulated state is re-yielded, no miss when several arrive in one
+ * step. Messages without tool calls (human, tool results, the final answer)
+ * yield nothing.
+ */
+export function extractToolCallNarrations(messages: unknown[], fromIndex: number): ToolCallNarration[] {
+  const out: ToolCallNarration[] = [];
+  for (let i = Math.max(0, fromIndex); i < messages.length; i++) {
+    const msg = messages[i] as { _getType?: () => string; constructor?: { name?: string }; tool_calls?: unknown };
+    const type = msg?._getType?.() ?? msg?.constructor?.name ?? "";
+    if (type !== "ai" && type !== "AIMessage") continue;
+    const tc = msg?.tool_calls;
+    if (!Array.isArray(tc) || tc.length === 0) continue;
+    const toolCalls = tc
+      .map((t: { name?: string; args?: unknown }) => ({ name: t.name ?? "", args: t.args }))
+      .filter((c) => c.name);
+    if (toolCalls.length === 0) continue;
+    out.push({ toolNames: toolCalls.map((c) => c.name), toolCalls });
+  }
+  return out;
+}
+
 export interface DeepAgentConfig {
   gatewayUrl?: string;
   gatewayApiKey?: string;
@@ -102,6 +134,16 @@ export interface DeepAgentConfig {
    * SkillDispatcher across ALL executor types and does not need this hook.
    */
   onToolCall?: (event: { agentName: string; correlationId: string; skill?: string; toolNames: string[]; toolCalls?: Array<{ name: string; args?: unknown }> }) => void;
+
+  /**
+   * Best-effort generic progress hook fired for non-tool-call milestones
+   * during a skill run — currently the initial "thinking" frame emitted the
+   * moment the graph starts, before the first LLM turn produces any tool call.
+   * Wired by `AgentRuntimePlugin` to publish `agent.skill.progress.{cid}` so
+   * A2A callers see motion during the initial model-latency window instead of
+   * a byte-silent run. Errors inside the callback are swallowed.
+   */
+  onProgress?: (event: { agentName: string; correlationId: string; skill?: string; text: string; step?: string }) => void;
 
   /**
    * Shared memory flywheel. When provided AND the agent declares `memory`,
@@ -864,6 +906,7 @@ export class DeepAgentExecutor implements IExecutor {
   private readonly model: ChatOpenAI;
   private readonly http: HttpClient;
   private readonly onToolCall: DeepAgentConfig["onToolCall"];
+  private readonly onProgress: DeepAgentConfig["onProgress"];
   private readonly gatewayUrl: string | undefined;
   private readonly apiKey: string;
   private readonly memory: AgentMemory | undefined;
@@ -878,6 +921,7 @@ export class DeepAgentExecutor implements IExecutor {
   constructor(agentDef: AgentDefinition, config: DeepAgentConfig = {}) {
     this.agentDef = agentDef;
     this.onToolCall = config.onToolCall;
+    this.onProgress = config.onProgress;
     this.gatewayUrl = config.gatewayUrl ?? process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL;
     this.apiKey = config.gatewayApiKey ?? process.env.OPENAI_API_KEY ?? "unused";
     this.memory = config.memory;
@@ -1002,41 +1046,53 @@ export class DeepAgentExecutor implements IExecutor {
       const preamble = typeof req.payload?.contextPreamble === "string" ? req.payload.contextPreamble : "";
       const userContent = preamble ? `${preamble}\n\n${prompt}` : prompt;
 
-      const result = await agent.invoke(
+      // Emit an immediate "thinking" frame so A2A callers see motion during the
+      // initial model-latency window (the first LLM turn can take 15–20s before
+      // it produces any tool call). Without this the stream is byte-silent —
+      // only empty keepalive heartbeats — until the first tool call lands.
+      if (this.onProgress) {
+        try {
+          this.onProgress({ agentName: this.agentDef.name, correlationId: req.correlationId, skill: req.skill, text: "thinking", step: "thinking" });
+        } catch (cbErr) {
+          console.warn(`[deep-agent:${this.agentDef.name}] onProgress callback threw:`, cbErr);
+        }
+      }
+
+      // Stream the graph rather than invoke()-ing it, so tool-call narration
+      // reaches the caller LIVE (the moment each turn streams in) instead of
+      // being replayed in a tight loop after the whole run settles — which made
+      // every progress frame arrive ~1ms before the terminal answer (#778
+      // wired the bridge but the source fired post-hoc). streamMode "values"
+      // yields the full accumulated state after each node; the final yield is
+      // exactly what invoke() would have returned, so all downstream extraction
+      // (final text, memory, structured output) is unchanged.
+      type RunMessage = { _getType?: () => string; constructor?: { name?: string }; content?: unknown; tool_calls?: unknown };
+      let result: { messages?: RunMessage[] } = { messages: [] };
+      let narrated = 0;
+      for await (const state of await agent.stream(
         { messages: [...history.map(t => ({ role: t.role, content: t.content })), { role: "user", content: userContent }] },
-        { recursionLimit: effectiveMaxTurns * 2 + 1, callbacks },
-      );
-
-      const messages = result.messages ?? [];
-      console.log(`[deep-agent:${this.agentDef.name}] ${messages.length} messages returned`);
-
-      // Log tool calls made + emit telemetry for the /system dashboard.
-      for (const msg of messages) {
-        const type = msg._getType?.() ?? msg.constructor?.name ?? "";
-        if (type === "ai" || type === "AIMessage") {
-          const tc = (msg as unknown as Record<string, unknown>).tool_calls;
-          if (Array.isArray(tc) && tc.length > 0) {
-            const calls = tc.map((t: { name?: string; args?: unknown }) => ({ name: t.name ?? "", args: t.args }))
-              .filter((c) => c.name);
-            const toolNames = calls.map((c) => c.name);
-            console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${toolNames.join(", ")}`);
-            if (this.onToolCall && toolNames.length > 0) {
-              try {
-                this.onToolCall({
-                  agentName: this.agentDef.name,
-                  correlationId: req.correlationId,
-                  skill: req.skill,
-                  toolNames,
-                  toolCalls: calls,
-                });
-              } catch (cbErr) {
-                // Telemetry must never break a running skill.
-                console.warn(`[deep-agent:${this.agentDef.name}] onToolCall callback threw:`, cbErr);
-              }
+        { recursionLimit: effectiveMaxTurns * 2 + 1, callbacks, streamMode: "values" },
+      )) {
+        result = state as unknown as { messages?: RunMessage[] };
+        const msgs = result.messages ?? [];
+        // Narrate any tool-call turn that streamed in this step and hasn't been
+        // narrated yet — live, before its tools execute.
+        for (const n of extractToolCallNarrations(msgs, narrated)) {
+          console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${n.toolNames.join(", ")}`);
+          if (this.onToolCall) {
+            try {
+              this.onToolCall({ agentName: this.agentDef.name, correlationId: req.correlationId, skill: req.skill, toolNames: n.toolNames, toolCalls: n.toolCalls });
+            } catch (cbErr) {
+              // Telemetry must never break a running skill.
+              console.warn(`[deep-agent:${this.agentDef.name}] onToolCall callback threw:`, cbErr);
             }
           }
         }
+        narrated = msgs.length;
       }
+
+      const messages = result.messages ?? [];
+      console.log(`[deep-agent:${this.agentDef.name}] ${messages.length} messages returned`);
 
       let text = "";
       for (let i = messages.length - 1; i >= 0; i--) {
