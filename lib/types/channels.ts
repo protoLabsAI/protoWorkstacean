@@ -73,7 +73,7 @@ export interface Channel {
   /**
    * Project channel role — what this channel is *for* within the
    * project. The set is open-ended; current consumers use:
-   *   - "dev"     — feature-notifier ✅/❌ updates, pr-remediator alerts
+   *   - "dev"     — feature-notifier ✅/❌ updates, feature-remediation alerts
    *   - "release" — release announcements
    */
   kind?: string;

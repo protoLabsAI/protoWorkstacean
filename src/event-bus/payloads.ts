@@ -374,7 +374,7 @@ export interface AutonomousOutcomePayload {
   correlationId: string;
   /** Parent span ID — the bus message ID that triggered the skill request. */
   parentId?: string;
-  /** Autonomous subsystem actor (e.g. "goap", "ceremony", "pr-remediator") or "user". */
+  /** Autonomous subsystem actor (e.g. "goap", "ceremony", "feature-remediation") or "user". */
   systemActor: string;
   /** Skill name that was executed. */
   skill: string;

@@ -397,19 +397,6 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
-    // Registers FunctionExecutors for the `action.pr_*` /
-    // `action.dispatch_backmerge` skills whose handlers live in
-    // PrRemediatorPlugin.
-    // Same install-order constraint as alert-skill-executor: AFTER the
-    // ExecutorRegistry exists, BEFORE skill-dispatcher subscribes.
-    name: "pr-remediator-skill-executor",
-    condition: () => !!(process.env.QUINN_APP_PRIVATE_KEY || process.env.GITHUB_TOKEN),
-    factory: async () => {
-      const { PrRemediatorSkillExecutorPlugin } = await import("./plugins/pr-remediator-skill-executor-plugin.js");
-      return new PrRemediatorSkillExecutorPlugin(executorRegistry);
-    },
-  },
-  {
     // Intercepts ExecutorRegistry.resolve() to A/B test competing skill variants.
     // Must be installed AFTER registrars (agent-runtime, skill-broker) and
     // BEFORE skill-dispatcher so the hook is active when dispatches begin.
@@ -441,11 +428,15 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
-    name: "pr-remediator",
-    condition: () => !!(process.env.QUINN_APP_PRIVATE_KEY || process.env.GITHUB_TOKEN),
+    // Single auto-remediation loop: feature.blocked (from protoMaker via
+    // /publish) → Roxy unblock_feature / HITL, bounded + escalating. Subsumes
+    // the old pr-remediator (protoMaker now detects stuck PRs as blocked
+    // features; non-feature PRs use GitHub-native auto-merge). #776.
+    name: "feature-remediation",
+    condition: () => true,
     factory: async () => {
-      const { PrRemediatorPlugin } = await import("../lib/plugins/pr-remediator.js");
-      return new PrRemediatorPlugin({ projectRegistry });
+      const { FeatureRemediationPlugin } = await import("../lib/plugins/feature-remediation.js");
+      return new FeatureRemediationPlugin();
     },
   },
   {
@@ -487,7 +478,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
   {
     // Watches dispatch.dropped.# (from SkillDispatcher) for storms — N drops
     // on same key in M min. Escalates to operator.message.request (same pipe
-    // as #619 pr-remediator stuck-PR escalations). Per-key cooldown prevents
+    // as feature-remediation stuck-feature escalations). Per-key cooldown prevents
     // DM flood.
     name: "dispatch-drop-escalator",
     condition: () => true,

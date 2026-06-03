@@ -65,7 +65,7 @@ interface GitHubConfig {
  *   WORKSTACEAN_AGENT_BOT_LOGINS=protoquinn[bot],protoquinn,ava[bot],ava,foo[bot]
  *
  * Auto-review (pull_request opened/synchronize → Quinn) is intentionally
- * NOT filtered — pr-remediator opens PRs as @protoquinn[bot] and those
+ * NOT filtered — protoMaker automode opens PRs as @protoquinn[bot] and those
  * should still be reviewed; self-approval is already guarded by GitHub
  * itself.
  */
@@ -668,7 +668,7 @@ export class GitHubPlugin implements Plugin {
     // Without this, Quinn files an issue → GitHub webhook → bug_triage →
     // Quinn files another issue → infinite cascade (protoWorkstacean#556 ate
     // protoMaker with 23 duplicate triage issues in 60s). pull_request events
-    // are intentionally NOT filtered here — pr-remediator opens legitimate
+    // are intentionally NOT filtered here — protoMaker automode opens legitimate
     // bot-authored PRs that should still be reviewed; GitHub's self-approval
     // check already prevents same-account approvals.
     if (
