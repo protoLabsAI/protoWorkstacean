@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { TaskState } from "@a2a-js/sdk";
 import { A2AExecutor } from "../executors/a2a-executor.ts";
 import { COST_V1_MIME_TYPE, CONFIDENCE_V1_MIME_TYPE } from "@protolabs/a2a";
 
@@ -104,5 +105,71 @@ describe("A2AExecutor cost-v1 / confidence-v1 extraction", () => {
   test("_flattenExtensionData returns {} when neither payload present", () => {
     const exec = makeExec();
     expect(exec._flattenExtensionData(undefined, undefined, "completed")).toEqual({});
+  });
+});
+
+// Regression for #763: the tasks/get poll path (taken whenever a streaming
+// agent emits a non-terminal task event first — i.e. virtually every real task)
+// used to surface only text + state, silently dropping cost-v1/confidence-v1.
+describe("A2AExecutor.pollTask surfaces extension DataParts (#763)", () => {
+  function execWithTask(task: unknown): A2AExecutor {
+    const exec = new A2AExecutor({
+      name: "roxy",
+      url: "http://roxy:7870/a2a",
+      streaming: true,
+      pushNotifications: false,
+    });
+    // Stub the client build so no network/card fetch happens.
+    (exec as unknown as { _buildClient: () => Promise<unknown> })._buildClient =
+      async () => ({ getTask: async () => task });
+    return exec;
+  }
+
+  const terminalTask = {
+    id: "t-763",
+    contextId: "ctx-763",
+    status: { state: TaskState.TASK_STATE_COMPLETED },
+    artifacts: [
+      {
+        artifactId: "a1",
+        parts: [
+          { content: { $case: "text", value: "portfolio sitrep…" } },
+          {
+            content: {
+              $case: "data",
+              value: { usage: { input_tokens: 54339, output_tokens: 1969 }, costUsd: 0.006221, success: true },
+            },
+            metadata: { mimeType: COST_V1_MIME_TYPE },
+          },
+          {
+            content: { $case: "data", value: { confidence: 0.92, explanation: "consistent across sources", success: true } },
+            metadata: { mimeType: CONFIDENCE_V1_MIME_TYPE },
+          },
+        ],
+      },
+    ],
+  };
+
+  test("poll result.data carries costUsd + usage + confidence (not just text)", async () => {
+    const exec = execWithTask(terminalTask);
+    const res = await exec.pollTask("t-763", "corr-763");
+    expect(res.text).toBe("portfolio sitrep…");
+    expect(res.data?.costUsd).toBe(0.006221);
+    expect(res.data?.usage).toEqual({ input_tokens: 54339, output_tokens: 1969 });
+    expect(res.data?.confidence).toBe(0.92);
+    expect(res.data?.confidenceExplanation).toBe("consistent across sources");
+  });
+
+  test("poll result omits cost/confidence cleanly when the task emits no such parts", async () => {
+    const exec = execWithTask({
+      id: "t2",
+      contextId: "ctx2",
+      status: { state: TaskState.TASK_STATE_COMPLETED },
+      artifacts: [{ artifactId: "a1", parts: [{ content: { $case: "text", value: "pong" } }] }],
+    });
+    const res = await exec.pollTask("t2", "corr2");
+    expect(res.text).toBe("pong");
+    expect(res.data?.costUsd).toBeUndefined();
+    expect(res.data?.confidence).toBeUndefined();
   });
 });
