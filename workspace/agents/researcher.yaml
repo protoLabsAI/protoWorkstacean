@@ -46,6 +46,12 @@ tools:
 
 maxTurns: 30
 
+# Dedicated Discord identity: the protoResearcher bot. When DISCORD_BOT_TOKEN_RESEARCHER
+# is set, the agent pool gives the researcher its own bot client, so research
+# replies post as protoResearcher (not the main bot). Falls back to the main bot
+# when unset. (Same mechanism as Ava's DISCORD_BOT_TOKEN_AVA.)
+discordBotTokenEnvKey: DISCORD_BOT_TOKEN_RESEARCHER
+
 # Multi-turn research sessions retain their own thread context + recall prior
 # research conversations. Scoped to the research skills.
 memory:
