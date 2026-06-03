@@ -1,0 +1,23 @@
+id: research-digest
+name: "Research Digest"
+description: >
+  Weekly AI/ML research roundup. The researcher agent scans its sources
+  (HuggingFace, GitHub, the team's Discord feed, the web), pulls the notable
+  papers / models / releases, synthesizes the highlights, stores the digest in
+  the research knowledge base, and the outcome is posted to the research channel.
+# Monday 09:00 — start of the week. Cron: min hour dom mon dow.
+schedule: "0 9 * * 1"
+# research_digest lives on the researcher agent. The skill owns producing +
+# storing the digest (kind: digest); the ceremony only triggers it — no content
+# injection (the agent owns its response).
+skill: research_digest
+targets:
+  - researcher
+# Posts the digest to the research channel via DISCORD_WEBHOOK_RESEARCH.
+# NOTE: set that webhook env (Discord webhook → Infisical secret) for the post
+# to land; until then the digest still runs + is stored in the KB, the publish
+# step just no-ops. Switch to "updates" to reuse the existing fleet channel.
+notifyChannel: "research"
+# Research scans multiple sources + synthesizes — give it room.
+timeoutMs: 600000
+enabled: true

@@ -123,6 +123,11 @@ import { FleetStateRepository } from "./knowledge/fleet-state.js";
 const fleetStateRepo = new FleetStateRepository(`${dataDir}/knowledge.db`);
 fleetStateRepo.init();
 
+// Researcher agent's hybrid knowledge base (sqlite-vec + FTS5). Backs /api/research/*.
+import { ResearchStore } from "./knowledge/research-store.ts";
+const researchStore = new ResearchStore(`${dataDir}/knowledge.db`);
+researchStore.init();
+
 // Core plugins — always loaded, statically imported (no dynamic overhead needed)
 const debugPlugin = new DebugPlugin();
 debugPlugin.install(bus);
@@ -592,6 +597,7 @@ const apiContext: ApiContext = {
   activeDispatchCheck: (correlationId: string) => skillDispatcher?.isActive(correlationId) ?? false,
   projectRegistry,
   channelRegistry,
+  researchStore,
 };
 
 const routes = createAllRoutes(apiContext);
