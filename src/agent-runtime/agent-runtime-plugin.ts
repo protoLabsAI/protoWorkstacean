@@ -350,6 +350,34 @@ export class AgentRuntimePlugin implements Plugin {
     }
   };
 
+  /**
+   * Generic progress hook — bridges non-tool milestones (e.g. the initial
+   * "thinking" frame) to `agent.skill.progress.{correlationId}` so A2A callers
+   * narrate them as `working` status-updates, same channel as tool-call
+   * narration. Best-effort — never breaks a running skill.
+   */
+  private _publishProgress = (event: {
+    agentName: string;
+    correlationId: string;
+    skill?: string;
+    text: string;
+    step?: string;
+  }): void => {
+    if (!this.bus || !event.text) return;
+    const progressTopic = `agent.skill.progress.${event.correlationId}`;
+    try {
+      this.bus.publish(progressTopic, {
+        id: crypto.randomUUID(),
+        correlationId: event.correlationId,
+        topic: progressTopic,
+        timestamp: Date.now(),
+        payload: { text: event.text, step: event.step ?? "progress" },
+      });
+    } catch (err) {
+      console.warn(`[agent-runtime] progress publish failed for ${event.agentName}:`, err);
+    }
+  };
+
   private _buildExecutor(def: AgentDefinition): IExecutor {
     const runtime = def.runtime ?? "deep-agent";
     if (runtime === "proto-sdk") {
@@ -369,6 +397,7 @@ export class AgentRuntimePlugin implements Plugin {
       apiBaseUrl: this.config.apiBaseUrl ?? "http://localhost:3000",
       apiKey: this.config.apiKey ?? process.env.WORKSTACEAN_API_KEY,
       onToolCall: this._publishToolCall,
+      onProgress: this._publishProgress,
       // Share one memory instance across agents; only memory-enabled agents use it.
       memory: def.memory?.enabled ? this._memory() : undefined,
     });
