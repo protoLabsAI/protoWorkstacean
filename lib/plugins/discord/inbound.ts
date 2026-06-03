@@ -5,7 +5,7 @@
  * Discord client, and handles DM batching via DmAccumulator.
  */
 
-import { Events, type Message, type TextChannel } from "discord.js";
+import { Events, type Message, type TextChannel, type AnyThreadChannel } from "discord.js";
 import { DmAccumulator, type AccumulatorEntry } from "../../dm/dm-accumulator.ts";
 import { makeId, type DiscordContext } from "./core.ts";
 import { isRateLimited, isSpam } from "./rate-limit.ts";
@@ -18,6 +18,75 @@ import { alreadyHandled } from "./dedup.ts";
 function isAdmin(ctx: DiscordContext, userId: string): boolean {
   if (!ctx.config.admins?.length) return true;
   return ctx.config.admins.includes(userId);
+}
+
+// ── Research interactions (mirrors protoResearcher's 🔬 reaction + thread converse) ──
+
+/** React with this on any message to have the researcher investigate it. */
+export const RESEARCH_EMOJI = "🔬";
+
+/** A 🔬-prefixed thread is a live research conversation routed to the researcher. */
+export function researchThreadName(topic: string): string {
+  const firstLine = topic.split("\n")[0]?.trim() || "Research";
+  return `${RESEARCH_EMOJI} ${firstLine}`.slice(0, 95);
+}
+
+/**
+ * Dispatch one deep_research turn to the researcher, replying into `channelId`
+ * (a thread). correlationId is unique per turn; contextId is the sticky thread
+ * key so the researcher's memory flywheel threads the whole conversation.
+ */
+export function dispatchResearch(
+  ctx: DiscordContext,
+  opts: { channelId: string; correlationId: string; contextId: string; userId: string; content: string; contextPreamble: string },
+): void {
+  const { channelId, correlationId, contextId, userId, content, contextPreamble } = opts;
+  ctx.pendingAgents.set(correlationId, "researcher");
+  ctx.bus.publish("agent.skill.request", {
+    id: makeId(),
+    correlationId,
+    topic: "agent.skill.request",
+    timestamp: Date.now(),
+    payload: {
+      skill: "deep_research",
+      content: content || "(research the referenced message)",
+      targets: ["researcher"],
+      contextId,
+      ...(contextPreamble ? { contextPreamble } : {}),
+    },
+    source: { interface: "discord" as const, channelId, userId },
+    reply: { topic: `message.outbound.discord.${channelId}` },
+  });
+}
+
+/** 🔬 reaction → research the message in a dedicated thread you can converse in. */
+async function handleResearchReaction(ctx: DiscordContext, message: Message, userId: string): Promise<void> {
+  await message.react("👀").catch(() => {});
+  const topic = message.cleanContent?.trim() || "the referenced content";
+
+  // Open (or reuse) a 🔬 research thread on the message.
+  let thread: AnyThreadChannel | null = null;
+  try {
+    if (message.channel.isThread()) thread = message.channel;
+    else if ("startThread" in message) thread = await message.startThread({ name: researchThreadName(topic), autoArchiveDuration: 1440 });
+  } catch {
+    thread = null;
+  }
+
+  const channelId = thread?.id ?? message.channelId;
+  const contextId = `discord-research-${channelId}`;
+  const correlationId = makeId();
+  const contextPreamble = await buildMessageContext(message).catch(() => "");
+
+  // Reply into the thread (via a placeholder there) when we have one; else
+  // reply to the original message in-channel.
+  let anchor: Message = message;
+  if (thread) {
+    const placeholder = await thread.send(`${RESEARCH_EMOJI} Researching…`).catch(() => null);
+    if (placeholder) anchor = placeholder;
+  }
+  pendingReplies.set(correlationId, { message: anchor });
+  dispatchResearch(ctx, { channelId, correlationId, contextId, userId, content: topic, contextPreamble });
 }
 
 // ── DM handler ────────────────────────────────────────────────────────────────
@@ -176,6 +245,28 @@ export function registerInboundHandlers(ctx: DiscordContext): void {
       return;
     }
 
+    // Research-thread conversation: a follow-up in a 🔬 research thread continues
+    // with the researcher (memory-backed by the thread's contextId) — no mention
+    // needed. This is how "converse on research" works.
+    if (message.channel.isThread() && message.channel.name?.startsWith(RESEARCH_EMOJI)) {
+      const tUserId = message.author.id;
+      if (!isAdmin(ctx, tUserId)) return;
+      if (isRateLimited(ctx, tUserId)) { await message.reply("Easy there — you're sending messages too quickly.").catch(() => {}); return; }
+      await message.react("👀").catch(() => {});
+      const preamble = await buildMessageContext(message).catch(() => "");
+      const cid = makeId();
+      pendingReplies.set(cid, { message });
+      dispatchResearch(ctx, {
+        channelId: message.channelId,
+        correlationId: cid,
+        contextId: `discord-research-${message.channelId}`,
+        userId: tUserId,
+        content: message.cleanContent.replace(/<@!?\d+>/g, "").trim(),
+        contextPreamble: preamble,
+      });
+      return;
+    }
+
     const isMentioned = message.mentions.has(ctx.client.user!);
     const userId = message.author.id;
 
@@ -276,11 +367,12 @@ export function registerInboundHandlers(ctx: DiscordContext): void {
     });
   });
 
-  // ── 📋 reaction → bug triage ─────────────────────────────────────────────
+  // ── reactions: 📋 → bug triage, 🔬 → research ────────────────────────────
   ctx.client.on(Events.MessageReactionAdd, async (reaction, user) => {
     if (user.bot) return;
-    if (reaction.emoji.name !== "📋") return;
-    if (alreadyHandled(`react:${reaction.message.id}:${user.id}:📋`)) return;
+    const emoji = reaction.emoji.name;
+    if (emoji !== "📋" && emoji !== RESEARCH_EMOJI) return;
+    if (alreadyHandled(`react:${reaction.message.id}:${user.id}:${emoji}`)) return;
     if (!isAdmin(ctx, user.id)) {
       console.log(`[discord] reaction from ${user.id} ignored — not in admins list`);
       return;
@@ -290,6 +382,13 @@ export function registerInboundHandlers(ctx: DiscordContext): void {
       ? await reaction.message.fetch()
       : reaction.message as Message;
 
+    // 🔬 → research the reacted message in a thread you can converse in.
+    if (emoji === RESEARCH_EMOJI) {
+      await handleResearchReaction(ctx, message, user.id);
+      return;
+    }
+
+    // 📋 → bug triage
     await message.react("👀").catch(() => {});
 
     const correlationId = makeId();
