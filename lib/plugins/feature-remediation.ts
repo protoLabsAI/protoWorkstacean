@@ -26,6 +26,9 @@
 
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import { getFleetConfig } from "../fleet/fleet-config.ts";
+import { logger } from "../log.ts";
+
+const log = logger("feature-remediation");
 
 export interface FeatureBlockedPayload {
   projectSlug?: string;
@@ -86,7 +89,7 @@ export class FeatureRemediationPlugin implements Plugin {
     }));
     this.sweepTimer = setInterval(() => this._sweep(), ENTRY_TTL_MS);
     this.sweepTimer.unref?.();
-    console.log("[feature-remediation] installed — routing feature.blocked");
+    log.info("installed — routing feature.blocked");
   }
 
   uninstall(): void {
@@ -102,13 +105,13 @@ export class FeatureRemediationPlugin implements Plugin {
   private _onBlocked(msg: BusMessage): void {
     const p = (msg.payload ?? {}) as FeatureBlockedPayload;
     if (!p.featureId) {
-      console.warn("[feature-remediation] feature.blocked without featureId — dropping");
+      log.warn("feature.blocked without featureId — dropping");
       return;
     }
     const kind = p.kind ?? "unknown";
 
     if (IGNORE_KINDS.has(kind)) {
-      console.log(`[feature-remediation] ${p.featureId} kind=${kind} — protoMaker self-heals; ignoring`);
+      log.info(`${p.featureId} kind=${kind} — protoMaker self-heals; ignoring`);
       return;
     }
 
@@ -127,7 +130,7 @@ export class FeatureRemediationPlugin implements Plugin {
       return;
     }
     if (entry.lastAttemptAt && this.now() - entry.lastAttemptAt < COOLDOWN_MS) {
-      console.log(`[feature-remediation] ${p.featureId} kind=${kind} — within cooldown, skipping`);
+      log.info(`${p.featureId} kind=${kind} — within cooldown, skipping`);
       return;
     }
 
@@ -147,7 +150,7 @@ export class FeatureRemediationPlugin implements Plugin {
       ...(p.prNumber ? [`PR #${p.prNumber}${p.branchName ? ` (branch ${p.branchName})` : ""}.`] : []),
       `Investigate and take the smallest unblocking action, or escalate with a crisp ask.`,
     ];
-    console.log(`[feature-remediation] → Roxy unblock_feature: ${p.featureId} (kind=${p.kind}, attempt via dispatch)`);
+    log.info(`→ Roxy unblock_feature: ${p.featureId} (kind=${p.kind}, attempt via dispatch)`);
     this.bus.publish("agent.skill.request", {
       id: crypto.randomUUID(),
       correlationId: crypto.randomUUID(),
@@ -182,7 +185,7 @@ export class FeatureRemediationPlugin implements Plugin {
       ...(p.prNumber ? [`PR #${p.prNumber}.`] : []),
     ].join("\n");
     const urgency = HITL_KINDS.has(p.kind ?? "") ? "high" : "medium";
-    console.log(`[feature-remediation] STUCK → escalating to operator: ${p.featureId} (kind=${p.kind}) — ${why}`);
+    log.warn(`STUCK → escalating to operator: ${p.featureId} (kind=${p.kind}) — ${why}`);
     this.bus.publish("operator.message.request", {
       id: crypto.randomUUID(),
       correlationId: crypto.randomUUID(),

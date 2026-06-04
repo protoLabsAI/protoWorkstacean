@@ -12,6 +12,9 @@
  */
 
 import type { CircuitState, CircuitBreakerState } from "../types/budget.ts";
+import { logger } from "../log.ts";
+
+const log = logger("circuit-breaker");
 
 // ── Circuit breaker config ────────────────────────────────────────────────────
 
@@ -83,7 +86,7 @@ export class CircuitBreaker {
         const elapsed = Date.now() - (circuit.openedAt ?? 0);
         if (elapsed >= this.config.recoveryWindowMs) {
           circuit.state = "HALF_OPEN";
-          console.log(`[circuit-breaker] ${key}: OPEN → HALF_OPEN (recovery window elapsed)`);
+          log.info(`${key}: OPEN → HALF_OPEN (recovery window elapsed)`);
           return true; // allow one test request
         }
         return false;
@@ -113,14 +116,12 @@ export class CircuitBreaker {
     ) {
       circuit.state = "OPEN";
       circuit.openedAt = Date.now();
-      console.warn(
-        `[circuit-breaker] ${key}: CLOSED → OPEN after ${circuit.failureCount} failures`,
-      );
+      log.warn(`${key}: CLOSED → OPEN after ${circuit.failureCount} failures`);
     } else if (circuit.state === "HALF_OPEN") {
       // Failed in recovery window — re-open
       circuit.state = "OPEN";
       circuit.openedAt = Date.now();
-      console.warn(`[circuit-breaker] ${key}: HALF_OPEN → OPEN (failure during recovery)`);
+      log.warn(`${key}: HALF_OPEN → OPEN (failure during recovery)`);
     }
 
     return { ...circuit };
@@ -139,7 +140,7 @@ export class CircuitBreaker {
       circuit.state = "CLOSED";
       circuit.failureCount = 0;
       circuit.openedAt = null;
-      console.log(`[circuit-breaker] ${key}: → CLOSED (recovered)`);
+      log.info(`${key}: → CLOSED (recovered)`);
     } else {
       // CLOSED — reset failure count on success
       circuit.failureCount = 0;
@@ -171,8 +172,8 @@ export class CircuitBreaker {
       circuit.openedAt = null;
     }
 
-    console.warn(
-      `[circuit-breaker] OVERRIDE ${key}: ${prevState} → ${targetState} ` +
+    log.warn(
+      `OVERRIDE ${key}: ${prevState} → ${targetState} ` +
         `by ${approvedBy}. Justification: ${justification}`,
     );
 
@@ -214,9 +215,8 @@ export async function withCircuitBreaker<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   if (!_apiBreaker.isAllowed(name, "api")) {
-    const msg = `[circuit-breaker] ${name}: circuit OPEN — call rejected`;
-    console.warn(msg);
-    throw new Error(msg);
+    log.warn(`${name}: circuit OPEN — call rejected`);
+    throw new Error(`circuit breaker ${name}: circuit OPEN — call rejected`);
   }
   try {
     const result = await fn();

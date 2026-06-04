@@ -23,6 +23,9 @@
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
 import type { GithubIssueOpenedPayload } from "../../src/event-bus/payloads.ts";
+import { logger } from "../log.ts";
+
+const log = logger("protomaker-board-bridge");
 
 const DEFAULT_PROTOMAKER_BASE = "http://protomaker-server:3008";
 
@@ -92,9 +95,7 @@ export class ProtoMakerBoardBridgePlugin implements Plugin {
     bus.subscribe("github.issue.opened", this.name, (msg: BusMessage) => {
       void this._forward(msg).catch((err) => {
         // Fire-and-forget subscriber — surface loudly, can't return to a caller.
-        console.error(
-          `[protomaker-board-bridge] forward failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        log.error("forward failed", { err });
       });
     });
   }
@@ -109,8 +110,8 @@ export class ProtoMakerBoardBridgePlugin implements Plugin {
     if (!project) return; // not a managed project repo — workstacean triage owns it
 
     if (!this.apiKey) {
-      console.warn(
-        `[protomaker-board-bridge] AUTOMAKER_API_KEY not set — cannot forward ${issue.owner}/${issue.repo}#${issue.number}`,
+      log.warn(
+        `AUTOMAKER_API_KEY not set — cannot forward ${issue.owner}/${issue.repo}#${issue.number}`,
       );
       return;
     }
@@ -130,8 +131,8 @@ export class ProtoMakerBoardBridgePlugin implements Plugin {
         `protoMaker signal/submit ${resp.status}: ${(await resp.text()).slice(0, 200)}`,
       );
     }
-    console.log(
-      `[protomaker-board-bridge] ${issue.owner}/${issue.repo}#${issue.number} → board "${project.slug}" (${project.path})`,
+    log.info(
+      `${issue.owner}/${issue.repo}#${issue.number} → board "${project.slug}" (${project.path})`,
     );
   }
 }

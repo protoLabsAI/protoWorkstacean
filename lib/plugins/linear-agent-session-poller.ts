@@ -24,6 +24,9 @@ import { join } from "node:path";
 import type { EventBus, Plugin } from "../types.ts";
 import { LinearAgentActivityClient } from "../linear/agent-activity-client.ts";
 import { getLinearAvaTokenManager } from "../linear/ava-oauth-token-manager.ts";
+import { logger } from "../log.ts";
+
+const log = logger("linear-session-poller");
 
 const GRAPHQL_URL = "https://api.linear.app/graphql";
 const POLL_INTERVAL_MS = 20_000;
@@ -93,13 +96,13 @@ export class LinearAgentSessionPoller implements Plugin {
 
   install(bus: EventBus): void {
     if (!this.apiKey) {
-      console.warn("[linear-session-poller] LINEAR_API_KEY not set — stale-session recovery disabled");
+      log.warn("LINEAR_API_KEY not set — stale-session recovery disabled");
       return;
     }
     this.timer = setInterval(() => void this._poll(bus), this.intervalMs);
     this.timer.unref?.();
     void this._poll(bus); // immediate first sweep
-    console.log(`[linear-session-poller] recovering stale agent sessions every ${this.intervalMs / 1000}s`);
+    log.info(`recovering stale agent sessions every ${this.intervalMs / 1000}s`);
   }
 
   uninstall(): void {
@@ -112,7 +115,7 @@ export class LinearAgentSessionPoller implements Plugin {
     try {
       sessions = await fetchStaleSessions(this.apiKey!, this.fetchImpl);
     } catch (err) {
-      console.error(`[linear-session-poller] poll failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`poll failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
     this._prune();
@@ -129,12 +132,12 @@ export class LinearAgentSessionPoller implements Plugin {
           assigned = await this.assignedToAva(s.issueId);
         } catch (err) {
           // Transient/auth error — don't mark handled, retry next sweep.
-          console.warn(`[linear-session-poller] assignee check failed for session ${s.id} — retry next sweep: ${err instanceof Error ? err.message : String(err)}`);
+          log.warn(`assignee check failed for session ${s.id} — retry next sweep: ${err instanceof Error ? err.message : String(err)}`);
           continue;
         }
         if (!assigned) {
           this.handled.set(key, Date.now()); // mark so we don't re-check this stale state every sweep
-          console.log(`[linear-session-poller] stale session ${s.id}${s.issueIdentifier ? ` (${s.issueIdentifier})` : ""} not assigned to Ava — skipping recovery`);
+          log.info(`stale session ${s.id}${s.issueIdentifier ? ` (${s.issueIdentifier})` : ""} not assigned to Ava — skipping recovery`);
           continue;
         }
       }
@@ -157,7 +160,7 @@ export class LinearAgentSessionPoller implements Plugin {
         },
         reply: { topic: `linear.agent_activity.${s.id}`, format: "markdown" as const },
       });
-      console.log(`[linear-session-poller] recovered stale session ${s.id}${s.issueIdentifier ? ` (${s.issueIdentifier})` : ""} → dispatched to Ava`);
+      log.info(`recovered stale session ${s.id}${s.issueIdentifier ? ` (${s.issueIdentifier})` : ""} → dispatched to Ava`);
     }
   }
 

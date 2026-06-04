@@ -33,6 +33,9 @@
 
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import type { IdentityRegistry } from "../identity/identity-registry.ts";
+import { logger } from "../log.ts";
+
+const log = logger("operator-routing");
 
 /** Thrown when the plugin has no transport available for the operator. */
 export class OperatorUnreachableError extends Error {
@@ -84,9 +87,7 @@ export class OperatorRoutingPlugin implements Plugin {
         // callers (the tool handler) subscribe to this and surface the
         // error to the agent's ReAct loop.
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error(
-          `[operator-routing] FAILED to route message from ${req.from}: ${errMsg}`,
-        );
+        log.error(`FAILED to route message from ${req.from}: ${errMsg}`);
         bus.publish(`operator.message.failed.${req.correlationId}`, {
           id: crypto.randomUUID(),
           correlationId: req.correlationId,
@@ -141,8 +142,8 @@ export class OperatorRoutingPlugin implements Plugin {
       );
     }
 
-    console.log(
-      `[operator-routing] Delivered message from ${req.from} via ${delivered.join(", ")} (urgency=${req.urgency}, topic=${req.topic ?? "none"})`,
+    log.info(
+      `Delivered message from ${req.from} via ${delivered.join(", ")} (urgency=${req.urgency}, topic=${req.topic ?? "none"})`,
     );
   }
 }

@@ -2,6 +2,9 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Plugin, EventBus, BusMessage, LoggerTurnQueryRequest, LoggerTurnQueryResponse, ConversationTurn } from "../types";
+import { logger } from "../log.ts";
+
+const log = logger("event-logger");
 
 /** Object keys whose values are masked before an event is persisted (#801). */
 const SECRET_KEY_RE = /(token|secret|password|passwd|api[-_]?key|private[-_]?key|authorization|bearer|refresh[-_]?token|client[-_]?secret|credential)/i;
@@ -133,10 +136,10 @@ export class LoggerPlugin implements Plugin {
       const deleted = this.db.run("DELETE FROM events WHERE timestamp < ?", [cutoff]);
       this.db.exec("PRAGMA incremental_vacuum;");
       if ((deleted as { changes?: number }).changes) {
-        console.log(`[logger] retention sweep: purged ${(deleted as { changes?: number }).changes} event(s) older than ${Math.round(ms / 86400000)}d`);
+        log.info(`retention sweep: purged ${(deleted as { changes?: number }).changes} event(s) older than ${Math.round(ms / 86400000)}d`);
       }
     } catch (err) {
-      console.warn("[logger] retention sweep failed:", err);
+      log.warn("retention sweep failed", { err });
     }
   }
 

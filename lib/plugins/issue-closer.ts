@@ -19,6 +19,9 @@
 
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
 import { closeIssue as defaultCloseIssue } from "../github-issues.ts";
+import { logger } from "../log.ts";
+
+const log = logger("issue-closer");
 
 interface FeatureCompletedPayload {
   featureId?: string;
@@ -55,7 +58,7 @@ export class IssueCloserPlugin implements Plugin {
         void this._onCompleted(msg);
       }),
     );
-    console.log("[issue-closer] installed — closing originating GitHub issues on feature.completed");
+    log.info("installed — closing originating GitHub issues on feature.completed");
   }
 
   uninstall(): void {
@@ -71,7 +74,7 @@ export class IssueCloserPlugin implements Plugin {
     }
     const [owner, name] = p.repo.split("/");
     if (!owner || !name) {
-      console.warn(`[issue-closer] feature.completed has malformed repo "${p.repo}" — cannot close #${p.githubIssueNumber}`);
+      log.warn(`feature.completed has malformed repo "${p.repo}" — cannot close #${p.githubIssueNumber}`);
       return;
     }
     const comment = [
@@ -82,10 +85,10 @@ export class IssueCloserPlugin implements Plugin {
       .join("\n");
     try {
       await this.closeFn(owner, name, p.githubIssueNumber, { comment, reason: "completed" });
-      console.log(`[issue-closer] closed ${p.repo}#${p.githubIssueNumber} (feature ${p.featureId ?? "?"} shipped)`);
+      log.info(`closed ${p.repo}#${p.githubIssueNumber} (feature ${p.featureId ?? "?"} shipped)`);
     } catch (err) {
       // Loud, but never breaks the bus / other feature.completed consumers.
-      console.warn(`[issue-closer] failed to close ${p.repo}#${p.githubIssueNumber}: ${String(err).slice(0, 300)}`);
+      log.warn(`failed to close ${p.repo}#${p.githubIssueNumber}`, { err });
     }
   }
 }
