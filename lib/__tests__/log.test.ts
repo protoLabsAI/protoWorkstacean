@@ -12,7 +12,14 @@ function capture(fn: () => void): string[] {
   return lines;
 }
 const env = (o: Record<string, string>) => { Object.assign(process.env, o); };
-afterEach(() => { delete process.env.LOG_LEVEL; delete process.env.LOG_FORMAT; });
+let prevNodeEnv: string | undefined;
+afterEach(() => {
+  delete process.env.LOG_LEVEL;
+  delete process.env.LOG_FORMAT;
+  if (prevNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = prevNodeEnv;
+  prevNodeEnv = undefined;
+});
 
 describe("logger", () => {
   test("JSON format emits one structured object per line with component + fields", () => {
@@ -46,6 +53,12 @@ describe("logger", () => {
   });
 
   test("dev format is a readable single line", () => {
+    // Dev format requires non-JSON output: useJson() is true when
+    // NODE_ENV==="production" (the Docker build gate runs the suite that way)
+    // OR LOG_FORMAT==="json". Force dev format by clearing NODE_ENV; afterEach
+    // restores it. LOG_FORMAT is already unset here.
+    prevNodeEnv = process.env.NODE_ENV;
+    delete process.env.NODE_ENV;
     const lines = capture(() => logger("x").info("hello", { a: 1 }));
     expect(lines[0]).toContain("INFO [x] hello");
     expect(lines[0]).toContain('{"a":1}');

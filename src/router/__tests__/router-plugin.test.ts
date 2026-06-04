@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -421,6 +421,26 @@ describe("RouterPlugin", () => {
   });
 
   describe("linear event delivery surface", () => {
+    // These assertions read the human-readable (dev) log line emitted via the
+    // structured logger. useJson() keys on NODE_ENV==="production" ||
+    // LOG_FORMAT==="json", so the Docker build gate (NODE_ENV=production) would
+    // render JSON and break the `[linear] event=` substring matches. Force dev
+    // format for this surface and restore the ambient env afterward.
+    let prevNodeEnv: string | undefined;
+    let prevLogFormat: string | undefined;
+    beforeEach(() => {
+      prevNodeEnv = process.env.NODE_ENV;
+      prevLogFormat = process.env.LOG_FORMAT;
+      delete process.env.NODE_ENV;
+      delete process.env.LOG_FORMAT;
+    });
+    afterEach(() => {
+      if (prevNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = prevNodeEnv;
+      if (prevLogFormat === undefined) delete process.env.LOG_FORMAT;
+      else process.env.LOG_FORMAT = prevLogFormat;
+    });
+
     test("emits [linear] event=… delivered to <agent> alongside [router] log", async () => {
       const { workspaceDir, cleanup } = makeWorkspace({
         agents: { "quinn.yaml": quinnAgent, "ava.yaml": avaAgent },
