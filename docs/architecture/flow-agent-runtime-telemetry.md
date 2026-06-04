@@ -162,6 +162,8 @@ When an executor returns `taskState ∈ {submitted, working}`, the dispatcher ha
 
 This means **autonomous.outcome is sometimes published by TaskTracker, not the dispatcher**. Subscribers don't need to care (same payload shape), but if you're tracing a missing outcome, check both.
 
+**Durability (#793).** Tracked tasks are persisted to `${dataDir}/tasks.db` (`TaskTrackerStore`), so a restart (watchtower auto-pulls several times a day) doesn't silently drop an owed reply. On boot the tracker rehydrates in-flight tasks and parks them until the agent's executor re-registers (A2A card discovery); once resolvable it resumes polling, and if the executor never returns within the grace window it escalates a failure to the reply topic rather than leaving the caller hanging. A push callback for a task whose poll loop was lost is recovered the same way (the callback token is persisted). The rehydration path can't restore the in-memory `onTerminal` outcome callback, so a rehydrated task still publishes its reply but may not emit the outcome-telemetry event.
+
 ---
 
 ## Runtime activity + skill latency topics

@@ -15,6 +15,7 @@
 import type { EventBus } from "../../lib/types.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
 import type { AgentSkillResponsePayload } from "../event-bus/payloads.ts";
+import type { TaskTrackerStore, PersistedTask } from "./task-tracker-store.ts";
 import { Part } from "@a2a-js/sdk";
 import { partText, parseWorldStateDelta } from "@protolabs/a2a";
 
@@ -76,6 +77,12 @@ export interface TaskTrackerOptions {
   defaultPollIntervalMs?: number;
   /** Max time to track a task before giving up (ms). Default: 1hr. */
   maxTrackingMs?: number;
+  /** Durable backing — when set, tasks survive restarts (rehydrated on boot). */
+  store?: TaskTrackerStore;
+  /** Resolve the live A2A executor for an agent (used to rehydrate after restart). */
+  resolveExecutor?: (agentName: string, skill?: string) => A2AExecutor | undefined;
+  /** Grace period after boot before an unresolvable rehydrated task is escalated (ms). Default: 5min. */
+  rehydrateGraceMs?: number;
 }
 
 export class TaskTracker {
@@ -88,13 +95,91 @@ export class TaskTracker {
   /** Tracks task IDs for which world.state.delta events have already been published. */
   private readonly publishedDeltaTaskIds = new Set<string>();
 
+  /** Durable store (optional). */
+  private readonly store?: TaskTrackerStore;
+  private readonly resolveExecutor?: (agentName: string, skill?: string) => A2AExecutor | undefined;
+  private readonly rehydrateGraceMs: number;
+  private readonly bootAt = Date.now();
+  /** Persisted tasks awaiting executor re-registration after a restart. */
+  private readonly pending = new Map<string, PersistedTask>();
+
   constructor(opts: TaskTrackerOptions) {
     this.bus = opts.bus;
     this.sweepIntervalMs = opts.sweepIntervalMs ?? 10_000;
     this.defaultPollIntervalMs = opts.defaultPollIntervalMs ?? 30_000;
     this.maxTrackingMs = opts.maxTrackingMs ?? 60 * 60_000;
+    this.store = opts.store;
+    this.resolveExecutor = opts.resolveExecutor;
+    this.rehydrateGraceMs = opts.rehydrateGraceMs ?? 5 * 60_000;
+    // Rehydrate in-flight tasks owed a reply. They can't poll until the agent's
+    // executor re-registers (A2A card discovery), so park them in `pending`;
+    // _sweep promotes them once resolvable, or escalates after the grace window.
+    for (const row of this.store?.loadAll() ?? []) {
+      this.pending.set(row.correlationId, row);
+    }
+    if (this.pending.size > 0) {
+      console.log(`[task-tracker] rehydrated ${this.pending.size} in-flight task(s) from store — awaiting executor re-registration`);
+    }
     this.sweepTimer = setInterval(() => { void this._sweep(); }, this.sweepIntervalMs);
     this.sweepTimer.unref?.();
+  }
+
+  /** Remove a task from memory + pending + durable store. */
+  private _forget(correlationId: string): void {
+    this.tasks.delete(correlationId);
+    this.pending.delete(correlationId);
+    this.store?.delete(correlationId);
+  }
+
+  /**
+   * Try to bring a persisted (rehydrated) task back to active polling by
+   * resolving its agent's executor. Returns the live task, or null if the
+   * executor isn't registered yet. `onTerminal` (the outcome-emit callback) is
+   * not persisted, so a rehydrated task still publishes its reply but emits no
+   * outcome telemetry — an acceptable loss vs. dropping the reply entirely.
+   */
+  private _rehydrate(row: PersistedTask): TrackedTask | null {
+    const executor = this.resolveExecutor?.(row.agentName, row.skillName);
+    if (!executor) return null;
+    const task: TrackedTask = { ...row, executor, lastPolledAt: 0 };
+    this.tasks.set(row.correlationId, task);
+    this.pending.delete(row.correlationId);
+    return task;
+  }
+
+  /** Promote rehydrated tasks once their executor re-registers; escalate the unresolvable. */
+  private _promoteRehydrated(now: number): void {
+    if (this.pending.size === 0) return;
+    for (const [, row] of [...this.pending]) {
+      if (this._rehydrate(row)) {
+        console.log(`[task-tracker] resumed ${row.agentName} task ${row.taskId.slice(0, 8)}… after restart`);
+        continue;
+      }
+      // Executor still unregistered — escalate (don't silently drop) once the
+      // task ages out or the post-boot grace window elapses.
+      if (now - row.registeredAt > this.maxTrackingMs || now - this.bootAt >= this.rehydrateGraceMs) {
+        this._escalateInterrupted(row);
+      }
+    }
+  }
+
+  /** Publish a failure to the reply topic for a task that couldn't be resumed. */
+  private _escalateInterrupted(row: PersistedTask): void {
+    console.warn(`[task-tracker] could not resume ${row.agentName} task ${row.taskId.slice(0, 8)}… — escalating as interrupted`);
+    const payload: AgentSkillResponsePayload = {
+      error: "Task interrupted by a workstacean restart and could not be resumed — please retry.",
+      correlationId: row.correlationId,
+      taskState: "failed",
+      taskId: row.taskId,
+    };
+    this.bus.publish(row.replyTopic, {
+      id: crypto.randomUUID(),
+      correlationId: row.correlationId,
+      topic: row.replyTopic,
+      timestamp: Date.now(),
+      payload,
+    });
+    this._forget(row.correlationId);
   }
 
   /** Register a task for tracking. Dispatcher calls this after executor returns working. */
@@ -138,6 +223,14 @@ export class TaskTracker {
       sourceUserId: params.sourceUserId,
       onTerminal: params.onTerminal,
     });
+    const t = this.tasks.get(params.correlationId)!;
+    this.store?.upsert({
+      correlationId: t.correlationId, taskId: t.taskId, agentName: t.agentName,
+      skillName: t.skillName, dispatcherAgent: t.dispatcherAgent, replyTopic: t.replyTopic,
+      parentId: t.parentId, registeredAt: t.registeredAt, pollIntervalMs: t.pollIntervalMs,
+      callbackToken: t.callbackToken, sourceInterface: t.sourceInterface,
+      sourceChannelId: t.sourceChannelId, sourceUserId: t.sourceUserId,
+    });
     console.log(
       `[task-tracker] Tracking ${params.agentName} task ${params.taskId.slice(0, 8)}… (correlationId: ${params.correlationId.slice(0, 8)}…)`,
     );
@@ -145,7 +238,7 @@ export class TaskTracker {
 
   /** Look up the callback token for a tracked task. Used by the webhook route. */
   getCallbackToken(correlationId: string): string | undefined {
-    return this.tasks.get(correlationId)?.callbackToken;
+    return this.tasks.get(correlationId)?.callbackToken ?? this.pending.get(correlationId)?.callbackToken;
   }
 
   /**
@@ -154,7 +247,13 @@ export class TaskTracker {
    * we update lastPolledAt so the polling loop gives the task more time.
    */
   handleCallback(correlationId: string, body: Record<string, unknown>): void {
-    const task = this.tasks.get(correlationId);
+    // Recover a task whose poll loop was lost to a restart: the callback token
+    // is persisted, so an agent's push callback can re-find it in `pending`.
+    let task = this.tasks.get(correlationId);
+    if (!task) {
+      const row = this.pending.get(correlationId);
+      if (row) task = this._rehydrate(row) ?? undefined;
+    }
     if (!task) return;
 
     const status = (body.status ?? {}) as { state?: string; message?: { parts?: unknown[] } };
@@ -169,7 +268,7 @@ export class TaskTracker {
         `but no approval gate is wired — terminating with failure. Question: ${statusText || "(none)"}`,
       );
       this._publishResponse(task, undefined, `Agent asked for human input but no approval gate is wired: ${statusText || "(no question text)"}`, "failed");
-      this.tasks.delete(correlationId);
+      this._forget(correlationId);
       return;
     }
 
@@ -190,7 +289,7 @@ export class TaskTracker {
 
     this._extractAndPublishDeltas(task.taskId, task.agentName, artifacts);
     this._publishResponse(task, isError ? undefined : content, isError ? (content || state) : undefined, state);
-    this.tasks.delete(correlationId);
+    this._forget(correlationId);
     console.log(
       `[task-tracker] Callback for ${task.taskId.slice(0, 8)}… → terminal state "${state}" (via webhook)`,
     );
@@ -198,7 +297,7 @@ export class TaskTracker {
 
   /** Stop tracking a task (e.g., on cancel). */
   untrack(correlationId: string): void {
-    this.tasks.delete(correlationId);
+    this._forget(correlationId);
   }
 
   /** Get snapshot of currently-tracked tasks — for API endpoint. */
@@ -223,11 +322,13 @@ export class TaskTracker {
   private async _sweep(): Promise<void> {
     const now = Date.now();
 
+    this._promoteRehydrated(now);
+
     for (const task of this.tasks.values()) {
       // Age-out: task has been working for too long
       if (now - task.registeredAt > this.maxTrackingMs) {
         this._publishResponse(task, undefined, `Task tracking timeout (>${Math.round(this.maxTrackingMs / 60_000)}min)`);
-        this.tasks.delete(task.correlationId);
+        this._forget(task.correlationId);
         continue;
       }
 
@@ -246,7 +347,7 @@ export class TaskTracker {
             `but no approval gate is wired — terminating with failure. Question: ${result.text || "(none)"}`,
           );
           this._publishResponse(task, undefined, `Agent asked for human input but no approval gate is wired: ${result.text || "(no question text)"}`, "failed");
-          this.tasks.delete(task.correlationId);
+          this._forget(task.correlationId);
           continue;
         }
 
@@ -261,7 +362,7 @@ export class TaskTracker {
           // result.data carries the extension payloads pollTask extracted.
           await task.executor.recordTerminalExtensions(task.skillName ?? "unknown", task.correlationId, result.data);
           this._publishResponse(task, result.text, result.isError ? result.text : undefined, state, result.data);
-          this.tasks.delete(task.correlationId);
+          this._forget(task.correlationId);
           console.log(
             `[task-tracker] Task ${task.taskId.slice(0, 8)}… reached terminal state "${state}" after ${Math.round((now - task.registeredAt) / 1000)}s`,
           );
