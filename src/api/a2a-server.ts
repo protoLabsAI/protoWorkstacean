@@ -37,7 +37,7 @@ import {
 } from "@a2a-js/sdk/server";
 import { join } from "node:path";
 import { Role, TaskState, type Message } from "@a2a-js/sdk";
-import { textPart, partText, textArtifact } from "@protolabs/a2a";
+import { textPart, partText, textArtifact, dataArtifact, emitToolCall, type ToolCallArtifactData } from "@protolabs/a2a";
 import type { Route, ApiContext } from "./types.ts";
 import type { BusMessage } from "../../lib/types.ts";
 import { buildAgentCard } from "./agent-card.ts";
@@ -208,6 +208,26 @@ class BusAgentExecutor implements AgentExecutor {
         }));
       });
 
+      // Tool-call-v1 frame subscriber — structured per-tool lifecycle frames
+      // (started → completed/failed) streamed as artifact-update DataParts for
+      // rich clients that render a tool timeline. Plain-text narration still
+      // rides status.message via the progress subscriber above; this is the
+      // structured channel the AgentCard's tool-call-v1 extension advertises.
+      const toolFrameTopic = `agent.skill.toolframe.${correlationId}`;
+      const toolFrameSubId = this.ctx.bus.subscribe(toolFrameTopic, "a2a-server-toolframe", (msg: BusMessage) => {
+        if (settled) return;
+        const frame = (msg.payload as { frame?: ToolCallArtifactData } | undefined)?.frame;
+        if (!frame) return;
+        eventBus.publish(AgentEvent.artifactUpdate({
+          taskId,
+          contextId,
+          artifact: dataArtifact([emitToolCall(frame)], { name: "tool-call" }),
+          append: false,
+          lastChunk: false,
+          metadata: undefined,
+        }));
+      });
+
       // Input-required subscriber — when the in-process agent's `ask_human`
       // tool announces it needs an answer (agent.input.request.{cid}), surface
       // an `input-required` status-update carrying the question + requestId so
@@ -241,6 +261,7 @@ class BusAgentExecutor implements AgentExecutor {
         this.ctx.bus.unsubscribe(subId);
         this.ctx.bus.unsubscribe(progressSubId);
         this.ctx.bus.unsubscribe(inputReqSubId);
+        this.ctx.bus.unsubscribe(toolFrameSubId);
         this.activeCancels.delete(taskId);
 
         const payload = (msg.payload ?? {}) as { content?: string; error?: string };
@@ -313,6 +334,7 @@ class BusAgentExecutor implements AgentExecutor {
         this.ctx.bus.unsubscribe(subId);
         this.ctx.bus.unsubscribe(progressSubId);
         this.ctx.bus.unsubscribe(inputReqSubId);
+        this.ctx.bus.unsubscribe(toolFrameSubId);
         this.activeCancels.delete(taskId);
         eventBus.publish(AgentEvent.statusUpdate({
           taskId,

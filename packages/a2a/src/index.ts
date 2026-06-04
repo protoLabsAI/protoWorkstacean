@@ -16,7 +16,7 @@
  */
 
 // Part builders + readers (1.0 member-discriminated Part)
-export { textPart, textArtifact, dataPart, partText, partData, partsToText } from "./parts.ts";
+export { textPart, textArtifact, dataArtifact, dataPart, partText, partData, partsToText } from "./parts.ts";
 
 // Structured skill results (output_schema → forced-finalizer DataPart)
 export {

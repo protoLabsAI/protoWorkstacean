@@ -23,6 +23,7 @@
 import type { Plugin, EventBus } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { IExecutor } from "../executor/types.ts";
+import type { ToolCallArtifactData } from "@protolabs/a2a";
 import { DeepAgentExecutor } from "../executor/executors/deep-agent-executor.ts";
 import { ProtoSdkExecutor } from "../executor/executors/proto-sdk-executor.ts";
 import { AgentMemory } from "../knowledge/agent-memory.ts";
@@ -378,6 +379,32 @@ export class AgentRuntimePlugin implements Plugin {
     }
   };
 
+  /**
+   * Structured tool-call frame hook (tool-call-v1) — bridges each tool
+   * lifecycle frame to `agent.skill.toolframe.{correlationId}` so the a2a-server
+   * can emit it as a streamed artifact-update DataPart. Best-effort.
+   */
+  private _publishToolFrame = (event: {
+    agentName: string;
+    correlationId: string;
+    skill?: string;
+    frame: ToolCallArtifactData;
+  }): void => {
+    if (!this.bus) return;
+    const topic = `agent.skill.toolframe.${event.correlationId}`;
+    try {
+      this.bus.publish(topic, {
+        id: crypto.randomUUID(),
+        correlationId: event.correlationId,
+        topic,
+        timestamp: Date.now(),
+        payload: { frame: event.frame },
+      });
+    } catch (err) {
+      console.warn(`[agent-runtime] toolframe publish failed for ${event.agentName}:`, err);
+    }
+  };
+
   private _buildExecutor(def: AgentDefinition): IExecutor {
     const runtime = def.runtime ?? "deep-agent";
     if (runtime === "proto-sdk") {
@@ -398,6 +425,7 @@ export class AgentRuntimePlugin implements Plugin {
       apiKey: this.config.apiKey ?? process.env.WORKSTACEAN_API_KEY,
       onToolCall: this._publishToolCall,
       onProgress: this._publishProgress,
+      onToolFrame: this._publishToolFrame,
       // Share one memory instance across agents; only memory-enabled agents use it.
       memory: def.memory?.enabled ? this._memory() : undefined,
     });

@@ -52,6 +52,16 @@ export const ACTION_TOPICS = {
   AGENT_SKILL_PROGRESS_PREFIX: "agent.skill.progress",
 
   /**
+   * Prefix for structured tool-call-v1 frames. Full topic is
+   * `agent.skill.toolframe.{correlationId}`. The in-process runtime publishes
+   * one frame per tool lifecycle event (started → completed/failed); the
+   * a2a-server emits each as a streamed artifact-update DataPart for clients
+   * that render a structured tool timeline. Sibling to the plain-text
+   * narration on AGENT_SKILL_PROGRESS_PREFIX. Opt-in.
+   */
+  AGENT_SKILL_TOOLFRAME_PREFIX: "agent.skill.toolframe",
+
+  /**
    * Prefix for human-input requests. Full topic is
    * `agent.input.request.{correlationId}`. An in-process agent's `ask_human`
    * tool (via POST /api/agent/ask-human) publishes here when it needs an answer

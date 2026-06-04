@@ -17,6 +17,7 @@ import type { AgentDefinition } from "../../agent-runtime/types.ts";
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
 import { runStructuredFinalizer, type ForcedToolCaller } from "./structured-finalizer.ts";
 import { AgentMemory, memoryAppliesTo } from "../../knowledge/agent-memory.ts";
+import type { ToolCallArtifactData } from "@protolabs/a2a";
 
 const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
 
@@ -118,6 +119,48 @@ export function extractToolCallNarrations(messages: unknown[], fromIndex: number
   return out;
 }
 
+/**
+ * Scan `messages[fromIndex..]` for structured tool-call lifecycle frames
+ * (tool-call-v1): a `started` frame per tool call on each new AI message (keyed
+ * by the call's `id` so a later result correlates), and a `completed` / `failed`
+ * frame per tool-result message. Cursor-driven the same way as
+ * `extractToolCallNarrations` — each message contributes its frames exactly once.
+ * These ride the streaming artifact-update channel for rich clients; the plain
+ * `status.message` narration is unaffected.
+ */
+export function extractToolFrames(messages: unknown[], fromIndex: number): ToolCallArtifactData[] {
+  const out: ToolCallArtifactData[] = [];
+  for (let i = Math.max(0, fromIndex); i < messages.length; i++) {
+    const msg = messages[i] as {
+      _getType?: () => string;
+      constructor?: { name?: string };
+      tool_calls?: unknown;
+      tool_call_id?: string;
+      name?: string;
+      content?: unknown;
+      status?: string;
+    };
+    const type = msg?._getType?.() ?? msg?.constructor?.name ?? "";
+    if (type === "ai" || type === "AIMessage") {
+      const tc = msg?.tool_calls;
+      if (!Array.isArray(tc)) continue;
+      tc.forEach((t: { name?: string; args?: unknown; id?: string }, idx: number) => {
+        if (!t?.name) return;
+        out.push({ toolCallId: t.id ?? `${t.name}#${i}.${idx}`, name: t.name, phase: "started", args: t.args });
+      });
+    } else if (type === "tool" || type === "ToolMessage") {
+      const name = typeof msg?.name === "string" ? msg.name : "";
+      const toolCallId = typeof msg?.tool_call_id === "string" ? msg.tool_call_id : `${name}#${i}`;
+      if (msg?.status === "error") {
+        out.push({ toolCallId, name, phase: "failed", error: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content) });
+      } else {
+        out.push({ toolCallId, name, phase: "completed", result: msg?.content });
+      }
+    }
+  }
+  return out;
+}
+
 export interface DeepAgentConfig {
   gatewayUrl?: string;
   gatewayApiKey?: string;
@@ -144,6 +187,15 @@ export interface DeepAgentConfig {
    * a byte-silent run. Errors inside the callback are swallowed.
    */
   onProgress?: (event: { agentName: string; correlationId: string; skill?: string; text: string; step?: string }) => void;
+
+  /**
+   * Best-effort structured tool-call frame hook (tool-call-v1). Fires per tool
+   * lifecycle event (started → completed/failed) as the graph streams. Wired by
+   * `AgentRuntimePlugin` to publish `agent.skill.toolframe.{cid}` so the
+   * a2a-server can emit them as streamed artifact-update DataParts for rich
+   * clients. Errors inside the callback are swallowed.
+   */
+  onToolFrame?: (event: { agentName: string; correlationId: string; skill?: string; frame: ToolCallArtifactData }) => void;
 
   /**
    * Shared memory flywheel. When provided AND the agent declares `memory`,
@@ -907,6 +959,7 @@ export class DeepAgentExecutor implements IExecutor {
   private readonly http: HttpClient;
   private readonly onToolCall: DeepAgentConfig["onToolCall"];
   private readonly onProgress: DeepAgentConfig["onProgress"];
+  private readonly onToolFrame: DeepAgentConfig["onToolFrame"];
   private readonly gatewayUrl: string | undefined;
   private readonly apiKey: string;
   private readonly memory: AgentMemory | undefined;
@@ -922,6 +975,7 @@ export class DeepAgentExecutor implements IExecutor {
     this.agentDef = agentDef;
     this.onToolCall = config.onToolCall;
     this.onProgress = config.onProgress;
+    this.onToolFrame = config.onToolFrame;
     this.gatewayUrl = config.gatewayUrl ?? process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL;
     this.apiKey = config.gatewayApiKey ?? process.env.OPENAI_API_KEY ?? "unused";
     this.memory = config.memory;
@@ -1085,6 +1139,17 @@ export class DeepAgentExecutor implements IExecutor {
             } catch (cbErr) {
               // Telemetry must never break a running skill.
               console.warn(`[deep-agent:${this.agentDef.name}] onToolCall callback threw:`, cbErr);
+            }
+          }
+        }
+        // Structured tool-call-v1 frames (started → completed/failed) for rich
+        // clients, on the streaming artifact-update channel.
+        if (this.onToolFrame) {
+          for (const frame of extractToolFrames(msgs, narrated)) {
+            try {
+              this.onToolFrame({ agentName: this.agentDef.name, correlationId: req.correlationId, skill: req.skill, frame });
+            } catch (cbErr) {
+              console.warn(`[deep-agent:${this.agentDef.name}] onToolFrame callback threw:`, cbErr);
             }
           }
         }
