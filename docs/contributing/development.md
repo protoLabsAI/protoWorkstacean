@@ -272,6 +272,19 @@ runMigrations(this.db, [
 
 `runMigrations` applies only migrations newer than the DB's `PRAGMA user_version`, each in a transaction, bumping the version after each succeeds. **Never edit a shipped migration's `up` — append a new version.** `src/executor/task-tracker-store.ts` is the reference adoption; other stores adopt the same pattern on their next schema change.
 
+## Logging
+
+New/edited code uses the structured logger (`lib/log.ts`) over `console.*`:
+
+```ts
+import { logger } from "../log.ts";
+const log = logger("my-component");
+log.info("dispatched", { correlationId, skill });
+log.error("publish failed", { topic, err });   // Error → {message, stack}
+```
+
+Leveled (`LOG_LEVEL=debug|info|warn|error`), JSON in prod (`LOG_FORMAT=json` or `NODE_ENV=production`) so lines are filterable + queryable by field, readable in dev. `log.child({ correlationId })` binds fields onto every line. The bulk `console.*` migration is incremental — prefer the logger when you touch a file.
+
 ## Conventions
 
 - **Named exports only** in `.ts` files. Exception: `_meta.ts` files use a default export for Nextra.
