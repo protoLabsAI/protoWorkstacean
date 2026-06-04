@@ -68,9 +68,9 @@ jobs:
 
       - name: Run dashboard tests
         # Dashboard owns its own deps (react, @xyflow/react, …) — the root
-        # `bun test` is scoped via root bunfig.toml to lib/ + src/ only, so
-        # tests under dashboard/src/**/__tests__/ have to run here where the
-        # dashboard node_modules is resolvable.
+        # `bun test` covers lib/ + src/ + tests/ (per root bunfig.toml) but not
+        # dashboard/, so tests under dashboard/src/**/__tests__/ have to run here
+        # where the dashboard node_modules is resolvable.
         working-directory: dashboard
         run: bun test
 

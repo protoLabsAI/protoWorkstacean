@@ -1,11 +1,17 @@
 # Root Bun config.
 #
 # [test] root: scope `bun test` discovery to the server side of the repo
-# (lib/ + src/) so we don't accidentally crawl into dashboard/, which is a
-# separate workspace with its own deps + tsconfig. The dashboard's tests
+# (lib/ + src/ + tests/) so we don't accidentally crawl into dashboard/, which
+# is a separate workspace with its own deps + tsconfig. The dashboard's tests
 # get run by the matching CI job in .github/workflows/build.yml — they
 # need `bun install` to happen inside dashboard/ first so dashboard-only
 # deps actually resolve.
+#
+# `tests/` (root-level integration + e2e suites) is INCLUDED so CI actually
+# runs it — it was previously undiscovered, hiding dead/broken tests behind a
+# false sense of coverage (#797). The legacy pr-review cluster those tests
+# covered (src/llm, src/skills/prReview, src/state/prTracker) was deleted; the
+# survivors test live code and pass.
 #
 # Without this, `bun test` at the repo root walks every *.test.ts including
 # dashboard/src/lib/__tests__/, which CI's root install can't satisfy and
@@ -13,4 +19,4 @@
 # tests that don't belong there. See build.yml's dashboard-job comment
 # block for the precedent and the 2026-04-11 incident it cites.
 [test]
-root = ["lib", "src"]
+root = ["lib", "src", "tests"]
