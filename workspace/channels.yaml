@@ -65,7 +65,7 @@ channels:
 
   # ── Per-project bindings ──────────────────────────────────────────────────
   # Bind a Discord channel to a (projectSlug, kind) pair so feature-notifier,
-  # pr-remediator, and slash-commands can resolve "the dev channel for
+  # feature-remediation, and slash-commands can resolve "the dev channel for
   # protomaker" without any project-level config file. Lookup:
   # ChannelRegistry.getProjectChannel(slug, kind).
   #

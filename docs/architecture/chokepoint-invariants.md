@@ -2,7 +2,7 @@
 title: Cross-cut — Dispatcher chokepoint invariants
 ---
 
-_The "four invariants" pattern referred to elsewhere in the codebase. This doc audits what is actually in source vs. what was planned. Three of the four are implemented; one is not generalized; one fleet-side filter lives outside the dispatcher entirely._
+_The "dispatcher invariants" pattern referred to elsewhere in the codebase. This doc audits what is actually in source vs. what was planned. Two are true dispatcher invariants; one fleet-side filter lives outside the dispatcher entirely. (A fourth — the #465 destructive-verdict guard — lived in the now-deleted `pr-remediator.ts` and is no longer in the codebase; see the historical note below.)_
 
 ---
 
@@ -17,9 +17,9 @@ Audit reality:
 | #437 | Cooldown | `src/executor/skill-dispatcher-plugin.ts:216-230` | ✅ yes |
 | #444 | Target-registry guard | `src/executor/executor-registry.ts:93-97` (inside `resolve()`) | ✅ effectively — dispatcher drops on null resolve |
 | #459 | Synthetic actor filter | `src/plugins/agent-fleet-health-plugin.ts:281-334` | ❌ **outside** the dispatcher (fleet-health aggregation site) |
-| #465 | Destructive verdict guard | `lib/plugins/pr-remediator.ts:1516-1546` | ❌ **specific to pr-remediator**, not a general dispatcher invariant |
+| #465 | Destructive verdict guard | _retired — lived in `pr-remediator.ts`, deleted #776_ | ❌ **no longer in the codebase** |
 
-Treat #437 and #444 as the actual dispatcher invariants. #459 and #465 are the same architectural *pattern* (single chokepoint for an invariant) applied at *different* chokepoints — outcome-aggregation and verdict-handling respectively.
+Treat #437 and #444 as the actual dispatcher invariants. #459 is the same architectural *pattern* (single chokepoint for an invariant) applied at a *different* chokepoint — the outcome-aggregation site. #465 was that pattern applied at the PR-remediator verdict-handling site; it was removed when `pr-remediator.ts` was deleted (the PR-pipeline-violation derivation it guarded moved to protoMaker — see [flow-alert-remediator](flow-alert-remediator.md)).
 
 ---
 
@@ -114,21 +114,21 @@ on autonomous.outcome.{actor}.{skill}:
         → logged once-per-distinct-actor at warn level
 ```
 
-**Known synthetic actors:** `pr-remediator`, `goap`, `user`.
+**Known synthetic actors:** `feature-remediation`, `user`.
 
 **On trip:** one-time `console.warn` per actor, no escalation. The point is bucketing, not blocking.
 
 ---
 
-## #465 — Destructive verdict guard (only in pr-remediator)
+## #465 — Destructive verdict guard (RETIRED — no longer in code)
 
-**Where:** [pr-remediator.ts:1516–1546](../../lib/plugins/pr-remediator.ts), specifically the promotion-PR check inside `diagnose_pr_stuck` verdict handling.
+**Status:** removed. This invariant lived in `lib/plugins/pr-remediator.ts`, which was **deleted in #776**. It is documented here only as history — there is no destructive-verdict guard in the current codebase, because the LLM-driven PR-close verdict it guarded no longer exists in workstacean.
 
-**What it actually does:** when Ava's LLM verdict on a stuck PR is `decomposable` (i.e. "close this and re-cut as smaller PRs"), the handler checks whether the PR is a promotion PR (`head ∈ {dev, staging}` OR `base ∈ {main, staging}` OR title starts with "Promote"). If so, the close is suppressed and an HITL escalation is emitted instead.
+**What it did:** inside the old pr-remediator's `diagnose_pr_stuck` verdict handling, when an LLM verdict on a stuck PR was `decomposable` (i.e. "close this and re-cut as smaller PRs"), the handler checked whether the PR was a promotion PR (`head ∈ {dev, staging}` OR `base ∈ {main, staging}` OR title starts with "Promote"). If so, the close was suppressed and an HITL escalation emitted instead.
 
-**Why it's not generalized:** there is no other destructive verb in the codebase today that an LLM can issue. Closing a PR is the only one. If `delete issue` or `force-update ref` become LLM-driven, *then* generalizing this to a dispatcher invariant becomes worth the abstraction cost. For now, the guard lives next to the only verb that needs it.
+**Why it's gone:** workstacean no longer re-derives PR-pipeline violations or issues destructive PR verdicts. protoMaker now detects stuck PRs as blocked features and emits a single canonical `feature.blocked` signal; `FeatureRemediationPlugin` routes that to Roxy's `unblock_feature` skill or to HITL (see [flow-alert-remediator](flow-alert-remediator.md)). Roxy may take unblocking actions, but the promotion-PR destructive-close path that #465 guarded no longer exists on the workstacean side.
 
-**On trip:** `console.warn` + intended HITL escalation. See [flow-hitl](flow-hitl.md) for the gap that the HITL bus topic is *not actually published* — only logged.
+If a new LLM-driven destructive verb appears later (e.g. `delete issue`, `force-update ref`), the right pattern is the same one #465 used — guard it next to the verb's consumer, and only promote it to a dispatcher invariant if it generalizes across skills.
 
 ---
 
@@ -157,13 +157,12 @@ If you find yourself adding a check that:
 
 …then add it to `_dispatch()` in the same sequence (after registry resolve, before cooldown is fine — the order between these is semantic, see [#437 above](#437--cooldown)).
 
-If the check is **specific to one skill or one verb** (like #465's PR close), put it next to the consumer, not at the dispatcher. The dispatcher is for invariants every skill must respect.
+If the check is **specific to one skill or one verb** (as #465's now-retired PR-close guard was), put it next to the consumer, not at the dispatcher. The dispatcher is for invariants every skill must respect.
 
 ---
 
 ## Related
 
 - [flow-inbound-message](flow-inbound-message.md) — full dispatcher sequence with these invariants in context
-- [flow-alert-remediator](flow-alert-remediator.md) — #459's downstream consumer
-- [flow-pr-review](flow-pr-review.md) — #465's home today
-- [flow-hitl](flow-hitl.md) — the (gap) destination for #465 escalations
+- [flow-alert-remediator](flow-alert-remediator.md) — #459's downstream consumer; also where the retired #465 guard's responsibility moved (protoMaker + feature-remediation)
+- [flow-hitl](flow-hitl.md) — the operator-escalation path

@@ -1,19 +1,21 @@
 ---
-title: Flow — Alert / PR remediator
+title: Flow — Alerts & feature remediation
 ---
 
-_The fleet self-healing path: AgentFleetHealth aggregates outcomes into a snapshot; the `fleet_alerts` ceremony polls thresholds every minute and dispatches `alert.*` skills on violation; pr-remediator handles `pr.remediate.*` topics that propose code mutations._
+_The fleet self-healing path has two halves. **Alerts**: AgentFleetHealth aggregates outcomes into a snapshot; the `fleet_alerts` ceremony polls thresholds every minute and dispatches `alert.*` skills on violation. **Feature remediation**: protoMaker detects blocked features and emits a kinded `feature.blocked` event; `FeatureRemediationPlugin` routes it (ignore / HITL / Roxy `unblock_feature`) with bounded retries._
+
+> **Note on filename.** This doc was historically "alert / PR remediator." The PR-remediator half is gone — `pr-remediator.ts` was deleted (#776) and replaced by `FeatureRemediationPlugin`, which consumes a single canonical `feature.blocked` signal from protoMaker instead of re-deriving PR-pipeline violations in workstacean. The filename is kept stable to avoid breaking links.
 
 ---
 
 ## What & why
 
-The fleet is a distributed system; agents fail, PRs get stuck, costs spike. Two related paths handle the response:
+The fleet is a distributed system; agents fail, features get stuck, costs spike. Two related paths handle the response:
 
-- **Alerts** — declarative skill executors (20 of them) that turn a `alert.fleet_*` skill dispatch into a Discord message. Fire-and-forget, no LLM.
-- **PR remediator** — five `pr.remediate.*` topics (`update_branch`, `merge_ready`, `fix_ci`, `address_feedback`, `pr.backmerge.dispatch`) that consume an action dispatch and mutate the PR via GitHub API.
+- **Alerts** — declarative skill executors (20 of them) that turn an `alert.fleet_*` skill dispatch into a Discord message. Fire-and-forget, no LLM.
+- **Feature remediation** — a single auto-remediation loop. protoMaker's automode raises `feature.blocked` (via the workstacean `/publish` ingress) whenever a feature transitions to blocked, carrying a `kind`. `FeatureRemediationPlugin` routes by kind: ignore the kinds protoMaker self-heals, escalate the kinds no auto-action can fix straight to HITL, and dispatch Roxy's `unblock_feature` for everything else.
 
-Both are `FunctionExecutor`-backed (no LLM at the executor itself; LLM lives one layer deeper in `pr-remediator` for `diagnose_pr_stuck`).
+Alerts are `FunctionExecutor`-backed (no LLM at the executor). Feature remediation does no work itself — it routes a kinded event to either an operator DM or a Roxy DeepAgent skill that holds the LLM.
 
 ---
 
@@ -46,29 +48,52 @@ Both are `FunctionExecutor`-backed (no LLM at the executor itself; LLM lives one
    └──────────────┬───────────┘
                   │
                   ▼
-   ┌──────────────────────────┐  ┌──────────────────────────┐
-   │ alert.fleet_agent_stuck  │  │ action.pr_update_branch  │
-   │ alert.fleet_skill_       │  │ action.pr_fix_ci         │
-   │   orphaned               │  │ action.pr_address_       │
-   │ alert.fleet_cost_over_   │  │   feedback               │
-   │   budget                 │  │ action.pr_merge_ready    │
-   │ … (20 alert skills)      │  │ action.pr_backmerge      │
-   └──────────────┬───────────┘  └──────────────┬───────────┘
-                  │                              │
-                  ▼  SkillDispatcher              ▼  SkillDispatcher
-   ┌──────────────────────────┐  ┌──────────────────────────┐
-   │ AlertSkillExecutorPlugin │  │ PrRemediatorSkillExec.   │
-   │  → message.outbound.     │  │  → pr.remediate.{action} │
-   │      discord.alert       │  │                          │
-   └──────────────────────────┘  └──────────────┬───────────┘
-                                                 │
-                                                 ▼
-                                  ┌──────────────────────────┐
-                                  │ PrRemediatorPlugin       │
-                                  │  in-memory inFlight Map  │
-                                  │  publishes GitHub mut.   │
-                                  │  or HITL escalation      │
-                                  └──────────────────────────┘
+   ┌──────────────────────────┐
+   │ alert.fleet_agent_stuck  │
+   │ alert.fleet_skill_       │
+   │   orphaned               │
+   │ alert.fleet_cost_over_   │
+   │   budget                 │
+   │ … (20 alert skills)      │
+   └──────────────┬───────────┘
+                  │
+                  ▼  SkillDispatcher
+   ┌──────────────────────────┐
+   │ AlertSkillExecutorPlugin │
+   │  → message.outbound.     │
+   │      discord.alert       │
+   └──────────────────────────┘
+
+
+   protoMaker automode (feature blocked)
+        │  POST /publish
+        ▼
+   ┌──────────────────────────┐
+   │ feature.blocked          │  { featureId, kind, projectSlug,
+   │   (kinded)               │    prNumber?, reason?, … }
+   └──────────────┬───────────┘
+                  ▼
+   ┌──────────────────────────┐
+   │ FeatureRemediationPlugin │  per-feature tracker
+   │   _onBlocked()           │  (attempts, cooldown, escalated)
+   │                          │
+   │   route by kind:         │
+   │   • IGNORE_KINDS  ─► drop (protoMaker self-heals)
+   │   • HITL_KINDS    ─► operator.message.request
+   │   • else          ─► dispatch Roxy unblock_feature
+   │                       (bounded: ≤3 attempts, 5min cooldown)
+   │                       on exhaustion ─► escalate ONCE to operator
+   └──────────────┬───────────┘
+                  │
+        ┌─────────┴──────────┐
+        ▼                    ▼
+   agent.skill.request   operator.message.request
+   {skill:unblock_feature,   (HITL — see flow-hitl)
+    targets:["roxy"]}
+        │
+        ▼  SkillDispatcher → A2AExecutor (Roxy)
+
+   feature.unblocked ─► clears the per-feature tracker (fresh budget)
 ```
 
 ---
@@ -101,38 +126,45 @@ sequenceDiagram
     DP->>DP: post to alert webhook channel
 ```
 
-## Sequence (PR remediator path)
+## Sequence (feature remediation path)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant TE as Threshold/policy<br/>(external)
+    participant PM as protoMaker automode
     participant Bus as Bus
+    participant FR as FeatureRemediationPlugin
     participant SD as SkillDispatcher
-    participant PRE as PrRemediatorSkillExec
-    participant PR as PrRemediatorPlugin
-    participant GH as GitHub API
+    participant RX as Roxy (A2A)
+    participant OR as OperatorRouting
 
-    TE->>Bus: agent.skill.request<br/>(skill=action.pr_update_branch)
-    Bus->>SD: deliver
-    SD->>PRE: execute (FunctionExecutor)
-    PRE->>Bus: pr.remediate.update_branch
-    Bus->>PR: deliver
+    PM->>Bus: feature.blocked (via POST /publish)<br/>{ featureId, kind, projectSlug, … }
+    Bus->>FR: deliver
+    FR->>FR: _onBlocked(): route by kind
 
-    PR->>PR: look up / create inFlight entry
-    PR->>GH: PATCH /repos/{o}/{r}/pulls/{n}/branch
-    GH-->>PR: response
-
-    alt success
-        PR->>Bus: flow.item.updated / completed
-    else 422 conflict (2+ attempts)
-        PR->>PR: dispatch diagnose_pr_stuck (LLM verdict)
-        alt decomposable + promotion PR
-            Note over PR: #465 destructive guard:<br/>suppress close, escalate HITL
-        else genuine conflict
-            PR->>PR: escalate HITL (console.warn only)
+    alt kind ∈ IGNORE_KINDS (dependency_unsatisfied, …)
+        Note over FR: protoMaker self-heals — ignore
+    else kind ∈ HITL_KINDS (cost_exceeded, quota, …)
+        FR->>Bus: operator.message.request (urgency=high)
+        Bus->>OR: deliver → Discord DM
+    else everything else (ci_failure, merge_conflict, …)
+        alt attempts < MAX_ATTEMPTS (3) and outside cooldown
+            FR->>FR: attempts += 1, lastAttemptAt = now
+            FR->>Bus: agent.skill.request<br/>{ skill: unblock_feature, targets: ["roxy"] }
+            Bus->>SD: deliver
+            SD->>RX: execute (A2AExecutor)
+            RX-->>RX: investigate + smallest unblocking action / crisp ask
+        else attempts ≥ MAX_ATTEMPTS
+            FR->>Bus: operator.message.request (escalate ONCE)
+            Bus->>OR: deliver → Discord DM
+        else within COOLDOWN_MS (5min)
+            Note over FR: skip — too soon since last attempt
         end
     end
+
+    Note over PM,FR: later, when the feature recovers
+    PM->>Bus: feature.unblocked
+    Bus->>FR: clears per-feature tracker (fresh budget on re-block)
 ```
 
 ---
@@ -156,17 +188,16 @@ sequenceDiagram
 
 All 20 are `FunctionExecutor` registrations with priority=5, fire-and-forget, no LLM.
 
-### PR remediator
+### Feature remediation
 
-| Skill | Topic published | Handler in `pr-remediator.ts` |
-|---|---|---|
-| `action.pr_update_branch` | `pr.remediate.update_branch` | line 1006+ |
-| `action.pr_merge_ready` | `pr.remediate.merge_ready` | line 985+ |
-| `action.pr_fix_ci` | `pr.remediate.fix_ci` | line 750+ |
-| `action.pr_address_feedback` | `pr.remediate.address_feedback` | line 750+ |
-| `action.pr_backmerge` | `pr.backmerge.dispatch` | line 6+ |
+| Topic | Published by | Subscribed by | File |
+|---|---|---|---|
+| `feature.blocked` | protoMaker automode (via `POST /publish`) | FeatureRemediationPlugin | `lib/plugins/feature-remediation.ts:80` |
+| `feature.unblocked` | protoMaker automode (via `POST /publish`) | FeatureRemediationPlugin | `lib/plugins/feature-remediation.ts:82` |
+| `agent.skill.request` (`skill: unblock_feature`, `targets: ["roxy"]`) | FeatureRemediationPlugin | SkillDispatcher → Roxy A2AExecutor | `lib/plugins/feature-remediation.ts:150` |
+| `operator.message.request` | FeatureRemediationPlugin (HITL_KINDS + exhaustion) | OperatorRoutingPlugin | `lib/plugins/feature-remediation.ts:185` |
 
-PrRemediatorSkillExecutorPlugin maps skill→topic; PrRemediatorPlugin subscribes to all five.
+`feature.blocked` payload (`FeatureBlockedPayload`): `{ featureId, projectSlug?, projectPath?, featureTitle?, kind?, reason?, prNumber?, branchName?, retryCount?, retryable?, failureCategory?, detail? }`. `featureId` is required; `kind` drives the routing.
 
 ---
 
@@ -174,7 +205,7 @@ PrRemediatorSkillExecutorPlugin maps skill→topic; PrRemediatorPlugin subscribe
 
 Lives at [AgentFleetHealthPlugin._record:281–334](../../src/plugins/agent-fleet-health-plugin.ts). Detail in [chokepoint-invariants](chokepoint-invariants.md).
 
-Summary: `pr-remediator`, `goap`, `user` are recognized synthetic actors. Their outcomes go into `systemActors[]` bucket (not `agents[]`) so they don't inflate `agentCount` or skew `maxFailureRate1h`.
+Summary: synthetic actors like `feature-remediation`, `user` are recognized and their outcomes go into the `systemActors[]` bucket (not `agents[]`) so they don't inflate `agentCount` or skew `maxFailureRate1h`.
 
 ---
 
@@ -209,32 +240,39 @@ src/plugins/fleet-alerts-evaluator-plugin.ts
 
 ---
 
-## PR remediator state machine
+## Feature-remediation state machine
 
-PrRemediatorPlugin (`lib/plugins/pr-remediator.ts`) maintains in-memory `inFlight` Map per PR:
+`FeatureRemediationPlugin` (`lib/plugins/feature-remediation.ts`) maintains an in-memory `tracked` Map keyed by `{projectSlug|projectPath}::{featureId}`:
 
 ```
-InFlightEntry {
-  attemptCount,
-  escalated,
-  diagnostics?,
-  …
+Tracked {
+  attempts,        // auto-remediations dispatched so far
+  lastAttemptAt,   // for cooldown
+  lastSeenAt,      // for the TTL sweep
+  escalated,       // one-shot HITL flag
 }
 ```
 
-Key transitions ([pr-remediator.ts:604+](../../lib/plugins/pr-remediator.ts)):
-- Fresh PR → enter inFlight, attempt = 0
-- Each `pr.remediate.*` consume → attempt += 1, try GitHub mutation
-- Attempt count ≥ `MAX_ATTEMPTS_PER_PR` (3) → mark escalated, emit HITL (see gap in [flow-hitl](flow-hitl.md))
-- 422 conflict on `update_branch` after 2 attempts → dispatch `diagnose_pr_stuck` for LLM verdict
-- Verdict `genuine` → immediate HITL
-- Verdict `decomposable` + promotion PR → suppress close, HITL (defense-in-depth #465)
+Constants: `MAX_ATTEMPTS = 3`, `COOLDOWN_MS = 5min`, `ENTRY_TTL_MS = 1h` (sweep interval that drops stale trackers).
+
+Routing on `feature.blocked` ([feature-remediation.ts:101](../../lib/plugins/feature-remediation.ts)):
+
+- **`kind` ∈ IGNORE_KINDS** (`dependency_unsatisfied`, `external_dependency_unsatisfied`) → ignored; protoMaker self-heals on stale deps. No tracker entry created.
+- **`kind` ∈ HITL_KINDS** (`cost_exceeded`, `runtime_exceeded`, `quota`, `rate_limit`, `worktree_safety`) → escalate directly to the operator (`urgency: high`); no auto-action can help.
+- **everything else** (`ci_failure`, `merge_conflict`, `changes_requested`, `retries_exhausted`, unknown):
+  - `attempts ≥ MAX_ATTEMPTS (3)` → escalate ONCE to the operator, then stay quiet.
+  - within `COOLDOWN_MS (5min)` of the last attempt → skip.
+  - otherwise → `attempts += 1`, dispatch Roxy `unblock_feature` with the blocked-feature context (`targets: ["roxy"]`, `systemActor: "feature-remediation"`).
+- **`feature.unblocked`** → delete the tracker, so a feature that recovers and later re-blocks gets a fresh budget.
+- The escalation is one-shot per tracker (`escalated` flag) — bottlenecks-are-growth: a stuck loop becomes a single HITL signal, never silent infinite retry.
 
 ---
 
 ## Failure modes & gotchas
 
-- **Live CI re-check before fix_ci escalation** ([line 821–830](../../lib/plugins/pr-remediator.ts)) — before emitting HITL for "stuck on CI", pr-remediator hits GitHub live API to confirm CI is still red. If it flipped green between snapshot and escalation, the escalation is silently dropped. Prevents stale-snapshot false alarms.
+- **One escalation per blocked feature** — `Tracked.escalated` is a one-shot flag. Once a feature escalates (either via HITL_KINDS or exhaustion), no further operator DMs fire for it until `feature.unblocked` clears the tracker. Acceptable today; revisit if HITL becomes a queue.
+- **Trackers are in-memory** — a restart drops all per-feature attempt counts. A feature blocked across a restart starts fresh at `attempts = 0`. The `ENTRY_TTL_MS` sweep also drops trackers idle for >1h, intentionally granting a fresh budget on a much-later re-block.
+- **`feature.blocked` without `featureId` is dropped** ([feature-remediation.ts:103](../../lib/plugins/feature-remediation.ts)) with a `console.warn`. protoMaker must always include it.
 - **Alert thresholds are hard-coded in source** — `WINDOW_MS = 24h`, `MAX_RECENT_FAILURES = 10`. No env override. Changing these requires a rebuild.
 - **Cost calculation depends on `MODEL_RATES`** ([lib/types/budget.ts](../../lib/types/budget.ts)) — hard-coded model price table. When LiteLLM gateway adds a new model, this table must be updated or `costUsd` is zero for that model.
 - **Outcome attribution is write-time, not read-time** ([line 281](../../src/plugins/agent-fleet-health-plugin.ts)) — `systemActor` is bucketed *as outcomes arrive*. If `ExecutorRegistry` enrolls a new agent later, prior outcomes for that name stay in `systemActors[]`. Restart required to re-bucket.
@@ -243,7 +281,7 @@ Key transitions ([pr-remediator.ts:604+](../../lib/plugins/pr-remediator.ts)):
 
 ## Related
 
-- [chokepoint-invariants](chokepoint-invariants.md) — #459 synthetic actor filter, #465 destructive verdict guard
-- [flow-hitl](flow-hitl.md) — the escalation path (with the wire-incomplete gap)
+- [chokepoint-invariants](chokepoint-invariants.md) — #459 synthetic actor filter
+- [flow-hitl](flow-hitl.md) — the escalation path (feature-remediation + dispatch-drop-escalator)
 - [flow-agent-runtime-telemetry](flow-agent-runtime-telemetry.md) — what feeds the snapshot
 - [flow-dashboard](flow-dashboard.md) — how the snapshot is rendered

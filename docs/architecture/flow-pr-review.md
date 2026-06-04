@@ -199,6 +199,6 @@ Note this is separate from #437 cooldown (which is per-skill-per-repo and 30s) �
 ## Related
 
 - [flow-inbound-message](flow-inbound-message.md) — the underlying transport
-- [chokepoint-invariants](chokepoint-invariants.md) — #465 destructive-verdict guard, which sits inside `pr-remediator` (not Quinn), but related to the verdict pattern
-- [flow-alert-remediator](flow-alert-remediator.md) — PR remediator handles `update_branch` / `fix_ci` / `address_feedback` actions that follow up on review verdicts
+- [chokepoint-invariants](chokepoint-invariants.md) — #465 destructive-verdict guard (retired; it lived in the deleted pr-remediator), kept as history of the verdict-guard pattern
+- [flow-alert-remediator](flow-alert-remediator.md) — feature remediation: protoMaker detects stuck PRs as blocked features (`feature.blocked`) and `FeatureRemediationPlugin` routes them to Roxy `unblock_feature` / HITL
 - [flow-dashboard](flow-dashboard.md) — PR-1/-2/-3 tiles

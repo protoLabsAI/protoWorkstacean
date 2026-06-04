@@ -46,13 +46,16 @@ flowchart TD
         SKB["SkillBrokerPlugin\nworkspace/agents.yaml\n→ A2AExecutor"]
         ASE["AlertSkillExecutorPlugin\n→ FunctionExecutor for alert.*"]
         CSE["CeremonySkillExecutorPlugin\n→ FunctionExecutor for ceremony.*"]
-        PSE["PrRemediatorSkillExecutorPlugin\n→ FunctionExecutor for action.pr_*"]
+    end
+
+    subgraph Remediation["Auto-remediation (bus subscriber)"]
+        FR["FeatureRemediationPlugin\nfeature.blocked → ignore / HITL /\nRoxy unblock_feature (bounded)"]
     end
 
     subgraph Executors["Executor implementations"]
         DAE["DeepAgentExecutor\nLangGraph createReactAgent\nin-process (Ava, protoBot)"]
-        A2AE["A2AExecutor\nHTTP JSON-RPC 2.0 + SSE\n(Quinn, protoMaker, Researcher, Jon, protoPen)"]
-        FE["FunctionExecutor\ninline function\n(alert.*, ceremony.*, action.pr_*)"]
+        A2AE["A2AExecutor\nHTTP JSON-RPC 2.0 + SSE\n(Quinn, protoMaker, Researcher, Jon, protoPen, Roxy)"]
+        FE["FunctionExecutor\ninline function\n(alert.*, ceremony.*)"]
     end
 
     GH --> GHP
@@ -74,7 +77,10 @@ flowchart TD
 
     ART -- "register DeepAgentExecutor" --> REG
     SKB -- "register A2AExecutor" --> REG
-    ASE & CSE & PSE -- "register FunctionExecutor" --> REG
+    ASE & CSE -- "register FunctionExecutor" --> REG
+
+    BUS -- "feature.blocked / feature.unblocked\n(from protoMaker via /publish)" --> FR
+    FR -- "agent.skill.request\n(unblock_feature → Roxy)" --> BUS
 ```
 
 ---
@@ -91,14 +97,14 @@ This constraint is what makes the system composable. Adding Discord support does
 
 The executor layer is the unified dispatch path for all agent skill calls. It separates registration from dispatch:
 
-- **Registrars** (`AgentRuntimePlugin`, `SkillBrokerPlugin`, plus the function-executor registrars for `alert.*` / `ceremony.*` / `action.pr_*`) — register executors into `ExecutorRegistry` at `install()` time. No bus subscriptions.
+- **Registrars** (`AgentRuntimePlugin`, `SkillBrokerPlugin`, plus the function-executor registrars for `alert.*` / `ceremony.*`) — register executors into `ExecutorRegistry` at `install()` time. No bus subscriptions.
 - **Dispatcher** (`SkillDispatcherPlugin`) — sole subscriber to `agent.skill.request`, delegates to the registry.
 
 ```
 agent.skill.request
   → SkillDispatcherPlugin
-    ├── chokepoint invariants (cooldown, target-registry guard,
-    │   synthetic-actor filter, destructive-verdict guard)
+    ├── chokepoint invariants (cooldown, target-registry guard;
+    │   synthetic-actor filter lives downstream at fleet-health)
     └── ExecutorRegistry.resolve(skill, targets?)
        1. Named target: any registration whose agentName ∈ targets[]
        2. Skill match: highest priority registration where skill matches

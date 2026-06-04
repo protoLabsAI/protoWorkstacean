@@ -238,7 +238,9 @@ skills:
     keywords: [diagnose, conflict, stuck, merge, rebase, pr, dirty]
     # Structured output: after the analysis loop, a forced submit_diagnose_pr_stuck
     # tool call distills the verdict into this schema, validated + emitted as a
-    # typed DataPart (resultMime) the pr-remediator reads directly — no prose parsing.
+    # typed DataPart (resultMime) a remediation consumer reads directly — no prose
+    # parsing. (PR-pipeline remediation now flows through feature.blocked →
+    # FeatureRemediationPlugin → Roxy unblock_feature; the old pr-remediator is gone.)
     resultMime: application/vnd.protolabs.pr-diagnosis-v1+json
     outputSchema:
       type: object

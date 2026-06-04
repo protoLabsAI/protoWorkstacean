@@ -10,7 +10,7 @@ That's the spine. Everything else extends it.
 
 - **In-process agents** (DeepAgent / LangGraph): Ava, protoBot, Quinn
 - **Remote agents** (A2A): protoMaker, protoPen
-- **Integration plugins**: Discord, GitHub, Linear, Google Workspace, linear-protomaker-bridge, pr-remediator
+- **Integration plugins**: Discord, GitHub, Linear, Google Workspace, linear-protomaker-bridge, feature-remediation (feature.blocked → ignore / HITL / Roxy unblock_feature), issue-closer (feature.completed → close originating GitHub issue)
 - **Scheduling**: SchedulerPlugin (yaml-defined crons), CeremonyPlugin (named, observable, hot-reloadable rituals)
 - **Observability**: AgentFleetHealth (24h rollups → health-weighted dispatch), Langfuse OTEL tracing, cost-v1 / confidence-v1 / blast-v1 / hitl-mode-v1 A2A extensions
 - **Operator routing**: OperatorRoutingPlugin abstracts the transport (Discord DM today; SMS / Signal / push future)

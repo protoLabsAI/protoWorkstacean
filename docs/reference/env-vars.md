@@ -145,8 +145,6 @@ These variables are read via `process.env` somewhere in `src/` or `lib/` but are
 | `A2A_INPUT_REQUIRED_TTL_MS` | `src/api/human-input.ts` |
 | `A2A_STREAM_HEARTBEAT_MS` | `src/api/a2a-server.ts` |
 | `AUTOMAKER_API_KEY` | `lib/plugins/protomaker-board-bridge.ts`, `src/plugins/project-registry.ts` |
-| `BACKMERGE_WORKFLOW_FILE` | `lib/plugins/pr-remediator.ts` |
-| `BACKMERGE_WORKFLOW_REF` | `lib/plugins/pr-remediator.ts` |
 | `CLAWPATCH_CHECKOUT_ROOT` | `lib/checkout-cache.ts` |
 | `CLAWPATCH_REPO_PATH_MAP` | `src/api/clawpatch.ts` |
 | `CLAWPATCH_STATE_ROOT` | `src/api/clawpatch.ts` |

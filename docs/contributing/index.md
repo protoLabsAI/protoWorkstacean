@@ -10,7 +10,7 @@ Contributions to protoWorkstacean are welcome. This section covers how to get st
 |-----------------|------------|
 | `src/index.ts` | Application bootstrap — wires all plugins, starts the HTTP server |
 | `src/executor/` | Executor layer: `IExecutor`, `ExecutorRegistry`, `SkillDispatcherPlugin`, executor implementations |
-| `src/plugins/` | Built-in plugins (CeremonyPlugin, AgentFleetHealth, alert/ceremony/pr-remediator skill executors) |
+| `src/plugins/` | Built-in plugins (CeremonyPlugin, AgentFleetHealth, alert/ceremony skill executors). Feature remediation + issue close-the-loop live in `lib/plugins/` (`feature-remediation.ts`, `issue-closer.ts`) |
 | `src/router/` | `RouterPlugin` + `SkillResolver` + `ProjectEnricher` |
 | `src/agent-runtime/` | `AgentRuntimePlugin`, `AgentDefinitionLoader` (registers `DeepAgentExecutor` instances) |
 | `src/api/` | HTTP route modules (one per concern) |
