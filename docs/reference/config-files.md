@@ -33,8 +33,8 @@ _This is a reference doc. It covers all `workspace/*.yaml` schemas and environme
 | `GITHUB_TOKEN` | Yes | PAT — enables the plugin; posts comment replies |
 | `GITHUB_WEBHOOK_SECRET` | Recommended | Validates `X-Hub-Signature-256` on inbound payloads |
 | `GITHUB_WEBHOOK_PORT` | No | Webhook HTTP server port (default: `8082`) |
-| `QUINN_APP_ID` | For bot comments | GitHub App ID — Quinn's responses post as `protoquinn[bot]` |
-| `QUINN_APP_PRIVATE_KEY` | For bot comments | GitHub App private key (PKCS#1 PEM) |
+| `GITHUB_APP_ID` | For bot comments | GitHub App ID — Quinn's responses post as `protoquinn[bot]` |
+| `GITHUB_APP_PRIVATE_KEY` | For bot comments | GitHub App private key (PKCS#1 PEM) |
 
 ### Discord Plugin
 
@@ -144,6 +144,21 @@ skills:
 **`model`** is any alias the LiteLLM gateway recognises. See your gateway config for the full alias list.
 
 ---
+
+## workspace/fleet.yaml
+
+Maps abstract **roles** to concrete agents — the one file a fork edits to re-skin the fleet without touching code. Loaded by `lib/fleet/fleet-config.ts`; the dispatch/review/remediation paths read these roles instead of hardcoding agent names. All keys default to the proto-labs fleet's values, so an unmodified deploy needs no fleet.yaml.
+
+```yaml
+roles:
+  helm: ava          # default target for untargeted A2A requests + the OpenAI-compat chat alias
+  reviewer: quinn    # runs PR review
+  remediator: roxy   # dispatched to unblock a blocked feature (feature.blocked)
+github:
+  reviewerBotLogins: [protoquinn, "protoquinn[bot]"]   # reviewer's own GitHub identities (review-loop matching)
+```
+
+A fork also sets the GitHub App credentials via env: `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` (the agent's reviews/comments/issue-closes post as that App's bot).
 
 ## workspace/agents.yaml
 

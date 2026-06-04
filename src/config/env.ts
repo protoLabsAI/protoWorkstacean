@@ -71,10 +71,9 @@ export const EnvSchema = z
 
     // GitHub
     GITHUB_TOKEN:          z.string().optional(),
-    /** Legacy alias — prefer QUINN_APP_ID. */
-    GITHUB_APP_ID:         z.string().optional(),
-    QUINN_APP_ID:          z.string().optional(),
-    QUINN_APP_PRIVATE_KEY: z.string().optional(),
+    /** GitHub App credentials — the agent's reviews/comments/issue-closes post as the App's bot identity. */
+    GITHUB_APP_ID:          z.string().optional(),
+    GITHUB_APP_PRIVATE_KEY: z.string().optional(),
     GITHUB_WEBHOOK_SECRET: z.string().optional(),
     GITHUB_WEBHOOK_PORT:   z.string().optional(),
 

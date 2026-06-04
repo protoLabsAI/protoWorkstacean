@@ -47,7 +47,7 @@ export async function closeIssue(
   const auth = opts.authGetter ?? makeGitHubAuth();
   if (!auth) {
     throw new Error(
-      `[github-issues] no GitHub auth configured (set QUINN_APP_ID+QUINN_APP_PRIVATE_KEY or GITHUB_TOKEN) — cannot close ${owner}/${name}#${issueNumber}`,
+      `[github-issues] no GitHub auth configured (set GITHUB_APP_ID+GITHUB_APP_PRIVATE_KEY or GITHUB_TOKEN) — cannot close ${owner}/${name}#${issueNumber}`,
     );
   }
   const doFetch = opts.fetchImpl ?? fetch;

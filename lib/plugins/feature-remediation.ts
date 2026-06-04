@@ -25,6 +25,7 @@
  */
 
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
+import { getFleetConfig } from "../fleet/fleet-config.ts";
 
 export interface FeatureBlockedPayload {
   projectSlug?: string;
@@ -155,7 +156,7 @@ export class FeatureRemediationPlugin implements Plugin {
       payload: {
         skill: "unblock_feature",
         content: lines.join("\n"),
-        targets: ["roxy"],
+        targets: [getFleetConfig().remediator],
         meta: {
           systemActor: "feature-remediation",
           featureId: p.featureId,

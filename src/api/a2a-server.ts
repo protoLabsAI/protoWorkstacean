@@ -41,6 +41,7 @@ import { textPart, partText, textArtifact, dataArtifact, emitToolCall, type Tool
 import type { Route, ApiContext } from "./types.ts";
 import type { BusMessage } from "../../lib/types.ts";
 import { buildAgentCard } from "./agent-card.ts";
+import { getFleetConfig } from "../../lib/fleet/fleet-config.ts";
 import { SqlitePushNotificationStore } from "../storage/push-notification-store.ts";
 
 /**
@@ -138,14 +139,15 @@ class BusAgentExecutor implements AgentExecutor {
     const explicitTargets = Array.isArray(metadata.targets)
       ? (metadata.targets as unknown[]).filter((v): v is string => typeof v === "string")
       : [];
-    // This endpoint (ava.proto-labs.ai/a2a) defaults to Ava when no target is
-    // specified. The orchestrator agent card aggregates the full fleet's
-    // skills, but the routing default must be Ava — she's the helm. Callers
-    // route elsewhere by passing explicit `metadata.targets`.
+    // Untargeted requests default to the fleet's helm agent (the orchestrator
+    // card aggregates the whole fleet's skills, but routing needs one default).
+    // The helm is config-driven (workspace/fleet.yaml), not hardcoded — #798.
+    // Callers route elsewhere via explicit `metadata.targets`.
     let targets: string[];
     if (explicitTargets.length === 0) {
-      targets = ["ava"];
-      console.log("[a2a-server] no target specified, defaulting to [ava] for message/send");
+      const helm = getFleetConfig().helm;
+      targets = [helm];
+      console.log(`[a2a-server] no target specified, defaulting to helm [${helm}] for message/send`);
     } else {
       targets = explicitTargets;
     }

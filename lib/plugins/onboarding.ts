@@ -23,7 +23,7 @@
  *   msg.reply.topic                  — confirmation text back to caller
  *
  * Env vars:
- *   QUINN_APP_ID, QUINN_APP_PRIVATE_KEY, GITHUB_TOKEN
+ *   GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_TOKEN
  *   GITHUB_WEBHOOK_SECRET
  *   WORKSTACEAN_PUBLIC_URL  base URL for webhook registration (e.g. https://ws.example.com)
  */
@@ -233,7 +233,7 @@ export class OnboardingPlugin implements Plugin {
   private async _stepGitHubWebhook(req: OnboardRequest): Promise<StepResult> {
     const getToken = makeGitHubAuth();
     if (!getToken) {
-      return { status: "skip", detail: "No GitHub auth configured (QUINN_APP_ID or GITHUB_TOKEN required)" };
+      return { status: "skip", detail: "No GitHub auth configured (GITHUB_APP_ID or GITHUB_TOKEN required)" };
     }
 
     const publicUrl = process.env.WORKSTACEAN_PUBLIC_URL;

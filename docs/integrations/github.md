@@ -24,14 +24,14 @@ Receives GitHub webhook events and routes `@mention` comments to the agent fleet
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GITHUB_TOKEN` | Yes* | PAT used to post comment replies (enables the plugin) |
-| `QUINN_APP_ID` | No | GitHub App ID — preferred over the PAT for write operations (comments, PR ops, issue closure) so they author as `@protoquinn[bot]` |
-| `QUINN_APP_PRIVATE_KEY` | No | GitHub App PEM private key (newlines as `\n`). Must be set together with `QUINN_APP_ID` |
+| `GITHUB_APP_ID` | No | GitHub App ID — preferred over the PAT for write operations (comments, PR ops, issue closure) so they author as `@protoquinn[bot]` |
+| `GITHUB_APP_PRIVATE_KEY` | No | GitHub App PEM private key (newlines as `\n`). Must be set together with `GITHUB_APP_ID` |
 | `GITHUB_WEBHOOK_SECRET` | Recommended | Validates `X-Hub-Signature-256` on inbound payloads |
 | `GITHUB_WEBHOOK_PORT` | No | Port for the webhook HTTP server (default: `8082`) |
 
 The plugin is automatically skipped if `GITHUB_TOKEN` is not set.
 
-\* Write operations resolve auth via the shared `makeGitHubAuth` (`lib/github-auth.ts`): the Quinn GitHub App when both `QUINN_APP_ID` and `QUINN_APP_PRIVATE_KEY` are set, otherwise the `GITHUB_TOKEN` PAT. Setting exactly one of the App pair is a misconfiguration and fails loud rather than silently writing as the operator's PAT identity.
+\* Write operations resolve auth via the shared `makeGitHubAuth` (`lib/github-auth.ts`): the Quinn GitHub App when both `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are set, otherwise the `GITHUB_TOKEN` PAT. Setting exactly one of the App pair is a misconfiguration and fails loud rather than silently writing as the operator's PAT identity.
 
 ### 2. github.yaml
 
@@ -151,7 +151,7 @@ The portfolio pipeline files GitHub issues as the spine (Ava fans out per-repo i
 
 **Best-effort.** A close failure is logged loudly but never disturbs other `feature.completed` consumers (e.g. the Discord feature-notifier on the same event). `feature.failed` is intentionally **not** handled — a failed or escalated feature's issue must stay open for attention.
 
-**Auth.** Like PR operations, `closeIssue` authenticates via the shared `makeGitHubAuth` (`lib/github-auth.ts`): the Quinn GitHub App when `QUINN_APP_ID` + `QUINN_APP_PRIVATE_KEY` are set, otherwise the `GITHUB_TOKEN` PAT fallback. The plugin is registered in `src/index.ts` only when GitHub auth is present. A missing comment is non-fatal (logged, then the close proceeds); a failed PATCH throws so the caller surfaces it.
+**Auth.** Like PR operations, `closeIssue` authenticates via the shared `makeGitHubAuth` (`lib/github-auth.ts`): the Quinn GitHub App when `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` are set, otherwise the `GITHUB_TOKEN` PAT fallback. The plugin is registered in `src/index.ts` only when GitHub auth is present. A missing comment is non-fatal (logged, then the close proceeds); a failed PATCH throws so the caller surfaces it.
 
 ## Org Webhook: repository.created
 

@@ -18,8 +18,8 @@ Quinn reviews pull requests and issues via GitHub webhook. It uses codebase-wide
 | `GITHUB_TOKEN` | Yes | PAT — enables the GitHub plugin and posts comment replies |
 | `GITHUB_WEBHOOK_SECRET` | Recommended | Validates `X-Hub-Signature-256` on inbound payloads |
 | `GITHUB_WEBHOOK_PORT` | No | Webhook HTTP server port (default: `8082`) |
-| `QUINN_APP_ID` | For bot comments | GitHub App ID — Quinn posts as `protoquinn[bot]` |
-| `QUINN_APP_PRIVATE_KEY` | For bot comments | GitHub App private key (PKCS#1 PEM) |
+| `GITHUB_APP_ID` | For bot comments | GitHub App ID — Quinn posts as `protoquinn[bot]` |
+| `GITHUB_APP_PRIVATE_KEY` | For bot comments | GitHub App private key (PKCS#1 PEM) |
 | `QDRANT_URL` | For vector context | `http://qdrant:6333` |
 | `OLLAMA_URL` | For embeddings | `http://ollama:11434` |
 | `OLLAMA_EMBED_MODEL` | For embeddings | `nomic-embed-text` |

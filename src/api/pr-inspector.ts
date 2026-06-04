@@ -3,7 +3,7 @@
  *
  * Wraps the GitHub REST + GraphQL APIs behind one action-shaped endpoint.
  * Authenticates as `@protoquinn[bot]` via the GitHub App credentials
- * (`QUINN_APP_ID` + `QUINN_APP_PRIVATE_KEY`) — reuses the same
+ * (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`) — reuses the same
  * shared `makeGitHubAuth` helper (`lib/github-auth.ts`). Falls back to `GITHUB_TOKEN`
  * when the App credentials aren't set.
  *
@@ -108,7 +108,7 @@ async function ghFetch(
   init: RequestInit = {},
 ): Promise<Response> {
   const getToken = resolveAuth();
-  if (!getToken) throw new Error("no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)");
+  if (!getToken) throw new Error("no GitHub credentials (GITHUB_APP_* or GITHUB_TOKEN)");
   const token = await getToken(owner, name);
   return fetch(url, {
     ...init,
@@ -391,7 +391,7 @@ async function coderabbitThreads(owner: string, name: string, pr: number): Promi
 
 async function diffSummary(owner: string, name: string, pr: number): Promise<string> {
   const getToken = resolveAuth();
-  if (!getToken) throw new Error("no GitHub credentials (QUINN_APP_* or GITHUB_TOKEN)");
+  if (!getToken) throw new Error("no GitHub credentials (GITHUB_APP_* or GITHUB_TOKEN)");
   const token = await getToken(owner, name);
   const resp = await fetch(`https://api.github.com/repos/${owner}/${name}/pulls/${pr}`, {
     signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS),
