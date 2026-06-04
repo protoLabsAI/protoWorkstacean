@@ -18,6 +18,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { runMigrations } from "../../lib/sqlite-migrate.ts";
 
 export interface PersistedTask {
   correlationId: string;
@@ -64,23 +65,33 @@ export class TaskTrackerStore {
       this.db.exec("PRAGMA journal_mode=WAL;");
       this.db.exec("PRAGMA synchronous=NORMAL;");
       this.db.exec("PRAGMA busy_timeout=5000;");
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS tracked_tasks (
-          correlation_id   TEXT PRIMARY KEY,
-          task_id          TEXT NOT NULL,
-          agent_name       TEXT NOT NULL,
-          skill_name       TEXT,
-          dispatcher_agent TEXT,
-          reply_topic      TEXT NOT NULL,
-          parent_id        TEXT,
-          registered_at    INTEGER NOT NULL,
-          poll_interval_ms INTEGER NOT NULL,
-          callback_token   TEXT,
-          source_interface TEXT,
-          source_channel_id TEXT,
-          source_user_id   TEXT
-        );
-      `);
+      // Versioned schema (#796). v1 is the baseline; future changes append v2+
+      // with ALTER statements so an existing prod DB migrates deterministically
+      // instead of silently no-op'ing a CREATE TABLE IF NOT EXISTS. This is the
+      // reference pattern other stores adopt on their next schema change.
+      runMigrations(this.db, [
+        {
+          version: 1,
+          up: (d) =>
+            d.exec(`
+              CREATE TABLE IF NOT EXISTS tracked_tasks (
+                correlation_id   TEXT PRIMARY KEY,
+                task_id          TEXT NOT NULL,
+                agent_name       TEXT NOT NULL,
+                skill_name       TEXT,
+                dispatcher_agent TEXT,
+                reply_topic      TEXT NOT NULL,
+                parent_id        TEXT,
+                registered_at    INTEGER NOT NULL,
+                poll_interval_ms INTEGER NOT NULL,
+                callback_token   TEXT,
+                source_interface TEXT,
+                source_channel_id TEXT,
+                source_user_id   TEXT
+              );
+            `),
+        },
+      ]);
       console.log(`[task-store] Ready at ${this.dbPath}`);
     } catch (err) {
       console.error("[task-store] Init failed — task persistence disabled (in-memory only):", err);
