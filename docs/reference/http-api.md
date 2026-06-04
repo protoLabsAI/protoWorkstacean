@@ -248,7 +248,7 @@ Each row links to the route definition as `path:line` so jumping from this index
 | Method | Path | Source | Description |
 |---|---|---|---|
 | `GET` | `/health` | `src/api/operations.ts` | Cheap liveness — the process is up. Always 200. |
-| `GET` | `/ready` | `src/api/operations.ts` | Readiness — gates on local invariants (sqlite open). 200 `ready` / 503 `unready`. The LLM gateway is probed and reported in the body but does **not** gate readiness (an external outage shouldn't restart-loop the container; agent runs fail fast instead). The prod compose `healthcheck` polls this. |
+| `GET` | `/ready` | `src/api/operations.ts` | Readiness — gates on local invariants (sqlite open). 200 `ready` / 503 `unready`. The LLM gateway is probed for **reachability** (any HTTP response counts — LiteLLM's `/health` is auth-gated and returns 401, which still means "up") and reported in the body, but does **not** gate readiness (an external outage shouldn't restart-loop the container; agent runs fail fast instead). The prod compose `healthcheck` polls this. |
 | `GET` | `/metrics` | `src/api/operations.ts` | Prometheus text-exposition metrics (`lib/metrics.ts`): `workstacean_dispatch_total{skill,success}`, `workstacean_dispatch_duration_ms` histogram, `workstacean_bus_handler_errors_total{plugin}`. Low-cardinality labels only. (#800) |
 
 ### `/publish`
