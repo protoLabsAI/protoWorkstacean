@@ -50,7 +50,7 @@ describe("/publish hardening", () => {
   test("publishes an allowed topic with the key", async () => {
     const bus = new InMemoryEventBus();
     const got: unknown[] = [];
-    bus.subscribe("feature.completed", "t", (m) => got.push(m.payload));
+    bus.subscribe("feature.completed", "t", (m) => { got.push(m.payload); });
     const res = await publishRoute(ctxWithKey(bus)).handler(
       req({ topic: "feature.completed", payload: { featureId: "f1" } }, KEY), {},
     );
