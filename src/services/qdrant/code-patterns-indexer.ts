@@ -10,6 +10,9 @@ import { upsertPoints } from "./client.ts";
 import { COLLECTION_CODE_PATTERNS } from "./collections.ts";
 import { embed } from "../embeddings/ollama-client.ts";
 import type { SymbolContext } from "../codebase/symbol-fetcher.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("code-patterns-indexer");
 
 /**
  * Index symbol contexts into quinn-code-patterns.
@@ -27,7 +30,7 @@ export async function indexCodePatterns(symbolContexts: SymbolContext[]): Promis
       failures++;
       const total = indexed + failures;
       if (total >= 10 && failures / total > 0.1) {
-        console.warn(`[code-patterns-indexer] High embedding failure rate: ${failures}/${total}`);
+        log.warn(`High embedding failure rate: ${failures}/${total}`);
       }
       continue;
     }
@@ -52,7 +55,7 @@ export async function indexCodePatterns(symbolContexts: SymbolContext[]): Promis
     if (success) indexed++;
   }
 
-  console.log(`[code-patterns-indexer] ${indexed} symbol contexts indexed, ${failures} failed`);
+  log.info(`${indexed} symbol contexts indexed, ${failures} failed`);
   return indexed;
 }
 

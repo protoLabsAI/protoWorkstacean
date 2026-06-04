@@ -9,6 +9,9 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { CeremonyOutcome } from "../plugins/CeremonyPlugin.types.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("ceremony-outcomes");
 
 const MAX_OUTCOMES_PER_CEREMONY = 500;
 
@@ -52,10 +55,10 @@ export class CeremonyOutcomesRepository {
           ON ceremony_outcomes(started_at);
       `);
 
-      console.log(`[ceremony-outcomes] DB ready: ${this.dbPath}`);
+      log.info(`DB ready: ${this.dbPath}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[ceremony-outcomes] DB init failed: ${msg}`);
+      log.error("DB init failed", { err: msg });
       this.db = null;
     }
   }
@@ -63,7 +66,7 @@ export class CeremonyOutcomesRepository {
   /** Persist a ceremony outcome. Returns true on success. */
   save(outcome: CeremonyOutcome): boolean {
     if (!this.db) {
-      console.warn("[ceremony-outcomes] DB unavailable — outcome not persisted:", outcome.runId);
+      log.warn("DB unavailable — outcome not persisted", { runId: outcome.runId });
       return false;
     }
 
@@ -107,7 +110,7 @@ export class CeremonyOutcomesRepository {
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[ceremony-outcomes] Save failed for run ${outcome.runId}: ${msg}`);
+      log.error(`Save failed for run ${outcome.runId}`, { err: msg });
       return false;
     }
   }
@@ -154,7 +157,7 @@ export class CeremonyOutcomesRepository {
         error: r.error ?? undefined,
       }));
     } catch (err) {
-      console.error(`[ceremony-outcomes] getRecent failed for ${ceremonyId}:`, err);
+      log.error(`getRecent failed for ${ceremonyId}`, { err });
       return [];
     }
   }

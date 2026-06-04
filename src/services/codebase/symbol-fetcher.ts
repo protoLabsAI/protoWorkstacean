@@ -8,6 +8,9 @@
 
 import type { ExtractedSymbol } from "../diff/symbol-extractor.ts";
 import { HttpClient } from "../http-client.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("symbol-fetcher");
 
 const CONTEXT_LINES = 10; // lines before and after the symbol definition
 
@@ -62,7 +65,7 @@ export async function fetchSymbolContext(
       repo: `${owner}/${repo}`,
     };
   } catch (err) {
-    console.error(`[symbol-fetcher] fetchSymbolContext error for ${filePath}:`, err);
+    log.error(`fetchSymbolContext error for ${filePath}`, { err });
     return null;
   }
 }

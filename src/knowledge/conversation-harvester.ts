@@ -15,6 +15,9 @@
 
 import type { AgentMemory } from "./agent-memory.ts";
 import type { ConversationTurn } from "./conversation-store.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("harvester");
 
 export type Summarizer = (transcript: string) => Promise<string>;
 
@@ -69,7 +72,7 @@ export class ConversationHarvester {
     if (this.timer) return;
     this.timer = setInterval(() => { void this.sweepOnce(); }, this.sweepIntervalMs);
     this.timer.unref?.();
-    console.log(`[harvester] started — maxAge=${Math.round(this.maxAgeMs / 86_400_000)}d sweep=${Math.round(this.sweepIntervalMs / 3_600_000)}h`);
+    log.info(`started — maxAge=${Math.round(this.maxAgeMs / 86_400_000)}d sweep=${Math.round(this.sweepIntervalMs / 3_600_000)}h`);
   }
 
   stop(): void {
@@ -104,11 +107,11 @@ export class ConversationHarvester {
         // Reclaim raw turns regardless — the summary (or empty) is the keeper.
         this.memory.conversations.deleteConversation(conv.contextId);
       } catch (err) {
-        console.warn(`[harvester] failed for ${conv.contextId}: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`failed for ${conv.contextId}`, { err: err instanceof Error ? err.message : String(err) });
         // Leave it in place to retry next sweep.
       }
     }
-    if (harvested > 0) console.log(`[harvester] harvested ${harvested}/${candidates.length} conversation(s) into knowledge`);
+    if (harvested > 0) log.info(`harvested ${harvested}/${candidates.length} conversation(s) into knowledge`);
     return harvested;
   }
 }

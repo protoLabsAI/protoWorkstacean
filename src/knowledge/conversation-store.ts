@@ -19,6 +19,9 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("conversation-store");
 
 export type TurnRole = "user" | "assistant";
 
@@ -75,9 +78,9 @@ export class ConversationStore {
         CREATE INDEX IF NOT EXISTS idx_conversation_meta_activity
           ON conversation_meta(last_activity);
       `);
-      console.log(`[conversation-store] DB ready: ${this.dbPath}`);
+      log.info(`DB ready: ${this.dbPath}`);
     } catch (err) {
-      console.error(`[conversation-store] DB init failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error("DB init failed", { err: err instanceof Error ? err.message : String(err) });
       this.db = null;
     }
   }
@@ -109,7 +112,7 @@ export class ConversationStore {
       });
       tx();
     } catch (err) {
-      console.warn(`[conversation-store] appendTurn failed for ${contextId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`appendTurn failed for ${contextId}`, { err: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -127,7 +130,7 @@ export class ConversationStore {
         .reverse()
         .map((r) => ({ role: r.role === "assistant" ? "assistant" : "user", content: r.content }));
     } catch (err) {
-      console.warn(`[conversation-store] recentTurns failed for ${contextId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`recentTurns failed for ${contextId}`, { err: err instanceof Error ? err.message : String(err) });
       return [];
     }
   }
@@ -174,7 +177,7 @@ export class ConversationStore {
       });
       tx();
     } catch (err) {
-      console.warn(`[conversation-store] deleteConversation failed for ${contextId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`deleteConversation failed for ${contextId}`, { err: err instanceof Error ? err.message : String(err) });
     }
   }
 

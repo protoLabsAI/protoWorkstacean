@@ -19,6 +19,9 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { runMigrations } from "../../lib/sqlite-migrate.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("task-tracker-store");
 
 export interface PersistedTask {
   correlationId: string;
@@ -92,9 +95,9 @@ export class TaskTrackerStore {
             `),
         },
       ]);
-      console.log(`[task-store] Ready at ${this.dbPath}`);
+      log.info(`Ready at ${this.dbPath}`);
     } catch (err) {
-      console.error("[task-store] Init failed — task persistence disabled (in-memory only):", err);
+      log.error("Init failed — task persistence disabled (in-memory only)", { err });
       this.db = null;
     }
   }
@@ -119,7 +122,7 @@ export class TaskTrackerStore {
         $si: t.sourceInterface ?? null, $sc: t.sourceChannelId ?? null, $su: t.sourceUserId ?? null,
       });
     } catch (err) {
-      console.warn(`[task-store] upsert ${t.correlationId} failed:`, err);
+      log.warn(`upsert ${t.correlationId} failed`, { err });
     }
   }
 
@@ -128,7 +131,7 @@ export class TaskTrackerStore {
     try {
       this.db.query("DELETE FROM tracked_tasks WHERE correlation_id = $cid").run({ $cid: correlationId });
     } catch (err) {
-      console.warn(`[task-store] delete ${correlationId} failed:`, err);
+      log.warn(`delete ${correlationId} failed`, { err });
     }
   }
 
@@ -152,7 +155,7 @@ export class TaskTrackerStore {
         sourceUserId: r.source_user_id ?? undefined,
       }));
     } catch (err) {
-      console.warn("[task-store] loadAll failed:", err);
+      log.warn("loadAll failed", { err });
       return [];
     }
   }

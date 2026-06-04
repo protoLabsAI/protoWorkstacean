@@ -21,6 +21,9 @@ import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import * as sqliteVec from "sqlite-vec";
 import { gatewayEmbed as embed } from "../services/embeddings/gateway-embed.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("research-store");
 
 /** What a chunk represents — drives filtering + how the agent reads it back. */
 export type ResearchKind = "paper" | "finding" | "digest" | "model_release";
@@ -96,7 +99,7 @@ export class ResearchStore {
           END;
         `);
       } catch (err) {
-        console.warn(`[research-store] FTS5 unavailable: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn("FTS5 unavailable", { err: err instanceof Error ? err.message : String(err) });
       }
 
       // sqlite-vec — the semantic half. If the extension won't load, we run
@@ -109,18 +112,18 @@ export class ResearchStore {
         // vectors survive ordinary restarts.
         const existing = this.db.query<{ sql: string }, []>(`SELECT sql FROM sqlite_master WHERE name='research_vec'`).get();
         if (existing && !existing.sql.includes(`float[${EMBED_DIM}]`)) {
-          console.warn(`[research-store] research_vec dimension changed → rebuilding as float[${EMBED_DIM}]`);
+          log.warn(`research_vec dimension changed → rebuilding as float[${EMBED_DIM}]`);
           this.db.exec(`DROP TABLE research_vec`);
         }
         this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS research_vec USING vec0(embedding float[${EMBED_DIM}])`);
         this.vecAvailable = true;
       } catch (err) {
-        console.warn(`[research-store] sqlite-vec unavailable — keyword-only: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn("sqlite-vec unavailable — keyword-only", { err: err instanceof Error ? err.message : String(err) });
         this.vecAvailable = false;
       }
-      console.log(`[research-store] DB ready: ${this.dbPath} (vec=${this.vecAvailable}, dim=${EMBED_DIM})`);
+      log.info(`DB ready: ${this.dbPath} (vec=${this.vecAvailable}, dim=${EMBED_DIM})`);
     } catch (err) {
-      console.error(`[research-store] DB init failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error("DB init failed", { err: err instanceof Error ? err.message : String(err) });
       this.db = null;
     }
   }
@@ -146,7 +149,7 @@ export class ResearchStore {
       if (this.vecAvailable) await this._embedInto(id, `${input.title ?? ""}\n${input.content}`.trim());
       return id;
     } catch (err) {
-      console.warn(`[research-store] addChunk failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn("addChunk failed", { err: err instanceof Error ? err.message : String(err) });
       return null;
     }
   }
@@ -158,7 +161,7 @@ export class ResearchStore {
       const blob = new Uint8Array(new Float32Array(vec).buffer);
       this.db!.query(`INSERT INTO research_vec(rowid, embedding) VALUES (?, ?)`).run(id, blob);
     } catch (err) {
-      console.warn(`[research-store] vector insert failed for ${id}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`vector insert failed for ${id}`, { err: err instanceof Error ? err.message : String(err) });
     }
   }
 

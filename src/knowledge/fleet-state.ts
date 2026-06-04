@@ -19,6 +19,9 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("fleet-state");
 
 /** Keep at most this many records per system-actor; older rows are pruned on write. */
 const MAX_PER_AGENT = 500;
@@ -79,10 +82,10 @@ export class FleetStateRepository {
           ON fleet_outcome_records(skill, timestamp);
       `);
 
-      console.log(`[fleet-state] DB ready: ${this.dbPath}`);
+      log.info(`DB ready: ${this.dbPath}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[fleet-state] DB init failed, running in-memory only: ${msg}`);
+      log.warn("DB init failed, running in-memory only", { err: msg });
       this.db = null;
     }
   }
@@ -132,7 +135,7 @@ export class FleetStateRepository {
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[fleet-state] recordOutcome failed: ${msg}`);
+      log.error("recordOutcome failed", { err: msg });
       return false;
     }
   }
@@ -177,7 +180,7 @@ export class FleetStateRepository {
         timestamp: r.timestamp,
       }));
     } catch (err) {
-      console.error("[fleet-state] hydrateRecords failed:", err);
+      log.error("hydrateRecords failed", { err });
       return [];
     }
   }

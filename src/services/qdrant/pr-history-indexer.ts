@@ -11,6 +11,9 @@ import { COLLECTION_PR_HISTORY } from "./collections.ts";
 import { embed } from "../embeddings/ollama-client.ts";
 import type { DiffChunk } from "../diff/chunker.ts";
 import type { PRMetadata, ReviewDecision } from "../github/diff-fetcher.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("pr-history-indexer");
 
 export interface PRHistoryRecord {
   meta: PRMetadata;
@@ -38,7 +41,7 @@ export async function indexPRHistory(record: PRHistoryRecord): Promise<number> {
       failures++;
       const total = indexed + failures;
       if (total >= 10 && failures / total > 0.1) {
-        console.warn(`[pr-history-indexer] High embedding failure rate: ${failures}/${total}`);
+        log.warn(`High embedding failure rate: ${failures}/${total}`);
       }
       continue;
     }
@@ -67,7 +70,7 @@ export async function indexPRHistory(record: PRHistoryRecord): Promise<number> {
     if (success) indexed++;
   }
 
-  console.log(`[pr-history-indexer] PR #${meta.prNumber} ${meta.owner}/${meta.repo}: ${indexed} chunks indexed, ${failures} failed`);
+  log.info(`PR #${meta.prNumber} ${meta.owner}/${meta.repo}: ${indexed} chunks indexed, ${failures} failed`);
   return indexed;
 }
 

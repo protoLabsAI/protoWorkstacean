@@ -19,6 +19,9 @@
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { LangfuseSpanProcessor } from "@langfuse/otel";
 import { setLangfuseTracerProvider } from "@langfuse/tracing";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("langfuse");
 
 let initialized = false;
 let activeProvider: NodeTracerProvider | null = null;
@@ -55,7 +58,7 @@ export async function shutdownLangfuseTracer(): Promise<void> {
   try {
     await activeProvider.shutdown();
   } catch (err) {
-    console.warn("[langfuse] tracer shutdown/flush failed:", err);
+    log.warn("tracer shutdown/flush failed", { err });
   } finally {
     activeProvider = null;
     initialized = false;

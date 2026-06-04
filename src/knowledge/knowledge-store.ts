@@ -19,6 +19,9 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("knowledge-store");
 
 export interface KnowledgeChunk {
   id: number;
@@ -90,12 +93,12 @@ export class KnowledgeStore {
         `);
         this.ftsAvailable = true;
       } catch (err) {
-        console.warn(`[knowledge-store] FTS5 unavailable — using LIKE fallback: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn("FTS5 unavailable — using LIKE fallback", { err: err instanceof Error ? err.message : String(err) });
         this.ftsAvailable = false;
       }
-      console.log(`[knowledge-store] DB ready: ${this.dbPath} (fts5=${this.ftsAvailable})`);
+      log.info(`DB ready: ${this.dbPath} (fts5=${this.ftsAvailable})`);
     } catch (err) {
-      console.error(`[knowledge-store] DB init failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error("DB init failed", { err: err instanceof Error ? err.message : String(err) });
       this.db = null;
     }
   }
@@ -109,7 +112,7 @@ export class KnowledgeStore {
         .run(content, opts.domain ?? "general", opts.heading ?? null, opts.source ?? null, Date.now());
       return Number(res.lastInsertRowid);
     } catch (err) {
-      console.warn(`[knowledge-store] addChunk failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn("addChunk failed", { err: err instanceof Error ? err.message : String(err) });
       return null;
     }
   }
@@ -136,7 +139,7 @@ export class KnowledgeStore {
       }
       return this._likeSearch(tokens, k, domain);
     } catch (err) {
-      console.warn(`[knowledge-store] search failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn("search failed", { err: err instanceof Error ? err.message : String(err) });
       return [];
     }
   }

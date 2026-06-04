@@ -4,6 +4,9 @@
  */
 
 import { HttpClient } from "../http-client.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("diff-fetcher");
 
 const GITHUB_API = "https://api.github.com";
 const USER_AGENT = "protoWorkstacean/1.0";
@@ -65,12 +68,12 @@ export async function fetchPRDiff(meta: PRMetadata, token: string): Promise<stri
       headers: { Accept: "application/vnd.github.diff" },
     });
     if (!resp.ok) {
-      console.error(`[diff-fetcher] fetchPRDiff failed ${resp.status}`);
+      log.error(`fetchPRDiff failed ${resp.status}`);
       return "";
     }
     return await resp.text();
   } catch (err) {
-    console.error("[diff-fetcher] fetchPRDiff error:", err);
+    log.error("fetchPRDiff error", { err });
     return "";
   }
 }
@@ -102,7 +105,7 @@ export async function fetchReviewComments(
       isQuinn: (c.user?.login ?? "").includes("quinn"),
     }));
   } catch (err) {
-    console.error("[diff-fetcher] fetchReviewComments error:", err);
+    log.error("fetchReviewComments error", { err });
     return [];
   }
 }
@@ -132,7 +135,7 @@ export async function fetchReviewDecision(
     if (!decisive.length) return "COMMENT";
     return decisive[0].state === "APPROVED" ? "APPROVE" : "REQUEST_CHANGES";
   } catch (err) {
-    console.error("[diff-fetcher] fetchReviewDecision error:", err);
+    log.error("fetchReviewDecision error", { err });
     return "PENDING";
   }
 }
