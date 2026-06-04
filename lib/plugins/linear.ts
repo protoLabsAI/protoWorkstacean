@@ -46,6 +46,9 @@ import { isProductionLike } from "../runtime-env.ts";
 import { LinearClient, type LinearPriority } from "../linear-client.ts";
 import { getLinearAvaTokenManager } from "../linear/ava-oauth-token-manager.ts";
 import { LinearAgentActivityClient } from "../linear/agent-activity-client.ts";
+import { logger } from "../log.ts";
+
+const log = logger("linear");
 
 // ── Limits ───────────────────────────────────────────────────────────────────
 
@@ -225,7 +228,7 @@ export class LinearPlugin implements Plugin {
           "unauthenticated webhook receiver in production.",
         );
       }
-      console.warn("[linear] LINEAR_WEBHOOK_SECRET not set — signature verification disabled (dev only)");
+      log.warn("LINEAR_WEBHOOK_SECRET not set — signature verification disabled (dev only)");
     }
 
     const dedup = new DeliveryDedup();
@@ -239,12 +242,12 @@ export class LinearPlugin implements Plugin {
     const tokenManager = getLinearAvaTokenManager(dataDir);
     const avaClient = tokenManager.isConfigured() ? new LinearAgentActivityClient(tokenManager) : null;
     this._avaClient = avaClient;
-    if (!avaClient) console.warn("[linear] LINEAR_AVA_CLIENT_ID/_SECRET not set — post-as-Ava disabled (replies fall back to personal key)");
+    if (!avaClient) log.warn("LINEAR_AVA_CLIENT_ID/_SECRET not set — post-as-Ava disabled (replies fall back to personal key)");
 
     // Outbound comments prefer Ava's identity; create/update still use the
     // personal-key client (team/state resolution lives there).
     if (client || avaClient) this._wireOutbound(bus, client, avaClient);
-    else console.warn("[linear] no LINEAR_API_KEY and no Ava OAuth — outbound Linear mutations disabled");
+    else log.warn("no LINEAR_API_KEY and no Ava OAuth — outbound Linear mutations disabled");
 
     if (avaClient) this._wireAgentActivity(bus, avaClient);
 
@@ -270,7 +273,7 @@ export class LinearPlugin implements Plugin {
           if (webhookSecret) {
             const sig = req.headers.get("linear-signature") ?? "";
             if (!verifyLinearSignature(bodyBuffer, sig, webhookSecret)) {
-              console.warn("[linear] Invalid webhook signature — request rejected");
+              log.warn("Invalid webhook signature — request rejected");
               return new Response("Unauthorized", { status: 401 });
             }
           }
@@ -285,7 +288,7 @@ export class LinearPlugin implements Plugin {
           const parsed = LinearWebhookEnvelopeSchema.safeParse(raw);
           if (!parsed.success) {
             const issues = parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ");
-            console.warn(`[linear] Webhook envelope failed schema validation — ${issues}`);
+            log.warn(`Webhook envelope failed schema validation — ${issues}`);
             return new Response(`Bad request: ${issues}`, { status: 400 });
           }
           const payload = parsed.data;
@@ -296,8 +299,8 @@ export class LinearPlugin implements Plugin {
           if (payload.webhookTimestamp != null) {
             const age = Date.now() - payload.webhookTimestamp;
             if (age > FRESHNESS_WINDOW_MS || age < -FRESHNESS_WINDOW_MS) {
-              console.warn(
-                `[linear] Webhook timestamp outside freshness window ` +
+              log.warn(
+                `Webhook timestamp outside freshness window ` +
                 `(age=${age}ms, max=${FRESHNESS_WINDOW_MS}ms) — request rejected`,
               );
               return new Response("Stale webhook timestamp", { status: 400 });
@@ -322,7 +325,7 @@ export class LinearPlugin implements Plugin {
           try {
             await this._handleWebhook(payload, bus);
           } catch (err) {
-            console.error("[linear] Webhook handler error — returning 500 for retry:", err);
+            log.error("Webhook handler error — returning 500 for retry", { err });
             return new Response("Internal handler error", { status: 500 });
           }
 
@@ -332,15 +335,15 @@ export class LinearPlugin implements Plugin {
     } catch (err) {
       // Server start failed (port in use, perms, etc.). Fail-loud but don't
       // block the whole process — outbound subscribers are still useful.
-      console.error(
-        `[linear] Failed to start webhook server on :${port} — inbound disabled. Outbound mutations remain active. Error:`,
-        err,
+      log.error(
+        `Failed to start webhook server on :${port} — inbound disabled. Outbound mutations remain active`,
+        { err },
       );
       this.server = null;
       return;
     }
 
-    console.log(`[linear] Webhook receiver on :${port}/webhooks/linear`);
+    log.info(`Webhook receiver on :${port}/webhooks/linear`);
   }
 
   uninstall(): void {
@@ -353,12 +356,12 @@ export class LinearPlugin implements Plugin {
 
     if (payload.type === "Issue") {
       if (!payload.data) {
-        console.warn(`[linear] Issue webhook missing data field — dropping`);
+        log.warn(`Issue webhook missing data field — dropping`);
         return;
       }
       const issueParsed = LinearIssueDataSchema.safeParse(payload.data);
       if (!issueParsed.success) {
-        console.warn(`[linear] Issue payload failed schema — dropping. ${issueParsed.error.issues.map(i => i.message).join("; ")}`);
+        log.warn(`Issue payload failed schema — dropping. ${issueParsed.error.issues.map(i => i.message).join("; ")}`);
         return;
       }
       this._publishIssue(issueParsed.data, action, bus);
@@ -366,12 +369,12 @@ export class LinearPlugin implements Plugin {
     }
     if (payload.type === "Comment") {
       if (!payload.data) {
-        console.warn(`[linear] Comment webhook missing data field — dropping`);
+        log.warn(`Comment webhook missing data field — dropping`);
         return;
       }
       const commentParsed = LinearCommentDataSchema.safeParse(payload.data);
       if (!commentParsed.success) {
-        console.warn(`[linear] Comment payload failed schema — dropping. ${commentParsed.error.issues.map(i => i.message).join("; ")}`);
+        log.warn(`Comment payload failed schema — dropping. ${commentParsed.error.issues.map(i => i.message).join("; ")}`);
         return;
       }
       this._publishComment(commentParsed.data, action, bus);
@@ -379,12 +382,12 @@ export class LinearPlugin implements Plugin {
     }
     if (payload.type === "Project") {
       if (!payload.data) {
-        console.warn(`[linear] Project webhook missing data field — dropping`);
+        log.warn(`Project webhook missing data field — dropping`);
         return;
       }
       const projectParsed = LinearProjectDataSchema.safeParse(payload.data);
       if (!projectParsed.success) {
-        console.warn(`[linear] Project payload failed schema — dropping. ${projectParsed.error.issues.map(i => i.message).join("; ")}`);
+        log.warn(`Project payload failed schema — dropping. ${projectParsed.error.issues.map(i => i.message).join("; ")}`);
         return;
       }
       this._publishProject(projectParsed.data, action, bus);
@@ -405,7 +408,7 @@ export class LinearPlugin implements Plugin {
     }
     // Unknown envelope type — log loudly + drop. Linear adds new resource
     // types over time; fail visibly so we know to extend the plugin.
-    console.warn(`[linear] Unhandled webhook type "${payload.type}" action="${payload.action}" — dropping (extend LinearPlugin to support)`);
+    log.warn(`Unhandled webhook type "${payload.type}" action="${payload.action}" — dropping (extend LinearPlugin to support)`);
   }
 
   private _publishAgentNotification(action: string, notification: Record<string, unknown>, bus: EventBus): void {
@@ -436,7 +439,7 @@ export class LinearPlugin implements Plugin {
         commentId,
       },
     });
-    console.log(`[linear] agent.${action}${issueId ? ` on issue ${issueId}` : ""}${isMention ? " → Ava (mention)" : ""}`);
+    log.info(`agent.${action}${issueId ? ` on issue ${issueId}` : ""}${isMention ? " → Ava (mention)" : ""}`);
   }
 
   private async _publishAgentSession(
@@ -462,10 +465,10 @@ export class LinearPlugin implements Plugin {
       try {
         assigned = await this._avaClient.isAssignedToAva(issueId);
       } catch (err) {
-        console.warn(`[linear] assignee check failed for issue ${issueId} — allowing (fail-open): ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`assignee check failed for issue ${issueId} — allowing (fail-open): ${err instanceof Error ? err.message : String(err)}`);
       }
       if (!assigned) {
-        console.log(`[linear] agent_session.${action} on issue ${issueId} — not assigned to Ava, dropping (no response)`);
+        log.info(`agent_session.${action} on issue ${issueId} — not assigned to Ava, dropping (no response)`);
         return;
       }
     }
@@ -493,7 +496,7 @@ export class LinearPlugin implements Plugin {
         ? { reply: { topic: `linear.agent_activity.${sessionId}`, format: "markdown" as const } }
         : {}),
     });
-    console.log(`[linear] agent_session.${action}${sessionId ? ` session=${sessionId}` : ""}`);
+    log.info(`agent_session.${action}${sessionId ? ` session=${sessionId}` : ""}`);
   }
 
   // ── Agent-session activities (post AS Ava via actor=app OAuth) ──────────────
@@ -518,7 +521,7 @@ export class LinearPlugin implements Plugin {
         ? "On it — taking a look and routing this."
         : "Got it — looking at that now.";
       void activity.thought(sessionId, ack).catch((err) => {
-        console.error(`[linear] agent-activity thought ack failed (session ${sessionId}): ${err instanceof Error ? err.message : String(err)}`);
+        log.error(`agent-activity thought ack failed (session ${sessionId}): ${err instanceof Error ? err.message : String(err)}`);
       });
     });
 
@@ -536,12 +539,12 @@ export class LinearPlugin implements Plugin {
       void activity.response(sessionId, body)
         .then(() => {
           publishResult(bus, msg.correlationId, "linear.agent_activity.result", { success: true, sessionId });
-          console.log(`[linear] response activity posted to session ${sessionId}`);
+          log.info(`response activity posted to session ${sessionId}`);
         })
         .catch((err) => {
           const errMsg = err instanceof Error ? err.message : String(err);
           publishResult(bus, msg.correlationId, "linear.agent_activity.result", { success: false, sessionId, error: errMsg });
-          console.error(`[linear] response activity failed (session ${sessionId}): ${errMsg}`);
+          log.error(`response activity failed (session ${sessionId}): ${errMsg}`);
         });
     });
   }
@@ -589,7 +592,7 @@ export class LinearPlugin implements Plugin {
         format: "markdown",
       },
     });
-    console.log(`[linear] issue.${action} ${issue.identifier ?? issue.id} "${issue.title}"`);
+    log.info(`issue.${action} ${issue.identifier ?? issue.id} "${issue.title}"`);
   }
 
   private _publishComment(comment: LinearCommentData, action: string, bus: EventBus): void {
@@ -623,7 +626,7 @@ export class LinearPlugin implements Plugin {
         format: "markdown",
       },
     });
-    console.log(`[linear] comment.${action} on ${comment.issue?.identifier ?? issueId}`);
+    log.info(`comment.${action} on ${comment.issue?.identifier ?? issueId}`);
   }
 
   private _publishProject(project: LinearProjectData, action: string, bus: EventBus): void {
@@ -649,7 +652,7 @@ export class LinearPlugin implements Plugin {
         userId: project.creator?.id,
       },
     });
-    console.log(`[linear] project.${action} "${project.name}" (${project.id})`);
+    log.info(`project.${action} "${project.name}" (${project.id})`);
   }
 
   // ── Outbound ───────────────────────────────────────────────────────────────
@@ -691,11 +694,11 @@ export class LinearPlugin implements Plugin {
         try {
           await avaClient.createComment(issueId, body);
           publishResult(bus, msg.correlationId, "linear.reply.result", { success: true, issueId, as: "ava" });
-          console.log(`[linear] Comment posted AS Ava on issue ${issueId}`);
+          log.info(`Comment posted AS Ava on issue ${issueId}`);
           return;
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.warn(`[linear] post-as-Ava comment failed on ${issueId} (${errMsg}) — falling back to personal key`);
+          log.warn(`post-as-Ava comment failed on ${issueId} (${errMsg}) — falling back to personal key`);
         }
       }
       // 2) Fall back to the personal-key client.
@@ -703,7 +706,7 @@ export class LinearPlugin implements Plugin {
         publishResult(bus, msg.correlationId, "linear.reply.result", {
           success: false, issueId, error: "no Ava token and no LINEAR_API_KEY — cannot post comment",
         });
-        console.error(`[linear] cannot post comment on ${issueId} — no Ava token and no personal key`);
+        log.error(`cannot post comment on ${issueId} — no Ava token and no personal key`);
         return;
       }
       try {
@@ -714,8 +717,8 @@ export class LinearPlugin implements Plugin {
           as: "personal-key",
           error: ok ? undefined : "client.addComment returned false",
         });
-        if (ok) console.log(`[linear] Comment posted (personal key) on issue ${issueId}`);
-        else console.warn(`[linear] Failed to post comment on issue ${issueId}`);
+        if (ok) log.info(`Comment posted (personal key) on issue ${issueId}`);
+        else log.warn(`Failed to post comment on issue ${issueId}`);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         publishResult(bus, msg.correlationId, "linear.reply.result", {
@@ -723,7 +726,7 @@ export class LinearPlugin implements Plugin {
           issueId,
           error: errMsg,
         });
-        console.error(`[linear] Comment exception on issue ${issueId}: ${errMsg}`);
+        log.error(`Comment exception on issue ${issueId}: ${errMsg}`);
       }
     });
 
@@ -763,9 +766,9 @@ export class LinearPlugin implements Plugin {
           error: result.success ? undefined : result.reason,
         });
         if (result.success) {
-          console.log(`[linear] Issue ${issueId} updated: ${JSON.stringify(payload)}`);
+          log.info(`Issue ${issueId} updated: ${JSON.stringify(payload)}`);
         } else {
-          console.warn(`[linear] Issue ${issueId} update skipped: ${result.reason}`);
+          log.warn(`Issue ${issueId} update skipped: ${result.reason}`);
         }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -774,7 +777,7 @@ export class LinearPlugin implements Plugin {
           issueId,
           error: errMsg,
         });
-        console.error(`[linear] Issue ${issueId} update exception: ${errMsg}`);
+        log.error(`Issue ${issueId} update exception: ${errMsg}`);
       }
     });
 
@@ -802,7 +805,7 @@ export class LinearPlugin implements Plugin {
           success: false,
           error: "missing teamKey or title",
         });
-        console.warn("[linear] linear.create.issue missing teamKey or title — skipping");
+        log.warn("linear.create.issue missing teamKey or title — skipping");
         return;
       }
       try {
@@ -820,15 +823,15 @@ export class LinearPlugin implements Plugin {
           issueId: newId,
           error: newId === null ? `team '${payload.teamKey}' not found or createIssue failed` : undefined,
         });
-        if (newId) console.log(`[linear] Created issue ${newId} in team ${payload.teamKey}`);
-        else console.warn(`[linear] Failed to create issue in team ${payload.teamKey}`);
+        if (newId) log.info(`Created issue ${newId} in team ${payload.teamKey}`);
+        else log.warn(`Failed to create issue in team ${payload.teamKey}`);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         publishResult(bus, msg.correlationId, "linear.create.issue.result", {
           success: false,
           error: errMsg,
         });
-        console.error(`[linear] Create issue exception in team ${payload.teamKey}: ${errMsg}`);
+        log.error(`Create issue exception in team ${payload.teamKey}: ${errMsg}`);
       }
     });
   }

@@ -3,14 +3,9 @@ import { join, resolve } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 import * as YAML from "yaml";
 import type { Plugin, EventBus, BusMessage } from "../types";
+import { logger } from "../log.ts";
 
-const DEBUG = process.env.DEBUG === "1" || process.env.DEBUG === "true";
-
-function debug(...args: unknown[]): void {
-  if (DEBUG) {
-    console.log("[DEBUG]", ...args);
-  }
-}
+const log = logger("scheduler");
 
 interface ScheduleDefinition {
   id: string;
@@ -74,7 +69,7 @@ export class SchedulerPlugin implements Plugin {
       this.handleCommand(msg);
     });
 
-    debug("Scheduler ready. Timezone:", this.defaultTimezone, "Crons dir:", this.cronsDir);
+    log.debug("ready", { timezone: this.defaultTimezone, cronsDir: this.cronsDir });
   }
 
   uninstall(): void {
@@ -98,12 +93,12 @@ export class SchedulerPlugin implements Plugin {
         this.validate(def);
         this.schedule(def, filePath);
       } catch (err) {
-        console.error(`[Scheduler] Failed to load ${file}:`, err);
+        log.error(`Failed to load ${file}`, { err });
       }
     }
 
     if (files.length > 0) {
-      console.log(`[Scheduler] Loaded ${files.length} schedule(s) from ${this.cronsDir}`);
+      log.info(`Loaded ${files.length} schedule(s) from ${this.cronsDir}`);
     }
 
     this.watchForNewFiles();
@@ -126,9 +121,9 @@ export class SchedulerPlugin implements Plugin {
           this.validate(def);
           this.schedule(def, filePath);
           existing.add(file);
-          console.log(`[Scheduler] Hot-loaded new cron: ${file}`);
+          log.info(`Hot-loaded new cron: ${file}`);
         } catch (err) {
-          console.error(`[Scheduler] Failed to load ${file}:`, err);
+          log.error(`Failed to load ${file}`, { err });
         }
       }
     }, 5000);
@@ -161,7 +156,7 @@ export class SchedulerPlugin implements Plugin {
     this.cancelTimer(def.id);
 
     if (def.enabled === false) {
-      debug("Schedule disabled:", def.id);
+      log.debug("Schedule disabled", { id: def.id });
       return;
     }
 
@@ -194,7 +189,7 @@ export class SchedulerPlugin implements Plugin {
 
       // Fire immediately if missed (delay is negative and within reason — max 24h)
       if (delay < 0 && delay > -24 * 60 * 60 * 1000) {
-        debug("Firing missed schedule:", def.id, "was", Math.round(-delay / 1000 / 60), "min ago");
+        log.debug("Firing missed schedule", { id: def.id, agoMin: Math.round(-delay / 1000 / 60) });
         this.fire(def, filePath);
         if (def.type === "once") return; // one-shot, done
         // For recurring, schedule the next one after firing
@@ -215,9 +210,9 @@ export class SchedulerPlugin implements Plugin {
       this.timers.set(def.id, { definition: def, timer, filePath });
 
       const nextStr = nextDate.toISOString();
-      debug("Scheduled:", def.id, "fires at", nextStr, `(${Math.round(actualDelay / 1000 / 60)} min)`);
+      log.debug("Scheduled", { id: def.id, firesAt: nextStr, inMin: Math.round(actualDelay / 1000 / 60) });
     } catch (err) {
-      console.error(`[Scheduler] Failed to schedule ${def.id}:`, err);
+      log.error(`Failed to schedule ${def.id}`, { err });
     }
   }
 
@@ -239,9 +234,9 @@ export class SchedulerPlugin implements Plugin {
       // Delete the YAML file
       try {
         unlinkSync(filePath);
-        debug("Deleted one-shot schedule:", def.id);
+        log.debug("Deleted one-shot schedule", { id: def.id });
       } catch (err) {
-        console.error(`[Scheduler] Failed to delete ${filePath}:`, err);
+        log.error(`Failed to delete ${filePath}`, { err });
       }
       this.timers.delete(def.id);
     } else {
@@ -259,7 +254,7 @@ export class SchedulerPlugin implements Plugin {
       payload: { ...def.payload },
     };
 
-    console.log(`[Scheduler] Firing: ${def.id} → ${def.topic}`);
+    log.info(`Firing: ${def.id} → ${def.topic}`);
     this.bus.publish(def.topic, msg);
   }
 
@@ -297,7 +292,7 @@ export class SchedulerPlugin implements Plugin {
         this.handleResume(payload);
         break;
       default:
-        console.error(`[Scheduler] Unknown action: ${action}`);
+        log.error(`Unknown action: ${action}`);
     }
   }
 
@@ -310,7 +305,7 @@ export class SchedulerPlugin implements Plugin {
     payload?: { content?: string; sender?: string; channel?: string };
   }): void {
     if (!payload.id || !payload.schedule || !payload.topic || !payload.payload?.content) {
-      console.error("[Scheduler] add requires: id, schedule, topic, payload.content");
+      log.error("add requires: id, schedule, topic, payload.content");
       return;
     }
 
@@ -329,7 +324,7 @@ export class SchedulerPlugin implements Plugin {
     try {
       this.validate(def);
     } catch (err) {
-      console.error("[Scheduler] Invalid schedule:", err);
+      log.error("Invalid schedule", { err });
       return;
     }
 
@@ -337,7 +332,7 @@ export class SchedulerPlugin implements Plugin {
     this.saveYaml(def, filePath);
     this.schedule(def, filePath);
 
-    console.log(`[Scheduler] Added: ${def.id} (${def.type} ${def.schedule})`);
+    log.info(`Added: ${def.id} (${def.type} ${def.schedule})`);
   }
 
   private handleRemove(payload: { id?: string }): void {
@@ -350,7 +345,7 @@ export class SchedulerPlugin implements Plugin {
       unlinkSync(filePath);
     }
 
-    console.log(`[Scheduler] Removed: ${payload.id}`);
+    log.info(`Removed: ${payload.id}`);
   }
 
   private handleList(requestMsg: BusMessage): void {
@@ -382,7 +377,7 @@ export class SchedulerPlugin implements Plugin {
       this.cancelTimer(payload.id);
       active.definition.enabled = false;
       this.saveYaml(active.definition, active.filePath);
-      console.log(`[Scheduler] Paused: ${payload.id}`);
+      log.info(`Paused: ${payload.id}`);
     }
   }
 
@@ -396,7 +391,7 @@ export class SchedulerPlugin implements Plugin {
       def.enabled = true;
       this.saveYaml(def, filePath);
       this.schedule(def, filePath);
-      console.log(`[Scheduler] Resumed: ${payload.id}`);
+      log.info(`Resumed: ${payload.id}`);
     }
   }
 }

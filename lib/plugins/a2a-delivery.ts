@@ -15,6 +15,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import * as YAML from "yaml";
 import type { Plugin, EventBus, BusMessage } from "../types";
+import { logger } from "../log.ts";
+
+const log = logger("a2a-delivery");
 
 interface A2ATarget {
   url: string;
@@ -81,7 +84,7 @@ export class A2ADeliveryPlugin implements Plugin {
     });
 
     const count = Object.keys(this.targets).length;
-    console.log(`[a2a-delivery] Ready — ${count} target(s) configured`);
+    log.info(`Ready — ${count} target(s) configured`);
   }
 
   uninstall(): void {
@@ -102,7 +105,7 @@ export class A2ADeliveryPlugin implements Plugin {
       const parsed = YAML.parse(raw) as A2AConfig | null;
       this.targets = parsed?.targets ?? {};
     } catch (err) {
-      console.error(`[a2a-delivery] Failed to load ${this.configPath}:`, err);
+      log.error(`Failed to load ${this.configPath}`, { err });
       this.targets = {};
     }
   }
@@ -112,32 +115,32 @@ export class A2ADeliveryPlugin implements Plugin {
     if (!payload || payload.channel !== "a2a") return;
 
     if (typeof payload.content !== "string" || payload.content.trim() === "") {
-      console.error(
-        `[a2a-delivery] cron "${msg.topic}" channel=a2a but payload.content is missing or not a non-empty string — drop`,
+      log.error(
+        `cron "${msg.topic}" channel=a2a but payload.content is missing or not a non-empty string — drop`,
       );
       return;
     }
 
     const agentName = payload.agent_name;
     if (!agentName) {
-      console.error(
-        `[a2a-delivery] cron "${msg.topic}" channel=a2a but payload.agent_name is missing — drop`,
+      log.error(
+        `cron "${msg.topic}" channel=a2a but payload.agent_name is missing — drop`,
       );
       return;
     }
 
     const target = this.targets[agentName];
     if (!target) {
-      console.error(
-        `[a2a-delivery] cron "${msg.topic}" agent_name="${agentName}" has no configured target in ${this.configPath} — drop`,
+      log.error(
+        `cron "${msg.topic}" agent_name="${agentName}" has no configured target in ${this.configPath} — drop`,
       );
       return;
     }
 
     const url = (expandEnv(target.url) ?? "").trim();
     if (!url) {
-      console.error(
-        `[a2a-delivery] cron "${msg.topic}" agent_name="${agentName}" has empty url after env expansion (raw="${target.url}") — drop`,
+      log.error(
+        `cron "${msg.topic}" agent_name="${agentName}" has empty url after env expansion (raw="${target.url}") — drop`,
       );
       return;
     }
@@ -183,13 +186,13 @@ export class A2ADeliveryPlugin implements Plugin {
       if (rpcError) {
         throw new Error(`JSON-RPC error: ${rpcError}`);
       }
-      console.log(
-        `[a2a-delivery] Delivered cron "${msg.topic}" → ${agentName} (${url})`,
+      log.info(
+        `Delivered cron "${msg.topic}" → ${agentName} (${url})`,
       );
     } catch (err) {
-      console.error(
-        `[a2a-delivery] Delivery failed for cron "${msg.topic}" → ${agentName} (${url}):`,
-        err,
+      log.error(
+        `Delivery failed for cron "${msg.topic}" → ${agentName} (${url})`,
+        { err },
       );
     }
   }

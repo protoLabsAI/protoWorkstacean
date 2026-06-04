@@ -26,6 +26,9 @@
 
 import type { ChannelRegistry } from "../channels/channel-registry.ts";
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
+import { logger } from "../log.ts";
+
+const log = logger("feature-notifier");
 
 function expandEnv(val: string | undefined): string {
   if (!val) return "";
@@ -66,7 +69,7 @@ export class FeatureNotifierPlugin implements Plugin {
         this.handle(bus, msg, formatFailed);
       }),
     );
-    console.log("[feature-notifier] Installed — watching feature.completed + feature.failed");
+    log.info("Installed — watching feature.completed + feature.failed");
   }
 
   uninstall(): void {
@@ -79,13 +82,13 @@ export class FeatureNotifierPlugin implements Plugin {
     const payload = (msg.payload ?? {}) as Record<string, unknown>;
     const slug = String(payload.projectSlug ?? "");
     if (!slug) {
-      console.warn("[feature-notifier] feature event missing projectSlug — skipping");
+      log.warn("feature event missing projectSlug — skipping");
       return;
     }
 
     const channel = this.channelRegistry.getProjectChannel(slug, "dev");
     if (!channel) {
-      console.warn(`[feature-notifier] No dev channel binding for project "${slug}" in channels.yaml — skipping`);
+      log.warn(`No dev channel binding for project "${slug}" in channels.yaml — skipping`);
       return;
     }
 
@@ -102,15 +105,15 @@ export class FeatureNotifierPlugin implements Plugin {
         timestamp: Date.now(),
         payload: { content, channel: channelId },
       });
-      console.log(`[feature-notifier] Posted to ${slug} dev channel (${channelId})`);
+      log.info(`Posted to ${slug} dev channel (${channelId})`);
     } else if (webhook) {
       // Fallback: direct webhook POST (used when no bot channel is bound).
       fetch(webhook, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content }),
-      }).catch((err) => console.error("[feature-notifier] Webhook POST failed:", err));
-      console.log(`[feature-notifier] Webhook POST to ${slug} dev channel`);
+      }).catch((err) => log.error("Webhook POST failed", { err }));
+      log.info(`Webhook POST to ${slug} dev channel`);
     }
   }
 }

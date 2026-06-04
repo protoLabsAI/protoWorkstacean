@@ -1,4 +1,7 @@
 import type { Plugin, EventBus, BusMessage } from "../types";
+import { logger } from "../log.ts";
+
+const log = logger("signal");
 
 interface SignalEnvelope {
   envelope: {
@@ -37,7 +40,7 @@ export class SignalPlugin implements Plugin {
     this.signalNumber = process.env.SIGNAL_NUMBER;
 
     if (!this.signalUrl || !this.signalNumber) {
-      console.log("Signal not configured, skipping bridge");
+      log.info("Signal not configured, skipping bridge");
       return;
     }
 
@@ -65,13 +68,13 @@ export class SignalPlugin implements Plugin {
     const { baseUrl, auth } = parseAuth(this.signalUrl);
     const wsUrl = baseUrl.replace(/^https/, "wss") + `/v1/receive/${this.signalNumber}`;
     const wsUrlWithAuth = auth ? wsUrl.replace(/^wss?:\/\//, `wss://${auth}@`) : wsUrl;
-    console.log(`Connecting to Signal WebSocket: ${wsUrl}`);
+    log.info(`Connecting to Signal WebSocket: ${wsUrl}`);
 
     this.ws = new WebSocket(wsUrlWithAuth);
 
-    this.ws.onopen = () => console.log("Signal bridge connected");
-    this.ws.onerror = (err) => console.error("Signal WebSocket error:", err);
-    this.ws.onclose = () => console.log("Signal WebSocket closed");
+    this.ws.onopen = () => log.info("Signal bridge connected");
+    this.ws.onerror = (err) => log.error("Signal WebSocket error", { err });
+    this.ws.onclose = () => log.info("Signal WebSocket closed");
 
     this.ws.onmessage = (event) => {
       try {
@@ -87,7 +90,7 @@ export class SignalPlugin implements Plugin {
         if (!text) return;
 
         const sender = envelope.source;
-        console.log(`[Signal] ${sender}: ${text}`);
+        log.info(`${sender}: ${text}`);
 
         const msgId = crypto.randomUUID();
         const msg: BusMessage = {
@@ -102,7 +105,7 @@ export class SignalPlugin implements Plugin {
 
         this.bus!.publish(msg.topic, msg);
       } catch (e) {
-        console.error("Error processing Signal message:", e);
+        log.error("Error processing Signal message", { err: e });
       }
     };
   }
@@ -116,7 +119,7 @@ export class SignalPlugin implements Plugin {
     const content = (msg.payload as { content?: string })?.content;
 
     if (!recipient || !content) {
-      console.error("Invalid outbound signal message:", msg);
+      log.error("Invalid outbound signal message", { msg });
       return;
     }
 
@@ -141,10 +144,10 @@ export class SignalPlugin implements Plugin {
       });
       if (!res.ok) {
         const err = await res.text();
-        console.error(`Signal send failed: ${res.status} ${err}`);
+        log.error(`Signal send failed: ${res.status} ${err}`);
       }
     } catch (e) {
-      console.error(`Signal send error: ${e}`);
+      log.error("Signal send error", { err: e });
     }
   }
 }

@@ -31,6 +31,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
+import { logger } from "../log.ts";
 import { isProductionLike } from "../runtime-env.ts";
 import { getFleetConfig } from "../fleet/fleet-config.ts";
 import { withCircuitBreaker } from "./circuit-breaker.ts";
@@ -44,6 +45,8 @@ import {
   type ReviewCommentPayload,
   type ReviewDismissalPayload,
 } from "../../src/webhooks/github-comment-response.ts";
+
+const log = logger("github");
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -402,12 +405,12 @@ export class GitHubPlugin implements Plugin {
   install(bus: EventBus): void {
     const getToken = makeGitHubAuth();
     if (!getToken) {
-      console.log("[github] No auth configured (GITHUB_APP_ID or GITHUB_TOKEN required) — plugin disabled");
+      log.warn("No auth configured (GITHUB_APP_ID or GITHUB_TOKEN required) — plugin disabled");
       return;
     }
 
     const usingApp = !!(process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY);
-    console.log(`[github] Auth: ${usingApp ? "GitHub App (quinn[bot])" : "PAT (GITHUB_TOKEN)"}`);
+    log.info(`Auth: ${usingApp ? "GitHub App (quinn[bot])" : "PAT (GITHUB_TOKEN)"}`);
 
     this.config = loadConfig(this.workspaceDir);
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? "";
@@ -423,7 +426,7 @@ export class GitHubPlugin implements Plugin {
             "webhook receiver in production.",
         );
       }
-      console.warn("[github] GITHUB_WEBHOOK_SECRET not set — signature verification disabled (dev only)");
+      log.warn("GITHUB_WEBHOOK_SECRET not set — signature verification disabled (dev only)");
     }
 
     // ── Hot-reload github.yaml ────────────────────────────────────────────────
@@ -437,7 +440,7 @@ export class GitHubPlugin implements Plugin {
       reloadDebounceTimer = setTimeout(() => {
         this.config = loadConfig(this.workspaceDir);
         const repoCount = this.projectRegistry.getGithubCoords().length;
-        console.log(`[github] Config reloaded — ${repoCount} monitored repo(s)`);
+        log.info(`Config reloaded — ${repoCount} monitored repo(s)`);
       }, 300);
     };
 
@@ -473,7 +476,7 @@ export class GitHubPlugin implements Plugin {
         if (webhookSecret) {
           const sig = req.headers.get("X-Hub-Signature-256");
           if (!await validateSignature(webhookSecret, body, sig)) {
-            console.warn("[github] Invalid webhook signature — request rejected");
+            log.warn("Invalid webhook signature — request rejected");
             return new Response("Unauthorized", { status: 401 });
           }
         }
@@ -491,7 +494,7 @@ export class GitHubPlugin implements Plugin {
       },
     });
 
-    console.log(`[github] Webhook receiver on :${port}/webhook/github`);
+    log.info(`Webhook receiver on :${port}/webhook/github`);
   }
 
   uninstall(): void {
@@ -537,7 +540,7 @@ export class GitHubPlugin implements Plugin {
           source: { interface: "github" as const },
         });
 
-        console.log(`[github] repository.created: ${fullName} → ${topic}`);
+        log.info(`repository.created: ${fullName} → ${topic}`);
       }
       return;
     }
@@ -560,7 +563,7 @@ export class GitHubPlugin implements Plugin {
           payload: rel,
           source: { interface: "github" as const },
         });
-        console.log(`[github] release.published: ${rel.owner}/${rel.repo} ${rel.version} → release.published`);
+        log.info(`release.published: ${rel.owner}/${rel.repo} ${rel.version} → release.published`);
       }
       return;
     }
@@ -577,7 +580,7 @@ export class GitHubPlugin implements Plugin {
     // Requires the GitHub App to subscribe to `workflow_run` + `check_suite`.
     if ((event === "workflow_run" || event === "check_suite") && payload.action === "completed") {
       void this._handleCiCompletion(event, payload, bus, getToken).catch((err) => {
-        console.error(`[github] CI-completion re-review failed: ${err instanceof Error ? err.message : err}`);
+        log.error("CI-completion re-review failed", { err });
       });
       return;
     }
@@ -666,7 +669,7 @@ export class GitHubPlugin implements Plugin {
           const mergePayload = parsePRMergePayload(event, payload);
           if (mergePayload) {
             void handlePRMerge(mergePayload, getToken).catch((err) =>
-              console.warn(`[github] PR-merge indexing failed for ${owner}/${repoName}#${prNumber}: ${err instanceof Error ? err.message : err}`),
+              log.warn(`PR-merge indexing failed for ${owner}/${repoName}#${prNumber}`, { err }),
             );
           }
         }
@@ -679,12 +682,12 @@ export class GitHubPlugin implements Plugin {
     // pushback. Independent of the @mention / auto-review paths and best-effort.
     if (event === "pull_request_review_comment" && payload.action === "created") {
       void this._trackCommentResponse(payload, getToken).catch((err) =>
-        console.warn(`[github] comment-response tracking failed: ${err instanceof Error ? err.message : err}`),
+        log.warn("comment-response tracking failed", { err }),
       );
     }
     if (event === "pull_request_review" && payload.action === "dismissed") {
       void this._trackReviewDismissal(payload).catch((err) =>
-        console.warn(`[github] review-dismissal tracking failed: ${err instanceof Error ? err.message : err}`),
+        log.warn("review-dismissal tracking failed", { err }),
       );
     }
 
@@ -704,8 +707,8 @@ export class GitHubPlugin implements Plugin {
       (event === "issues" || event === "issue_comment" || event === "pull_request_review_comment") &&
       isAgentBotActor(ctx.author)
     ) {
-      console.log(
-        `[github] Dropping ${event}.${payload.action} on ${ctx.owner}/${ctx.repo}#${ctx.number} — ` +
+      log.info(
+        `Dropping ${event}.${payload.action} on ${ctx.owner}/${ctx.repo}#${ctx.number} — ` +
         `authored by agent bot ${ctx.author} (self-cascade guard, see #556)`,
       );
       return;
@@ -747,7 +750,7 @@ export class GitHubPlugin implements Plugin {
     if (!ctx.body.toLowerCase().includes(config.mentionHandle.toLowerCase())) return;
 
     if (config.admins?.length && !config.admins.some(a => a.toLowerCase() === ctx.author.toLowerCase())) {
-      console.log(`[github] ${event} from @${ctx.author} ignored — not in admins list`);
+      log.info(`${event} from @${ctx.author} ignored — not in admins list`);
       return;
     }
 
@@ -774,8 +777,8 @@ export class GitHubPlugin implements Plugin {
           body: JSON.stringify({ content: "eyes" }),
         }),
       );
-      if (!res.ok) console.error(`[github] reaction failed ${res.status}: ${await res.text()}`);
-    })().catch(err => console.error("[github] reaction error:", err));
+      if (!res.ok) log.error(`reaction failed ${res.status}: ${await res.text()}`);
+    })().catch(err => log.error("reaction error", { err }));
 
     // A top-level comment on a PR arrives as an `issue_comment` event — GitHub
     // models PR conversation comments as issue comments. The default
@@ -820,7 +823,7 @@ export class GitHubPlugin implements Plugin {
       reply: { topic: replyTopic },
     });
 
-    console.log(`[github] ${event} on ${ctx.owner}/${ctx.repo}#${ctx.number} → ${skillHint ?? "default"}`);
+    log.info(`${event} on ${ctx.owner}/${ctx.repo}#${ctx.number} → ${skillHint ?? "default"}`);
   }
 
   /** Tracks recently-dispatched (owner/repo#number) to suppress duplicate webhook deliveries. */
@@ -840,7 +843,7 @@ export class GitHubPlugin implements Plugin {
     if (!opts.skipDedup) {
       const lastDispatched = this.recentDispatches.get(dedupKey);
       if (lastDispatched && Date.now() - lastDispatched < GitHubPlugin.DEDUP_WINDOW_MS) {
-        console.log(`[github] Auto-review: skipping duplicate ${dedupKey} (dispatched ${Date.now() - lastDispatched}ms ago)`);
+        log.info(`Auto-review: skipping duplicate ${dedupKey} (dispatched ${Date.now() - lastDispatched}ms ago)`);
         return;
       }
     }
@@ -849,7 +852,7 @@ export class GitHubPlugin implements Plugin {
     const pr = payload.pull_request as Record<string, unknown>;
     const isDraft = pr?.draft as boolean;
     if (isDraft) {
-      console.log(`[github] Auto-review: skipping draft PR ${ctx.owner}/${ctx.repo}#${ctx.number}`);
+      log.info(`Auto-review: skipping draft PR ${ctx.owner}/${ctx.repo}#${ctx.number}`);
       return;
     }
 
@@ -910,7 +913,7 @@ export class GitHubPlugin implements Plugin {
       reply: { topic: replyTopic },
     });
 
-    console.log(`[github] Auto-review: ${ctx.owner}/${ctx.repo}#${ctx.number} (${action}) → pr_review`);
+    log.info(`Auto-review: ${ctx.owner}/${ctx.repo}#${ctx.number} (${action}) → pr_review`);
 
     // Leading acknowledgment comment so the PR shows Quinn engagement
     // immediately, not minutes later when the formal verdict review
@@ -929,8 +932,9 @@ export class GitHubPlugin implements Plugin {
         { owner: ctx.owner, repo: ctx.repo, number: ctx.number },
         "👀 Quinn is reviewing — verdict (PASS / WARN / FAIL) + findings to follow.",
       ).catch((err) => {
-        console.warn(
-          `[github] Auto-review: leading-comment post failed for ${ctx.owner}/${ctx.repo}#${ctx.number}: ${err instanceof Error ? err.message : err}`,
+        log.warn(
+          `Auto-review: leading-comment post failed for ${ctx.owner}/${ctx.repo}#${ctx.number}`,
+          { err },
         );
       });
     }
@@ -977,7 +981,7 @@ export class GitHubPlugin implements Plugin {
         | null;
       if (!quinnHasReviewed(reviews ?? undefined)) continue;
       if (!(await this._ciTerminal(getToken, owner, repo, headSha))) {
-        console.log(`[github] CI-completion (${event}): ${owner}/${repo}#${number} — checks not all terminal yet, deferring`);
+        log.info(`CI-completion (${event}): ${owner}/${repo}#${number} — checks not all terminal yet, deferring`);
         continue;
       }
 
@@ -1004,8 +1008,8 @@ export class GitHubPlugin implements Plugin {
         const approveKey = `approve-on-green:${owner}/${repo}#${number}@${headSha.slice(0, 7)}`;
         const lastApproved = this.recentDispatches.get(approveKey);
         if (lastApproved && Date.now() - lastApproved < GitHubPlugin.DEDUP_WINDOW_MS) {
-          console.log(
-            `[github] CI-completion (${event}): skipping duplicate approve-on-green ${approveKey} ` +
+          log.info(
+            `CI-completion (${event}): skipping duplicate approve-on-green ${approveKey} ` +
               `(approved ${Date.now() - lastApproved}ms ago)`,
           );
           continue;
@@ -1022,14 +1026,14 @@ export class GitHubPlugin implements Plugin {
             "CI terminal-green, no blockers on prior review — auto-approving on green (#748).",
             [],
           );
-          console.log(
-            `[github] CI-completion (${event}): auto-approved ${owner}/${repo}#${number} @${headSha.slice(0, 7)} ` +
+          log.info(
+            `CI-completion (${event}): auto-approved ${owner}/${repo}#${number} @${headSha.slice(0, 7)} ` +
               `(terminal-green, prior Quinn review COMMENTED) — #748`,
           );
         } catch (err) {
-          console.error(
-            `[github] CI-completion (${event}): auto-approve failed for ${owner}/${repo}#${number}: ` +
-              `${err instanceof Error ? err.message : err}`,
+          log.error(
+            `CI-completion (${event}): auto-approve failed for ${owner}/${repo}#${number}`,
+            { err },
           );
         }
         continue;
@@ -1049,7 +1053,7 @@ export class GitHubPlugin implements Plugin {
       // a single meaningful dispatch; the dispatcher's @sha7 cooldown collapses
       // any workflow_run+check_suite co-arrival.
       const synthPayload: Record<string, unknown> = { action: "ci_completed", pull_request: pr };
-      console.log(`[github] CI-completion (${event}): re-dispatching pr_review for ${owner}/${repo}#${number} @${headSha.slice(0, 7)}`);
+      log.info(`CI-completion (${event}): re-dispatching pr_review for ${owner}/${repo}#${number} @${headSha.slice(0, 7)}`);
       // event="pull_request" so the published topic is byte-identical to a
       // normal auto-review (the routed path is proven); the "ci_completed"
       // action just suppresses the opened-only leading comment.
@@ -1077,12 +1081,12 @@ export class GitHubPlugin implements Plugin {
         }),
       );
       if (!res.ok) {
-        console.warn(`[github] GET ${path} → ${res.status}`);
+        log.warn(`GET ${path} → ${res.status}`);
         return null;
       }
       return await res.json();
     } catch (err) {
-      console.error(`[github] GET ${path} error:`, err);
+      log.error(`GET ${path} error`, { err });
       return null;
     }
   }
@@ -1178,12 +1182,12 @@ export class GitHubPlugin implements Plugin {
         }),
       );
       if (!res.ok) {
-        console.error(`[github] Failed to post comment: ${res.status} ${await res.text()}`);
+        log.error(`Failed to post comment: ${res.status} ${await res.text()}`);
       } else {
-        console.log(`[github] Comment posted to ${ctx.owner}/${ctx.repo}#${ctx.number}`);
+        log.info(`Comment posted to ${ctx.owner}/${ctx.repo}#${ctx.number}`);
       }
     } catch (err) {
-      console.error("[github] Error posting comment:", err);
+      log.error("Error posting comment", { err });
     }
   }
 }

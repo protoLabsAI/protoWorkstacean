@@ -28,6 +28,9 @@
  */
 
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
+import { logger } from "../log.ts";
+
+const log = logger("linear-proto-bridge");
 
 const DEFAULT_TRIGGER_LABEL = "proto-task";
 
@@ -67,9 +70,7 @@ export class LinearProtoBridgePlugin implements Plugin {
     );
     this.subscriptionIds.push(subId);
 
-    console.log(
-      `[linear-proto-bridge] installed — gating on label "${this.triggerLabel}"`,
-    );
+    log.info(`installed — gating on label "${this.triggerLabel}"`);
   }
 
   uninstall(): void {
@@ -132,8 +133,8 @@ export class LinearProtoBridgePlugin implements Plugin {
       source: { interface: "linear" as const },
     });
 
-    console.log(
-      `[linear-proto-bridge] ${payload.identifier ?? payload.issueId} → code.execute@proto ` +
+    log.info(
+      `${payload.identifier ?? payload.issueId} → code.execute@proto ` +
         `(label="${this.triggerLabel}", reply → ${replyTopic})`,
     );
   }
