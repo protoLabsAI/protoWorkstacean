@@ -171,7 +171,7 @@ skills:
       Formal review of a single GitHub PR. Gathers CI status, unresolved
       review threads, and the diff; produces a verdict; submits an
       APPROVED / COMMENTED / CHANGES_REQUESTED review via the GitHub
-      Review API. Feeds the autonomous merge loop in pr-remediator.
+      Review API. Feeds the autonomous merge-on-green loop.
     keywords: [pr_review, review, pull request, audit, formal review]
     # Scoped toolbelt: pr_inspector covers all GitHub-side review IO;
     # clawpatch_review adds a structural code-review pass via the gateway
@@ -313,9 +313,9 @@ skills:
 
       | VERDICT | pr_inspector action | GitHub state | When |
       |---------|---------------------|--------------|------|
-      | **PASS** | `review_approve` | APPROVED | All critical checks pass, no blocking issues, no HIGH/CRITICAL findings. Triggers auto-merge in pr-remediator. |
+      | **PASS** | `review_approve` | APPROVED | All critical checks pass, no blocking issues, no HIGH/CRITICAL findings. Clears the merge-on-green gate — the PR auto-merges once CI is terminal-green. |
       | **WARN** | `review_comment` | COMMENTED | Critical checks pass but medium/low concerns worth flagging, or confidence below the 80% threshold. Does NOT block merge. |
-      | **FAIL** | `review_request_changes` | CHANGES_REQUESTED | One or more CRITICAL or HIGH findings, broken CI, verified defect. Triggers `pr_address_feedback` in pr-remediator. |
+      | **FAIL** | `review_request_changes` | CHANGES_REQUESTED | One or more CRITICAL or HIGH findings, broken CI, verified defect. protoMaker's automode then iterates on the feedback and re-requests review. |
 
       **Never skip this step.** Narrative summary without a formal review
       = PR stuck forever.
