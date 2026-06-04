@@ -205,7 +205,7 @@ The `_publishToolCall` callback is wired uniformly in `AgentRuntimePlugin.instal
 - **Progress topics are silent today** — no executor publishes `agent.skill.progress.*`. Dashboard tiles relying on them show nothing.
 - **TaskTracker outcome publish is the canonical path for long-running A2A** — if you're debugging "outcome never fires", check whether the task is parked in TaskTracker (likely) or actually never completed (unlikely).
 - **Latency is `durationMs` on outcomes + structured `agent.skill.latency` on success** — `autonomous.outcome.*.durationMs` is wall-clock; `agent.skill.latency` adds queueMs/executeMs split + optional GitHub PR context. Aggregate at the consumer for p50/p95 ([flow-alert-remediator](flow-alert-remediator.md) does this from outcomes).
-- **`systemActor` is whatever the dispatcher writes** — it's not validated by the bus. Synthetic actors (`pr-remediator`, `goap`, `user`) coexist with real agents. The synthetic-actor filter at FleetHealth ([#459](chokepoint-invariants.md)) is the source of truth for "is this a real agent."
+- **`systemActor` is whatever the dispatcher writes** — it's not validated by the bus. Synthetic actors (`feature-remediation`, `user`) coexist with real agents. The synthetic-actor filter at FleetHealth ([#459](chokepoint-invariants.md)) is the source of truth for "is this a real agent."
 
 ---
 

@@ -6,9 +6,9 @@ title: Bus Topics
 
 ## Summary
 
-- **88** distinct topics seen across the codebase
-- **20** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
-- **68** raw-string / template topics not in TOPICS (candidates to register)
+- **85** distinct topics seen across the codebase
+- **23** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
+- **62** raw-string / template topics not in TOPICS (candidates to register)
 - **18** topics that couldn't be statically resolved (computed at runtime)
 - **100** publish call sites, **59** subscribe call sites
 
@@ -30,9 +30,10 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | `agent.input.response` | ✅ `AGENT_INPUT_RESPONSE_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
 | `agent.skill.latency` | ✅ `AGENT_SKILL_LATENCY` (`ACTION_TOPICS`) | — | `src/executor/skill-dispatcher-plugin.ts:518` | _(none)_ |
 | `agent.skill.progress` | ✅ `AGENT_SKILL_PROGRESS_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
-| `agent.skill.request` | ✅ `AGENT_SKILL_REQUEST` (`ACTION_TOPICS`) | — | `src/router/router-plugin.ts:295`<br>`src/router/router-plugin.ts:342`<br>`src/executor/skill-dispatcher-plugin.ts:665`<br>`src/api/openai-compat.ts:171`<br>`src/api/ava-tools.ts:132`<br>`src/api/ava-tools.ts:323`<br>`src/api/a2a-server.ts:354`<br>`src/plugins/fleet-alerts-evaluator-plugin.ts:188`<br>`lib/plugins/pr-remediator.ts:1350`<br>`lib/plugins/pr-remediator.ts:1616`<br>`lib/plugins/linear-proto-bridge.ts:105`<br>`lib/plugins/discord/inbound.ts:115` | `src/executor/skill-dispatcher-plugin.ts:183` |
-| `agent.skill.response.{correlationId}` | — | — | _(none)_ | `src/api/ava-tools.ts:51`<br>`lib/plugins/pr-remediator.ts:1335` |
-| `agent.skill.response.#` | — | — | _(none)_ | `lib/plugins/pr-remediator.ts:632` |
+| `agent.skill.toolframe.{correlationId}` | ✅ `AGENT_SKILL_TOOLFRAME_PREFIX` (`ACTION_TOPICS`) | `ToolCallArtifactData` (tool-call-v1) | `src/agent-runtime/agent-runtime-plugin.ts:394` | `src/api/a2a-server.ts:217` |
+| `agent.skill.request` | ✅ `AGENT_SKILL_REQUEST` (`ACTION_TOPICS`) | — | `src/router/router-plugin.ts:295`<br>`src/router/router-plugin.ts:342`<br>`src/executor/skill-dispatcher-plugin.ts:667`<br>`src/api/openai-compat.ts:171`<br>`src/api/ava-tools.ts:132`<br>`src/api/ava-tools.ts:323`<br>`src/api/a2a-server.ts:390`<br>`src/plugins/fleet-alerts-evaluator-plugin.ts:188`<br>`lib/plugins/feature-remediation.ts:150`<br>`lib/plugins/linear-proto-bridge.ts:105`<br>`lib/plugins/discord/inbound.ts:45` | `src/executor/skill-dispatcher-plugin.ts:183` |
+| `agent.skill.response.{correlationId}` | — | — | _(none)_ | `src/api/ava-tools.ts:52` |
+| `agent.skill.response.#` | — | — | _(none)_ | `src/event-bus/skill-response-cache.ts:96` |
 
 **`agent.input.request`** — Prefix for human-input requests. Full topic is `agent.input.request.{correlationId}`. An in-process agent's `ask_human` tool (via POST /api/agent/ask-human) publishes here when it needs an answer from the A2A caller; BusAgentExecutor turns it into an `input-required` status-update on the caller's stream. See src/api/human-input.ts.
 
@@ -41,6 +42,8 @@ Each row links to the original call site as `path:line` so jumping from this ind
 **`agent.skill.latency`** — Published by SkillDispatcherPlugin after every successful skill completion that came from a webhook-stamped dispatch (today: github's `_handleAutoReview`). Structured form of the existing `[skill-latency]` log line — dashboard tiles + downstream alerting can subscribe and accumulate without parsing stdout. Payload shape: { skill, totalMs, queueMs, executeMs, github? }. - totalMs   = webhook arrival → done - queueMs   = webhook arrival → dispatch start (bus hops + routing) - executeMs = dispatch start → done (LLM + tools) - github    = { owner, repo, number } when the original payload carried it (PR reviews, etc.); absent otherwise.
 
 **`agent.skill.progress`** — Prefix for skill-progress events. Full topic is `agent.skill.progress.{correlationId}`. Skill executors that want to stream intermediate progress to a long-running A2A caller publish to this topic; BusAgentExecutor translates each event into a `status-update` (state=working, final=false) on the A2A `message/stream` channel. Opt-in — executors that don't publish lose nothing. See AgentSkillProgressPayload in src/event-bus/payloads.ts.
+
+**`agent.skill.toolframe`** — Prefix for structured tool-call-v1 frames. Full topic is `agent.skill.toolframe.{correlationId}`. AgentRuntimePlugin publishes one frame per tool lifecycle event (started → completed/failed), sourced from DeepAgentExecutor's `onToolFrame` callback; the a2a-server subscribes and emits each frame as a streamed artifact-update DataPart for clients that render a structured tool timeline. Sibling to the plain-text narration on `agent.skill.progress.{correlationId}`. Opt-in.
 
 **`agent.skill.request`** — Published to invoke an agent skill (unified dispatch).
 
@@ -114,18 +117,22 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 **`dispatch.dropped`** — Prefix for dispatcher drop events. Full topic is `dispatch.dropped.{reason}` where reason ∈ {no_skill, target_unresolved, cooldown}. Published by SkillDispatcherPlugin at each chokepoint drop site so subscribers (dashboard, drop-rate alerts) can count + filter by reason without scraping stdout. Payload shape: see `DispatchDroppedPayload` in src/event-bus/payloads.ts.
 
-## `entry.*`
-
-| Topic | Declared | Payload | Publishers | Subscribers |
-|---|---|---|---|---|
-| `entry.topic` | — | — | `src/plugins/pr-remediator-skill-executor-plugin.ts:111` | _(none)_ |
-
 ## `feature.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `feature.completed` | — | — | _(none)_ | `lib/plugins/feature-notifier.ts:62` |
-| `feature.failed` | — | — | _(none)_ | `lib/plugins/feature-notifier.ts:65` |
+| `feature.blocked` | ✅ `FEATURE_BLOCKED` (`FEATURE_TOPICS`) | `FeatureBlockedPayload` | _(protoMaker via POST /publish)_ | `lib/plugins/feature-remediation.ts:80` |
+| `feature.unblocked` | ✅ `FEATURE_UNBLOCKED` (`FEATURE_TOPICS`) | `{ projectSlug?, featureId }` | _(protoMaker via POST /publish)_ | `lib/plugins/feature-remediation.ts:82` |
+| `feature.completed` | — | `{ projectSlug, featureId, featureTitle?, branchName?, prNumber?, githubIssueNumber?, repo? }` | _(protoMaker via POST /publish)_ | `lib/plugins/feature-notifier.ts:62`<br>`lib/plugins/issue-closer.ts:54` |
+| `feature.failed` | — | `{ projectSlug, featureId, featureTitle?, error? }` | _(protoMaker via POST /publish)_ | `lib/plugins/feature-notifier.ts:65` |
+
+**`feature.blocked`** — Declared in `FEATURE_TOPICS` (not yet in the `TOPICS` barrel). Published when a protoMaker feature transitions to blocked — the canonical auto-remediation signal. Raised by protoMaker's automode via the workstacean `POST /publish` ingress; consumed by FeatureRemediationPlugin, which routes by `kind` to Roxy `unblock_feature` or operator HITL (bounded + escalating). Payload shape: `FeatureBlockedPayload` `{ projectSlug?, projectPath?, featureId, featureTitle?, kind?, reason?, prNumber?, branchName?, retryCount?, retryable?, failureCategory?, detail? }`.
+
+**`feature.unblocked`** — Declared in `FEATURE_TOPICS` (not yet in the `TOPICS` barrel). protoMaker recovery signal published when a feature recovers; FeatureRemediationPlugin clears its remediation tracker so a later re-block gets a fresh retry budget.
+
+**`feature.completed`** — Published by protoMaker (via `POST /publish`) when a feature ships. FeatureNotifierPlugin posts a ✅ message to the project's dev channel; IssueCloserPlugin closes the originating `repo#githubIssueNumber` with a comment when both `githubIssueNumber` and `repo` are present (close-the-loop).
+
+**`feature.failed`** — Published by protoMaker (via `POST /publish`) when a feature fails/escalates. FeatureNotifierPlugin posts a ❌ message with the error; IssueCloserPlugin intentionally does not act on it (a failed feature's issue stays open).
 
 ## `flow.*`
 
@@ -179,7 +186,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | `message.inbound.onboard` | — | — | _(none)_ | `lib/plugins/onboarding.ts:142` |
 | `message.outbound.cli` | — | — | _(none)_ | `lib/plugins/cli.ts:18` |
 | `message.outbound.discord.#` | — | — | _(none)_ | `lib/plugins/discord/outbound.ts:43` |
-| `message.outbound.discord.alert` | ✅ `MESSAGE_OUTBOUND_DISCORD_ALERT` (`MESSAGE_TOPICS`) | — | `src/plugins/quinn-review-notifier-plugin.ts:113`<br>`src/plugins/alert-skill-executor-plugin.ts:135`<br>`lib/plugins/pr-remediator.ts:1241`<br>`lib/plugins/pr-remediator.ts:1638` | _(none)_ |
+| `message.outbound.discord.alert` | ✅ `MESSAGE_OUTBOUND_DISCORD_ALERT` (`MESSAGE_TOPICS`) | — | `src/plugins/quinn-review-notifier-plugin.ts:113`<br>`src/plugins/alert-skill-executor-plugin.ts:135` | _(none)_ |
 | `message.outbound.discord.dm.user.#` | — | — | _(none)_ | `lib/plugins/discord/outbound.ts:129` |
 | `message.outbound.discord.push.{AGENT_OPS_CHANNEL}` | — | — | `src/api/ava-tools.ts:117`<br>`src/api/ava-tools.ts:181` | _(none)_ |
 | `message.outbound.discord.push.{opsChannel}` | — | — | `src/plugins/skill-broker-plugin.ts:178` | _(none)_ |
@@ -208,17 +215,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
 | `operator.message.failed.{correlationId}` | — | — | `lib/plugins/operator-routing.ts:90` | _(none)_ |
-| `operator.message.request` | — | — | `src/api/operator.ts:69`<br>`src/plugins/dispatch-drop-escalator-plugin.ts:144`<br>`lib/plugins/pr-remediator.ts:827` | `lib/plugins/operator-routing.ts:76` |
-
-## `pr.*`
-
-| Topic | Declared | Payload | Publishers | Subscribers |
-|---|---|---|---|---|
-| `pr.backmerge.dispatch` | — | — | _(none)_ | `lib/plugins/pr-remediator.ts:649` |
-| `pr.remediate.address_feedback` | — | — | _(none)_ | `lib/plugins/pr-remediator.ts:643` |
-| `pr.remediate.fix_ci` | — | — | _(none)_ | `lib/plugins/pr-remediator.ts:640` |
-| `pr.remediate.merge_ready` | — | — | _(none)_ | `lib/plugins/pr-remediator.ts:637` |
-| `pr.remediate.update_branch` | — | — | _(none)_ | `lib/plugins/pr-remediator.ts:646` |
+| `operator.message.request` | — | — | `src/api/operator.ts:69`<br>`src/plugins/dispatch-drop-escalator-plugin.ts:144`<br>`lib/plugins/feature-remediation.ts:185` | `lib/plugins/operator-routing.ts:76` |
 
 ## `quinn.*`
 
@@ -274,12 +271,6 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
 | `task.replyTopic` | — | — | `src/executor/task-tracker.ts:330` | _(none)_ |
-
-## `world.*`
-
-| Topic | Declared | Payload | Publishers | Subscribers |
-|---|---|---|---|---|
-| `world.state.updated` | — | — | _(none)_ | `lib/plugins/pr-remediator.ts:592` |
 
 ## `{RESPONSE_TOPIC_WILDCARD}.*`
 
@@ -452,6 +443,5 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
 | `src/plugins/CeremonyPlugin.ts:372` | subscribe | `replyTopic` |
 | `src/plugins/CeremonyPlugin.ts:399` | publish | `skillRequestTopic` |
 | `src/plugins/CeremonyPlugin.ts:453` | publish | `completedTopic` |
-| `src/plugins/pr-remediator-skill-executor-plugin.ts:111` | publish | `entry.topic` |
 | `src/world/extensions/CeremonyStateExtension.ts:120` | publish | `topic` |
 

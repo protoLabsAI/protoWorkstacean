@@ -261,6 +261,46 @@ submitted → working → working (text="...") → working (percent=40, step="..
 
 Same task lifecycle, real-time visibility into what the agent is doing.
 
+## Structured tool-call frames (tool-call-v1)
+
+The `agent.skill.progress.{correlationId}` channel above carries **humanized text** — a one-liner like `routing to quinn` or `searching the web` on `status.message`, which simple clients render as-is. Alongside it, the in-process runtime emits a **structured** tool timeline on a parallel channel for rich clients that want to draw a per-tool spinner with `started → completed/failed` state.
+
+### Topic contract
+
+```
+agent.skill.toolframe.{correlationId}
+```
+
+`BusAgentExecutor` subscribes to this topic on every inbound `message/send` / `message/stream` call, alongside the reply and progress topics. Each event payload is `{ frame: ToolCallArtifactData }`, and each frame becomes its own A2A `artifact-update` event whose artifact (named `tool-call`) carries a [tool-call-v1](../extensions/tool-call-v1) DataPart:
+
+```ts
+eventBus.publish(AgentEvent.artifactUpdate({
+  taskId, contextId,
+  artifact: dataArtifact([emitToolCall(frame)], { name: "tool-call" }),
+  append: false,
+  lastChunk: false,
+}));
+```
+
+The frame is a discriminated union on `phase` — `{ toolCallId, name, phase: "started", args? }`, `{ ..., phase: "completed", result? }`, or `{ ..., phase: "failed", error? }`. A client keys on `toolCallId` to stitch each `started` to its later `completed` / `failed`. See the [tool-call-v1 extension reference](../extensions/tool-call-v1) for the full payload shape and emit/parse helpers.
+
+### Where the frames come from
+
+`DeepAgentExecutor` streams its LangGraph agent (`streamMode: "values"`) and, as each tool turn streams in, fires an `onToolFrame` callback (a `started` frame per AI-message tool call keyed by the call id; a `completed` / `failed` frame per tool-result message). `AgentRuntimePlugin` bridges that callback to `agent.skill.toolframe.{correlationId}`, and `BusAgentExecutor` emits each as the `artifact-update` above.
+
+### The initial "thinking" frame
+
+The first LLM turn can take 15–20s before it produces any tool call, so the runtime also emits an immediate `thinking` progress frame the instant the graph starts — published on the **text** channel (`agent.skill.progress.{cid}`, `step: "thinking"`) so even a simple client sees motion before any tool runs, instead of a byte-silent stream broken only by keepalive heartbeats.
+
+### Two channels, pick by client
+
+| Channel | Topic | A2A surface | Reader |
+|---|---|---|---|
+| Text narration | `agent.skill.progress.{cid}` | `status-update` (`status.message`) | Simple clients |
+| Structured frames | `agent.skill.toolframe.{cid}` | `artifact-update` DataPart | Rich tool-timeline clients |
+
+Both ride the same SSE stream and both are torn down together with the reply subscription on terminal / cancel; late frames after settle are dropped. A simple client reads `status.message` and ignores the artifact frames; a rich client reads the frames to render a live tool timeline.
+
 ## Push-notification configs survive restart
 
 Inbound A2A clients can register a webhook callback via `tasks/pushNotificationConfig/set` so workstacean POSTs them when long-running work terminates. Those configs are persisted to `${DATA_DIR}/push-notifications.db` (SQLite, WAL journal) so they survive container restarts — important on `:main` where watchtower auto-pulls multiple times per day. Each config carries a 24-hour TTL by default; expired rows are filtered from `load()` and opportunistically purged on subsequent `save()` calls. Falls back to the SDK's in-memory store when `DATA_DIR` is unset (tests + ephemeral setups).

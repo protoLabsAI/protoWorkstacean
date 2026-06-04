@@ -14,6 +14,8 @@ Once you've built the A2A spec surface ([Build an A2A Agent](./build-an-a2a-agen
 
 You don't have to implement any of them. You keep working as a plain A2A agent. But each extension unlocks behavior on the workstacean side that only fires when you opt in.
 
+A sixth extension — [tool-call-v1](../extensions/tool-call-v1) — also exists, but it is **not** part of this interceptor pack. It is a streaming-only construct (live `started → completed/failed` tool frames emitted as `artifact-update` DataParts), not a card-declared `before`/`after` interceptor. See [its own subsection below](#tool-call-v1-—-a-streaming-only-extension-not-an-interceptor).
+
 ## How workstacean picks them up
 
 All five interceptors are **registered unconditionally** at workstacean startup (`src/index.ts`). They run on every outbound A2A call, but **self-gate** on whether you advertised the URI in your agent card. Workstacean never forces behavior on agents that don't opt in.
@@ -184,7 +186,20 @@ All five interceptors live in `defaultExtensionRegistry` and fire on every `A2AE
 
 Each step is independently useful. The pack composes — e.g. blast-v1 + hitl-mode-v1 together let you say "anything `fleet` or `public` radius is `gated`, reviewer: operator."
 
+## tool-call-v1 — a streaming-only extension, not an interceptor
+
+[tool-call-v1](../extensions/tool-call-v1) is the odd one out: it is **not** one of the five interceptors above and **not** something you declare on your card with `before` / `after` hooks. It is a live streaming construct — per-tool lifecycle frames (`started → completed/failed`) emitted on the SSE stream as `artifact-update` DataParts (MIME `application/vnd.protolabs.tool-call-v1+json`) while the task is still `working`.
+
+Key differences from the interceptor pack:
+
+- **No card declaration, no self-gating.** The five interceptors register on the `A2AExecutor` dispatch pipeline and fire (then no-op) based on whether you advertised the URI. tool-call-v1 has no dispatch-pipeline registration at all — the frames originate inside the in-process runtime and ride the live stream.
+- **Streaming, not terminal telemetry.** cost-v1 / confidence-v1 read the terminal task's `data`; tool-call-v1 frames arrive mid-task, one `artifact-update` per tool turn, keyed by `toolCallId` so a client can stitch a `started` to its later `completed` / `failed`.
+- **It's the structured sibling of `status.message` narration.** Workstacean's in-process agents emit both a humanized text line (on `status.message`) and these structured frames in parallel. Simple clients read the text; rich clients read the frames to draw a tool timeline. See [A2A Streaming → Structured tool-call frames](./a2a-streaming#structured-tool-call-frames-tool-call-v1).
+
+You don't opt into it from your card. Workstacean's own `/a2a` endpoint emits it for its in-process agents; a remote A2A agent that wants to offer the same rich timeline streams equivalent `artifact-update` DataParts (built with `emitToolCall`) on its own SSE response.
+
 ## Related
 
 - [Build an A2A Agent](./build-an-a2a-agent) — the spec-side recipe (task store, webhooks, health)
-- Extension reference pages — [cost-v1](../extensions/cost-v1), [confidence-v1](../extensions/confidence-v1), [effect-domain-v1](../extensions/effect-domain-v1), [blast-v1](../extensions/blast-v1), [hitl-mode-v1](../extensions/hitl-mode-v1)
+- Extension reference pages — [cost-v1](../extensions/cost-v1), [confidence-v1](../extensions/confidence-v1), [effect-domain-v1](../extensions/effect-domain-v1), [blast-v1](../extensions/blast-v1), [hitl-mode-v1](../extensions/hitl-mode-v1), [tool-call-v1](../extensions/tool-call-v1)
+- [A2A Streaming (SSE)](./a2a-streaming) — the streaming pipeline tool-call-v1 frames ride on

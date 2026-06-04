@@ -29,10 +29,10 @@ Two important splits:
 
 ## GitHub App identities
 
-Quinn and the protoMaker team each have their own GitHub App installation. Each app has an App ID and a private key (PKCS#1 PEM). The pr-remediator and A2A plugins generate short-lived installation tokens from those credentials so comments and reviews post with the right attribution.
+Quinn and the protoMaker team each have their own GitHub App installation. Each app has an App ID and a private key (PKCS#1 PEM). The GitHub-acting code paths (the GitHub plugin, `pr-inspector`, the `issue-closer`) mint short-lived installation tokens from those credentials via the shared `makeGitHubAuth` helper, so comments, reviews, and issue closes post with the right attribution.
 
 When a PR review response lands for Quinn:
-1. pr-remediator looks up the GitHub context from the inbound `correlationId` (owner, repo, number)
+1. The GitHub context is resolved from the inbound `correlationId` (owner, repo, number)
 2. The Quinn container mints a JWT using `QUINN_APP_ID` + `QUINN_APP_PRIVATE_KEY`
 3. Exchanges it for a GitHub installation token (refreshed every 45 min by an entrypoint daemon)
 4. Submits the formal review via the GitHub API — shows as `@protoquinn[bot]`

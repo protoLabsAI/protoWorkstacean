@@ -9,7 +9,8 @@
 #   pr_review        — Formal review of a single PR. Posts an
 #                      APPROVED / COMMENTED / CHANGES_REQUESTED
 #                      review via the GitHub Review API. Feeds the
-#                      autonomous merge loop in pr-remediator.
+#                      autonomous merge-on-green loop (deterministic
+#                      approve-on-terminal-green in github.ts).
 #   bug_triage       — Triage open GitHub issues / blocked board
 #                      features and report patterns.
 #   security_triage  — Classify a CVE / dependabot / vuln report,

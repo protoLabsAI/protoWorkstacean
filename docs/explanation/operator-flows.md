@@ -51,6 +51,18 @@ Linear issue (trigger label)
 
 The net effect: a Linear ticket gets an automatic outcome comment when the board feature it spawned completes — closing the loop that filing alone couldn't.
 
+## Flow 2b — When a feature gets stuck (auto-remediation)
+
+A feature doesn't always march straight to done. When protoMaker's automode detects one is *blocked* — CI failing, a merge conflict, changes requested, retries exhausted, a cost/quota ceiling hit — it emits a **kinded** `feature.blocked` event by `POST`ing to workstacean's `/publish` (same ingress as `feature.completed`). **`FeatureRemediationPlugin`** (`lib/plugins/feature-remediation.ts`) is the single auto-remediation loop and routes by `kind`:
+
+- **Ignore** — `dependency_unsatisfied` / `external_dependency_unsatisfied`: protoMaker self-heals these on its own (stale-dep resolution), so workstacean does nothing.
+- **Escalate to HITL** — `cost_exceeded`, `runtime_exceeded`, `quota`, `rate_limit`, `worktree_safety`: no auto-action can help, so it publishes `operator.message.request` (`urgency: high`) straight to the operator's Discord DM (see [HITL flow](../architecture/flow-hitl)).
+- **Dispatch Roxy** — everything else (`ci_failure`, `merge_conflict`, `changes_requested`, `retries_exhausted`, unknown): it dispatches Roxy's `unblock_feature` skill with the blocked-feature context, asking her to investigate and take the smallest unblocking action (rebase, dispatch a fix, re-queue) or escalate with a crisp ask.
+
+The Roxy path is **bounded**: at most 3 auto-remediation attempts per feature, with a 5-minute cooldown between them. On exhaustion it escalates **once** to the operator and goes quiet — a stuck loop becomes a single HITL signal, never silent infinite retry. A later `feature.unblocked` clears the per-feature tracker, so a feature that recovers and re-blocks gets a fresh budget.
+
+This subsumes the old PR-remediator: instead of workstacean re-deriving PR-pipeline violations and dispatching ad-hoc fixes, protoMaker now detects stuck PRs (and any other block) as blocked features and emits one canonical signal. Non-feature PRs (dependabot / renovate) use GitHub-native auto-merge, not this loop.
+
 ## Flow 3 — PR review with Quinn
 
 1. A PR is opened or synchronized (auto-review), **or** a maintainer comments **`@protoquinn review`** on the PR — a top-level PR comment routes to the `pr_review` skill (not triage).
@@ -73,3 +85,4 @@ The net effect: a Linear ticket gets an automatic outcome comment when the board
 | Label a Linear issue | File the board feature, then comment the outcome back when it completes |
 | `@protoquinn review` (or just open a PR) | Gather CI + diff + structural findings, verify cross-repo refs, post a CI-terminal verdict |
 | Nothing | Notify the project dev channel on feature done/fail; gate the merge on protoMaker's eligibility check |
+| Nothing | On a blocked feature: ignore self-healing kinds, dispatch Roxy to unblock (bounded), or escalate to HITL — only pinging you when auto-remediation can't help or is exhausted |

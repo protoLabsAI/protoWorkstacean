@@ -73,7 +73,7 @@ Auto-merge captures the head SHA when you enable it. If you force-push afterward
 src/              Application entry, router, dispatcher, executors, telemetry
 src/agent-runtime/    DeepAgentExecutor wiring + agent YAML loader
 src/executor/         ExecutorRegistry, SkillDispatcher, A2A/Function/Workflow executors, extensions
-src/plugins/          CeremonyPlugin, AgentFleetHealth, alert/ceremony/pr-remediator skill executors
+src/plugins/          CeremonyPlugin, AgentFleetHealth, alert/ceremony skill executors
 src/api/              HTTP routes (per-module)
 src/router/           RouterPlugin
 lib/plugins/          Integration plugins (Discord, GitHub, Linear, Google, scheduler, HITL, etc.)

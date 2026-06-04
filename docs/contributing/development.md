@@ -204,7 +204,6 @@ src/
     agent-fleet-health-plugin.ts
     alert-skill-executor-plugin.ts
     ceremony-skill-executor-plugin.ts
-    pr-remediator-skill-executor-plugin.ts
     skill-broker-plugin.ts
   agent-runtime/
     agent-runtime-plugin.ts    # Registrar for in-process agents
@@ -228,7 +227,8 @@ lib/
     github.ts
     linear.ts
     google.ts
-    pr-remediator.ts
+    feature-remediation.ts       # feature.blocked → ignore / HITL / Roxy unblock_feature
+    issue-closer.ts              # feature.completed → close the originating GitHub issue
     scheduler.ts
     a2a-delivery.ts
     operator-routing.ts

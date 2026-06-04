@@ -37,7 +37,7 @@ Nine flows + one cross-cut. Each doc has the same shape:
    │ Google       │                         │          │                        │ • outcome    │
    │ Scheduler    │ ── cron.* ──────────────┴──────────┘                        │   publish    │
    │ Ceremonies   │ ── ceremony.{id}.execute ───────────────────────────────────┤              │
-   │ Alerts/PR-R  │ ── action.*, pr.remediate.* ────────────────────────────────┘              │
+   │ Alerts       │ ── action.* ───────────────────────────────────────────────┘              │
    └──────────────┘                                                              └──────┬───────┘
                                                                                         │ dispatch
                                                                                         ▼
@@ -50,8 +50,8 @@ Nine flows + one cross-cut. Each doc has the same shape:
                                                               ▼                                       ▼
                                                   ┌────────────────────┐                  ┌──────────────────┐
                                                   │  DeepAgentExecutor │                  │ FunctionExecutor │
-                                                  │   A2AExecutor      │                  │  (alert/ceremony │
-                                                  │                    │                  │   /pr-remediator)│
+                                                  │   A2AExecutor      │                  │  (alert/ceremony)│
+                                                  │                    │                  │                  │
                                                   └─────────┬──────────┘                  └────────┬─────────┘
                                                             │ message.outbound.*                   │
                                                             │ linear.reply.{id}                    │
@@ -76,8 +76,8 @@ Everything else — telemetry, dashboard, HITL, fleet health — observes this s
 | 2 | [flow-linear-bridges](flow-linear-bridges.md) | `message.inbound.linear.issue.created` (`proto-task` label → `code.execute`@`proto`) | `linear.reply.{issueId}` |
 | 3 | [flow-ceremonies](flow-ceremonies.md) | cron tick / external trigger | `ceremony.{id}.completed` + `autonomous.outcome.ceremony.{id}.{skill}` |
 | 4 | [flow-pr-review](flow-pr-review.md) | `message.inbound.github.{owner}.{repo}.pull_request.{n}` | GitHub review (APPROVED / COMMENTED / CHANGES_REQUESTED) |
-| 5 | [flow-alert-remediator](flow-alert-remediator.md) | fleet-health threshold trip → `action.*` / `pr.remediate.*` | `message.outbound.discord.alert` / GitHub mutation |
-| 6 | [flow-hitl](flow-hitl.md) | escalation site (stuck PR, destructive verdict) | `operator.message.request` → Discord DM |
+| 5 | [flow-alert-remediator](flow-alert-remediator.md) | fleet-health threshold trip → `action.*`; `feature.blocked` (from protoMaker) | `message.outbound.discord.alert` / Roxy `unblock_feature` / HITL |
+| 6 | [flow-hitl](flow-hitl.md) | escalation site (stuck feature, exhausted remediation) | `operator.message.request` → Discord DM |
 | 7 | [flow-agent-runtime-telemetry](flow-agent-runtime-telemetry.md) | executor lifecycle | `agent.runtime.activity.*`, `agent.skill.progress.*`, `agent.skill.latency`, `autonomous.outcome.*` |
 | 8 | [flow-a2a-discovery](flow-a2a-discovery.md) | process startup | ExecutorRegistry enrollment |
 | 9 | [flow-dashboard](flow-dashboard.md) | BusHistoryRecorder + API routes | dashboard tiles |

@@ -15,7 +15,7 @@ title: DeepAgent Runtime (LangGraph)
 3. When `SkillDispatcherPlugin` routes a `SkillRequest` to this executor, it:
    - Creates a LangGraph ReAct agent with `ChatOpenAI` pointed at the LiteLLM gateway
    - Resolves the system prompt: if the matched skill has `systemPromptOverride`, uses that; otherwise uses the agent's `systemPrompt`
-   - Appends a cached world state snapshot for instant situational awareness
+   - Replays recent conversation history when per-agent memory is enabled (`this.memory.history(...)`), so the agent sees the conversation rather than only the latest message
    - Provides LangChain tools matching the `tools` whitelist from the agent YAML
    - Runs the agent loop with `recursionLimit` derived from `maxTurns`
    - Returns the final AI message as `SkillResult.text`
@@ -75,6 +75,20 @@ skills:
 When a skill declares `systemPromptOverride`, the executor uses it instead of the agent's main `systemPrompt` for that specific invocation. This allows structured-output skills (like `diagnose_pr_stuck`) to use narrow, format-enforcing prompts while operational skills use the full conversational prompt.
 
 See [Agent Skills Reference](../../reference/agent-skills) for the full YAML schema and available tools.
+
+## Streaming & live tool narration
+
+The executor **streams** the LangGraph run rather than calling `invoke()`. It iterates `agent.stream({ messages }, { streamMode: "values" })`, which yields the full accumulated state after each node; the final yield is exactly what `invoke()` would have returned, so all downstream extraction (final text, memory, structured output) is unchanged.
+
+Streaming exists so progress reaches the caller **live** — the moment each turn streams in — instead of being replayed in a tight loop after the whole run settles. The executor fires three hooks during the run, all wired by `AgentRuntimePlugin` onto the bus:
+
+| Hook | When | Bus topic | Payload |
+|------|------|-----------|---------|
+| `onProgress` | An initial `"thinking"` frame, emitted before the first LLM turn (which can take 15–20s) so the stream is not byte-silent | `agent.skill.progress.{correlationId}` | Humanized progress text |
+| `onToolCall` | Each tool-call turn as it streams in, before its tools execute | `agent.skill.progress.{correlationId}` | Humanized tool-call narration (`toolNames`, `toolCalls`) |
+| `onToolFrame` | A structured tool-call-v1 lifecycle frame (`started` → `completed`/`failed`) per tool call as the graph streams | `agent.skill.toolframe.{correlationId}` | Structured `ToolCallArtifactData` frame |
+
+The progress topics carry humanized narration for plain clients; the toolframe topic carries structured frames that the a2a-server emits as streamed artifact-update DataParts for rich clients. All three hooks are best-effort — a throwing callback is logged and never aborts the run.
 
 ## Available tools
 
