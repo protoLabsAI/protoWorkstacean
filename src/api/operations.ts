@@ -12,6 +12,27 @@ import { getPendingHumanInput } from "./human-input.ts";
 import { safeKeyEqual, isPublishTopicDenied } from "../../lib/runtime-env.ts";
 import { metrics } from "../../lib/metrics.ts";
 
+/**
+ * Probe whether the LLM gateway is REACHABLE for the readiness report.
+ * Any HTTP response — including the 401 that LiteLLM's auth-gated `/health`
+ * returns without the master key — means the gateway is up; only a network
+ * error / timeout counts as unreachable. (Earlier this required a 2xx, so an
+ * auth-gated /health reported `gateway:false` on a perfectly healthy gateway.)
+ * Informational only — does not gate readiness.
+ */
+export async function gatewayReachable(
+  url: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 2000,
+): Promise<boolean> {
+  try {
+    await fetchImpl(new URL("/health", url), { signal: AbortSignal.timeout(timeoutMs) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function createRoutes(ctx: ApiContext): Route[] {
 
   /**
@@ -148,14 +169,8 @@ export function createRoutes(ctx: ApiContext): Route[] {
    */
   async function handleReady(): Promise<Response> {
     const sqlite = ctx.telemetry ? ctx.telemetry.healthCheck() : true;
-    let gateway: boolean | "unconfigured" = "unconfigured";
     const gw = process.env.LLM_GATEWAY_URL;
-    if (gw) {
-      try {
-        const r = await fetch(new URL("/health", gw), { signal: AbortSignal.timeout(2000) });
-        gateway = r.ok;
-      } catch { gateway = false; }
-    }
+    const gateway: boolean | "unconfigured" = gw ? await gatewayReachable(gw) : "unconfigured";
     const ready = sqlite;
     return Response.json(
       { status: ready ? "ready" : "unready", sqlite, gateway, timestamp: Date.now() },
