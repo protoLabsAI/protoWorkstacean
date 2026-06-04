@@ -49,12 +49,15 @@ import { CeremonyYamlLoader } from "../loaders/ceremonyYamlLoader.ts";
 import { CeremonyOutcomesRepository } from "../knowledge/ceremonyOutcomes.ts";
 import { CeremonyStateExtension } from "../world/extensions/CeremonyStateExtension.ts";
 import { CeremonyNotifier } from "../integrations/discord/CeremonyNotifier.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("ceremony");
 
 const DEBUG = process.env.DEBUG === "1" || process.env.DEBUG === "true";
 const HOT_RELOAD_INTERVAL_MS = 5_000;
 
 function debug(...args: unknown[]): void {
-  if (DEBUG) console.log("[DEBUG][ceremony]", ...args);
+  if (DEBUG) log.debug(String(args[0] ?? ""), { args: args.slice(1) });
 }
 
 /** File metadata used to detect changes during hot-reload polling. */
@@ -127,7 +130,7 @@ export class CeremonyPlugin implements Plugin {
     const subId = bus.subscribe("ceremony.#", this.name, (msg: BusMessage) => {
       if (msg.topic.endsWith(".completed")) {
         this._onCeremonyCompleted(msg).catch((err) => {
-          console.error("[ceremony] Error handling completed event:", err);
+          log.error("Error handling completed event", { err });
         });
       } else if (msg.topic.endsWith(".execute")) {
         // External trigger (e.g. from ActionDispatcher via world engine).
@@ -142,10 +145,10 @@ export class CeremonyPlugin implements Plugin {
           const ceremonyId = parts.slice(1, -1).join(".");
           const ceremony = this.ceremonies.get(ceremonyId);
           if (ceremony) {
-            console.log(`[ceremony] External trigger received for: ${ceremonyId}`);
+            log.info(`External trigger received for: ${ceremonyId}`);
             this._fireCeremony(ceremony);
           } else {
-            console.warn(`[ceremony] External trigger for unknown ceremony: ${ceremonyId}`);
+            log.warn(`External trigger for unknown ceremony: ${ceremonyId}`);
           }
         }
       }
@@ -161,7 +164,7 @@ export class CeremonyPlugin implements Plugin {
     // Start hot-reload watcher
     this._startHotReload();
 
-    console.log(`[ceremony] Plugin installed — loaded ${this.ceremonies.size} ceremony(ies)`);
+    log.info(`Plugin installed — loaded ${this.ceremonies.size} ceremony(ies)`);
   }
 
   uninstall(): void {
@@ -246,13 +249,13 @@ export class CeremonyPlugin implements Plugin {
           deployed++;
           debug("Deployed default ceremony:", file);
         } catch (err) {
-          console.warn(`[ceremony] Failed to deploy default ${file}:`, err);
+          log.warn(`Failed to deploy default ${file}`, { err });
         }
       }
     }
 
     if (deployed > 0) {
-      console.log(`[ceremony] Deployed ${deployed} default ceremony file(s) to ${ceremoniesDir}`);
+      log.info(`Deployed ${deployed} default ceremony file(s) to ${ceremoniesDir}`);
     }
   }
 
@@ -264,7 +267,7 @@ export class CeremonyPlugin implements Plugin {
         // Greenfield: disabled = disabled everywhere. Do not register, do not
         // schedule, and skip state extension so external `ceremony.<id>.execute`
         // triggers cannot resurrect the ceremony via the registry lookup.
-        console.log(`[ceremony] Skipping disabled ceremony: ${ceremony.id}`);
+        log.info(`Skipping disabled ceremony: ${ceremony.id}`);
         continue;
       }
       this.ceremonies.set(ceremony.id, ceremony);
@@ -297,7 +300,7 @@ export class CeremonyPlugin implements Plugin {
       this.timers.set(ceremony.id, timer);
       debug(`Scheduled: ${ceremony.id} fires at ${nextDate.toISOString()} (delay: ${Math.round(actualDelay / 1000)}s)`);
     } catch (err) {
-      console.error(`[ceremony] Failed to schedule ${ceremony.id}:`, err);
+      log.error(`Failed to schedule ${ceremony.id}`, { err });
     }
   }
 
@@ -340,12 +343,12 @@ export class CeremonyPlugin implements Plugin {
       payload: executePayload,
     };
 
-    console.log(`[ceremony] Firing: ${ceremony.id} (run ${runId})`);
+    log.info(`Firing: ${ceremony.id} (run ${runId})`);
     this.bus.publish(executeTopic, executeMsg);
 
     // Dispatch skill and publish completed
     this._dispatchSkillAndComplete(ceremony, context).catch((err) => {
-      console.error(`[ceremony] Dispatch error for ${ceremony.id}:`, err);
+      log.error(`Dispatch error for ${ceremony.id}`, { err });
     });
   }
 
@@ -419,7 +422,7 @@ export class CeremonyPlugin implements Plugin {
         // Per-ceremony timeout fired
         status = "timeout";
         error = `Skill dispatch timed out after ${ceremony.timeoutMs / 1000}s`;
-        console.warn(`[ceremony] Skill dispatch timeout for ${ceremony.id} (run ${context.runId})`);
+        log.warn(`Skill dispatch timeout for ${ceremony.id} (run ${context.runId})`);
       }
     } catch (err) {
       status = "failure";
@@ -476,12 +479,12 @@ export class CeremonyPlugin implements Plugin {
       this.notifier
         .notify(outcome, ceremony.name, ceremony.notifyChannel, ceremony.notifyWebhookEnv)
         .catch((err) => {
-          console.error("[ceremony] Discord notification error:", err);
+          log.error("Discord notification error", { err });
         });
     }
 
-    console.log(
-      `[ceremony] ${outcome.status.toUpperCase()}: ${outcome.ceremonyId} ` +
+    log.info(
+      `${outcome.status.toUpperCase()}: ${outcome.ceremonyId} ` +
       `(run ${outcome.runId}, ${outcome.duration}ms)`,
     );
   }
@@ -524,11 +527,11 @@ export class CeremonyPlugin implements Plugin {
             for (const ceremony of ceremonies) {
               if (this.ceremonies.has(ceremony.id)) continue;
               if (ceremony.enabled === false) {
-                console.log(`[ceremony] Skipping disabled ceremony: ${ceremony.id}`);
+                log.info(`Skipping disabled ceremony: ${ceremony.id}`);
                 continue;
               }
               this.registerCeremony(ceremony);
-              console.log(`[ceremony] Hot-loaded new ceremony: ${ceremony.id}`);
+              log.info(`Hot-loaded new ceremony: ${ceremony.id}`);
             }
           } else {
             // Changed file — reload all and reschedule changed ceremonies
@@ -552,7 +555,7 @@ export class CeremonyPlugin implements Plugin {
         // disabled = disabled everywhere.
         if (existing) {
           this.unregisterCeremony(ceremony.id);
-          console.log(`[ceremony] Hot-disabled ceremony: ${ceremony.id}`);
+          log.info(`Hot-disabled ceremony: ${ceremony.id}`);
         }
         continue;
       }
@@ -561,7 +564,7 @@ export class CeremonyPlugin implements Plugin {
         this.ceremonies.set(ceremony.id, ceremony);
         this.stateExtension.registerCeremony(ceremony);
         this._scheduleCeremony(ceremony);
-        console.log(`[ceremony] Hot-reloaded ceremony: ${ceremony.id}`);
+        log.info(`Hot-reloaded ceremony: ${ceremony.id}`);
       }
     }
   }

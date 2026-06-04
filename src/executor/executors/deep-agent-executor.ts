@@ -19,6 +19,10 @@ import { runStructuredFinalizer, type ForcedToolCaller } from "./structured-fina
 import { AgentMemory, memoryAppliesTo } from "../../knowledge/agent-memory.ts";
 import type { ToolCallArtifactData } from "@protolabs/a2a";
 import { withCircuitBreaker } from "../../../lib/plugins/circuit-breaker.ts";
+import { logger } from "../../../lib/log.ts";
+
+const toolLog = logger("deep-agent:tool");
+const log = logger("deep-agent");
 
 const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
 
@@ -215,7 +219,7 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
   const all: Record<string, any> = {
     chat_with_agent: tool(
       async (input) => {
-        console.log(`[deep-agent:tool] chat_with_agent called: agent=${input.agent}, skill=${input.skill ?? "auto"}, msg="${input.message.slice(0, 80)}"`);
+        toolLog.info(`chat_with_agent called: agent=${input.agent}, skill=${input.skill ?? "auto"}, msg="${input.message.slice(0, 80)}"`);
         try {
           const body = agentName ? { ...input, dispatcherAgent: agentName } : input;
           const result = await http.post("/api/a2a/chat", body) as { success?: boolean; data?: Record<string, unknown> };
@@ -247,19 +251,19 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
                     ...(pd.confidence !== undefined ? { confidence: pd.confidence } : {}),
                   },
                 };
-                console.log(`[deep-agent:tool] chat_with_agent resolved pending ${input.agent} task: taskState=${pd.taskState}`);
+                toolLog.info(`chat_with_agent resolved pending ${input.agent} task: taskState=${pd.taskState}`);
                 return JSON.stringify(merged);
               }
               if (pd.taskState === "unknown") break; // never tracked / aged out
             }
-            console.log(`[deep-agent:tool] chat_with_agent ${input.agent} still pending after budget`);
+            toolLog.info(`chat_with_agent ${input.agent} still pending after budget`);
             return JSON.stringify(result);
           }
 
-          console.log(`[deep-agent:tool] chat_with_agent returned: ${JSON.stringify(result).slice(0, 200)}`);
+          toolLog.info(`chat_with_agent returned: ${JSON.stringify(result).slice(0, 200)}`);
           return JSON.stringify(result);
         } catch (e) {
-          console.error(`[deep-agent:tool] chat_with_agent ERROR:`, e);
+          toolLog.error("chat_with_agent ERROR", { err: e });
           throw e;
         }
       },
@@ -1092,7 +1096,7 @@ export class DeepAgentExecutor implements IExecutor {
       const usingModel = modelOverride && modelOverride !== this.agentDef.model
         ? ` (model override: ${modelOverride})`
         : "";
-      console.log(`[deep-agent:${this.agentDef.name}] invoke skill="${req.skill ?? "?"}" tools=${tools.length}/${agentTools.length} maxTurns=${effectiveMaxTurns} promptLen=${prompt.length} langfuse=${LANGFUSE_ENABLED}${usingModel}`);
+      log.info(`invoke skill="${req.skill ?? "?"}" tools=${tools.length}/${agentTools.length} maxTurns=${effectiveMaxTurns} promptLen=${prompt.length} langfuse=${LANGFUSE_ENABLED}${usingModel}`, { agent: this.agentDef.name });
 
       // Within-conversation history (Phase 1): replay recent turns so the agent
       // sees the conversation, not just the latest message.
@@ -1113,7 +1117,7 @@ export class DeepAgentExecutor implements IExecutor {
         try {
           this.onProgress({ agentName: this.agentDef.name, correlationId: req.correlationId, skill: req.skill, text: "thinking", step: "thinking" });
         } catch (cbErr) {
-          console.warn(`[deep-agent:${this.agentDef.name}] onProgress callback threw:`, cbErr);
+          log.warn("onProgress callback threw", { agent: this.agentDef.name, err: cbErr });
         }
       }
 
@@ -1142,13 +1146,13 @@ export class DeepAgentExecutor implements IExecutor {
         // Narrate any tool-call turn that streamed in this step and hasn't been
         // narrated yet — live, before its tools execute.
         for (const n of extractToolCallNarrations(msgs, narrated)) {
-          console.log(`[deep-agent:${this.agentDef.name}] tool calls: ${n.toolNames.join(", ")}`);
+          log.info(`tool calls: ${n.toolNames.join(", ")}`, { agent: this.agentDef.name });
           if (this.onToolCall) {
             try {
               this.onToolCall({ agentName: this.agentDef.name, correlationId: req.correlationId, skill: req.skill, toolNames: n.toolNames, toolCalls: n.toolCalls });
             } catch (cbErr) {
               // Telemetry must never break a running skill.
-              console.warn(`[deep-agent:${this.agentDef.name}] onToolCall callback threw:`, cbErr);
+              log.warn("onToolCall callback threw", { agent: this.agentDef.name, err: cbErr });
             }
           }
         }
@@ -1159,7 +1163,7 @@ export class DeepAgentExecutor implements IExecutor {
             try {
               this.onToolFrame({ agentName: this.agentDef.name, correlationId: req.correlationId, skill: req.skill, frame });
             } catch (cbErr) {
-              console.warn(`[deep-agent:${this.agentDef.name}] onToolFrame callback threw:`, cbErr);
+              log.warn("onToolFrame callback threw", { agent: this.agentDef.name, err: cbErr });
             }
           }
         }
@@ -1168,7 +1172,7 @@ export class DeepAgentExecutor implements IExecutor {
       });
 
       const messages = result.messages ?? [];
-      console.log(`[deep-agent:${this.agentDef.name}] ${messages.length} messages returned`);
+      log.info(`${messages.length} messages returned`, { agent: this.agentDef.name });
 
       let text = "";
       for (let i = messages.length - 1; i >= 0; i--) {
@@ -1206,8 +1210,9 @@ export class DeepAgentExecutor implements IExecutor {
           finalText,
           this._forcedToolCaller(llm),
         );
-        console.log(
-          `[deep-agent:${this.agentDef.name}] structured finalizer for "${req.skill}" → ${skillDef.resultMime}${finalized.repaired ? " (repaired)" : ""}`,
+        log.info(
+          `structured finalizer for "${req.skill}" → ${skillDef.resultMime}${finalized.repaired ? " (repaired)" : ""}`,
+          { agent: this.agentDef.name },
         );
         return {
           text: JSON.stringify(finalized.value),
@@ -1223,7 +1228,7 @@ export class DeepAgentExecutor implements IExecutor {
         correlationId: req.correlationId,
       };
     } catch (e) {
-      console.error(`[deep-agent:${this.agentDef.name}]`, e);
+      log.error("execute failed", { agent: this.agentDef.name, err: e });
       return {
         text: e instanceof Error ? e.message : String(e),
         isError: true,

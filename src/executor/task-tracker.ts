@@ -18,6 +18,9 @@ import type { AgentSkillResponsePayload } from "../event-bus/payloads.ts";
 import type { TaskTrackerStore, PersistedTask } from "./task-tracker-store.ts";
 import { Part } from "@a2a-js/sdk";
 import { partText, parseWorldStateDelta } from "@protolabs/a2a";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("task-tracker");
 
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled", "rejected"]);
 
@@ -118,7 +121,7 @@ export class TaskTracker {
       this.pending.set(row.correlationId, row);
     }
     if (this.pending.size > 0) {
-      console.log(`[task-tracker] rehydrated ${this.pending.size} in-flight task(s) from store — awaiting executor re-registration`);
+      log.info(`rehydrated ${this.pending.size} in-flight task(s) from store — awaiting executor re-registration`);
     }
     this.sweepTimer = setInterval(() => { void this._sweep(); }, this.sweepIntervalMs);
     this.sweepTimer.unref?.();
@@ -152,7 +155,7 @@ export class TaskTracker {
     if (this.pending.size === 0) return;
     for (const [, row] of [...this.pending]) {
       if (this._rehydrate(row)) {
-        console.log(`[task-tracker] resumed ${row.agentName} task ${row.taskId.slice(0, 8)}… after restart`);
+        log.info(`resumed ${row.agentName} task ${row.taskId.slice(0, 8)}… after restart`);
         continue;
       }
       // Executor still unregistered — escalate (don't silently drop) once the
@@ -165,7 +168,7 @@ export class TaskTracker {
 
   /** Publish a failure to the reply topic for a task that couldn't be resumed. */
   private _escalateInterrupted(row: PersistedTask): void {
-    console.warn(`[task-tracker] could not resume ${row.agentName} task ${row.taskId.slice(0, 8)}… — escalating as interrupted`);
+    log.warn(`could not resume ${row.agentName} task ${row.taskId.slice(0, 8)}… — escalating as interrupted`);
     const payload: AgentSkillResponsePayload = {
       error: "Task interrupted by a workstacean restart and could not be resumed — please retry.",
       correlationId: row.correlationId,
@@ -231,8 +234,8 @@ export class TaskTracker {
       callbackToken: t.callbackToken, sourceInterface: t.sourceInterface,
       sourceChannelId: t.sourceChannelId, sourceUserId: t.sourceUserId,
     });
-    console.log(
-      `[task-tracker] Tracking ${params.agentName} task ${params.taskId.slice(0, 8)}… (correlationId: ${params.correlationId.slice(0, 8)}…)`,
+    log.info(
+      `Tracking ${params.agentName} task ${params.taskId.slice(0, 8)}… (correlationId: ${params.correlationId.slice(0, 8)}…)`,
     );
   }
 
@@ -263,8 +266,8 @@ export class TaskTracker {
 
     if (state === "input-required") {
       const statusText = textOf(normalizeParts(status.message?.parts));
-      console.warn(
-        `[task-tracker] ${task.agentName} task ${task.taskId.slice(0, 8)}… is input-required ` +
+      log.warn(
+        `${task.agentName} task ${task.taskId.slice(0, 8)}… is input-required ` +
         `but no approval gate is wired — terminating with failure. Question: ${statusText || "(none)"}`,
       );
       this._publishResponse(task, undefined, `Agent asked for human input but no approval gate is wired: ${statusText || "(no question text)"}`, "failed");
@@ -290,8 +293,8 @@ export class TaskTracker {
     this._extractAndPublishDeltas(task.taskId, task.agentName, artifacts);
     this._publishResponse(task, isError ? undefined : content, isError ? (content || state) : undefined, state);
     this._forget(correlationId);
-    console.log(
-      `[task-tracker] Callback for ${task.taskId.slice(0, 8)}… → terminal state "${state}" (via webhook)`,
+    log.info(
+      `Callback for ${task.taskId.slice(0, 8)}… → terminal state "${state}" (via webhook)`,
     );
   }
 
@@ -342,8 +345,8 @@ export class TaskTracker {
         const state = result.data?.taskState;
 
         if (state === "input-required") {
-          console.warn(
-            `[task-tracker] ${task.agentName} task ${task.taskId.slice(0, 8)}… is input-required ` +
+          log.warn(
+            `${task.agentName} task ${task.taskId.slice(0, 8)}… is input-required ` +
             `but no approval gate is wired — terminating with failure. Question: ${result.text || "(none)"}`,
           );
           this._publishResponse(task, undefined, `Agent asked for human input but no approval gate is wired: ${result.text || "(no question text)"}`, "failed");
@@ -363,14 +366,14 @@ export class TaskTracker {
           await task.executor.recordTerminalExtensions(task.skillName ?? "unknown", task.correlationId, result.data);
           this._publishResponse(task, result.text, result.isError ? result.text : undefined, state, result.data);
           this._forget(task.correlationId);
-          console.log(
-            `[task-tracker] Task ${task.taskId.slice(0, 8)}… reached terminal state "${state}" after ${Math.round((now - task.registeredAt) / 1000)}s`,
+          log.info(
+            `Task ${task.taskId.slice(0, 8)}… reached terminal state "${state}" after ${Math.round((now - task.registeredAt) / 1000)}s`,
           );
         }
       } catch (err) {
-        console.warn(
-          `[task-tracker] poll failed for ${task.taskId.slice(0, 8)}…:`,
-          err instanceof Error ? err.message : String(err),
+        log.warn(
+          `poll failed for ${task.taskId.slice(0, 8)}…`,
+          { err: err instanceof Error ? err.message : String(err) },
         );
       }
     }
@@ -405,8 +408,8 @@ export class TaskTracker {
           timestamp: Date.now(),
           payload: { domain, path, op, value, sourceTaskId: taskId, sourceAgent: agentName },
         });
-        console.log(
-          `[task-tracker] world.state.delta: ${domain}.${path} op=${op} from ${agentName} (task ${taskId.slice(0, 8)}…)`,
+        log.info(
+          `world.state.delta: ${domain}.${path} op=${op} from ${agentName} (task ${taskId.slice(0, 8)}…)`,
         );
       }
     }

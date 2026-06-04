@@ -11,8 +11,15 @@ import { ControlPlaneRegistrarPlugin } from "./plugins/control-plane-registrar-p
 import type { Plugin, } from "../lib/types";
 import { parseEnv } from "./config/env.ts";
 import { isProductionLike, safeKeyEqual } from "../lib/runtime-env.ts";
+import { logger } from "../lib/log.ts";
 // Fail-fast env validation — exits immediately on misconfiguration.
 parseEnv();
+
+const log = logger("startup");
+const langfuseLog = logger("langfuse");
+const busWsLog = logger("bus-ws");
+const shutdownLog = logger("shutdown");
+const fatalLog = logger("fatal");
 
 // --- Langfuse OTEL tracer — register BEFORE any plugin that emits spans ---
 // Without this, @langfuse/langchain's CallbackHandler (used by
@@ -20,7 +27,7 @@ parseEnv();
 // is captured. Gated on LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY.
 import { initLangfuseTracer, shutdownLangfuseTracer } from "./telemetry/langfuse-tracer.ts";
 const langfuseEnabled = initLangfuseTracer();
-console.log(`[langfuse] OTEL tracer ${langfuseEnabled ? "registered" : "skipped (no credentials)"}`);
+langfuseLog.info(`OTEL tracer ${langfuseEnabled ? "registered" : "skipped (no credentials)"}`);
 // --- Workspace config ---
 const workspaceDir = resolve(
   process.env.WORKSPACE_DIR || join(process.cwd(), "workspace")
@@ -109,8 +116,8 @@ channelRegistry.startWatching();
 import { ProjectRegistry } from "./plugins/project-registry.js";
 const projectRegistry = new ProjectRegistry();
 await projectRegistry.refreshNow();
-console.log(
-  `[startup] ProjectRegistry: ${projectRegistry.getProjects().length} project(s) loaded` +
+log.info(
+  `ProjectRegistry: ${projectRegistry.getProjects().length} project(s) loaded` +
     (projectRegistry.getLastError() ? ` (error: ${projectRegistry.getLastError()})` : ""),
 );
 
@@ -572,11 +579,11 @@ for (const entry of pluginRegistry) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     failedPlugins.push({ name: entry.name, error: msg });
-    console.error(`[startup] plugin "${entry.name}" failed to install — skipping (the rest still boot):`, err);
+    log.error(`plugin "${entry.name}" failed to install — skipping (the rest still boot)`, { err });
   }
 }
 if (failedPlugins.length > 0) {
-  console.error(`[startup] ${failedPlugins.length} plugin(s) failed: ${failedPlugins.map(p => p.name).join(", ")}`);
+  log.error(`${failedPlugins.length} plugin(s) failed: ${failedPlugins.map(p => p.name).join(", ")}`);
 }
 
 // Guard: warn if skill-dispatcher is installed but no executor registrars ran.
@@ -587,8 +594,8 @@ if (failedPlugins.length > 0) {
     p.name === "agent-runtime" || p.name === "skill-broker" || p.name === "mcp-client",
   );
   if (hasDispatcher && !hasRegistrar) {
-    console.warn(
-      "[startup] skill-dispatcher is installed but no executor registrar (agent-runtime / skill-broker / mcp-client) is active. " +
+    log.warn(
+      "skill-dispatcher is installed but no executor registrar (agent-runtime / skill-broker / mcp-client) is active. " +
       "All agent.skill.request messages will be dropped. " +
       "Add workspace/agents/*.yaml, workspace/agents.yaml, or workspace/mcp-servers.d/ to register at least one agent or MCP server.",
     );
@@ -605,11 +612,11 @@ if (failedPlugins.length > 0) {
 
 const allPlugins = [...corePlugins, ...registeredPlugins];
 
-console.log("WorkStacean started.");
-console.log(`Workspace: ${workspaceDir}`);
-console.log(`Plugins: ${allPlugins.map((p) => p.name).join(", ")}`);
-console.log(`Topics: ${bus.topics().map((t) => t.pattern).join(", ")}`);
-console.log(`Type 'help' for commands.`);
+log.info("WorkStacean started.");
+log.info(`Workspace: ${workspaceDir}`);
+log.info(`Plugins: ${allPlugins.map((p) => p.name).join(", ")}`);
+log.info(`Topics: ${bus.topics().map((t) => t.pattern).join(", ")}`);
+log.info(`Type 'help' for commands.`);
 
 // Show CLI prompt after startup
 const cli = corePlugins.find((p) => p.name === "cli") as CLIPlugin;
@@ -624,8 +631,8 @@ const API_KEY = process.env.WORKSTACEAN_API_KEY;
 // `if (ctx.apiKey && …)` check short-circuits open — fine for local dev, a
 // wide-open control surface in prod. (#791)
 if (isProductionLike() && !API_KEY) {
-  console.error(
-    "[startup] WORKSTACEAN_API_KEY is required when NODE_ENV=production or " +
+  log.error(
+    "WORKSTACEAN_API_KEY is required when NODE_ENV=production or " +
       "WORKSTACEAN_PUBLIC_BASE_URL is set. Refusing to start an unauthenticated " +
       "HTTP/A2A surface in production. Set the key (Infisical) and redeploy.",
   );
@@ -795,12 +802,12 @@ const httpServer = Bun.serve<BusSubscribeWsData>({
         }
       });
       ws.data.subscriberId = subscriberId;
-      console.log(`[bus-ws] subscribed to "${topic}" (sub ${subscriberId})`);
+      busWsLog.info(`subscribed to "${topic}" (sub ${subscriberId})`);
     },
     close(ws) {
       const { topic, subscriberId } = ws.data;
       if (subscriberId) bus.unsubscribe(subscriberId);
-      console.log(`[bus-ws] unsubscribed from "${topic}"`);
+      busWsLog.info(`unsubscribed from "${topic}"`);
     },
     message() {
       // Read-only: external subscribers receive bus events; to publish,
@@ -809,7 +816,7 @@ const httpServer = Bun.serve<BusSubscribeWsData>({
   },
 });
 
-console.log(`HTTP API listening on port ${HTTP_PORT}`);
+log.info(`HTTP API listening on port ${HTTP_PORT}`);
 
 // ── Wire fleet-health into ExecutorRegistry for health-weighted dispatch ──
 {
@@ -830,10 +837,10 @@ let shuttingDown = false;
 async function gracefulShutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`[shutdown] ${signal} received — draining…`);
-  try { httpServer.stop(); } catch (e) { console.warn("[shutdown] server.stop threw:", e); }
+  shutdownLog.info(`${signal} received — draining…`);
+  try { httpServer.stop(); } catch (e) { shutdownLog.warn("server.stop threw", { err: e }); }
   for (const plugin of allPlugins) {
-    try { plugin.uninstall?.(); } catch (e) { console.warn(`[shutdown] ${plugin.name} uninstall threw:`, e); }
+    try { plugin.uninstall?.(); } catch (e) { shutdownLog.warn(`${plugin.name} uninstall threw`, { err: e }); }
   }
   await shutdownLangfuseTracer();
   for (const [name, closer] of [
@@ -842,9 +849,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
     ["research-store", () => researchStore.close()],
     ["task-store", () => taskTrackerStore.close()],
   ] as const) {
-    try { closer(); } catch (e) { console.warn(`[shutdown] ${name} close threw:`, e); }
+    try { closer(); } catch (e) { shutdownLog.warn(`${name} close threw`, { err: e }); }
   }
-  console.log("[shutdown] complete");
+  shutdownLog.info("complete");
   process.exit(0);
 }
 process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));
@@ -855,9 +862,9 @@ process.on("SIGINT", () => void gracefulShutdown("SIGINT"));
 // the process in an undefined state — log loud and exit non-zero so the
 // orchestrator restarts cleanly.
 process.on("unhandledRejection", (reason) => {
-  console.error("[fatal] unhandledRejection (process kept alive):", reason);
+  fatalLog.error("unhandledRejection (process kept alive)", { reason });
 });
 process.on("uncaughtException", (err) => {
-  console.error("[fatal] uncaughtException — exiting for a clean restart:", err);
+  fatalLog.error("uncaughtException — exiting for a clean restart", { err });
   process.exit(1);
 });

@@ -27,6 +27,10 @@ import type { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
 import type { ProjectRegistry } from "../plugins/project-registry.ts";
 import { TTLCache } from "../../lib/ttl-cache.ts";
 import { TOPICS } from "../event-bus/topics.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("router");
+const linearLog = logger("linear");
 
 export interface RouterConfig {
   workspaceDir: string;
@@ -113,8 +117,8 @@ export class RouterPlugin implements Plugin {
       }),
     );
 
-    console.log(
-      `[router] Plugin installed — ${this.resolver.size} skill keyword entry/entries`,
+    log.info(
+      `Plugin installed — ${this.resolver.size} skill keyword entry/entries`,
     );
   }
 
@@ -224,14 +228,14 @@ export class RouterPlugin implements Plugin {
     }
 
     if (!match && !storedSession) {
-      console.log(
-        `[router] No skill match for topic "${msg.topic}"` +
+      log.info(
+        `No skill match for topic "${msg.topic}"` +
         (content ? ` content="${content.slice(0, 60)}"` : "") +
         " — dropping",
       );
       const linearEvent = extractLinearEvent(msg.topic);
       if (linearEvent) {
-        console.log(`[linear] event=${linearEvent} delivered to none (no skill match)`);
+        linearLog.info(`event=${linearEvent} delivered to none (no skill match)`);
       }
       return;
     }
@@ -260,16 +264,16 @@ export class RouterPlugin implements Plugin {
       `agent.skill.response.${runId}`;
 
     const via = match?.via ?? "sticky";
-    console.log(
-      `[router] ${msg.topic} → skill "${skill}" (via ${via})` +
+    log.info(
+      `${msg.topic} → skill "${skill}" (via ${via})` +
       (agentName ? ` [${agentName}]` : "") +
       ` reply → ${replyTopic}`,
     );
 
     const linearEvent = extractLinearEvent(msg.topic);
     if (linearEvent) {
-      console.log(
-        `[linear] event=${linearEvent} delivered to ${agentName ?? "none"} (skill=${skill})`,
+      linearLog.info(
+        `event=${linearEvent} delivered to ${agentName ?? "none"} (skill=${skill})`,
       );
     }
 
@@ -309,7 +313,7 @@ export class RouterPlugin implements Plugin {
     const match = this.resolver.resolve(skillHint, content);
 
     if (!match) {
-      console.log(`[router] cron "${msg.topic}" — no skill match, dropping`);
+      log.info(`cron "${msg.topic}" — no skill match, dropping`);
       return;
     }
 
@@ -317,8 +321,8 @@ export class RouterPlugin implements Plugin {
 
     const replyTopic = msg.reply?.topic ?? buildReplyTopic(channel, recipient);
 
-    console.log(
-      `[router] cron "${msg.topic}" → skill "${match.skill}" (via ${match.via}) → ${replyTopic}`,
+    log.info(
+      `cron "${msg.topic}" → skill "${match.skill}" (via ${match.via}) → ${replyTopic}`,
     );
 
     const skillRequest: BusMessage = {
