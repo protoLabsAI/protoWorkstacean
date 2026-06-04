@@ -93,6 +93,13 @@ DATA_DIR=/data
 
 For a full list of all supported variables, see [reference/env-vars.md](../reference/env-vars).
 
+## Data volume + backups
+
+The `workstacean-data` named volume holds the SQLite databases — `knowledge.db` (conversation memory + FTS5 + embeddings), `events.db` (the bus event log), `tasks.db` (in-flight A2A tasks), and push-notification configs. Losing it loses agent memory + the research corpus, so back it up.
+
+- **Bounded growth.** `events.db` (the `#`-subscribed event sink) self-purges on a retention window — default 7 days, override with `LOGGER_EVENTS_RETENTION_MS` — and secret-keyed fields are redacted before persistence (#801). Other stores are bounded by their own caps.
+- **Backup.** Schedule a periodic snapshot off-host, e.g. `sqlite3 /data/knowledge.db ".backup /backup/knowledge-$(date +%F).db"` from a sidecar/cron, or run [litestream](https://litestream.io) against the volume for continuous replication. Test the restore.
+
 ## Workspace volume
 
 The `workspace/` directory is bind-mounted read-write, so configuration changes are applied on the host (via `git pull`) without rebuilding the image:

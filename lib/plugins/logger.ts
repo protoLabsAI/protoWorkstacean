@@ -3,12 +3,34 @@ import { mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Plugin, EventBus, BusMessage, LoggerTurnQueryRequest, LoggerTurnQueryResponse, ConversationTurn } from "../types";
 
+/** Object keys whose values are masked before an event is persisted (#801). */
+const SECRET_KEY_RE = /(token|secret|password|passwd|api[-_]?key|private[-_]?key|authorization|bearer|refresh[-_]?token|client[-_]?secret|credential)/i;
+
+/**
+ * Deep-clone `value`, masking any property whose KEY looks secret-bearing, so
+ * the events.db sink (which persists every bus message) never stores tokens /
+ * OAuth state in cleartext. Free-text content is left intact — only key-named
+ * secrets are redacted. Cyclic refs are guarded.
+ */
+export function redactSecrets(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value as object)) return "[circular]";
+  seen.add(value as object);
+  if (Array.isArray(value)) return value.map((v) => redactSecrets(v, seen));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = SECRET_KEY_RE.test(k) && v != null && v !== "" ? "[redacted]" : redactSecrets(v, seen);
+  }
+  return out;
+}
+
 export class LoggerPlugin implements Plugin {
   name = "logger";
   description = "Event log subscriber - writes all messages to SQLite";
   capabilities: string[] = ["persist", "query"];
 
   private db: Database | null = null;
+  private retentionTimer: ReturnType<typeof setInterval> | null = null;
   private subscriptionId: string | null = null;
   private querySubscriptionId: string | null = null;
   private bus: EventBus | null = null;
@@ -26,6 +48,10 @@ export class LoggerPlugin implements Plugin {
     this.db = new Database(`${this.dataDir}/events.db`);
     this.db.exec("PRAGMA journal_mode=WAL;");
     this.db.exec("PRAGMA busy_timeout=5000;");
+    // INCREMENTAL auto-vacuum so reclaimed space (after retention deletes) can
+    // be returned without a full locking VACUUM. Takes effect on a fresh DB; an
+    // existing one keeps its mode but retention still bounds row growth. (#801)
+    this.db.exec("PRAGMA auto_vacuum=INCREMENTAL;");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS events (
         id TEXT NOT NULL,
@@ -54,6 +80,13 @@ export class LoggerPlugin implements Plugin {
       this.log(msg);
     });
 
+    // Retention: this sink subscribes to `#` (every bus message), so without a
+    // sweep events.db grows without bound on the data volume. Purge rows older
+    // than the window + reclaim space. (#801)
+    this._sweepRetention();
+    this.retentionTimer = setInterval(() => this._sweepRetention(), 60 * 60_000);
+    this.retentionTimer.unref?.();
+
     this.querySubscriptionId = bus.subscribe("logger.turn.query", this.name, (msg: BusMessage) => {
       const req = msg.payload as LoggerTurnQueryRequest;
       const turns = this.getRecentTurnsForUser(req.userId, req.agentName, req.limit, req.maxAgeMs);
@@ -70,6 +103,10 @@ export class LoggerPlugin implements Plugin {
   }
 
   uninstall(): void {
+    if (this.retentionTimer) {
+      clearInterval(this.retentionTimer);
+      this.retentionTimer = null;
+    }
     if (this.db) {
       this.db.close();
       this.db = null;
@@ -78,11 +115,29 @@ export class LoggerPlugin implements Plugin {
 
   private log(msg: BusMessage): void {
     if (!this.db) return;
-    
+    // Redact secret-keyed fields before persisting — this sink stores the whole
+    // message and would otherwise write tokens/OAuth state in cleartext. (#801)
+    const safe = redactSecrets(msg);
     this.db.run(
       "INSERT INTO events (id, correlation_id, parent_id, topic, payload, timestamp, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [msg.id, msg.correlationId, msg.parentId ?? null, msg.topic, JSON.stringify(msg), msg.timestamp, msg.topic.split(".")[0]]
+      [msg.id, msg.correlationId, msg.parentId ?? null, msg.topic, JSON.stringify(safe), msg.timestamp, msg.topic.split(".")[0]]
     );
+  }
+
+  /** Delete events older than the retention window + reclaim freed pages. */
+  private _sweepRetention(): void {
+    if (!this.db) return;
+    const ms = Number(process.env.LOGGER_EVENTS_RETENTION_MS) || 7 * 24 * 60 * 60_000;
+    try {
+      const cutoff = Date.now() - ms;
+      const deleted = this.db.run("DELETE FROM events WHERE timestamp < ?", [cutoff]);
+      this.db.exec("PRAGMA incremental_vacuum;");
+      if ((deleted as { changes?: number }).changes) {
+        console.log(`[logger] retention sweep: purged ${(deleted as { changes?: number }).changes} event(s) older than ${Math.round(ms / 86400000)}d`);
+      }
+    } catch (err) {
+      console.warn("[logger] retention sweep failed:", err);
+    }
   }
 
   getEvents(limit: number = 100): BusMessage[] {
