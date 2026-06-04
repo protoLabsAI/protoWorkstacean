@@ -4,6 +4,15 @@ services:
       context: .
       target: release
     restart: unless-stopped
+    # Readiness gate (#795) — checks local invariants (sqlite open). Uses bun
+    # (always in the image) so no curl/wget dependency. The HTTP API is on
+    # localhost:3000 inside the container.
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     ports:
       - "8081:8080"   # Event viewer UI
       - "8082:8082"   # GitHub webhook receiver
