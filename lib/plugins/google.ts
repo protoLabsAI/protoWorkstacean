@@ -25,6 +25,9 @@ import { createDriveService } from "./google/drive.ts";
 import { createDocsService } from "./google/docs.ts";
 import { createGmailService, createGmailOutbound, type GmailConfig } from "./google/gmail.ts";
 import { createCalendarService, type CalendarConfig } from "./google/calendar.ts";
+import { logger } from "../log.ts";
+
+const log = logger("google");
 
 // Re-export utilities used by OnboardingPlugin
 export { getGoogleAccessToken } from "./google/auth.ts";
@@ -41,13 +44,13 @@ interface GoogleConfig {
 function loadConfig(workspaceDir: string): GoogleConfig {
   const configPath = join(workspaceDir, "google.yaml");
   if (!existsSync(configPath)) {
-    console.log("[google] No google.yaml found — using defaults");
+    log.info("No google.yaml found — using defaults");
     return defaultConfig();
   }
   try {
     return parseYaml(readFileSync(configPath, "utf8")) as GoogleConfig;
   } catch (err) {
-    console.error("[google] Failed to parse google.yaml:", err);
+    log.error("Failed to parse google.yaml", { err });
     return defaultConfig();
   }
 }
@@ -83,7 +86,7 @@ export class GooglePlugin implements Plugin {
 
   install(bus: EventBus): void {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REFRESH_TOKEN) {
-      console.log("[google] GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN not set — plugin disabled");
+      log.info("GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN not set — plugin disabled");
       return;
     }
 
@@ -104,7 +107,7 @@ export class GooglePlugin implements Plugin {
     // Hot-reload google.yaml
     const configPath = join(this.workspaceDir, "google.yaml");
     watchFile(configPath, { interval: 1_000 }, () => {
-      console.log("[google] google.yaml changed — reloading config");
+      log.info("google.yaml changed — reloading config");
       const prevGmailLabels = JSON.stringify(this.config.gmail?.watchLabels ?? []);
       const prevGmailInterval = this.config.gmail?.pollIntervalMinutes;
       const prevCalInterval = this.config.calendar?.pollIntervalMinutes;
@@ -134,10 +137,10 @@ export class GooglePlugin implements Plugin {
         payload: { plugin: "google", config: "google.yaml" },
       });
 
-      console.log("[google] google.yaml reloaded");
+      log.info("google.yaml reloaded");
     });
 
-    console.log("[google] Plugin installed — Drive, Docs, Gmail, Calendar active");
+    log.info("Plugin installed — Drive, Docs, Gmail, Calendar active");
   }
 
   uninstall(): void {
@@ -148,6 +151,6 @@ export class GooglePlugin implements Plugin {
     this.calendar.stop();
     this.tokenRefresher?.stop();
     unwatchFile(join(this.workspaceDir, "google.yaml"));
-    console.log("[google] Plugin uninstalled");
+    log.info("Plugin uninstalled");
   }
 }

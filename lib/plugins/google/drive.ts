@@ -6,6 +6,9 @@
 import type { EventBus, BusMessage } from "../../types.ts";
 import { withCircuitBreaker } from "../circuit-breaker.ts";
 import { getGoogleAccessToken } from "./auth.ts";
+import { logger } from "../../log.ts";
+
+const log = logger("google-drive");
 
 export interface DriveService {
   start(bus: EventBus): void;
@@ -34,7 +37,7 @@ export function createDriveService(): DriveService {
     const token = await getGoogleAccessToken();
 
     if (!token) {
-      console.warn("[google] Drive operation skipped — no access token");
+      log.warn("Drive operation skipped — no access token");
       _reply(msg, { success: false, error: "No Google access token available" });
       return;
     }
@@ -50,7 +53,7 @@ export function createDriveService(): DriveService {
       }
       _reply(msg, result);
     } catch (err) {
-      console.error("[google] Drive handler error:", err);
+      log.error("Drive handler error", { err });
       _reply(msg, { success: false, error: String(err) });
     }
   }
@@ -191,13 +194,13 @@ export async function createDriveFolder(
   parentId: string,
 ): Promise<{ id: string; name: string } | null> {
   if (!parentId) {
-    console.warn("[google] createDriveFolder: parentId is empty — skipping");
+    log.warn("createDriveFolder: parentId is empty — skipping");
     return null;
   }
 
   const token = await getGoogleAccessToken();
   if (!token) {
-    console.warn("[google] createDriveFolder: no access token available");
+    log.warn("createDriveFolder: no access token available");
     return null;
   }
 
@@ -220,15 +223,15 @@ export async function createDriveFolder(
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => "");
-      console.error(`[google] Drive folder creation failed: ${resp.status} ${errBody}`);
+      log.error(`Drive folder creation failed: ${resp.status} ${errBody}`);
       return null;
     }
 
     const data = await resp.json() as { id: string; name: string };
-    console.log(`[google] Drive folder created: "${data.name}" (${data.id})`);
+    log.info(`Drive folder created: "${data.name}" (${data.id})`);
     return data;
   } catch (err) {
-    console.error("[google] Drive folder creation error:", err);
+    log.error("Drive folder creation error", { err });
     return null;
   }
 }
