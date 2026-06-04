@@ -18,7 +18,7 @@
  * Config: workspace/github.yaml (mention handle, skill hints per event type)
  *
  * Auth (in priority order):
- *   QUINN_APP_ID + QUINN_APP_PRIVATE_KEY   GitHub App — comments post as quinn[bot]
+ *   GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY   GitHub App — comments post as quinn[bot]
  *   GITHUB_TOKEN                           PAT fallback
  *
  * Other env vars:
@@ -32,6 +32,7 @@ import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
 import { isProductionLike } from "../runtime-env.ts";
+import { getFleetConfig } from "../fleet/fleet-config.ts";
 import { withCircuitBreaker } from "./circuit-breaker.ts";
 import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
 import type { ReleasePublishedPayload } from "../../src/event-bus/payloads.ts";
@@ -90,6 +91,16 @@ function agentBotLogins(): Set<string> {
 export function isAgentBotActor(login: string | undefined | null): boolean {
   if (!login) return false;
   return agentBotLogins().has(login.toLowerCase());
+}
+
+/**
+ * Login bases (lowercased, trailing "[bot]" stripped) that identify the
+ * reviewer agent's OWN GitHub reviews — config-driven via `fleet.yaml`'s
+ * `github.reviewerBotLogins` (default `protoquinn`), so a fork's reviewer bot
+ * is matched by the review loop instead of the hardcoded `protoquinn`. (#798)
+ */
+function reviewerLoginBases(): string[] {
+  return [...new Set(getFleetConfig().reviewerBotLogins.map((l) => l.toLowerCase().replace(/\[bot\]$/, "")))];
 }
 
 function loadConfig(workspaceDir: string): GitHubConfig {
@@ -171,12 +182,15 @@ export function allChecksTerminal(checkRuns: Array<Record<string, unknown>> | un
   return checkRuns.every((r) => r.status === "completed");
 }
 
-/** True iff @protoquinn[bot] has already left a review on the PR (the provisional→formal case). */
-export function quinnHasReviewed(reviews: Array<Record<string, unknown>> | undefined): boolean {
+/** True iff the reviewer bot has already left a review on the PR (the provisional→formal case). */
+export function quinnHasReviewed(
+  reviews: Array<Record<string, unknown>> | undefined,
+  bases: string[] = reviewerLoginBases(),
+): boolean {
   if (!Array.isArray(reviews)) return false;
   return reviews.some((r) => {
     const login = (r.user as Record<string, unknown> | undefined)?.login;
-    return typeof login === "string" && login.toLowerCase().startsWith("protoquinn");
+    return typeof login === "string" && bases.some((b) => login.toLowerCase().startsWith(b));
   });
 }
 
@@ -215,12 +229,13 @@ export function allChecksGreen(checkRuns: Array<Record<string, unknown>> | undef
  */
 export function quinnLatestReviewState(
   reviews: Array<Record<string, unknown>> | undefined,
+  bases: string[] = reviewerLoginBases(),
 ): string | undefined {
   if (!Array.isArray(reviews)) return undefined;
   let state: string | undefined;
   for (const r of reviews) {
     const login = (r.user as Record<string, unknown> | undefined)?.login;
-    if (typeof login === "string" && login.toLowerCase().startsWith("protoquinn")) {
+    if (typeof login === "string" && bases.some((b) => login.toLowerCase().startsWith(b))) {
       const s = r.state;
       if (typeof s === "string") state = s.toUpperCase();
     }
@@ -387,11 +402,11 @@ export class GitHubPlugin implements Plugin {
   install(bus: EventBus): void {
     const getToken = makeGitHubAuth();
     if (!getToken) {
-      console.log("[github] No auth configured (QUINN_APP_ID or GITHUB_TOKEN required) — plugin disabled");
+      console.log("[github] No auth configured (GITHUB_APP_ID or GITHUB_TOKEN required) — plugin disabled");
       return;
     }
 
-    const usingApp = !!(process.env.QUINN_APP_ID && process.env.QUINN_APP_PRIVATE_KEY);
+    const usingApp = !!(process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY);
     console.log(`[github] Auth: ${usingApp ? "GitHub App (quinn[bot])" : "PAT (GITHUB_TOKEN)"}`);
 
     this.config = loadConfig(this.workspaceDir);
@@ -721,7 +736,8 @@ export class GitHubPlugin implements Plugin {
     if (event === "pull_request" && payload.action === "review_requested") {
       const reviewer = payload.requested_reviewer as Record<string, unknown> | undefined;
       const login = (reviewer?.login as string | undefined)?.toLowerCase();
-      if (login === "protoquinn" || login === "protoquinn[bot]") {
+      const isReviewerBot = !!login && getFleetConfig().reviewerBotLogins.some((l) => l.toLowerCase() === login);
+      if (isReviewerBot) {
         this._handleAutoReview(event, payload, ctx, bus, getToken, { skipDedup: true });
       }
       return;

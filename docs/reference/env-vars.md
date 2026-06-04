@@ -8,7 +8,7 @@ Every variable recognised by protoWorkstacean is declared in the zod `EnvSchema`
 
 ## Summary
 
-- **63** variables declared in `EnvSchema`
+- **62** variables declared in `EnvSchema`
 - **0** required (no `.optional()`); the rest are optional
 - **33** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
 
@@ -85,12 +85,11 @@ Every variable recognised by protoWorkstacean is declared in the zod `EnvSchema`
 
 | Variable | Required? | Description |
 |---|---|---|
-| `GITHUB_APP_ID` | optional | Legacy alias — prefer QUINN_APP_ID. |
+| `GITHUB_APP_ID` | optional | GitHub App credentials — the agent's reviews/comments/issue-closes post as the App's bot identity. |
+| `GITHUB_APP_PRIVATE_KEY` | optional | — |
 | `GITHUB_TOKEN` | optional | — |
 | `GITHUB_WEBHOOK_PORT` | optional | — |
 | `GITHUB_WEBHOOK_SECRET` | optional | — |
-| `QUINN_APP_ID` | optional | — |
-| `QUINN_APP_PRIVATE_KEY` | optional | — |
 
 ## Linear
 

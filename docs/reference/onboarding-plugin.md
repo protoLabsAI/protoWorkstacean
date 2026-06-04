@@ -21,7 +21,7 @@ Steps run in sequence. Each step is individually idempotent — re-running the f
 | # | Step | What it does | Skip condition |
 |---|------|-------------|----------------|
 | 1 | **validate** | Checks `slug`, `title`, and `github` are present; validates `github` is `owner/repo` format; rejects duplicate in-flight runs for the same slug | Missing required fields or invalid format |
-| 2 | **github_webhook** | Registers a GitHub repo webhook for `issues`, `issue_comment`, `pull_request`, `pull_request_review_comment` events; lists existing webhooks first and skips if the target URL is already registered | No GitHub auth (`QUINN_APP_ID` or `GITHUB_TOKEN`), or `WORKSTACEAN_PUBLIC_URL` not set, or webhook already exists |
+| 2 | **github_webhook** | Registers a GitHub repo webhook for `issues`, `issue_comment`, `pull_request`, `pull_request_review_comment` events; lists existing webhooks first and skips if the target URL is already registered | No GitHub auth (`GITHUB_APP_ID` or `GITHUB_TOKEN`), or `WORKSTACEAN_PUBLIC_URL` not set, or webhook already exists |
 | 3 | **drive_folder** | Creates a Google Drive folder named after the project title, under the org root folder (`drive.orgFolderId` in `workspace/google.yaml`) | Google credentials not set, `google.yaml` missing, or `drive.orgFolderId` empty |
 | 4 | **bus_notify** | Publishes `message.inbound.onboard.complete` with project metadata and per-step outcomes for downstream consumers | Never skipped |
 | 5 | **reply** | Sends a confirmation message (or error) to the inbound message's reply topic | No reply topic in the inbound message |
@@ -107,8 +107,8 @@ When the GitHub org webhook is registered and a new repository is created under 
 | Variable | Required by | Default | Purpose |
 |----------|-------------|---------|---------|
 | `WORKSTACEAN_PUBLIC_URL` | github_webhook | — | Base URL for webhook registration (e.g. `https://ws.example.com`) |
-| `QUINN_APP_ID` | github_webhook | — | GitHub App ID for auth (used by `makeGitHubAuth`) |
-| `QUINN_APP_PRIVATE_KEY` | github_webhook | — | GitHub App private key |
+| `GITHUB_APP_ID` | github_webhook | — | GitHub App ID for auth (used by `makeGitHubAuth`) |
+| `GITHUB_APP_PRIVATE_KEY` | github_webhook | — | GitHub App private key |
 | `GITHUB_TOKEN` | github_webhook | — | Alternative GitHub PAT for webhook registration |
 | `GITHUB_WEBHOOK_SECRET` | github_webhook | — | Optional HMAC secret for GitHub webhooks |
 | `GOOGLE_CLIENT_ID` | drive_folder | — | Google OAuth client ID |

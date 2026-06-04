@@ -6,8 +6,8 @@
  * plugins stay self-contained.
  *
  * Env vars:
- *   QUINN_APP_ID          GitHub App ID
- *   QUINN_APP_PRIVATE_KEY PEM private key (newlines as \n in env)
+ *   GITHUB_APP_ID          GitHub App ID
+ *   GITHUB_APP_PRIVATE_KEY PEM private key (newlines as \n in env)
  *   GITHUB_TOKEN          PAT fallback when App credentials are absent
  */
 
@@ -73,8 +73,8 @@ export class GitHubAppAuth {
  * Returns a token getter for the Quinn GitHub App, or falls back to GITHUB_TOKEN PAT.
  * Returns null if no auth is configured.
  *
- * **Fail-loud on partial App config.** If exactly one of `QUINN_APP_ID` and
- * `QUINN_APP_PRIVATE_KEY` is set (the other empty / unset), refuse to
+ * **Fail-loud on partial App config.** If exactly one of `GITHUB_APP_ID` and
+ * `GITHUB_APP_PRIVATE_KEY` is set (the other empty / unset), refuse to
  * silently fall back to the PAT path — that's how Quinn's PR reviews
  * started showing up as the operator (mabry1985) instead of
  * @protoquinn[bot] when infisical hiccuped and only injected half the
@@ -89,8 +89,8 @@ export class GitHubAppAuth {
 export function makeGitHubAuth(
   env: Record<string, string | undefined> = process.env,
 ): ((owner: string, repo: string) => Promise<string>) | null {
-  const appId = (env.QUINN_APP_ID ?? "").trim();
-  const privateKey = (env.QUINN_APP_PRIVATE_KEY ?? "").trim();
+  const appId = (env.GITHUB_APP_ID ?? "").trim();
+  const privateKey = (env.GITHUB_APP_PRIVATE_KEY ?? "").trim();
 
   if (appId && privateKey) {
     const app = new GitHubAppAuth(appId, privateKey);
@@ -102,8 +102,8 @@ export function makeGitHubAuth(
   // path that needs auth throws loudly instead of silently writing as the
   // operator's PAT identity.
   if (appId || privateKey) {
-    const present  = appId ? "QUINN_APP_ID"          : "QUINN_APP_PRIVATE_KEY";
-    const missing  = appId ? "QUINN_APP_PRIVATE_KEY" : "QUINN_APP_ID";
+    const present  = appId ? "GITHUB_APP_ID"          : "GITHUB_APP_PRIVATE_KEY";
+    const missing  = appId ? "GITHUB_APP_PRIVATE_KEY" : "GITHUB_APP_ID";
     throw new Error(
       `[github-auth] partial GitHub App config: ${present} set but ${missing} empty/unset. ` +
         `Refusing to fall back to GITHUB_TOKEN PAT — that would silently author commits / ` +

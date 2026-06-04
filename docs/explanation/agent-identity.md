@@ -33,7 +33,7 @@ Quinn and the protoMaker team each have their own GitHub App installation. Each 
 
 When a PR review response lands for Quinn:
 1. The GitHub context is resolved from the inbound `correlationId` (owner, repo, number)
-2. The Quinn container mints a JWT using `QUINN_APP_ID` + `QUINN_APP_PRIVATE_KEY`
+2. The Quinn container mints a JWT using `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`
 3. Exchanges it for a GitHub installation token (refreshed every 45 min by an entrypoint daemon)
 4. Submits the formal review via the GitHub API — shows as `@protoquinn[bot]`
 

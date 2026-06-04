@@ -207,7 +207,7 @@ describe("BusAgentExecutor (Phase 7)", () => {
       expect(requestPayload).toBeDefined();
       expect((requestPayload as { targets: string[] }).targets).toEqual(["ava"]);
       expect((requestPayload as { skill: string }).skill).toBe("chat");
-      expect(logCalls.some(l => l.includes("[a2a-server]") && l.includes("defaulting to [ava]"))).toBe(true);
+      expect(logCalls.some(l => l.includes("[a2a-server]") && l.includes("defaulting to helm [ava]"))).toBe(true);
     } finally {
       console.log = origLog;
     }

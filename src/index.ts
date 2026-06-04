@@ -217,7 +217,7 @@ const pluginRegistry: PluginRegistryEntry[] = [
     // Needs GitHub auth (Quinn App or PAT) to act; without it closeIssue throws
     // and the plugin logs it, so gate on auth being present.
     name: "issue-closer",
-    condition: () => !!(process.env.QUINN_APP_ID || process.env.GITHUB_TOKEN),
+    condition: () => !!(process.env.GITHUB_APP_ID || process.env.GITHUB_TOKEN),
     factory: async () => {
       const { IssueCloserPlugin } = await import("../lib/plugins/issue-closer");
       return new IssueCloserPlugin();

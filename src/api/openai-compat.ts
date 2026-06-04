@@ -26,6 +26,7 @@
 import type { Route, ApiContext } from "./types.ts";
 import type { BusMessage } from "../../lib/types.ts";
 import { buildAgentCard } from "./agent-card.ts";
+import { getFleetConfig } from "../../lib/fleet/fleet-config.ts";
 
 interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -51,11 +52,12 @@ interface SkillRouting {
  * Accepts:
  *   - "skill"           → { skill, targets: [] }
  *   - "agent/skill"     → { skill, targets: [agent] }
- *   - "ava" (special)   → { skill: "chat", targets: ["ava"] }
+ *   - "<helm>" (special) → { skill: "chat", targets: [helm] }  (helm from fleet.yaml)
  */
 function modelToRouting(model: string): SkillRouting {
   if (!model) return { skill: "chat", targets: [] };
-  if (model === "ava") return { skill: "chat", targets: ["ava"] };
+  const helm = getFleetConfig().helm;
+  if (model === helm) return { skill: "chat", targets: [helm] };
   const slash = model.indexOf("/");
   if (slash > 0) {
     return {

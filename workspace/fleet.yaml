@@ -1,0 +1,16 @@
+# Fleet role bindings — map abstract roles to concrete agents. This is the one
+# file a fork edits to re-skin the fleet; the dispatch / review / remediation
+# code reads these roles instead of hardcoding agent names. Values below are the
+# defaults baked into the code (lib/fleet/fleet-config.ts), shown explicitly.
+roles:
+  helm: ava          # default target for untargeted A2A requests + the OpenAI-compat chat alias
+  reviewer: quinn    # runs PR review
+  remediator: roxy   # dispatched to unblock a blocked feature (feature.blocked)
+
+github:
+  # The reviewer's own GitHub bot identities — so the review loop recognizes
+  # its own reviews (provisional→formal, approve-on-green). A fork sets these to
+  # its reviewer App's login(s).
+  reviewerBotLogins:
+    - protoquinn
+    - protoquinn[bot]
