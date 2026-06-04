@@ -200,4 +200,26 @@ describe("_handleCiCompletion — deterministic approve-on-green", () => {
     });
     expect(captured.approvePosts.length).toBe(0);
   });
+
+  test("co-arriving terminal webhooks → exactly one APPROVE (dedup guard)", async () => {
+    // Reproduces the duplicate-approval spam: GitHub fires check_suite,
+    // workflow_run, and check_run completions near-simultaneously. They run
+    // concurrently and each reads `reviews` as COMMENTED before any APPROVE
+    // lands (the stub always returns COMMENTED, mirroring the real TOCTOU), so
+    // without the in-flight dedup every webhook would post its own approval.
+    const captured = stubFetch({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+      checkRuns: [{ status: "completed", conclusion: "success" }],
+    });
+    const bus = new InMemoryEventBus();
+    const plugin = new GitHubPlugin("/tmp/nonexistent-ws", new ProjectRegistry());
+    const getToken = async () => "fake-token";
+    const drive = () => (plugin as unknown as {
+      _handleCiCompletion: (e: string, p: Record<string, unknown>, b: InMemoryEventBus, g: () => Promise<string>) => Promise<void>;
+    })._handleCiCompletion("workflow_run", ciCompletionPayload(), bus, getToken);
+
+    await Promise.all([drive(), drive(), drive()]);
+
+    expect(captured.approvePosts.length).toBe(1);
+  });
 });

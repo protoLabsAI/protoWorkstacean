@@ -993,6 +993,24 @@ export class GitHubPlugin implements Plugin {
       // unchanged LLM re-dispatch below.
       const latestState = quinnLatestReviewState(reviews ?? undefined);
       if (latestState === "COMMENTED" && (await this._ciGreen(getToken, owner, repo, headSha))) {
+        // Collapse co-arriving terminal webhooks. GitHub fires check_suite,
+        // workflow_run, and check_run completions near-simultaneously; each runs
+        // _handleCiCompletion concurrently and reads `reviews` before any has
+        // posted its APPROVE, so every one sees latestState COMMENTED and submits
+        // a duplicate. Unlike the LLM re-dispatch path below, this branch
+        // `continue`s and never reaches _handleAutoReview's dedup — so guard it
+        // here. The get/set is synchronous (no await between), so exactly one
+        // racing invocation claims the key; the rest skip.
+        const approveKey = `approve-on-green:${owner}/${repo}#${number}@${headSha.slice(0, 7)}`;
+        const lastApproved = this.recentDispatches.get(approveKey);
+        if (lastApproved && Date.now() - lastApproved < GitHubPlugin.DEDUP_WINDOW_MS) {
+          console.log(
+            `[github] CI-completion (${event}): skipping duplicate approve-on-green ${approveKey} ` +
+              `(approved ${Date.now() - lastApproved}ms ago)`,
+          );
+          continue;
+        }
+        this.recentDispatches.set(approveKey, Date.now());
         try {
           const submitter = new GitHubReviewSubmitter(getToken);
           await submitter.submitReview(
