@@ -138,6 +138,30 @@ export function createRoutes(ctx: ApiContext): Route[] {
     return Response.json({ success: true });
   }
 
+  /**
+   * Readiness probe (#795). Gates on LOCAL invariants the instance needs to
+   * serve (sqlite open). The LLM gateway is probed for visibility but does NOT
+   * gate readiness — an external gateway outage shouldn't restart-loop the
+   * container (agent runs fail fast via #794 instead). `/health` stays a cheap
+   * liveness check.
+   */
+  async function handleReady(): Promise<Response> {
+    const sqlite = ctx.telemetry ? ctx.telemetry.healthCheck() : true;
+    let gateway: boolean | "unconfigured" = "unconfigured";
+    const gw = process.env.LLM_GATEWAY_URL;
+    if (gw) {
+      try {
+        const r = await fetch(new URL("/health", gw), { signal: AbortSignal.timeout(2000) });
+        gateway = r.ok;
+      } catch { gateway = false; }
+    }
+    const ready = sqlite;
+    return Response.json(
+      { status: ready ? "ready" : "unready", sqlite, gateway, timestamp: Date.now() },
+      { status: ready ? 200 : 503 },
+    );
+  }
+
   async function handleOnboard(req: Request): Promise<Response> {
     const caller = authenticateCaller(req);
     if (!caller?.isAdmin) return unauthorized();
@@ -259,6 +283,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
 
   return [
     { method: "GET",  path: "/health",                  handler: () => Response.json({ status: "ok", timestamp: Date.now() }) },
+    { method: "GET",  path: "/ready",                   handler: () => handleReady() },
     { method: "POST", path: "/publish",                 handler: (req) => handlePublish(req) },
     { method: "POST", path: "/api/onboard",             handler: (req) => handleOnboard(req) },
     { method: "GET",  path: "/api/projects",            handler: () => Response.json({ success: true, data: ctx.projectRegistry?.getProjects() ?? [] }) },

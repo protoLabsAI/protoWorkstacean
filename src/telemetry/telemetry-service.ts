@@ -203,6 +203,16 @@ export class TelemetryService {
     });
   }
 
+  /** Readiness probe: the backing sqlite is open and answers a trivial query. */
+  healthCheck(): boolean {
+    try {
+      this.db?.query("SELECT 1").get();
+      return !!this.db;
+    } catch {
+      return false;
+    }
+  }
+
   close(): void {
     try {
       this.db?.exec("PRAGMA wal_checkpoint(TRUNCATE);");
