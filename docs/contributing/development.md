@@ -253,6 +253,21 @@ bunx tsc --noEmit
 
 The project uses TypeScript strict mode. All exported types should have JSDoc comments on non-obvious fields.
 
+## Changing a SQLite store schema
+
+The bun:sqlite stores back a **persistent prod volume** (`/data`), and deploy is a watchtower image pull with no migration step. So a bare `CREATE TABLE IF NOT EXISTS` change silently no-ops against an existing DB and drifts at query time. Use the versioned migration runner instead (`lib/sqlite-migrate.ts`):
+
+```ts
+import { runMigrations } from "../../lib/sqlite-migrate.ts";
+// in the store's init, after the PRAGMAs:
+runMigrations(this.db, [
+  { version: 1, up: (d) => d.exec(`CREATE TABLE IF NOT EXISTS … `) }, // baseline
+  { version: 2, up: (d) => d.exec(`ALTER TABLE … ADD COLUMN … `) },   // future change
+]);
+```
+
+`runMigrations` applies only migrations newer than the DB's `PRAGMA user_version`, each in a transaction, bumping the version after each succeeds. **Never edit a shipped migration's `up` — append a new version.** `src/executor/task-tracker-store.ts` is the reference adoption; other stores adopt the same pattern on their next schema change.
+
 ## Conventions
 
 - **Named exports only** in `.ts` files. Exception: `_meta.ts` files use a default export for Nextra.
