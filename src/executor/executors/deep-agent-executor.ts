@@ -18,6 +18,7 @@ import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
 import { runStructuredFinalizer, type ForcedToolCaller } from "./structured-finalizer.ts";
 import { AgentMemory, memoryAppliesTo } from "../../knowledge/agent-memory.ts";
 import type { ToolCallArtifactData } from "@protolabs/a2a";
+import { withCircuitBreaker } from "../../../lib/plugins/circuit-breaker.ts";
 
 const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
 
@@ -994,6 +995,10 @@ export class DeepAgentExecutor implements IExecutor {
     return new ChatOpenAI({
       model: modelName,
       temperature: 0,
+      // Per-request deadline + bounded retries so a hung/partial-outage gateway
+      // can't block a turn forever (was unbounded — #794).
+      timeout: Number(process.env.LLM_GATEWAY_TIMEOUT_MS) || 120_000,
+      maxRetries: Number(process.env.LLM_MAX_RETRIES ?? 2),
       configuration: this.gatewayUrl ? { baseURL: this.gatewayUrl } : undefined,
       apiKey: this.apiKey,
     });
@@ -1123,9 +1128,14 @@ export class DeepAgentExecutor implements IExecutor {
       type RunMessage = { _getType?: () => string; constructor?: { name?: string }; content?: unknown; tool_calls?: unknown };
       let result: { messages?: RunMessage[] } = { messages: [] };
       let narrated = 0;
+      // Wall-clock deadline on the whole run + a circuit breaker on the gateway,
+      // so a hung gateway aborts (→ error result → dispatcher publishes failure)
+      // instead of blocking the slot forever, and a sustained outage fast-fails. (#794)
+      const AGENT_RUN_BUDGET_MS = Number(process.env.AGENT_RUN_BUDGET_MS) || 300_000;
+      await withCircuitBreaker(`llm-gateway:${this.agentDef.name}`, async () => {
       for await (const state of await agent.stream(
         { messages: [...history.map(t => ({ role: t.role, content: t.content })), { role: "user", content: userContent }] },
-        { recursionLimit: effectiveMaxTurns * 2 + 1, callbacks, streamMode: "values" },
+        { recursionLimit: effectiveMaxTurns * 2 + 1, callbacks, streamMode: "values", signal: AbortSignal.timeout(AGENT_RUN_BUDGET_MS) },
       )) {
         result = state as unknown as { messages?: RunMessage[] };
         const msgs = result.messages ?? [];
@@ -1155,6 +1165,7 @@ export class DeepAgentExecutor implements IExecutor {
         }
         narrated = msgs.length;
       }
+      });
 
       const messages = result.messages ?? [];
       console.log(`[deep-agent:${this.agentDef.name}] ${messages.length} messages returned`);

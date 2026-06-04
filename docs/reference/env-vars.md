@@ -10,7 +10,7 @@ Every variable recognised by protoWorkstacean is declared in the zod `EnvSchema`
 
 - **63** variables declared in `EnvSchema`
 - **0** required (no `.optional()`); the rest are optional
-- **29** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
+- **33** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
 
 ## Core / runtime
 
@@ -144,21 +144,27 @@ These variables are read via `process.env` somewhere in `src/` or `lib/` but are
 | `A2A_CHAT_REPLY_TIMEOUT_MS` | `src/api/ava-tools.ts` |
 | `A2A_INPUT_REQUIRED_TTL_MS` | `src/api/human-input.ts` |
 | `A2A_STREAM_HEARTBEAT_MS` | `src/api/a2a-server.ts` |
+| `AGENT_RUN_BUDGET_MS` | `src/executor/executors/deep-agent-executor.ts` |
 | `AUTOMAKER_API_KEY` | `lib/plugins/protomaker-board-bridge.ts`, `src/plugins/project-registry.ts` |
 | `CLAWPATCH_CHECKOUT_ROOT` | `lib/checkout-cache.ts` |
 | `CLAWPATCH_REPO_PATH_MAP` | `src/api/clawpatch.ts` |
-| `WORKSTACEAN_PUBLISH_TOPIC_DENYLIST` | `lib/runtime-env.ts` — CSV of topic prefixes rejected at `POST /publish` (overrides the control-plane default). |
 | `CLAWPATCH_STATE_ROOT` | `src/api/clawpatch.ts` |
 | `CREATE_ISSUE_DEDUP_DISABLED` | `src/api/github.ts` |
 | `CREATE_ISSUE_DEDUP_WINDOW_MS` | `src/api/github.ts` |
 | `DEEP_AGENT_CHAT_POLL_INTERVAL_MS` | `src/executor/executors/deep-agent-executor.ts` |
 | `DISCORD_AGENT_OPS_CHANNEL` | `src/api/ava-tools.ts`, `src/plugins/skill-broker-plugin.ts` |
 | `LINEAR_PROTO_BRIDGE_LABEL` | `lib/plugins/linear-proto-bridge.ts` |
-| `NODE_ENV` | `lib/plugins/linear.ts` |
-| `OPENAI_BASE_URL` | `src/executor/executors/deep-agent-executor.ts` |
+| `LLM_GATEWAY_TIMEOUT_MS` | `src/executor/executors/deep-agent-executor.ts` |
+| `LLM_MAX_RETRIES` | `src/executor/executors/deep-agent-executor.ts` |
+| `MEMORY_HARVEST_MAX_AGE_DAYS` | `src/agent-runtime/agent-runtime-plugin.ts` |
+| `MEMORY_HARVEST_SWEEP_HOURS` | `src/agent-runtime/agent-runtime-plugin.ts` |
+| `MEMORY_SUMMARY_MODEL` | `src/agent-runtime/agent-runtime-plugin.ts` |
+| `OPENAI_BASE_URL` | `src/agent-runtime/agent-runtime-plugin.ts`, `src/executor/executors/deep-agent-executor.ts`, `src/services/embeddings/gateway-embed.ts` |
 | `PROTOLABS_AGENTS_JSON` | `src/plugins/skill-broker-plugin.ts` |
 | `PROTOMAKER_API_BASE` | `lib/plugins/protomaker-board-bridge.ts`, `src/plugins/project-registry.ts` |
 | `QUINN_DISCORD_TOKEN` | `lib/types/channels.ts` |
+| `RESEARCH_EMBED_DIM` | `src/knowledge/research-store.ts` |
+| `RESEARCH_EMBED_MODEL` | `src/services/embeddings/gateway-embed.ts` |
 | `SEARXNG_URL` | `src/executor/executors/deep-agent-executor.ts` |
 | `WORKSTACEAN_AGENT_BOT_LOGINS` | `lib/plugins/github.ts` |
 | `WORKSTACEAN_DISPATCH_DROP_ESCALATION_COOLDOWN_MS` | `src/plugins/dispatch-drop-escalator-plugin.ts` |
