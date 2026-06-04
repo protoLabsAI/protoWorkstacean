@@ -58,8 +58,11 @@ import { ContextMailbox } from "../lib/dm/context-mailbox.ts";
 const contextMailbox = new ContextMailbox();
 
 // --- Task tracker — tracks long-running A2A tasks that returned non-terminal state ---
+// (constructed below, after executorRegistry, so it can resolve executors to
+// rehydrate in-flight tasks after a restart — #793)
 import { TaskTracker } from "./executor/task-tracker.ts";
-const taskTracker = new TaskTracker({ bus });
+import { TaskTrackerStore } from "./executor/task-tracker-store.ts";
+import type { A2AExecutor } from "./executor/executors/a2a-executor.ts";
 
 // Handle to the dispatcher's in-flight check — assigned when its (lazy) factory
 // runs below. Read via a closure in apiContext so the poll endpoint can report
@@ -172,6 +175,18 @@ const enabledBuiltins = (process.env.ENABLED_PLUGINS ?? "").split(",").map((s) =
 // consumed by SkillDispatcherPlugin (sole agent.skill.request subscriber).
 const { ExecutorRegistry } = await import("./executor/executor-registry.js");
 const executorRegistry = new ExecutorRegistry();
+
+// Durable task tracking — in-flight A2A tasks survive restarts and resume
+// polling once their agent's executor re-registers (else escalate). (#793)
+const taskTrackerStore = new TaskTrackerStore(`${dataDir}/tasks.db`);
+const taskTracker = new TaskTracker({
+  bus,
+  store: taskTrackerStore,
+  resolveExecutor: (agentName, skill) => {
+    const e = executorRegistry.resolve(skill ?? "chat", [agentName]);
+    return e && typeof (e as A2AExecutor).pollTask === "function" ? (e as A2AExecutor) : undefined;
+  },
+});
 
 const pluginRegistry: PluginRegistryEntry[] = [
   {
@@ -802,6 +817,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     ["telemetry", () => telemetry.close()],
     ["fleet-state", () => fleetStateRepo.close()],
     ["research-store", () => researchStore.close()],
+    ["task-store", () => taskTrackerStore.close()],
   ] as const) {
     try { closer(); } catch (e) { console.warn(`[shutdown] ${name} close threw:`, e); }
   }
