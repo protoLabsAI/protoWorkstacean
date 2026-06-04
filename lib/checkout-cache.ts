@@ -36,6 +36,9 @@ import {
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { logger } from "./log.ts";
+
+const log = logger("checkout-cache");
 
 const DEFAULT_CHECKOUT_ROOT =
   process.env["CLAWPATCH_CHECKOUT_ROOT"] ??
@@ -145,13 +148,13 @@ export class CheckoutCache {
       if (age < this.cfg.ttlMs) {
         const now = new Date();
         utimesSync(dir, now, now);
-        console.log(
-          `[checkout-cache] hit ${repo}@${sha.slice(0, 7)} (age ${(age / 60_000).toFixed(1)}m)`,
+        log.info(
+          `hit ${repo}@${sha.slice(0, 7)} (age ${(age / 60_000).toFixed(1)}m)`,
         );
         return dir;
       }
-      console.log(
-        `[checkout-cache] stale ${repo}@${sha.slice(0, 7)} (age ${(age / 60_000).toFixed(1)}m > ttl) — re-fetching`,
+      log.info(
+        `stale ${repo}@${sha.slice(0, 7)} (age ${(age / 60_000).toFixed(1)}m > ttl) — re-fetching`,
       );
       rmSync(dir, { recursive: true, force: true });
     }
@@ -166,8 +169,8 @@ export class CheckoutCache {
       );
     }
     await this._extract(tarball, dir, repo, sha);
-    console.log(
-      `[checkout-cache] miss ${repo}@${sha.slice(0, 7)} extracted (${tarball.byteLength} bytes)`,
+    log.info(
+      `miss ${repo}@${sha.slice(0, 7)} extracted (${tarball.byteLength} bytes)`,
     );
     return dir;
   }
@@ -224,8 +227,8 @@ export class CheckoutCache {
     }
 
     if (evicted > 0) {
-      console.log(
-        `[checkout-cache] pruned ${evicted} entr${evicted === 1 ? "y" : "ies"} (${bytesFreed} bytes)`,
+      log.info(
+        `pruned ${evicted} entr${evicted === 1 ? "y" : "ies"} (${bytesFreed} bytes)`,
       );
     }
     return { evicted, bytesFreed };

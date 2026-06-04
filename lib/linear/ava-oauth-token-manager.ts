@@ -23,6 +23,9 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { logger } from "../log.ts";
+
+const log = logger("linear-ava-oauth");
 
 const AUTHORIZE_URL = "https://linear.app/oauth/authorize";
 const TOKEN_URL = "https://api.linear.app/oauth/token";
@@ -226,7 +229,7 @@ export class LinearAvaTokenManager {
       }
     } catch (err) {
       // Corrupt file shouldn't crash boot — surface loudly, start unauthorized.
-      console.warn(`[linear-ava-oauth] failed to load ${this.filePath}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`failed to load ${this.filePath}`, { err });
       this.tokens = null;
     }
   }

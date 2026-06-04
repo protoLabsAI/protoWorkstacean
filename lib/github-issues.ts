@@ -11,6 +11,9 @@
  */
 
 import { makeGitHubAuth } from "./github-auth.ts";
+import { logger } from "./log.ts";
+
+const log = logger("github-issues");
 
 export interface CloseIssueOpts {
   /** Comment posted before the close so observers see the rationale first. Best-effort. */
@@ -62,10 +65,10 @@ export async function closeIssue(
         body: JSON.stringify({ body: opts.comment }),
       });
       if (!c.ok) {
-        console.warn(`[github-issues] comment on ${owner}/${name}#${issueNumber} failed (proceeding to close): ${c.status}`);
+        log.warn(`comment on ${owner}/${name}#${issueNumber} failed (proceeding to close)`, { status: c.status });
       }
     } catch (e) {
-      console.warn(`[github-issues] comment on ${owner}/${name}#${issueNumber} threw (proceeding to close): ${String(e).slice(0, 200)}`);
+      log.warn(`comment on ${owner}/${name}#${issueNumber} threw (proceeding to close)`, { err: e });
     }
   }
 

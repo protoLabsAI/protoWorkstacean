@@ -15,6 +15,10 @@
  *   endTrace()   — when conversation times out or is closed
  */
 
+import { logger } from "../log.ts";
+
+const log = logger("conversation-tracer");
+
 interface LangfuseConfig {
   publicKey: string;
   secretKey: string;
@@ -44,7 +48,7 @@ export class ConversationTracer {
       this.config = { publicKey, secretKey, host };
     } else {
       this.config = null;
-      console.info("[conversation-tracer] LANGFUSE keys not set — tracing disabled");
+      log.info("LANGFUSE keys not set — tracing disabled");
     }
   }
 
@@ -79,7 +83,7 @@ export class ConversationTracer {
         },
       }]);
     } catch (err) {
-      console.error("[conversation-tracer] startTrace error:", err);
+      log.error("startTrace error", { err });
     }
   }
 
@@ -119,7 +123,7 @@ export class ConversationTracer {
         },
       }]);
     } catch (err) {
-      console.error(`[conversation-tracer] traceTurn error (turn ${data.turnNumber}):`, err);
+      log.error(`traceTurn error (turn ${data.turnNumber})`, { err });
     }
   }
 
@@ -155,7 +159,7 @@ export class ConversationTracer {
         },
       }]);
     } catch (err) {
-      console.error("[conversation-tracer] endTrace error:", err);
+      log.error("endTrace error", { err });
     }
   }
 

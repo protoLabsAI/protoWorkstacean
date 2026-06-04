@@ -46,7 +46,7 @@ export class AppAlertPlugin implements Plugin {
   install(bus: EventBus): void {
     this.bus = bus;
     this.subId = bus.subscribe("system.error", this.name, (m) => { void this._onError(m); });
-    console.log(`[app-alert] installed — system.error → ops webhook${this.webhookUrl ? "" : " (no DISCORD_OPS_WEBHOOK_URL; logging only)"}`);
+    log.info(`installed — system.error → ops webhook${this.webhookUrl ? "" : " (no DISCORD_OPS_WEBHOOK_URL; logging only)"}`);
   }
 
   uninstall(): void {

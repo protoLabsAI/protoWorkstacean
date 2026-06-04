@@ -19,6 +19,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { logger } from "../log.ts";
+
+const log = logger("fleet");
 
 export interface FleetConfig {
   /** Default target for untargeted inbound requests + the OpenAI-compat chat alias. */
@@ -57,7 +60,7 @@ export function loadFleetConfig(workspaceDir: string = process.env.WORKSPACE_DIR
       reviewerBotLogins: Array.isArray(logins) && logins.length ? logins : FLEET_DEFAULTS.reviewerBotLogins,
     };
   } catch (e) {
-    console.warn("[fleet] failed to parse fleet.yaml — using defaults:", e);
+    log.warn("failed to parse fleet.yaml — using defaults", { err: e });
     return { ...FLEET_DEFAULTS };
   }
 }
