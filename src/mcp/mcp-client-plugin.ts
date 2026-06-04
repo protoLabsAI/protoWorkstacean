@@ -28,6 +28,9 @@ import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { McpServerDef } from "./types.ts";
 import { McpExecutor } from "./mcp-executor.ts";
 import { resolveServerConfig, connectMcp, toolAllowed, mcpEnabled } from "./mcp-connect.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("mcp-client");
 
 /** The registry skill name for an MCP tool — namespaced by server to avoid collisions. */
 export function mcpSkillName(serverName: string, toolName: string): string {
@@ -54,7 +57,7 @@ export class McpClientPlugin implements Plugin {
     this.bus = bus;
     const defs = this._loadServers();
     for (const def of defs) this._registerServer(def);
-    console.log(`[mcp-client] Reconciling ${defs.length} MCP server(s) from mcp-servers.d/ (tools connect async)`);
+    log.info(`Reconciling ${defs.length} MCP server(s) from mcp-servers.d/ (tools connect async)`);
 
     bus.subscribe("command.mcp.upsert", this.name, (msg: BusMessage) => {
       const entry = (msg.payload as { entry?: McpServerDef })?.entry;
@@ -78,7 +81,7 @@ export class McpClientPlugin implements Plugin {
   private _registerServer(def: McpServerDef): void {
     void this._unregisterServer(def.name).then(() => {
       if (!mcpEnabled(def)) {
-        console.log(`[mcp-client] "${def.name}" registered but disabled (trust=${def.trust ?? "community"}) — set enabled:true to connect`);
+        log.info(`"${def.name}" registered but disabled (trust=${def.trust ?? "community"}) — set enabled:true to connect`);
         return;
       }
       return this._connectAndRegister(def);
@@ -101,12 +104,12 @@ export class McpClientPlugin implements Plugin {
         });
         registered++;
       }
-      console.log(`[mcp-client] "${def.name}" connected — registered ${registered}/${tools.length} tool(s)`);
+      log.info(`"${def.name}" connected — registered ${registered}/${tools.length} tool(s)`);
     } catch (err) {
       // Loud failure at the boundary (per feedback_fail_fast_and_loud): a server
       // that won't connect registers no tools, and silence would hide it.
       this.clients.delete(def.name);
-      console.warn(`[mcp-client] "${def.name}" connect failed — no tools registered: ${err instanceof Error ? err.message : err}`);
+      log.warn(`"${def.name}" connect failed — no tools registered`, { err: err instanceof Error ? err.message : err });
     }
   }
 
@@ -119,7 +122,7 @@ export class McpClientPlugin implements Plugin {
     if (client) {
       this.clients.delete(name);
       await client.close().catch(() => {});
-      console.log(`[mcp-client] - MCP server "${name}" disconnected + unregistered`);
+      log.info(`MCP server "${name}" disconnected + unregistered`);
     }
   }
 
@@ -134,9 +137,9 @@ export class McpClientPlugin implements Plugin {
         try {
           const def = parseYaml(readFileSync(join(dir, f), "utf8")) as McpServerDef;
           if (def?.name) out.push(def);
-          else console.warn(`[mcp-client] mcp-servers.d/${f}: missing name — skipped`);
+          else log.warn(`mcp-servers.d/${f}: missing name — skipped`);
         } catch (err) {
-          console.error(`[mcp-client] Skipping mcp-servers.d/${f}: ${err instanceof Error ? err.message : String(err)}`);
+          log.error(`Skipping mcp-servers.d/${f}`, { err: err instanceof Error ? err.message : String(err) });
         }
       }
     } catch { /* dir vanished mid-scan */ }

@@ -13,6 +13,9 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AgentDefinition, AgentRole, AgentSkillDefinition, JsonSchema, RawAgentYaml } from "./types.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("agent-runtime");
 
 const VALID_ROLES: AgentRole[] = [
   "orchestrator",
@@ -207,9 +210,7 @@ export function loadAgentEntries(workspaceDir: string): AgentEntry[] {
       const def = parseAgentYaml(raw, file);
       entries.push({ def, file: filePath });
     } catch (err) {
-      console.error(
-        `[agent-runtime] Skipping ${file}: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      log.error(`Skipping ${file}`, { err: err instanceof Error ? err.message : String(err) });
     }
   }
 

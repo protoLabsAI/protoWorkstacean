@@ -11,6 +11,9 @@ import type { CallerIdentity } from "../../lib/auth/agent-keys.ts";
 import { getPendingHumanInput } from "./human-input.ts";
 import { safeKeyEqual, isPublishTopicDenied } from "../../lib/runtime-env.ts";
 import { metrics } from "../../lib/metrics.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("publish");
 
 /**
  * Probe whether the LLM gateway is REACHABLE for the readiness report.
@@ -144,7 +147,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
     // never for forging agent.skill.request / operator.message.request /
     // inbound messages / scheduled triggers.
     if (isPublishTopicDenied(topic)) {
-      console.warn(`[publish] rejected denied topic "${topic}" from ${caller.agentName ?? "admin"}`);
+      log.warn(`rejected denied topic "${topic}" from ${caller.agentName ?? "admin"}`);
       return Response.json(
         { success: false, error: `Topic "${topic}" may not be published via /publish (internal control-plane topic)` },
         { status: 403 },

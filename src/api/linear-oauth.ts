@@ -15,6 +15,9 @@
 
 import type { Route, ApiContext } from "./types.ts";
 import { getLinearAvaTokenManager } from "../../lib/linear/ava-oauth-token-manager.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("linear-ava-oauth");
 
 function htmlPage(title: string, body: string, status: number): Response {
   return new Response(
@@ -80,10 +83,10 @@ export function createRoutes(ctx: ApiContext): Route[] {
           await mgr.handleCallback(code, state);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[linear-ava-oauth] callback failed: ${msg}`);
+          log.error("callback failed", { err });
           return htmlPage("Authorization failed", `<p>${msg}</p>`, 400);
         }
-        console.log("[linear-ava-oauth] authorized — refresh token captured; Ava can now post as herself.");
+        log.info("authorized — refresh token captured; Ava can now post as herself.");
         return htmlPage(
           "Ava is connected to Linear ✅",
           `<p>The agent token was captured and stored. Ava will now post as herself in Linear. You can close this tab.</p>`,

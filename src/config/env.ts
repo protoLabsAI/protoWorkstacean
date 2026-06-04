@@ -22,6 +22,9 @@
  */
 
 import { z } from "zod";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("env");
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 // All vars are optional strings — the system degrades gracefully when optional
@@ -161,8 +164,8 @@ export function parseEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     const issues = result.error.issues
       .map((i) => `  ${i.path.join(".")}: ${i.message}`)
       .join("\n");
-    console.error(
-      `[env] Invalid environment configuration — fix the following and restart:\n${issues}`,
+    log.error(
+      `Invalid environment configuration — fix the following and restart:\n${issues}`,
     );
     process.exit(1);
   }

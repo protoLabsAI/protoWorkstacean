@@ -27,6 +27,9 @@
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import { REVIEW_TOPICS } from "../event-bus/topics.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("quinn-review-notifier");
 
 interface QuinnReviewSubmittedPayload {
   owner: string;
@@ -56,7 +59,7 @@ export class QuinnReviewNotifierPlugin implements Plugin {
       (msg) => this._handle(msg),
     );
     this.subscriptionIds.push(subId);
-    console.log("[quinn-review-notifier] installed — REQUEST_CHANGES verdicts will fire Discord alerts");
+    log.info("installed — REQUEST_CHANGES verdicts will fire Discord alerts");
   }
 
   uninstall(): void {
@@ -72,8 +75,8 @@ export class QuinnReviewNotifierPlugin implements Plugin {
     const payload = (msg.payload ?? {}) as Partial<QuinnReviewSubmittedPayload>;
     if (payload.event !== "REQUEST_CHANGES") return;
     if (!payload.owner || !payload.repo || !payload.prNumber) {
-      console.warn(
-        `[quinn-review-notifier] dropping malformed REQUEST_CHANGES event — missing owner/repo/prNumber`,
+      log.warn(
+        `dropping malformed REQUEST_CHANGES event — missing owner/repo/prNumber`,
       );
       return;
     }
@@ -111,11 +114,9 @@ export class QuinnReviewNotifierPlugin implements Plugin {
 
     try {
       this.bus.publish("message.outbound.discord.alert", alertMsg);
-      console.log(`[quinn-review-notifier] REQUEST_CHANGES on ${prRef} → discord.alert`);
+      log.info(`REQUEST_CHANGES on ${prRef} → discord.alert`);
     } catch (err) {
-      console.warn(
-        `[quinn-review-notifier] failed to publish discord.alert for ${prRef}: ${err instanceof Error ? err.message : err}`,
-      );
+      log.warn(`failed to publish discord.alert for ${prRef}`, { err });
     }
   }
 }

@@ -27,6 +27,9 @@ import type { AutonomousOutcomePayload } from "../event-bus/payloads.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import { MODEL_RATES } from "../../lib/types/budget.ts";
 import type { FleetStateRepository, OutcomeRecord as PersistedOutcomeRecord } from "../knowledge/fleet-state.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("fleet-health");
 
 const WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 hours
 const WINDOW_1H_MS = 60 * 60 * 1_000; // 1 hour
@@ -54,8 +57,8 @@ function _ratesFor(model: string | undefined): { input: number; output: number }
   if (rates) return rates;
   if (!_warnedUnknownModels.has(model)) {
     _warnedUnknownModels.add(model);
-    console.warn(
-      `[agent-fleet-health] No MODEL_RATES entry for "${model}" — using default rate. ` +
+    log.warn(
+      `No MODEL_RATES entry for "${model}" — using default rate. ` +
         `Add the model to lib/types/budget.ts MODEL_RATES table for accurate cost attribution.`,
     );
   }
@@ -198,7 +201,7 @@ export class AgentFleetHealthPlugin implements Plugin {
       const records = this.fleetStateRepo.hydrateRecords(24);
       for (const r of records) this._addToWindow(r);
       if (records.length > 0) {
-        console.log(`[agent-fleet-health] hydrated ${records.length} records from knowledge.db`);
+        log.info(`hydrated ${records.length} records from knowledge.db`);
       }
     }
 
@@ -209,7 +212,7 @@ export class AgentFleetHealthPlugin implements Plugin {
         this._record(p);
       }),
     );
-    console.log("[agent-fleet-health] Installed — aggregating autonomous.outcome.#");
+    log.info("Installed — aggregating autonomous.outcome.#");
   }
 
   uninstall(): void {
@@ -352,8 +355,8 @@ export class AgentFleetHealthPlugin implements Plugin {
       // without flooding on every outcome.
       if (!this.seenSyntheticActors.has(p.systemActor)) {
         this.seenSyntheticActors.add(p.systemActor);
-        console.warn(
-          `[agent-fleet-health] synthetic_actor_filtered systemActor=${p.systemActor} ` +
+        log.warn(
+          `synthetic_actor_filtered systemActor=${p.systemActor} ` +
             `skill=${p.skill} — not in ExecutorRegistry; aggregating under systemActors[] ` +
             `instead of agents[]. Fix source so it doesn't masquerade as an agent.`,
         );

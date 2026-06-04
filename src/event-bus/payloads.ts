@@ -221,7 +221,7 @@ export type DispatchDropReason = "no_skill" | "target_unresolved" | "cooldown";
 export interface DispatchDroppedPayload {
   reason: DispatchDropReason;
   correlationId: string;
-  /** The dispatcher's human-readable drop message — same content as the console.warn line. */
+  /** The dispatcher's human-readable drop message — same content as the log.warn line. */
   message: string;
   /** Skill name (absent only when reason="no_skill"). */
   skill?: string;

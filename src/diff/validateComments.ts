@@ -8,6 +8,9 @@
  */
 
 import type { LLMComment, ValidatedComment, AnnotatedHunk } from "./types.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("validate-comments");
 
 /**
  * Check if a given line number falls within any hunk for the specified file.
@@ -78,8 +81,8 @@ export function validateComments(
     // Validate line_end is within hunk bounds
     const endHunk = findHunkForLine(path, line_end, hunks);
     if (!endHunk) {
-      console.warn(
-        `[validateComments] Dropping comment: ${path}:${line_end} is outside hunk bounds or on a deleted line`,
+      log.warn(
+        `Dropping comment: ${path}:${line_end} is outside hunk bounds or on a deleted line`,
       );
       continue;
     }
@@ -101,8 +104,8 @@ export function validateComments(
     const startHunk = findHunkForLine(path, line_start, hunks);
     if (!startHunk) {
       // Start line is invalid — fall back to single-line at line_end
-      console.warn(
-        `[validateComments] Multi-line comment ${path}:${line_start}-${line_end}: start line outside bounds, falling back to single-line at ${line_end}`,
+      log.warn(
+        `Multi-line comment ${path}:${line_start}-${line_end}: start line outside bounds, falling back to single-line at ${line_end}`,
       );
       validated.push({
         path,
@@ -117,8 +120,8 @@ export function validateComments(
 
     // Check if start and end are in different hunks — split into single-line at end
     if (startHunk !== endHunk) {
-      console.warn(
-        `[validateComments] Multi-line comment ${path}:${line_start}-${line_end} spans multiple hunks, splitting to single-line at ${line_end}`,
+      log.warn(
+        `Multi-line comment ${path}:${line_start}-${line_end} spans multiple hunks, splitting to single-line at ${line_end}`,
       );
       validated.push({
         path,

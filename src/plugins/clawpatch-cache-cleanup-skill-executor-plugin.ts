@@ -17,6 +17,10 @@ import type { SkillRequest, SkillResult } from "../executor/types.ts";
 import { FunctionExecutor } from "../executor/executors/function-executor.ts";
 import { CheckoutCache } from "../../lib/checkout-cache.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("clawpatch-cache-cleanup-skill-executor");
+const cleanupLog = logger("clawpatch-cache-cleanup");
 
 export class ClawpatchCacheCleanupSkillExecutorPlugin implements Plugin {
   readonly name = "clawpatch-cache-cleanup-skill-executor";
@@ -42,9 +46,7 @@ export class ClawpatchCacheCleanupSkillExecutorPlugin implements Plugin {
     });
     const executor = new FunctionExecutor(async (req) => this._execute(req));
     this.registry.register("ceremony.clawpatch_cache_cleanup", executor, { priority: 5 });
-    console.log(
-      "[clawpatch-cache-cleanup-skill-executor] Registered ceremony.clawpatch_cache_cleanup",
-    );
+    log.info("Registered ceremony.clawpatch_cache_cleanup");
   }
 
   uninstall(): void {
@@ -63,8 +65,8 @@ export class ClawpatchCacheCleanupSkillExecutorPlugin implements Plugin {
     try {
       const { evicted, bytesFreed } = await this._cache.prune();
       const durationMs = Date.now() - startedAt;
-      console.log(
-        `[clawpatch-cache-cleanup] pruned ${evicted} entr${evicted === 1 ? "y" : "ies"} ` +
+      cleanupLog.info(
+        `pruned ${evicted} entr${evicted === 1 ? "y" : "ies"} ` +
           `(${bytesFreed} bytes) in ${durationMs}ms`,
       );
       return {

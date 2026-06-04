@@ -207,7 +207,11 @@ describe("BusAgentExecutor (Phase 7)", () => {
       expect(requestPayload).toBeDefined();
       expect((requestPayload as { targets: string[] }).targets).toEqual(["ava"]);
       expect((requestPayload as { skill: string }).skill).toBe("chat");
-      expect(logCalls.some(l => l.includes("[a2a-server]") && l.includes("defaulting to helm [ava]"))).toBe(true);
+      // Assert on the message content, not the `[a2a-server]` tag: that tag is
+      // now the structured-logger component (rendered as a JSON field under the
+      // NODE_ENV=production build gate), so matching the literal would be
+      // env-dependent. The message text is stable across dev/json formats.
+      expect(logCalls.some(l => l.includes("defaulting to helm [ava]"))).toBe(true);
     } finally {
       console.log = origLog;
     }

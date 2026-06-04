@@ -30,6 +30,9 @@
 import type { Route, ApiContext } from "./types.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
 import { REVIEW_TOPICS } from "../event-bus/topics.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("pr-inspector");
 
 // Resolve auth lazily + memoized on first use rather than at module load.
 // Module-load capture bound the getter to whatever env existed at import
@@ -313,8 +316,8 @@ async function guardTerminalCi(
   const pending = pendingCheckNames(runs);
   if (pending.length === 0) return null;
 
-  console.warn(
-    `[pr-inspector] CI-terminal guard: held ${verdict} on ${owner}/${name}#${pr} — ` +
+  log.warn(
+    `CI-terminal guard: held ${verdict} on ${owner}/${name}#${pr} — ` +
       `${pending.length} check(s) still running: ${pending.slice(0, 8).join(", ")}`,
   );
   const verb = verdict === "APPROVE" ? "approval" : "change-request";
@@ -442,9 +445,7 @@ function publishReviewSubmitted(
       },
     });
   } catch (err) {
-    console.warn(
-      `[pr-inspector] failed to publish quinn.review.submitted: ${err instanceof Error ? err.message : err}`,
-    );
+    log.warn("failed to publish quinn.review.submitted", { err });
   }
 }
 
@@ -511,7 +512,7 @@ async function setPrState(
     try {
       await postIssueComment(owner, name, pr, comment);
     } catch (e) {
-      console.warn(`[pr-inspector] comment-then-close: comment failed (proceeding): ${String(e).slice(0, 300)}`);
+      log.warn(`comment-then-close: comment failed (proceeding): ${String(e).slice(0, 300)}`);
     }
   }
 

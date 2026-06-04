@@ -28,6 +28,9 @@ import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { SkillRequest, SkillResult } from "../executor/types.ts";
 import { FunctionExecutor } from "../executor/executors/function-executor.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("ceremony-skill-executor");
 
 /**
  * Action id (== skill name on agent.skill.request) → ceremony id to trigger.
@@ -69,8 +72,8 @@ export class CeremonySkillExecutorPlugin implements Plugin {
       const executor = new FunctionExecutor(async (req) => this._execute(req, entry));
       this.registry.register(entry.skill, executor, { priority: 5 });
     }
-    console.log(
-      `[ceremony-skill-executor] Registered ${CEREMONY_SKILLS.length} ceremony executor(s): ${CEREMONY_SKILLS.map(c => c.skill).join(", ")}`,
+    log.info(
+      `Registered ${CEREMONY_SKILLS.length} ceremony executor(s): ${CEREMONY_SKILLS.map(c => c.skill).join(", ")}`,
     );
   }
 

@@ -11,6 +11,9 @@
  */
 
 import { trackCommentResponse, isDismissalResponse } from "../services/reviews/dismissal-tracker.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("github-comment-response");
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -86,8 +89,8 @@ export async function handleCommentResponse(
     reason: dismissed ? responseBody.slice(0, 200) : undefined,
   });
 
-  console.log(
-    `[github-comment-response] Comment response on ${repoSlug}#${payload.pull_request.number} ` +
+  log.info(
+    `Comment response on ${repoSlug}#${payload.pull_request.number} ` +
     `by @${author}: ${dismissed ? "dismissed" : "engaged"}`,
   );
 }
@@ -117,8 +120,8 @@ export async function handleReviewDismissal(
     reason: reason.slice(0, 200),
   });
 
-  console.log(
-    `[github-comment-response] Review dismissed on ${repoSlug}#${payload.pull_request.number}` +
+  log.info(
+    `Review dismissed on ${repoSlug}#${payload.pull_request.number}` +
     (reason ? `: ${reason}` : ""),
   );
 }

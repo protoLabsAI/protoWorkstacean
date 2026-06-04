@@ -20,6 +20,9 @@
 import { writeFileSync, renameSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("control-plane-registrar");
 
 export class ControlPlaneRegistrarPlugin implements Plugin {
   name = "control-plane-registrar";
@@ -58,7 +61,7 @@ export class ControlPlaneRegistrarPlugin implements Plugin {
     if (!file) return null;
     const resolved = resolve(file);
     if (dirname(resolved) !== root) {
-      console.warn(`[control-plane] refusing write outside ${root}: ${file}`);
+      log.warn(`refusing write outside ${root}: ${file}`);
       return null;
     }
     return resolved;
@@ -74,9 +77,9 @@ export class ControlPlaneRegistrarPlugin implements Plugin {
       const tmp = `${file}.tmp-${msg.id}`;
       writeFileSync(tmp, p.yaml, "utf8");
       renameSync(tmp, file);
-      console.log(`[control-plane] wrote "${p.name}" → ${file}`);
+      log.info(`wrote "${p.name}" → ${file}`);
     } catch (err) {
-      console.error(`[control-plane] write "${p.name}" failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`write "${p.name}" failed`, { err });
     }
   }
 
@@ -86,9 +89,9 @@ export class ControlPlaneRegistrarPlugin implements Plugin {
     if (!file) return;
     try {
       if (existsSync(file)) unlinkSync(file);
-      console.log(`[control-plane] removed "${p.name}" → ${file}`);
+      log.info(`removed "${p.name}" → ${file}`);
     } catch (err) {
-      console.error(`[control-plane] remove "${p.name}" failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`remove "${p.name}" failed`, { err });
     }
   }
 }

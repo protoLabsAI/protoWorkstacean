@@ -20,6 +20,9 @@
 
 import type { Route, ApiContext } from "./types.ts";
 import { pendingReplies, canSendProgress } from "../../lib/plugins/discord.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("discord-progress");
 
 function getDiscordClient(ctx: ApiContext) {
   const plugin = ctx.plugins.find(p => p.name === "discord") as any;
@@ -354,8 +357,9 @@ export function createRoutes(ctx: ApiContext): Route[] {
             await (pending.message.channel as any).send({ content });
             discordDelivered = true;
           } catch (e) {
-            console.warn(
-              `[discord/progress] Discord send failed for ${body.correlationId.slice(0, 8)}… (bus publish already succeeded): ${e instanceof Error ? e.message : String(e)}`,
+            log.warn(
+              `Discord send failed for ${body.correlationId.slice(0, 8)}… (bus publish already succeeded)`,
+              { err: e },
             );
           }
         }

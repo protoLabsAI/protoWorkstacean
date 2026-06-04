@@ -20,6 +20,9 @@ import { fetchSymbolContexts } from "../services/codebase/symbol-fetcher.ts";
 import { indexPRHistory } from "../services/qdrant/pr-history-indexer.ts";
 import { indexCodePatterns } from "../services/qdrant/code-patterns-indexer.ts";
 import type { PRMetadata } from "../services/github/diff-fetcher.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("github-pr-merge");
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -61,7 +64,7 @@ export async function handlePRMerge(
   const repo = payload.repository.name;
   const prNumber = pr.number;
 
-  console.log(`[github-pr-merge] Processing merged PR #${prNumber} in ${owner}/${repo}`);
+  log.info(`Processing merged PR #${prNumber} in ${owner}/${repo}`);
 
   const token = await getToken(owner, repo);
 
@@ -83,7 +86,7 @@ export async function handlePRMerge(
   ]);
 
   if (!diff) {
-    console.warn(`[github-pr-merge] Empty diff for PR #${prNumber} — skipping indexing`);
+    log.warn(`Empty diff for PR #${prNumber} — skipping indexing`);
     return;
   }
 
@@ -108,8 +111,8 @@ export async function handlePRMerge(
     }
   }
 
-  console.log(
-    `[github-pr-merge] Indexed PR #${prNumber} ${owner}/${repo}: ` +
+  log.info(
+    `Indexed PR #${prNumber} ${owner}/${repo}: ` +
     `${chunks.length} chunks, ${symbols.length} symbols, decision=${decision}`,
   );
 }

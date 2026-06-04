@@ -24,6 +24,9 @@
  */
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("bus-history-recorder");
 
 const DEFAULT_MAX_EVENTS = 10_000;
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
@@ -142,8 +145,8 @@ export class BusHistoryRecorderPlugin implements Plugin {
     this.subscriptionId = bus.subscribe("#", this.name, msg => this.recorder.record(msg));
     this.pruneTimer = setInterval(() => this.recorder.prune(), PRUNE_INTERVAL_MS);
     if (typeof this.pruneTimer.unref === "function") this.pruneTimer.unref();
-    console.log(
-      `[bus-history-recorder] installed (cap=${this.recorder.stats().capacity}, ttlMs=${this.recorder.stats().ttlMs})`,
+    log.info(
+      `installed (cap=${this.recorder.stats().capacity}, ttlMs=${this.recorder.stats().ttlMs})`,
     );
   }
 

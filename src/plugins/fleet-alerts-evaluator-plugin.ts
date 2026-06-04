@@ -41,6 +41,9 @@ import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { SkillRequest, SkillResult } from "../executor/types.ts";
 import type { AgentFleetHealthPlugin, FleetHealthSnapshot } from "./agent-fleet-health-plugin.ts";
 import { FunctionExecutor } from "../executor/executors/function-executor.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("fleet-alerts-evaluator");
 
 /** Minimum interval between firing the same alert skill (env: WORKSTACEAN_FLEET_ALERT_COOLDOWN_MS). */
 const ALERT_COOLDOWN_MS_DEFAULT = 15 * 60_000;
@@ -85,8 +88,8 @@ export class FleetAlertsEvaluatorPlugin implements Plugin {
     this.bus = bus;
     const executor = new FunctionExecutor(async (req: SkillRequest) => this._execute(req));
     this.registry.register("evaluate_fleet_thresholds", executor, { priority: 5 });
-    console.log(
-      `[fleet-alerts-evaluator] Installed — failureRate1h>${this.failureRateThreshold}, ` +
+    log.info(
+      `Installed — failureRate1h>${this.failureRateThreshold}, ` +
         `dailyBudget=$${this.dailyBudgetUsd}, alertCooldown=${Math.round(this.cooldownMs / 60_000)}min`,
     );
   }
@@ -208,8 +211,8 @@ export class FleetAlertsEvaluatorPlugin implements Plugin {
       },
     } as BusMessage);
 
-    console.log(
-      `[fleet-alerts-evaluator] DISPATCH ${violation.alertSkill}: ${violation.metric}=${violation.value} > ${violation.threshold} — ${violation.detail}`,
+    log.info(
+      `DISPATCH ${violation.alertSkill}: ${violation.metric}=${violation.value} > ${violation.threshold} — ${violation.detail}`,
     );
   }
 }

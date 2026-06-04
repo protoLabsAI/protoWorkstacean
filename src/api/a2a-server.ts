@@ -40,9 +40,12 @@ import { Role, TaskState, type Message } from "@a2a-js/sdk";
 import { textPart, partText, textArtifact, dataArtifact, emitToolCall, type ToolCallArtifactData } from "@protolabs/a2a";
 import type { Route, ApiContext } from "./types.ts";
 import type { BusMessage } from "../../lib/types.ts";
+import { logger } from "../../lib/log.ts";
 import { buildAgentCard } from "./agent-card.ts";
 import { getFleetConfig } from "../../lib/fleet/fleet-config.ts";
 import { SqlitePushNotificationStore } from "../storage/push-notification-store.ts";
+
+const log = logger("a2a-server");
 
 /**
  * Detect when an upstream payload looks like an HTML error page (usually the
@@ -147,7 +150,7 @@ class BusAgentExecutor implements AgentExecutor {
     if (explicitTargets.length === 0) {
       const helm = getFleetConfig().helm;
       targets = [helm];
-      console.log(`[a2a-server] no target specified, defaulting to helm [${helm}] for message/send`);
+      log.info(`no target specified, defaulting to helm [${helm}] for message/send`);
     } else {
       targets = explicitTargets;
     }
@@ -278,14 +281,14 @@ class BusAgentExecutor implements AgentExecutor {
         let errorText = rawError;
         let contentText = rawContent;
         if (rawError && looksLikeHtmlError(rawError)) {
-          console.warn(
-            `[a2a-server] upstream error payload contained HTML (taskId=${taskId.slice(0, 8)}…); sanitizing. Raw:\n${rawError}`,
+          log.warn(
+            `upstream error payload contained HTML (taskId=${taskId.slice(0, 8)}…); sanitizing. Raw:\n${rawError}`,
           );
           errorText = sanitizeHtmlError(rawError);
         }
         if (!errorText && rawContent && looksLikeHtmlError(rawContent)) {
-          console.warn(
-            `[a2a-server] upstream content payload contained HTML (taskId=${taskId.slice(0, 8)}…); treating as failure. Raw:\n${rawContent}`,
+          log.warn(
+            `upstream content payload contained HTML (taskId=${taskId.slice(0, 8)}…); treating as failure. Raw:\n${rawContent}`,
           );
           errorText = sanitizeHtmlError(rawContent);
           contentText = "";
@@ -408,7 +411,7 @@ class BusAgentExecutor implements AgentExecutor {
     await done;
     clearInterval(heartbeat);
     if (cancelled) {
-      console.log(`[a2a-server] Task ${taskId.slice(0, 8)}… canceled`);
+      log.info(`Task ${taskId.slice(0, 8)}… canceled`);
     }
   }
 

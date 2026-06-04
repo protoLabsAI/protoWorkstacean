@@ -22,6 +22,9 @@ import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "../executor/executor-registry.ts";
 import type { SkillRequest, SkillResult } from "../executor/types.ts";
 import { FunctionExecutor } from "../executor/executors/function-executor.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("alert-skill-executor");
 
 /**
  * Every `alert.*` skill in workspace/actions.yaml that has no other handler.
@@ -79,8 +82,8 @@ export class AlertSkillExecutorPlugin implements Plugin {
       const executor = new FunctionExecutor(async (req) => this._execute(req, entry));
       this.registry.register(entry.skill, executor, { priority: 5 });
     }
-    console.log(
-      `[alert-skill-executor] Registered ${ALERT_SKILLS.length} alert executor(s): ${ALERT_SKILLS.map(a => a.skill).join(", ")}`,
+    log.info(
+      `Registered ${ALERT_SKILLS.length} alert executor(s): ${ALERT_SKILLS.map(a => a.skill).join(", ")}`,
     );
   }
 

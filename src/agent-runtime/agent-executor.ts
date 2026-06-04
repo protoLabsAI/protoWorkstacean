@@ -28,6 +28,9 @@
 import { query, isSDKResultMessage } from "@protolabsai/sdk";
 import type { SDKResultMessageSuccess, SDKResultMessageError, ExtendedUsage } from "@protolabsai/sdk";
 import type { AgentDefinition } from "./types.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("agent-executor");
 
 export interface SkillProgressEvent {
   /** Discriminates between tool invocations and assistant text chunks. */
@@ -127,7 +130,7 @@ export class AgentExecutor {
         // use correlationId so LangFuse traces stay grouped under the same ID.
         ...(resume ? { resume } : { sessionId: correlationId }),
         cwd: cwd ?? process.cwd(),
-        stderr: (line: string) => console.error(`[agent:${this.agentDef.name}:stderr]`, line),
+        stderr: (line: string) => log.error("agent stderr", { agent: this.agentDef.name, line }),
         ...(this.agentDef.allowedTools?.length ? { allowedTools: this.agentDef.allowedTools } : {}),
         ...(this.agentDef.excludeTools?.length ? { excludeTools: this.agentDef.excludeTools } : {}),
         ...(Object.keys(env).length > 0 ? { env } : {}),
