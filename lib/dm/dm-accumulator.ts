@@ -13,6 +13,9 @@
  */
 
 import type { ContextMailbox } from "./context-mailbox.ts";
+import { logger } from "../log.ts";
+
+const log = logger("dm-accumulator");
 
 /**
  * Minimal subset of Discord.js Message used by the accumulator.
@@ -149,10 +152,7 @@ export class DmAccumulator {
     entry: Omit<AccumulatorEntry, "timer">,
     err: unknown,
   ): void {
-    console.error(
-      `[dm-accumulator] Flush error for ${conversationId}:`,
-      err instanceof Error ? err.message : err,
-    );
+    log.error(`Flush error for ${conversationId}`, { err });
 
     // Fallback: push to mailbox so messages aren't lost
     if (this.fallbackMailbox) {
@@ -165,8 +165,8 @@ export class DmAccumulator {
         sender: entry.userId,
         receivedAt: Date.now(),
       });
-      console.log(
-        `[dm-accumulator] Pushed ${entry.contents.length} message(s) to mailbox fallback for ${conversationId}`,
+      log.info(
+        `Pushed ${entry.contents.length} message(s) to mailbox fallback for ${conversationId}`,
       );
     }
   }

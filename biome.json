@@ -40,7 +40,7 @@
         "noUnreachable": "error"
       },
       "suspicious": {
-        "noConsoleLog": "off",
+        "noConsoleLog": "error",
         "noExplicitAny": "warn",
         "noDoubleEquals": "error",
         "noFallthroughSwitchClause": "error"
@@ -63,7 +63,16 @@
       }
     },
     {
-      "include": ["src/api/**", "lib/**", "src/**"],
+      "include": [
+        "lib/log.ts",
+        "lib/plugins/cli.ts",
+        "lib/plugins/debug.ts",
+        "lib/plugins/onboarding.ts",
+        "lib/plugins/event-viewer.ts",
+        "lib/plugins/echo.ts",
+        "lib/conversation/conversation-tracer.ts",
+        "src/integrations/discord/CeremonyNotifier.ts"
+      ],
       "linter": {
         "rules": {
           "suspicious": {

@@ -23,6 +23,9 @@ import { readFileSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { UserIdentity, UsersYaml } from "../types/users.ts";
+import { logger } from "../log.ts";
+
+const log = logger("identity");
 
 export class IdentityRegistry {
   private users: UserIdentity[] = [];
@@ -91,12 +94,12 @@ export class IdentityRegistry {
       const parsed = parseYaml(raw) as UsersYaml;
       this.users = parsed?.users ?? [];
       this._buildIndex();
-      console.log(`[identity] Loaded ${this.users.length} user identity(ies) from users.yaml`);
+      log.info(`Loaded ${this.users.length} user identity(ies) from users.yaml`);
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        console.info("[identity] No users.yaml found — identity resolution disabled");
+        log.info("No users.yaml found — identity resolution disabled");
       } else {
-        console.error("[identity] Error loading users.yaml:", err);
+        log.error("Error loading users.yaml", { err });
       }
       this.users = [];
       this.index.clear();
@@ -116,7 +119,7 @@ export class IdentityRegistry {
 
   private _watch(): void {
     watchFile(this.filePath, { interval: 2000 }, () => {
-      console.log("[identity] users.yaml changed — reloading");
+      log.info("users.yaml changed — reloading");
       this._load();
     });
   }

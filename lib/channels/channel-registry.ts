@@ -11,6 +11,9 @@
 import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { Channel, ChannelsYaml } from "../types/channels.ts";
+import { logger } from "../log.ts";
+
+const log = logger("channel-registry");
 
 export type { Channel };
 
@@ -158,7 +161,7 @@ export class ChannelRegistry {
     const { writeFileSync } = require("node:fs") as typeof import("node:fs");
     writeFileSync(this.filePath, stringifyYaml(yaml), "utf8");
     this._buildIndex(updated);
-    console.log(`[channel-registry] Added channel "${channel.id}" (${channel.platform})`);
+    log.info(`Added channel "${channel.id}" (${channel.platform})`);
   }
 
   // ── Hot-reload ────────────────────────────────────────────────────────────────
@@ -171,7 +174,7 @@ export class ChannelRegistry {
       this.reloadDebounce = setTimeout(() => {
         this.reloadDebounce = null;
         this._load();
-        console.log(`[channel-registry] Reloaded — ${this.channels.length} channel(s)`);
+        log.info(`Reloaded — ${this.channels.length} channel(s)`);
       }, 300);
     });
   }
@@ -202,7 +205,7 @@ export class ChannelRegistry {
       const parsed = parseYaml(raw) as ChannelsYaml;
       this._buildIndex(parsed.channels ?? []);
     } catch (err) {
-      console.error(`[channel-registry] Failed to load ${this.filePath}:`, err);
+      log.error(`Failed to load ${this.filePath}`, { err });
     }
   }
 
@@ -224,8 +227,8 @@ export class ChannelRegistry {
           // A duplicate (project, kind) means notifications could route to
           // either channel depending on file order — surface it loudly rather
           // than silently overwriting. Keep the first; operator fixes the dup.
-          console.warn(
-            `[channel-registry] duplicate project binding "${key}" — channel "${existing.id}" already owns it; ` +
+          log.warn(
+            `duplicate project binding "${key}" — channel "${existing.id}" already owns it; ` +
               `ignoring "${ch.id}". Remove one from channels.yaml.`,
           );
         } else {

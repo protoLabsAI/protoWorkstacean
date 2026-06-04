@@ -38,6 +38,9 @@
 import { existsSync, readFileSync, watchFile } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { logger } from "../log.ts";
+
+const log = logger("agent-keys");
 
 export interface CallerIdentity {
   /** Set when the request was authenticated via an agent-scoped key. */
@@ -109,26 +112,26 @@ export class AgentKeyRegistry {
         if (!entry?.envKey) continue;
         const value = process.env[entry.envKey];
         if (!value) {
-          console.warn(
-            `[agent-keys] ${agentName}: env var "${entry.envKey}" is unset — skipping`,
+          log.warn(
+            `${agentName}: env var "${entry.envKey}" is unset — skipping`,
           );
           continue;
         }
         if (next.has(value)) {
-          console.warn(
-            `[agent-keys] duplicate key value detected — multiple agents share the same secret. Last write wins.`,
+          log.warn(
+            `duplicate key value detected — multiple agents share the same secret. Last write wins.`,
           );
         }
         next.set(value, agentName);
       }
       this.keyToAgent = next;
       if (next.size > 0) {
-        console.log(
-          `[agent-keys] Loaded ${next.size} per-agent key(s): ${this.agentNames().join(", ")}`,
+        log.info(
+          `Loaded ${next.size} per-agent key(s): ${this.agentNames().join(", ")}`,
         );
       }
     } catch (err) {
-      console.error(`[agent-keys] Failed to parse ${this.yamlPath}:`, err);
+      log.error(`Failed to parse ${this.yamlPath}`, { err });
     }
   }
 }

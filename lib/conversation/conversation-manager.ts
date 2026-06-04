@@ -12,6 +12,10 @@
  *   manager.end(channelId, userId)  // terminate explicitly
  */
 
+import { logger } from "../log.ts";
+
+const log = logger("conversation");
+
 export interface ConversationEntry {
   conversationId: string;
   channelId: string;
@@ -112,8 +116,8 @@ export class ConversationManager {
     for (const [key, entry] of this.conversations) {
       if (now - entry.lastActivity >= entry.timeoutMs) {
         this.conversations.delete(key);
-        console.log(
-          `[conversation] Conversation ${entry.conversationId} timed out ` +
+        log.info(
+          `Conversation ${entry.conversationId} timed out ` +
           `(${entry.turnNumber} turn(s), user ${entry.userId} in channel ${entry.channelId})`,
         );
         this.onTimeout?.(entry);
