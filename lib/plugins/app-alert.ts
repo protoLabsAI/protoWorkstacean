@@ -12,6 +12,9 @@
  */
 
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
+import { logger } from "../log.ts";
+
+const log = logger("app-alert");
 
 interface SystemErrorPayload {
   source?: string;
@@ -67,7 +70,7 @@ export class AppAlertPlugin implements Plugin {
       });
     } catch (e) {
       // Must not throw back into the bus (would re-emit system.error → loop).
-      console.warn("[app-alert] ops webhook post failed:", e);
+      log.warn("ops webhook post failed", { err: e });
     }
   }
 }

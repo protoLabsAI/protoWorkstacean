@@ -10,7 +10,7 @@ Every variable recognised by protoWorkstacean is declared in the zod `EnvSchema`
 
 - **62** variables declared in `EnvSchema`
 - **0** required (no `.optional()`); the rest are optional
-- **33** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
+- **34** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
 
 ## Core / runtime
 
@@ -155,6 +155,7 @@ These variables are read via `process.env` somewhere in `src/` or `lib/` but are
 | `LINEAR_PROTO_BRIDGE_LABEL` | `lib/plugins/linear-proto-bridge.ts` |
 | `LLM_GATEWAY_TIMEOUT_MS` | `src/executor/executors/deep-agent-executor.ts` |
 | `LLM_MAX_RETRIES` | `src/executor/executors/deep-agent-executor.ts` |
+| `LOGGER_EVENTS_RETENTION_MS` | `lib/plugins/logger.ts` |
 | `MEMORY_HARVEST_MAX_AGE_DAYS` | `src/agent-runtime/agent-runtime-plugin.ts` |
 | `MEMORY_HARVEST_SWEEP_HOURS` | `src/agent-runtime/agent-runtime-plugin.ts` |
 | `MEMORY_SUMMARY_MODEL` | `src/agent-runtime/agent-runtime-plugin.ts` |

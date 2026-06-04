@@ -1,5 +1,8 @@
 import type { BusMessage, MessageHandler, Subscription, TopicInfo, ConsumerInfo } from "./types";
 import { metrics } from "./metrics.ts";
+import { logger } from "./log.ts";
+
+const log = logger("bus");
 
 export class InMemoryEventBus {
   private subscriptions = new Map<string, Subscription[]>();
@@ -32,7 +35,7 @@ export class InMemoryEventBus {
           try {
             sub.handler(message);
           } catch (e) {
-            console.error(`Error in handler for ${pattern}:`, e);
+            log.error("subscriber handler threw", { pattern, plugin: sub.pluginName, topic, correlationId: message.correlationId, err: e });
             // App-self observability (#800): count + surface the swallow so a
             // handler erroring on every message is visible/alertable. Guard
             // against a loop if the system.error handler itself throws.
