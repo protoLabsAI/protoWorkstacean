@@ -3,19 +3,17 @@ name: Roxy Board Pulse
 description: >
   Recurring board pulse for Roxy's managed projects. On each fire she runs her
   board_sweep skill: pulls the briefing (events since last look), reacts to what
-  matters — PR/CI → Quinn (pr_review), blocked/escalated → fix-or-escalate, stuck
-  in_progress → steer/reset, auto-mode paused → diagnose/restart, bug/triage →
-  Quinn — keeps auto-mode running on projects with ready work, updates her
-  cross-project ledger, and reports what she saw + did. This is Roxy's event
-  subscription: the fleet owns the cadence (this ceremony), she owns the reaction.
+  matters (PR/CI → Quinn, blocked/escalated → fix-or-escalate, stuck in_progress
+  → steer/reset, auto-mode paused → diagnose/restart, bug → Quinn), keeps
+  auto-mode running on projects with ready work, updates her cross-project
+  ledger, and reports. Roxy's event subscription — the fleet owns the cadence,
+  she owns the reaction.
 
-  Routes DIRECTLY to roxy (board_sweep is hers) — never targets [all], which 404s
-  on every agent that doesn't advertise the skill (see agent-health/board.retro).
-schedule: "0 * * * *" # hourly — tune up/down as real board volume grows
+  Routes DIRECTLY to roxy (board_sweep is hers) — never targets [all], which
+  404s on agents that don't advertise the skill.
+schedule: "0 * * * *" # hourly — tune up/down as board volume grows
 skill: board_sweep
 targets:
   - roxy
 notifyChannel: "" # set a Discord slug to post the sweep summary
-# Paused 2026-06-04: no managed projects yet (test portfolio ditched). Flip back
-# to true once Roxy has a real project with a protoMaker board.
-enabled: false
+enabled: true
