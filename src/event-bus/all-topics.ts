@@ -199,3 +199,12 @@ export const FEATURE_TOPICS = {
   /** Published when a feature recovers — clears its remediation tracker. */
   FEATURE_UNBLOCKED: "feature.unblocked",
 } as const;
+
+export const SYSTEM_TOPICS = {
+  /**
+   * App-self error — published by the bus when a subscriber handler throws
+   * (#800). Consumed by AppAlertPlugin, which posts a throttled message to the
+   * ops Discord webhook. Payload: { source, plugin?, pattern?, error }.
+   */
+  SYSTEM_ERROR: "system.error",
+} as const;

@@ -10,6 +10,7 @@ import { serveWorkspaceYaml } from "./types.ts";
 import type { CallerIdentity } from "../../lib/auth/agent-keys.ts";
 import { getPendingHumanInput } from "./human-input.ts";
 import { safeKeyEqual, isPublishTopicDenied } from "../../lib/runtime-env.ts";
+import { metrics } from "../../lib/metrics.ts";
 
 export function createRoutes(ctx: ApiContext): Route[] {
 
@@ -284,6 +285,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
   return [
     { method: "GET",  path: "/health",                  handler: () => Response.json({ status: "ok", timestamp: Date.now() }) },
     { method: "GET",  path: "/ready",                   handler: () => handleReady() },
+    { method: "GET",  path: "/metrics",                 handler: () => new Response(metrics.render(), { headers: { "content-type": "text/plain; version=0.0.4; charset=utf-8" } }) },
     { method: "POST", path: "/publish",                 handler: (req) => handlePublish(req) },
     { method: "POST", path: "/api/onboard",             handler: (req) => handleOnboard(req) },
     { method: "GET",  path: "/api/projects",            handler: () => Response.json({ success: true, data: ctx.projectRegistry?.getProjects() ?? [] }) },
