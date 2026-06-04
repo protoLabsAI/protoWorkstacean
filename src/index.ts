@@ -195,6 +195,19 @@ const pluginRegistry: PluginRegistryEntry[] = [
     },
   },
   {
+    // IssueCloserPlugin closes the originating GitHub issue when its feature
+    // ships (feature.completed with githubIssueNumber + repo) — the GitHub
+    // close-the-loop, so portfolio-pipeline issues don't pile up open forever.
+    // Needs GitHub auth (Quinn App or PAT) to act; without it closeIssue throws
+    // and the plugin logs it, so gate on auth being present.
+    name: "issue-closer",
+    condition: () => !!(process.env.QUINN_APP_ID || process.env.GITHUB_TOKEN),
+    factory: async () => {
+      const { IssueCloserPlugin } = await import("../lib/plugins/issue-closer");
+      return new IssueCloserPlugin();
+    },
+  },
+  {
     name: "discord",
     condition: () => !!process.env.DISCORD_BOT_TOKEN,
     factory: async () => {
