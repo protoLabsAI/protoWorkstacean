@@ -6,6 +6,9 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import type { DiscordContext } from "./core.ts";
+import { logger } from "../../log.ts";
+
+const log = logger("discord");
 
 // ── Spam pattern compilation ──────────────────────────────────────────────────
 
@@ -13,12 +16,12 @@ export function compileSpamPatterns(patterns: string[]): RegExp[] {
   return patterns.flatMap(p => {
     try {
       if (/(\([^)]*[+*][^)]*\))[+*?]/.test(p)) {
-        console.warn(`[discord] Skipping potentially unsafe spam pattern (nested quantifiers): "${p}"`);
+        log.warn(`Skipping potentially unsafe spam pattern (nested quantifiers): "${p}"`);
         return [];
       }
       return [new RegExp(p, "i")];
     } catch (err) {
-      console.warn(`[discord] Skipping invalid spam pattern "${p}":`, err);
+      log.warn(`Skipping invalid spam pattern "${p}"`, { err });
       return [];
     }
   });
@@ -54,9 +57,9 @@ export function openRateLimitDb(ctx: DiscordContext, dataDir: string): void {
       ctx.rateLimits.set(row.user_id, hits);
     }
 
-    console.log(`[discord] Rate-limit DB opened (${rows.length} persisted hit(s) loaded)`);
+    log.info(`Rate-limit DB opened (${rows.length} persisted hit(s) loaded)`);
   } catch (err) {
-    console.warn("[discord] Could not open rate-limit DB — falling back to in-memory only:", err);
+    log.warn("Could not open rate-limit DB — falling back to in-memory only", { err });
     ctx.rlDb = null;
   }
 }
@@ -74,7 +77,7 @@ export function isRateLimited(ctx: DiscordContext, userId: string): boolean {
       ctx.rlDb.run("INSERT INTO rate_limits (user_id, ts) VALUES (?, ?)", [userId, now]);
       ctx.rlDb.run("DELETE FROM rate_limits WHERE user_id = ? AND ts <= ?", [userId, now - ctx.rateWindowMs]);
     } catch (err) {
-      console.warn("[discord] Failed to persist rate-limit hit:", err);
+      log.warn("Failed to persist rate-limit hit", { err });
     }
   }
 

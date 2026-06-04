@@ -12,6 +12,9 @@ import { isRateLimited, isSpam } from "./rate-limit.ts";
 import { pendingReplies } from "./outbound.ts";
 import { buildMessageContext } from "./context.ts";
 import { alreadyHandled } from "./dedup.ts";
+import { logger } from "../../log.ts";
+
+const log = logger("discord");
 
 // ── Admin check ───────────────────────────────────────────────────────────────
 
@@ -140,8 +143,8 @@ export async function handleDMFlush(
     : contents.map((c, i) => `[${i + 1}/${contents.length}] ${c}`).join("\n\n");
 
   if (ctx.isExecutionActive?.(conversationId) && ctx.mailbox) {
-    console.log(
-      `[discord] Agent in-flight for ${conversationId} — queuing ${contents.length} message(s) to mailbox`,
+    log.info(
+      `Agent in-flight for ${conversationId} — queuing ${contents.length} message(s) to mailbox`,
     );
     ctx.mailbox.push(conversationId, {
       content: batchedContent,
@@ -160,7 +163,7 @@ export async function handleDMFlush(
   if (discordMessage) {
     pendingReplies.set(conversationId, { message: discordMessage });
   } else {
-    console.warn(`[discord] Could not fetch message for ${conversationId} via ${agentName ?? "main"} — reply will use unprompted push`);
+    log.warn(`Could not fetch message for ${conversationId} via ${agentName ?? "main"} — reply will use unprompted push`);
   }
 
   // Surrounding context for the DM (reply-to / scrollback / attachments).
@@ -174,7 +177,7 @@ export async function handleDMFlush(
       channelId,
       agentName,
       platform: "discord-dm",
-    }).catch(err => console.error("[discord] Langfuse startTrace error:", err));
+    }).catch(err => log.error("Langfuse startTrace error", { err }));
   }
   ctx.pendingTurns.set(conversationId, {
     conversationId,
@@ -282,7 +285,7 @@ export function registerInboundHandlers(ctx: DiscordContext): void {
     if (!isMentioned && !continueWithoutMention) return;
 
     if (!isAdmin(ctx, userId)) {
-      console.log(`[discord] message from ${userId} ignored — not in admins list`);
+      log.info(`message from ${userId} ignored — not in admins list`);
       return;
     }
 
@@ -336,7 +339,7 @@ export function registerInboundHandlers(ctx: DiscordContext): void {
           channelId: message.channelId,
           agentName: channelEntry?.agent,
           platform: "discord",
-        }).catch(err => console.error("[discord] Langfuse startTrace error:", err));
+        }).catch(err => log.error("Langfuse startTrace error", { err }));
       }
       ctx.pendingTurns.set(correlationId, {
         conversationId: correlationId,
@@ -374,7 +377,7 @@ export function registerInboundHandlers(ctx: DiscordContext): void {
     if (emoji !== "📋" && emoji !== RESEARCH_EMOJI) return;
     if (alreadyHandled(`react:${reaction.message.id}:${user.id}:${emoji}`)) return;
     if (!isAdmin(ctx, user.id)) {
-      console.log(`[discord] reaction from ${user.id} ignored — not in admins list`);
+      log.info(`reaction from ${user.id} ignored — not in admins list`);
       return;
     }
 

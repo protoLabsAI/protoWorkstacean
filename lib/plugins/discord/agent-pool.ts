@@ -12,6 +12,9 @@ import { Events, type Message } from "discord.js";
 import { createAgentClient } from "./core.ts";
 import { warmDmChannels } from "./dm-warming.ts";
 import type { DiscordContext } from "./core.ts";
+import { logger } from "../../log.ts";
+
+const log = logger("discord");
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -38,7 +41,7 @@ export function loadAgentPoolDefs(workspaceDir: string): AgentPoolEntry[] {
         if (entry?.name) seen.set(entry.name, entry);
       }
     } catch (err) {
-      console.error("[discord] Failed to parse agents.yaml:", err);
+      log.error("Failed to parse agents.yaml", { err });
     }
   }
 
@@ -63,11 +66,11 @@ export function loadAgentPoolDefs(workspaceDir: string): AgentPoolEntry[] {
             }
           }
         } catch (err) {
-          console.error(`[discord] Failed to parse agent file ${file}:`, err);
+          log.error(`Failed to parse agent file ${file}`, { err });
         }
       }
     } catch (err) {
-      console.error("[discord] Failed to enumerate workspace/agents/:", err);
+      log.error("Failed to enumerate workspace/agents/", { err });
     }
   }
 
@@ -98,7 +101,7 @@ export function initAgentPool(
   for (const [agentName, tokenEnvKey] of byName) {
     const token = process.env[tokenEnvKey];
     if (!token) {
-      console.warn(`[discord] No token for agent "${agentName}" (env: ${tokenEnvKey}) — will use bus bot`);
+      log.warn(`No token for agent "${agentName}" (env: ${tokenEnvKey}) — will use bus bot`);
       continue;
     }
 
@@ -106,32 +109,32 @@ export function initAgentPool(
       const agentClient = createAgentClient();
 
       agentClient.once(Events.ClientReady, async c => {
-        console.log(`[discord] Agent client "${agentName}" logged in as ${c.user.tag}`);
+        log.info(`Agent client "${agentName}" logged in as ${c.user.tag}`);
         await warmDmChannels(ctx, c).catch(err =>
-          console.warn(`[discord] Agent client "${agentName}" DM pre-warm failed:`, err),
+          log.warn(`Agent client "${agentName}" DM pre-warm failed`, { err }),
         );
       });
 
       agentClient.on(Events.MessageCreate, async (message) => {
         if (message.author.bot) return;
         if (message.guild) return;
-        console.log(`[discord] Agent client "${agentName}" received DM from ${message.author.tag} (${message.author.id})`);
+        log.info(`Agent client "${agentName}" received DM from ${message.author.tag} (${message.author.id})`);
         await handleDM(message, agentName);
       });
 
       agentClient.login(token).catch(err => {
-        console.warn(`[discord] Agent client "${agentName}" login failed:`, err);
+        log.warn(`Agent client "${agentName}" login failed`, { err });
         ctx.agentClients.delete(agentName);
       });
 
       ctx.agentClients.set(agentName, agentClient);
       created++;
     } catch (err) {
-      console.warn(`[discord] Failed to create client for agent "${agentName}":`, err);
+      log.warn(`Failed to create client for agent "${agentName}"`, { err });
     }
   }
 
-  console.log(`[discord] Agent client pool: ${created} client(s) initialized (${byName.size} agents configured)`);
+  log.info(`Agent client pool: ${created} client(s) initialized (${byName.size} agents configured)`);
 }
 
 // ── Pool reload ───────────────────────────────────────────────────────────────
@@ -147,7 +150,7 @@ export function reloadAgentPool(ctx: DiscordContext): void {
     if (!newAgentNames.has(name)) {
       client.destroy();
       ctx.agentClients.delete(name);
-      console.log(`[discord] Pool: removed agent client "${name}"`);
+      log.info(`Pool: removed agent client "${name}"`);
     }
   }
 
@@ -162,20 +165,20 @@ export function reloadAgentPool(ctx: DiscordContext): void {
       const agentClient = createAgentClient();
 
       agentClient.once(Events.ClientReady, c => {
-        console.log(`[discord] Agent client "${agent.name}" logged in as ${c.user.tag}`);
+        log.info(`Agent client "${agent.name}" logged in as ${c.user.tag}`);
       });
 
       agentClient.login(token).catch(err => {
-        console.warn(`[discord] Agent client "${agent.name}" login failed:`, err);
+        log.warn(`Agent client "${agent.name}" login failed`, { err });
         ctx.agentClients.delete(agent.name);
       });
 
       ctx.agentClients.set(agent.name, agentClient);
-      console.log(`[discord] Pool: added agent client "${agent.name}"`);
+      log.info(`Pool: added agent client "${agent.name}"`);
     } catch (err) {
-      console.warn(`[discord] Failed to create client for agent "${agent.name}":`, err);
+      log.warn(`Failed to create client for agent "${agent.name}"`, { err });
     }
   }
 
-  console.log(`[discord] Pool reloaded: ${ctx.agentClients.size} active agent client(s)`);
+  log.info(`Pool reloaded: ${ctx.agentClients.size} active agent client(s)`);
 }

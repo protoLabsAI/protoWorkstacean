@@ -21,6 +21,9 @@ import { ConversationTracer, type TurnData } from "../../conversation/conversati
 import { IdentityRegistry } from "../../identity/identity-registry.ts";
 import type { DmAccumulator } from "../../dm/dm-accumulator.ts";
 import type { ContextMailbox } from "../../dm/context-mailbox.ts";
+import { logger } from "../../log.ts";
+
+const log = logger("discord");
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -69,7 +72,7 @@ export interface DiscordConfig {
 export function loadConfig(workspaceDir: string): DiscordConfig {
   const configPath = join(workspaceDir, "discord.yaml");
   if (!existsSync(configPath)) {
-    console.log("[discord] No discord.yaml found — using defaults");
+    log.info("No discord.yaml found — using defaults");
     return {
       channels: {},
       moderation: {

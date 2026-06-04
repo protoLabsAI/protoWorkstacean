@@ -15,6 +15,9 @@ import {
 } from "discord.js";
 import type { BusMessage } from "../../types.ts";
 import type { DiscordContext } from "./core.ts";
+import { logger } from "../../log.ts";
+
+const log = logger("discord");
 
 // ── Pending reply handles ─────────────────────────────────────────────────────
 // Kept outside bus payload so the SQLite logger never tries to serialize them.
@@ -50,7 +53,7 @@ export function registerOutboundHandlers(ctx: DiscordContext): void {
       ?? (correlationId ? ctx.pendingAgents.get(correlationId) : undefined);
     const agentClient = agentId ? ctx.agentClients.get(agentId) : undefined;
     if (agentId && !agentClient) {
-      console.debug(`[discord] No pool client for agent "${agentId}" — falling back to bus client`);
+      log.debug(`No pool client for agent "${agentId}" — falling back to bus client`);
     }
 
     if (correlationId) {
@@ -66,11 +69,11 @@ export function registerOutboundHandlers(ctx: DiscordContext): void {
             ...pendingTurn,
             output: content,
             endTime: new Date(),
-          }).catch(err => console.error("[discord] Langfuse traceTurn error:", err));
+          }).catch(err => log.error("Langfuse traceTurn error", { err }));
         }
 
         if (pending.interaction) {
-          await pending.interaction.editReply({ content }).catch(console.error);
+          await pending.interaction.editReply({ content }).catch(err => log.error("editReply failed", { err }));
           return;
         }
 
@@ -78,18 +81,18 @@ export function registerOutboundHandlers(ctx: DiscordContext): void {
           const isDM = !pending.message.guild;
 
           if (isDM) {
-            await (pending.message.channel as TextChannel).send({ content }).catch(console.error);
+            await (pending.message.channel as TextChannel).send({ content }).catch(err => log.error("DM send failed", { err }));
           } else if (agentClient) {
             const ch = agentClient.channels.cache.get(pending.message.channelId) as TextChannel | undefined;
             if (ch) {
-              console.debug(`[discord] Routing reply via agent client "${agentId}"`);
-              await ch.send({ content }).catch(console.error);
+              log.debug(`Routing reply via agent client "${agentId}"`);
+              await ch.send({ content }).catch(err => log.error("agent client reply send failed", { err }));
             } else {
-              console.warn(`[discord] Agent "${agentId}" channel cache miss — falling back to bus client`);
-              await pending.message.reply({ content }).catch(console.error);
+              log.warn(`Agent "${agentId}" channel cache miss — falling back to bus client`);
+              await pending.message.reply({ content }).catch(err => log.error("reply failed", { err }));
             }
           } else {
-            const reply = await pending.message.reply({ content }).catch(console.error);
+            const reply = await pending.message.reply({ content }).catch(err => log.error("reply failed", { err }));
             if (reply && !pending.message.channel.isThread()) {
               await reply.startThread({ name: content.slice(0, 50) || "Response" }).catch(() => {});
             }
@@ -114,10 +117,10 @@ export function registerOutboundHandlers(ctx: DiscordContext): void {
     if (channelId) {
       const sendClient = agentClient ?? ctx.client;
       if (agentClient) {
-        console.debug(`[discord] Routing push to channel ${channelId} via agent client "${agentId}"`);
+        log.debug(`Routing push to channel ${channelId} via agent client "${agentId}"`);
       }
       const ch = sendClient.channels.cache.get(channelId) as TextChannel | undefined;
-      await ch?.send({ content }).catch(console.error);
+      await ch?.send({ content }).catch(err => log.error("push send failed", { err }));
     }
   });
 
@@ -135,7 +138,7 @@ export function registerOutboundHandlers(ctx: DiscordContext): void {
     const parts = msg.topic.split(".");
     const userId = parts[parts.length - 1];
     if (!userId || !/^\d+$/.test(userId)) {
-      console.warn(`[discord] Invalid user ID on DM topic ${msg.topic}`);
+      log.warn(`Invalid user ID on DM topic ${msg.topic}`);
       return;
     }
 
@@ -147,9 +150,9 @@ export function registerOutboundHandlers(ctx: DiscordContext): void {
       const user = await client.users.fetch(userId);
       const dm = await user.createDM();
       await dm.send({ content });
-      console.log(`[discord] DM delivered to user ${userId} via ${agentId ?? "default"} bot`);
+      log.info(`DM delivered to user ${userId} via ${agentId ?? "default"} bot`);
     } catch (err) {
-      console.error(`[discord] DM to user ${userId} failed:`, err);
+      log.error(`DM to user ${userId} failed`, { err });
     }
   });
 

@@ -8,6 +8,9 @@
 
 import type { Client } from "discord.js";
 import type { DiscordContext } from "./core.ts";
+import { logger } from "../../log.ts";
+
+const log = logger("discord");
 
 export async function warmDmChannels(ctx: DiscordContext, client: Client<true>): Promise<void> {
   const discordIds = ctx.identityRegistry
@@ -23,5 +26,5 @@ export async function warmDmChannels(ctx: DiscordContext, client: Client<true>):
       warmed++;
     } catch { /* skip if user not reachable */ }
   }
-  if (warmed) console.log(`[discord] Pre-warmed ${warmed} DM channel(s)`);
+  if (warmed) log.info(`Pre-warmed ${warmed} DM channel(s)`);
 }
