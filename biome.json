@@ -1,85 +1,83 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-  "files": {
-    "ignoreUnknown": true,
-    "ignore": [
-      "node_modules",
-      "dist",
-      "out",
-      "docs/.vitepress/dist",
-      "docs/.vitepress/cache",
-      "docs/node_modules",
-      ".automaker",
-      "data",
-      "workspace/ceremonies",
-      "**/*.yaml",
-      "**/*.yml",
-      "**/*.md"
-    ]
-  },
-  "organizeImports": {
-    "enabled": false
-  },
-  "formatter": {
-    "enabled": false
-  },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "recommended": false,
-      "complexity": {
-        "noUselessTernary": "error"
-      },
-      "style": {
-        "useConst": "error",
-        "useShorthandAssign": "error"
-      },
-      "correctness": {
-        "noUnusedImports": "warn",
-        "noConstAssign": "error",
-        "noUnreachable": "error"
-      },
-      "suspicious": {
-        "noConsoleLog": "error",
-        "noExplicitAny": "warn",
-        "noDoubleEquals": "error",
-        "noFallthroughSwitchClause": "error"
-      },
-      "nursery": {
-        "noNestedTernary": "warn"
-      }
-    }
-  },
-  "overrides": [
-    {
-      "include": ["**/*.test.ts", "**/__tests__/**"],
-      "linter": {
-        "rules": {
-          "suspicious": {
-            "noConsoleLog": "off",
-            "noExplicitAny": "off"
-          }
-        }
-      }
-    },
-    {
-      "include": [
-        "lib/log.ts",
-        "lib/plugins/cli.ts",
-        "lib/plugins/debug.ts",
-        "lib/plugins/onboarding.ts",
-        "lib/plugins/event-viewer.ts",
-        "lib/plugins/echo.ts",
-        "lib/conversation/conversation-tracer.ts",
-        "src/integrations/discord/CeremonyNotifier.ts"
-      ],
-      "linter": {
-        "rules": {
-          "suspicious": {
-            "noConsoleLog": "off"
-          }
-        }
-      }
-    }
-  ]
+	"$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+	"files": {
+		"ignoreUnknown": true,
+		"includes": [
+			"**",
+			"!**/node_modules",
+			"!**/dist",
+			"!**/out",
+			"!**/docs/.vitepress/dist",
+			"!**/docs/.vitepress/cache",
+			"!**/docs/node_modules",
+			"!**/.automaker",
+			"!**/data",
+			"!**/workspace/ceremonies",
+			"!**/*.yaml",
+			"!**/*.yml",
+			"!**/*.md"
+		]
+	},
+	"assist": { "actions": { "source": { "organizeImports": "off" } } },
+	"formatter": {
+		"enabled": false
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": false,
+			"complexity": {
+				"noUselessTernary": "error"
+			},
+			"style": {
+				"useConst": "error",
+				"useShorthandAssign": "error",
+				"noNestedTernary": "warn"
+			},
+			"correctness": {
+				"noUnusedImports": "warn",
+				"noConstAssign": "error",
+				"noUnreachable": "error"
+			},
+			"suspicious": {
+				"noExplicitAny": "warn",
+				"noDoubleEquals": "error",
+				"noFallthroughSwitchClause": "error",
+				"noConsole": "error"
+			},
+			"nursery": {}
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["**/*.test.ts", "**/__tests__/**"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "off",
+						"noConsole": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"**/lib/log.ts",
+				"**/lib/plugins/cli.ts",
+				"**/lib/plugins/debug.ts",
+				"**/lib/plugins/onboarding.ts",
+				"**/lib/plugins/event-viewer.ts",
+				"**/lib/plugins/echo.ts",
+				"**/lib/conversation/conversation-tracer.ts",
+				"**/src/integrations/discord/CeremonyNotifier.ts"
+			],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noConsole": "off"
+					}
+				}
+			}
+		}
+	]
 }
