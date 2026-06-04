@@ -16,4 +16,6 @@ skill: board_sweep
 targets:
   - roxy
 notifyChannel: "" # set a Discord slug to post the sweep summary
-enabled: true
+# Paused 2026-06-04: no managed projects yet (test portfolio ditched). Flip back
+# to true once Roxy has a real project with a protoMaker board.
+enabled: false
