@@ -42,6 +42,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
+import { isProductionLike } from "../runtime-env.ts";
 import { LinearClient, type LinearPriority } from "../linear-client.ts";
 import { getLinearAvaTokenManager } from "../linear/ava-oauth-token-manager.ts";
 import { LinearAgentActivityClient } from "../linear/agent-activity-client.ts";
@@ -197,11 +198,6 @@ function priorityToString(p?: number): LinearPriority {
  * a webhook secret — an unauthenticated public-facing webhook receiver is a
  * footgun that lets anyone inject `message.inbound.linear.*` events.
  */
-function isProductionLike(): boolean {
-  if (process.env.NODE_ENV === "production") return true;
-  if (process.env.WORKSTACEAN_PUBLIC_BASE_URL) return true;
-  return false;
-}
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 

@@ -37,6 +37,7 @@ import { CheckoutCache } from "../../lib/checkout-cache.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
 import type { Route, ApiContext } from "./types.ts";
 import type { ProjectRegistry } from "../plugins/project-registry.ts";
+import { safeKeyEqual } from "../../lib/runtime-env.ts";
 
 /**
  * Where clawpatch persists `.clawpatch/` (features, findings, runs, reports,
@@ -246,6 +247,16 @@ export function createRoutes(ctx: ApiContext): Route[] {
       method: "POST",
       path: "/api/clawpatch/review",
       handler: async (req) => {
+        // Auth: this spawns an LLM-backed review (cost + compute). Gate it like
+        // the other write routes — admin key required (fail-closed in prod via
+        // the startup guard). (#791)
+        if (ctx.apiKey) {
+          const bearer = req.headers.get("Authorization");
+          const provided = req.headers.get("X-API-Key") ?? (bearer?.startsWith("Bearer ") ? bearer.slice(7) : null);
+          if (!safeKeyEqual(provided, ctx.apiKey)) {
+            return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+          }
+        }
         let payload: ReviewRequest;
         try {
           payload = (await req.json()) as ReviewRequest;

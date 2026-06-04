@@ -9,6 +9,7 @@ import type { Route, ApiContext } from "./types.ts";
 import { serveWorkspaceYaml } from "./types.ts";
 import type { CallerIdentity } from "../../lib/auth/agent-keys.ts";
 import { getPendingHumanInput } from "./human-input.ts";
+import { safeKeyEqual, isPublishTopicDenied } from "../../lib/runtime-env.ts";
 
 export function createRoutes(ctx: ApiContext): Route[] {
 
@@ -30,8 +31,8 @@ export function createRoutes(ctx: ApiContext): Route[] {
       if (resolved) return resolved;
     }
     // Fallback: ctx.apiKey direct comparison (single-key legacy mode when
-    // agentKeys isn't configured).
-    if (apiKey === ctx.apiKey) return { isAdmin: true };
+    // agentKeys isn't configured). Constant-time to avoid a timing oracle.
+    if (safeKeyEqual(apiKey, ctx.apiKey)) return { isAdmin: true };
     return null;
   }
 
@@ -105,13 +106,28 @@ export function createRoutes(ctx: ApiContext): Route[] {
   }
 
   async function handlePublish(req: Request): Promise<Response> {
-    if (ctx.apiKey && req.headers.get("X-API-Key") !== ctx.apiKey) {
-      return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
-    }
+    // Admin-only — `/publish` injects directly onto the internal bus.
+    const caller = authenticateCaller(req);
+    if (!caller?.isAdmin) return unauthorized();
     let body: Record<string, unknown>;
     try { body = (await req.json()) as Record<string, unknown>; }
     catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
-    const topic = (body.topic as string) ?? "#";
+    // Require an explicit topic — no silent `"#"` wildcard publish.
+    const topic = typeof body.topic === "string" ? body.topic.trim() : "";
+    if (!topic) {
+      return Response.json({ success: false, error: "Missing 'topic'" }, { status: 400 });
+    }
+    // Reject internal control-plane topics — `/publish` is for external
+    // lifecycle/event injection (feature.*, hitl.request.*, board/incident),
+    // never for forging agent.skill.request / operator.message.request /
+    // inbound messages / scheduled triggers.
+    if (isPublishTopicDenied(topic)) {
+      console.warn(`[publish] rejected denied topic "${topic}" from ${caller.agentName ?? "admin"}`);
+      return Response.json(
+        { success: false, error: `Topic "${topic}" may not be published via /publish (internal control-plane topic)` },
+        { status: 403 },
+      );
+    }
     ctx.bus.publish(topic, {
       id: crypto.randomUUID(),
       correlationId: (body.correlationId as string) ?? crypto.randomUUID(),
@@ -123,9 +139,8 @@ export function createRoutes(ctx: ApiContext): Route[] {
   }
 
   async function handleOnboard(req: Request): Promise<Response> {
-    if (ctx.apiKey && req.headers.get("X-API-Key") !== ctx.apiKey) {
-      return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
-    }
+    const caller = authenticateCaller(req);
+    if (!caller?.isAdmin) return unauthorized();
     let body: Record<string, unknown>;
     try { body = (await req.json()) as Record<string, unknown>; }
     catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
