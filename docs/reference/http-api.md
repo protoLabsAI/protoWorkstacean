@@ -253,7 +253,9 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `POST` | `/publish` | `src/api/operations.ts:247` | — |
+| `POST` | `/publish` | `src/api/operations.ts` | Inject an `{ topic, payload }` event onto the bus. **Admin-key required**, an explicit `topic` is mandatory (no `"#"` default), and internal **control-plane topics are rejected (403)**. |
+
+`/publish` is the external lifecycle/event ingress (protoMaker's `feature.*` / `hitl.request.*`, agents' board/incident events). It refuses to inject internal control-plane topics — `agent.skill.request`, `agent.skill.response.*`, `operator.message.request`, `message.inbound.*`, `cron.*`, `command.*`, `autonomous.*`, `ceremony.*`, `dispatch.*`, `agent.input.*` — so a caller can't forge skill dispatches, spoof the operator, fake inbound user messages, or trigger scheduled work. The denied set is `WORKSTACEAN_PUBLISH_TOPIC_DENYLIST` (CSV override). The whole HTTP/A2A surface **fails closed in production-like envs**: the process refuses to start when `WORKSTACEAN_API_KEY` is unset and `NODE_ENV=production` (or `WORKSTACEAN_PUBLIC_BASE_URL` is set).
 
 ### `/v1`
 

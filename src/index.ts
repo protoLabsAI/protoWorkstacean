@@ -10,6 +10,7 @@ import { A2ADeliveryPlugin } from "../lib/plugins/a2a-delivery";
 import { ControlPlaneRegistrarPlugin } from "./plugins/control-plane-registrar-plugin.ts";
 import type { Plugin, } from "../lib/types";
 import { parseEnv } from "./config/env.ts";
+import { isProductionLike, safeKeyEqual } from "../lib/runtime-env.ts";
 // Fail-fast env validation — exits immediately on misconfiguration.
 parseEnv();
 
@@ -580,6 +581,19 @@ cli?.showPrompt();
 const HTTP_PORT = parseInt(process.env.WORKSTACEAN_HTTP_PORT || "3000", 10);
 const API_KEY = process.env.WORKSTACEAN_API_KEY;
 
+// Fail closed: refuse to start an unauthenticated HTTP/A2A surface in a
+// production-like env. Without WORKSTACEAN_API_KEY every route's
+// `if (ctx.apiKey && …)` check short-circuits open — fine for local dev, a
+// wide-open control surface in prod. (#791)
+if (isProductionLike() && !API_KEY) {
+  console.error(
+    "[startup] WORKSTACEAN_API_KEY is required when NODE_ENV=production or " +
+      "WORKSTACEAN_PUBLIC_BASE_URL is set. Refusing to start an unauthenticated " +
+      "HTTP/A2A surface in production. Set the key (Infisical) and redeploy.",
+  );
+  process.exit(1);
+}
+
 // ── API routes (modular) ──────────────────────────────────────────────────────
 import { createAllRoutes, matchPath } from "./api/index.ts";
 import type { ApiContext } from "./api/index.ts";
@@ -695,7 +709,7 @@ Bun.serve<BusSubscribeWsData>({
         const headerKey = req.headers.get("X-API-Key");
         const queryKey = url.searchParams.get("apiKey");
         const provided = headerKey ?? queryKey;
-        if (provided !== API_KEY) {
+        if (!safeKeyEqual(provided, API_KEY)) {
           return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
         }
       }

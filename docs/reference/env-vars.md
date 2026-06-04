@@ -10,7 +10,7 @@ Every variable recognised by protoWorkstacean is declared in the zod `EnvSchema`
 
 - **63** variables declared in `EnvSchema`
 - **0** required (no `.optional()`); the rest are optional
-- **28** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
+- **29** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
 
 ## Core / runtime
 
@@ -147,6 +147,7 @@ These variables are read via `process.env` somewhere in `src/` or `lib/` but are
 | `AUTOMAKER_API_KEY` | `lib/plugins/protomaker-board-bridge.ts`, `src/plugins/project-registry.ts` |
 | `CLAWPATCH_CHECKOUT_ROOT` | `lib/checkout-cache.ts` |
 | `CLAWPATCH_REPO_PATH_MAP` | `src/api/clawpatch.ts` |
+| `WORKSTACEAN_PUBLISH_TOPIC_DENYLIST` | `lib/runtime-env.ts` — CSV of topic prefixes rejected at `POST /publish` (overrides the control-plane default). |
 | `CLAWPATCH_STATE_ROOT` | `src/api/clawpatch.ts` |
 | `CREATE_ISSUE_DEDUP_DISABLED` | `src/api/github.ts` |
 | `CREATE_ISSUE_DEDUP_WINDOW_MS` | `src/api/github.ts` |

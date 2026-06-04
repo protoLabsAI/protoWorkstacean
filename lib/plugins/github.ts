@@ -31,6 +31,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { EventBus, BusMessage, Plugin } from "../types.ts";
 import { makeGitHubAuth } from "../github-auth.ts";
+import { isProductionLike } from "../runtime-env.ts";
 import { withCircuitBreaker } from "./circuit-breaker.ts";
 import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
 import type { ReleasePublishedPayload } from "../../src/event-bus/payloads.ts";
@@ -396,6 +397,19 @@ export class GitHubPlugin implements Plugin {
     this.config = loadConfig(this.workspaceDir);
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? "";
     const port = parseInt(process.env.GITHUB_WEBHOOK_PORT ?? "8082", 10);
+
+    if (!webhookSecret) {
+      if (isProductionLike()) {
+        // Fail loud rather than silently accepting forged GitHub webhooks (→ bus
+        // → triage/skill routing) in a production-like env. Mirrors LinearPlugin. (#791)
+        throw new Error(
+          "[github] GITHUB_WEBHOOK_SECRET is required when NODE_ENV=production or " +
+            "WORKSTACEAN_PUBLIC_BASE_URL is set. Refusing to start an unauthenticated " +
+            "webhook receiver in production.",
+        );
+      }
+      console.warn("[github] GITHUB_WEBHOOK_SECRET not set — signature verification disabled (dev only)");
+    }
 
     // ── Hot-reload github.yaml ────────────────────────────────────────────────
     // Project list lives in protoMaker and is refreshed by the registry's own
