@@ -20,6 +20,9 @@ import type {
 import { toGitHubComment } from "./types.ts";
 import type { ValidatedComment } from "../diff/types.ts";
 import { HttpClient } from "../services/http-client.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("review-submitter");
 
 const GITHUB_API_BASE = "https://api.github.com";
 const USER_AGENT = "protoWorkstacean/1.0";
@@ -95,11 +98,10 @@ export class GitHubReviewSubmitter {
 
       if (res.status === 422) {
         // Log all submitted comments for debugging, then fail fast — do NOT retry
-        console.error(
-          "[reviewSubmitter] 422 Validation Error — submitted comments:",
-          JSON.stringify(githubComments, null, 2),
-        );
-        console.error("[reviewSubmitter] GitHub response:", responseBody);
+        log.error("422 Validation Error — submitted comments", {
+          comments: JSON.stringify(githubComments, null, 2),
+        });
+        log.error("GitHub response", { responseBody });
         throw new Error(
           `[reviewSubmitter] GitHub API 422 validation error on review submission. ` +
           `Comments: ${githubComments.length}. Error: ${responseBody}`,
@@ -113,8 +115,8 @@ export class GitHubReviewSubmitter {
 
     const data = await res.json() as { id: number };
 
-    console.log(
-      `[reviewSubmitter] Review #${data.id} submitted on ${owner}/${repo}#${prNumber} — ` +
+    log.info(
+      `Review #${data.id} submitted on ${owner}/${repo}#${prNumber} — ` +
       `${event}, ${githubComments.length} inline comment(s)`,
     );
 

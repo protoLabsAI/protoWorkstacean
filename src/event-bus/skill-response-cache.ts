@@ -20,6 +20,9 @@
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { AgentSkillResponsePayload } from "./payloads.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("skill-response-cache");
 
 const DEFAULT_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_MAX_ENTRIES = 5_000;
@@ -114,8 +117,8 @@ export class SkillResponseCachePlugin implements Plugin {
     this.subscriptionId = bus.subscribe(RESPONSE_TOPIC_WILDCARD, this.name, (msg) => this.cache.record(msg));
     this.pruneTimer = setInterval(() => this.cache.prune(), PRUNE_INTERVAL_MS);
     if (typeof this.pruneTimer.unref === "function") this.pruneTimer.unref();
-    console.log(
-      `[skill-response-cache] installed (maxEntries=${this.cache.stats().maxEntries}, ttlMs=${this.cache.stats().ttlMs})`,
+    log.info(
+      `installed (maxEntries=${this.cache.stats().maxEntries}, ttlMs=${this.cache.stats().ttlMs})`,
     );
   }
 

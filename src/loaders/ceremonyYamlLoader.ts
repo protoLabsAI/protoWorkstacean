@@ -10,6 +10,9 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { Ceremony } from "../plugins/CeremonyPlugin.types.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("ceremony-loader");
 
 export interface LoadedCeremonies {
   ceremonies: Ceremony[];
@@ -83,7 +86,7 @@ export class CeremonyYamlLoader {
         (f) => f.endsWith(".yaml") || f.endsWith(".yml")
       );
     } catch (err) {
-      console.error(`[ceremony-loader] Failed to read directory ${dir}:`, err);
+      log.error(`Failed to read directory ${dir}`, { err });
       return [];
     }
 
@@ -105,14 +108,14 @@ export class CeremonyYamlLoader {
       const parsed = parseYaml(raw) as unknown;
       return this._validate(parsed, source, filePath);
     } catch (err) {
-      console.error(`[ceremony-loader] Failed to parse ${filePath}:`, err);
+      log.error(`Failed to parse ${filePath}`, { err });
       return null;
     }
   }
 
   private _validate(raw: unknown, source: string, filePath: string): Ceremony | null {
     if (!raw || typeof raw !== "object") {
-      console.warn(`[ceremony-loader] Invalid ceremony YAML at ${filePath}: not an object`);
+      log.warn(`Invalid ceremony YAML at ${filePath}: not an object`);
       return null;
     }
 
@@ -126,23 +129,23 @@ export class CeremonyYamlLoader {
     // _reloadChangedCeremonies path, which couldn't see a disappearing entry.
 
     if (typeof c.id !== "string" || !c.id) {
-      console.warn(`[ceremony-loader] Skipping ${filePath} (${source}): missing required 'id' field`);
+      log.warn(`Skipping ${filePath} (${source}): missing required 'id' field`);
       return null;
     }
     if (typeof c.name !== "string" || !c.name) {
-      console.warn(`[ceremony-loader] Skipping ${filePath} (${source}): missing required 'name' field`);
+      log.warn(`Skipping ${filePath} (${source}): missing required 'name' field`);
       return null;
     }
     if (typeof c.schedule !== "string" || !c.schedule) {
-      console.warn(`[ceremony-loader] Skipping ${filePath} (${source}): missing required 'schedule' field`);
+      log.warn(`Skipping ${filePath} (${source}): missing required 'schedule' field`);
       return null;
     }
     if (typeof c.skill !== "string" || !c.skill) {
-      console.warn(`[ceremony-loader] Skipping ${filePath} (${source}): missing required 'skill' field`);
+      log.warn(`Skipping ${filePath} (${source}): missing required 'skill' field`);
       return null;
     }
     if (!Array.isArray(c.targets) || c.targets.length === 0) {
-      console.warn(`[ceremony-loader] Skipping ${filePath} (${source}): 'targets' must be a non-empty array`);
+      log.warn(`Skipping ${filePath} (${source}): 'targets' must be a non-empty array`);
       return null;
     }
 

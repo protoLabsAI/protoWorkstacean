@@ -19,6 +19,9 @@ import type { Route, ApiContext } from "./types.ts";
 import { LinearClient, type LinearPriority } from "../../lib/linear-client.ts";
 import { getLinearAvaTokenManager } from "../../lib/linear/ava-oauth-token-manager.ts";
 import { LinearAgentActivityClient } from "../../lib/linear/agent-activity-client.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("api-linear");
 
 /**
  * Post a comment authored AS Ava (actor=app token) when she's authorized,
@@ -34,7 +37,7 @@ async function postComment(dataDir: string, issueId: string, body: string): Prom
       await ava.createComment(issueId, body);
       return { as: "ava" };
     } catch (err) {
-      console.warn(`[api/linear] post-as-Ava comment failed on ${issueId} (${err instanceof Error ? err.message : String(err)}) — falling back to personal key`);
+      log.warn(`post-as-Ava comment failed on ${issueId} — falling back to personal key`, { err });
     }
   }
   const client = getClient();

@@ -11,6 +11,9 @@
  */
 
 import type { CeremonyOutcome } from "../../plugins/CeremonyPlugin.types.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("ceremony-notifier");
 
 const STATUS_COLORS: Record<string, number> = {
   success: 0x2ecc71,  // green
@@ -24,7 +27,7 @@ export class CeremonyNotifier {
   constructor(webhookUrl?: string) {
     this.defaultWebhookUrl = webhookUrl ?? process.env.DISCORD_CEREMONY_WEBHOOK_URL ?? null;
     if (!this.defaultWebhookUrl) {
-      console.info("[ceremony-notifier] DISCORD_CEREMONY_WEBHOOK_URL not set — using console fallback");
+      log.info("DISCORD_CEREMONY_WEBHOOK_URL not set — using console fallback");
     }
   }
 
@@ -58,7 +61,7 @@ export class CeremonyNotifier {
 
       return true;
     } catch (err) {
-      console.error("[ceremony-notifier] Discord integration error:", err);
+      log.error("Discord integration error", { err });
       this._logFallback(outcome, ceremonyName);
       return false;
     }
@@ -77,6 +80,10 @@ export class CeremonyNotifier {
   }
 
   private _logFallback(outcome: CeremonyOutcome, ceremonyName: string): void {
+    // Intentional console output sink: when no Discord webhook is configured,
+    // the ceremony outcome is delivered to stdout. This is the fallback
+    // *delivery channel*, not operational logging — kept on console so the
+    // payload stays a stable, parse-friendly single line (a2a/ops tail it).
     const durationSec = (outcome.duration / 1000).toFixed(1);
     console.log(
       `[ceremony-notifier:fallback] Ceremony "${ceremonyName}" (${outcome.ceremonyId}) ` +

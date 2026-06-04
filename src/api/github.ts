@@ -5,6 +5,9 @@
 
 import type { Route, ApiContext } from "./types.ts";
 import { HttpClient } from "../services/http-client.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("api-github");
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
@@ -477,8 +480,8 @@ export function createRoutes(ctx: ApiContext): Route[] {
           return age < dedupWindowMs;
         });
         if (match) {
-          console.log(
-            `[github] create_github_issue dedup: skipping new "${title}" — ${match.state} ${repo}#${match.number} matches`,
+          log.info(
+            `create_github_issue dedup: skipping new "${title}" — ${match.state} ${repo}#${match.number} matches`,
           );
           return Response.json({
             success: true,
@@ -489,7 +492,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
       } catch (e) {
         // Dedup is best-effort. Failing to query the listing shouldn't block
         // the create — log and proceed.
-        console.warn(`[github] create_github_issue dedup lookup failed (proceeding with create): ${String(e).slice(0, 200)}`);
+        log.warn(`create_github_issue dedup lookup failed (proceeding with create): ${String(e).slice(0, 200)}`);
       }
     }
 

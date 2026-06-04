@@ -24,6 +24,9 @@
 
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { DispatchDroppedPayload } from "../event-bus/payloads.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("dispatch-drop-escalator");
 
 /** Drops in this rolling window count toward the storm threshold. */
 const STORM_WINDOW_MS_DEFAULT = 10 * 60_000;
@@ -68,8 +71,8 @@ export class DispatchDropEscalatorPlugin implements Plugin {
     this.subscriptionId = bus.subscribe("dispatch.dropped.#", this.name, (msg: BusMessage) => {
       this._onDrop(msg);
     });
-    console.log(
-      `[dispatch-drop-escalator] Installed — threshold=${this.threshold} drops / ` +
+    log.info(
+      `Installed — threshold=${this.threshold} drops / ` +
         `${Math.round(this.windowMs / 60_000)}min, escalationCooldown=${Math.round(this.escalationCooldownMs / 60_000)}min`,
     );
   }
@@ -156,8 +159,8 @@ export class DispatchDropEscalatorPlugin implements Plugin {
       },
     });
 
-    console.warn(
-      `[dispatch-drop-escalator] STORM → escalating: ${key} (${count} drops in ${ageMin}min)`,
+    log.warn(
+      `STORM → escalating: ${key} (${count} drops in ${ageMin}min)`,
     );
   }
 

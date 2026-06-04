@@ -28,6 +28,9 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("project-registry");
 
 const DEFAULT_PROTOMAKER_BASE = "http://protomaker-server:3008";
 const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60_000;
@@ -99,13 +102,13 @@ export class ProjectRegistry {
     if (this.refreshTimer) return;
     this.refreshTimer = setInterval(() => void this._refresh(), this.refreshIntervalMs);
     if (!this.apiKey) {
-      console.warn(
-        `[project-registry] AUTOMAKER_API_KEY not set — protoMaker will reject every refresh with 401. ` +
+      log.warn(
+        `AUTOMAKER_API_KEY not set — protoMaker will reject every refresh with 401. ` +
           `Set the env var (workstacean reads protoMaker's own auth key under that name) or pass apiKey in options.`,
       );
     }
-    console.log(
-      `[project-registry] Started — apiBase=${this.apiBase}, ` +
+    log.info(
+      `Started — apiBase=${this.apiBase}, ` +
         `auth=${this.apiKey ? "configured" : "MISSING"}, ` +
         `refresh=${Math.round(this.refreshIntervalMs / 60_000)}min, ` +
         `${this.projects.length} project(s) loaded`,
@@ -173,15 +176,15 @@ export class ProjectRegistry {
       this.projects = dedupeBySlug(raw.map((p) => this._enrichProject(p)));
       this.lastRefreshAt = Date.now();
       this.lastError = undefined;
-      console.log(
-        `[project-registry] Refreshed: ${this.projects.length} project(s) — ` +
+      log.info(
+        `Refreshed: ${this.projects.length} project(s) — ` +
           this.projects.map((p) => p.slug).join(", "),
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.lastError = msg;
-      console.warn(
-        `[project-registry] Refresh failed (${this.apiBase}): ${msg} — ` +
+      log.warn(
+        `Refresh failed (${this.apiBase}): ${msg} — ` +
           `keeping ${this.projects.length} stale project(s) in memory`,
       );
     }
@@ -268,8 +271,8 @@ export function dedupeBySlug(projects: RegistryProject[]): RegistryProject[] {
   const out: RegistryProject[] = [];
   for (const p of projects) {
     if (seen.has(p.slug)) {
-      console.warn(
-        `[project-registry] duplicate slug "${p.slug}" — keeping the first project, ` +
+      log.warn(
+        `duplicate slug "${p.slug}" — keeping the first project, ` +
           `dropping "${p.name}" (${p.path}). Rename one in protoMaker to disambiguate.`,
       );
       continue;

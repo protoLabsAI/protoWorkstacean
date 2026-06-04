@@ -38,6 +38,9 @@ import { makeGitHubAuth } from "../../lib/github-auth.ts";
 import type { Route, ApiContext } from "./types.ts";
 import type { ProjectRegistry } from "../plugins/project-registry.ts";
 import { safeKeyEqual } from "../../lib/runtime-env.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("clawpatch");
 
 /**
  * Where clawpatch persists `.clawpatch/` (features, findings, runs, reports,
@@ -93,7 +96,7 @@ function resolveDevOverridePath(repo: string): string | null {
     overrides = JSON.parse(raw) as Record<string, string>;
   } catch {
     // Bad JSON shouldn't break the route — log once and fall through to cache.
-    console.warn("[clawpatch] CLAWPATCH_REPO_PATH_MAP is not valid JSON — ignoring");
+    log.warn("CLAWPATCH_REPO_PATH_MAP is not valid JSON — ignoring");
     return null;
   }
   const path = overrides[repo];
