@@ -34,6 +34,7 @@ export function openRateLimitDb(ctx: DiscordContext, dataDir: string): void {
 
     ctx.rlDb = new Database(join(dataDir, "events.db"));
     ctx.rlDb.exec("PRAGMA journal_mode=WAL");
+    ctx.rlDb.exec("PRAGMA busy_timeout=5000");
     ctx.rlDb.exec(`
       CREATE TABLE IF NOT EXISTS rate_limits (
         user_id TEXT NOT NULL,

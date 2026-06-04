@@ -22,6 +22,7 @@ import {
   type Task,
 } from "@a2a-js/sdk";
 import type { IExecutor, SkillRequest, SkillResult } from "../types.ts";
+import { withCircuitBreaker } from "../../../lib/plugins/circuit-breaker.ts";
 import {
   WORLDSTATE_DELTA_MIME_TYPE,
   parseWorldStateDelta,
@@ -489,7 +490,9 @@ export class A2AExecutor implements IExecutor {
     params: Parameters<Client["sendMessage"]>[0],
     req: SkillRequest,
   ): Promise<SkillResult> {
-    const result = await client.sendMessage(params);
+    // Fast-fail when the remote agent is in a sustained outage instead of
+    // waiting the full per-request timeout on every dispatch (#799).
+    const result = await withCircuitBreaker(`a2a:${this.config.name}`, () => client.sendMessage(params));
 
     // A2A 1.0: SendMessageResult is Message | Task with no `kind` discriminator.
     // Discriminate structurally — a Task carries an `id` + `status`, a Message

@@ -548,12 +548,25 @@ registeredPlugins.push(operatorRoutingPlugin);
 // start() only arms the 5-min background refresh.
 projectRegistry.start();
 
+// Registry plugins are isolated: a single integration whose factory()/install()
+// throws (bad workspace YAML, transient import, missing optional dep) is logged
+// loud + skipped, so it can't take down the whole switchboard at boot. Core
+// plugins (above) stay fail-fast — they're foundational. (#799)
+const failedPlugins: Array<{ name: string; error: string }> = [];
 for (const entry of pluginRegistry) {
-  if (entry.condition()) {
+  if (!entry.condition()) continue;
+  try {
     const plugin = await entry.factory();
     plugin.install(bus);
     registeredPlugins.push(plugin);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    failedPlugins.push({ name: entry.name, error: msg });
+    console.error(`[startup] plugin "${entry.name}" failed to install — skipping (the rest still boot):`, err);
   }
+}
+if (failedPlugins.length > 0) {
+  console.error(`[startup] ${failedPlugins.length} plugin(s) failed: ${failedPlugins.map(p => p.name).join(", ")}`);
 }
 
 // Guard: warn if skill-dispatcher is installed but no executor registrars ran.

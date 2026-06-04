@@ -24,6 +24,8 @@ export class LoggerPlugin implements Plugin {
     }
 
     this.db = new Database(`${this.dataDir}/events.db`);
+    this.db.exec("PRAGMA journal_mode=WAL;");
+    this.db.exec("PRAGMA busy_timeout=5000;");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS events (
         id TEXT NOT NULL,
