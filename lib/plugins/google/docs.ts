@@ -3,8 +3,11 @@
  */
 
 import type { EventBus, BusMessage } from "../../types.ts";
+import { logger } from "../../log.ts";
 import { withCircuitBreaker } from "../circuit-breaker.ts";
 import { getGoogleAccessToken } from "./auth.ts";
+
+const log = logger("google-docs");
 
 export interface DocsService {
   start(bus: EventBus): void;
@@ -33,7 +36,7 @@ export function createDocsService(): DocsService {
     const token = await getGoogleAccessToken();
 
     if (!token) {
-      console.warn("[google] Docs operation skipped — no access token");
+      log.warn("Docs operation skipped — no access token");
       _reply(msg, { success: false, error: "No Google access token available" });
       return;
     }
@@ -49,7 +52,7 @@ export function createDocsService(): DocsService {
       }
       _reply(msg, result);
     } catch (err) {
-      console.error("[google] Docs handler error:", err);
+      log.error("Docs handler error", { err });
       _reply(msg, { success: false, error: String(err) });
     }
   }

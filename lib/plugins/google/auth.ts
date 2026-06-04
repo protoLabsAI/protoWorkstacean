@@ -4,6 +4,9 @@
  */
 
 import type { EventBus } from "../../types.ts";
+import { logger } from "../../log.ts";
+
+const log = logger("google-auth");
 
 interface TokenState {
   accessToken: string;
@@ -55,7 +58,7 @@ async function _doTokenRefresh(
 
       if (!resp.ok) {
         const errBody = await resp.text().catch(() => "");
-        console.error(`[google] Token refresh failed (attempt ${attempt}): ${resp.status} ${errBody}`);
+        log.error(`Token refresh failed (attempt ${attempt})`, { status: resp.status, errBody });
         if (attempt < 3) await _sleep(1_000 * attempt);
         continue;
       }
@@ -65,10 +68,10 @@ async function _doTokenRefresh(
         accessToken: data.access_token,
         expiresAt: Date.now() + data.expires_in * 1_000,
       };
-      console.log(`[google] Access token refreshed (expires in ${data.expires_in}s)`);
+      log.info(`Access token refreshed (expires in ${data.expires_in}s)`);
       return _tokenState.accessToken;
     } catch (err) {
-      console.error(`[google] Token refresh error (attempt ${attempt}):`, err);
+      log.error(`Token refresh error (attempt ${attempt})`, { err });
       if (attempt < 3) await _sleep(1_000 * attempt);
     }
   }
@@ -95,10 +98,10 @@ export function createTokenRefresher(bus: EventBus): TokenRefresher {
 
         const timeToExpiry = _tokenState.expiresAt - Date.now();
         if (timeToExpiry < 10 * 60_000) {
-          console.log("[google] Access token nearing expiry — refreshing proactively");
+          log.info("Access token nearing expiry — refreshing proactively");
           const newToken = await getGoogleAccessToken();
           if (!newToken) {
-            console.error("[google] Proactive token refresh failed — publishing auth.token_refresh_failed");
+            log.error("Proactive token refresh failed — publishing auth.token_refresh_failed");
             bus.publish("auth.token_refresh_failed", {
               id: crypto.randomUUID(),
               correlationId: crypto.randomUUID(),

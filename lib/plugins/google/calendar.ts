@@ -3,8 +3,11 @@
  */
 
 import type { EventBus } from "../../types.ts";
+import { logger } from "../../log.ts";
 import { withCircuitBreaker } from "../circuit-breaker.ts";
 import { getGoogleAccessToken } from "./auth.ts";
+
+const log = logger("google-calendar");
 
 export interface CalendarConfig {
   orgCalendarId: string;
@@ -49,7 +52,7 @@ export function createCalendarService(getConfig: () => CalendarConfig): Calendar
       );
 
       if (!resp.ok) {
-        console.warn(`[google] Calendar list failed: ${resp.status}`);
+        log.warn("Calendar list failed", { status: resp.status });
         return;
       }
 
@@ -88,9 +91,9 @@ export function createCalendarService(getConfig: () => CalendarConfig): Calendar
         source: { interface: "google" },
       });
 
-      console.log(`[google] Calendar: published ${events.length} event(s) within next 7 days`);
+      log.info(`Calendar: published ${events.length} event(s) within next 7 days`);
     } catch (err) {
-      console.error("[google] Calendar poll error:", err);
+      log.error("Calendar poll error", { err });
     }
   }
 
@@ -99,14 +102,14 @@ export function createCalendarService(getConfig: () => CalendarConfig): Calendar
       const config = getConfig();
       const calendarId = config.orgCalendarId;
       if (!calendarId) {
-        console.log("[google] Calendar polling skipped — no orgCalendarId configured");
+        log.info("Calendar polling skipped — no orgCalendarId configured");
         return;
       }
 
       const intervalMs = (config.pollIntervalMinutes ?? 60) * 60_000;
       initTimeout = setTimeout(() => _pollCalendar(bus), 15_000);
       pollTimer = setInterval(() => _pollCalendar(bus), intervalMs);
-      console.log(`[google] Calendar poller started (interval: ${config.pollIntervalMinutes}m)`);
+      log.info(`Calendar poller started (interval: ${config.pollIntervalMinutes}m)`);
     },
 
     stop() {

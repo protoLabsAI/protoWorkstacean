@@ -23,6 +23,9 @@
 import type { EventBus, BusMessage } from "../../types.ts";
 import { withCircuitBreaker } from "../circuit-breaker.ts";
 import { getGoogleAccessToken } from "./auth.ts";
+import { logger } from "../../log.ts";
+
+const log = logger("gmail");
 
 export interface GmailConfig {
   watchLabels: string[];
@@ -88,7 +91,7 @@ export function createGmailService(getConfig: () => GmailConfig): GmailService {
         );
 
         if (!listResp.ok) {
-          console.warn(`[google] Gmail list failed for label "${label}": ${listResp.status}`);
+          log.warn(`Gmail list failed for label "${label}": ${listResp.status}`);
           continue;
         }
 
@@ -179,12 +182,12 @@ export function createGmailService(getConfig: () => GmailConfig): GmailService {
             },
           });
 
-          console.log(
-            `[google] Gmail: routed message from "${from}" (label: ${label}${rule?.skillHint ? `, skill: ${rule.skillHint}` : ""})`,
+          log.info(
+            `Gmail: routed message from "${from}" (label: ${label}${rule?.skillHint ? `, skill: ${rule.skillHint}` : ""})`,
           );
         }
       } catch (err) {
-        console.error(`[google] Gmail poll error for label "${label}":`, err);
+        log.error(`Gmail poll error for label "${label}"`, { err });
       }
     }
   }
@@ -194,15 +197,15 @@ export function createGmailService(getConfig: () => GmailConfig): GmailService {
       const config = getConfig();
       const labels = config.watchLabels ?? [];
       if (!labels.length) {
-        console.log("[google] Gmail polling skipped — no watchLabels configured");
+        log.info("Gmail polling skipped — no watchLabels configured");
         return;
       }
 
       const intervalMs = (config.pollIntervalMinutes ?? 5) * 60_000;
       initTimeout = setTimeout(() => _pollGmail(bus), 10_000);
       pollTimer = setInterval(() => _pollGmail(bus), intervalMs);
-      console.log(
-        `[google] Gmail poller started (interval: ${config.pollIntervalMinutes}m, labels: ${labels.join(", ")})`,
+      log.info(
+        `Gmail poller started (interval: ${config.pollIntervalMinutes}m, labels: ${labels.join(", ")})`,
       );
     },
 
@@ -244,10 +247,10 @@ export function createGmailOutbound(): GmailOutboundService {
           await handleReply(msg);
         } catch (err) {
           const m = err instanceof Error ? err.message : String(err);
-          console.error(`[google] Gmail reply exception on ${msg.topic}: ${m}`);
+          log.error(`Gmail reply exception on ${msg.topic}: ${m}`);
         }
       });
-      console.log("[google] Gmail outbound subscriber active (google.gmail.reply.#)");
+      log.info("Gmail outbound subscriber active (google.gmail.reply.#)");
     },
     stop() {
       if (subId && installedBus) {
@@ -270,14 +273,14 @@ async function handleReply(msg: BusMessage): Promise<void> {
     ? topic.slice("google.gmail.reply.".length)
     : "";
   if (!threadId) {
-    console.warn(`[google] Gmail reply: missing threadId in topic ${topic}`);
+    log.warn(`Gmail reply: missing threadId in topic ${topic}`);
     return;
   }
 
   const payload = (msg.payload ?? {}) as GmailReplyPayload;
   const body = payload.text ?? payload.content ?? payload.summary ?? "";
   if (!body.trim()) {
-    console.warn(`[google] Gmail reply on thread ${threadId.slice(0, 12)}…: empty body — skipping`);
+    log.warn(`Gmail reply on thread ${threadId.slice(0, 12)}…: empty body — skipping`);
     return;
   }
 
@@ -294,13 +297,13 @@ async function handleReply(msg: BusMessage): Promise<void> {
   }
 
   if (!ctx.to) {
-    console.warn(`[google] Gmail reply on thread ${threadId.slice(0, 12)}…: no recipient resolved — skipping`);
+    log.warn(`Gmail reply on thread ${threadId.slice(0, 12)}…: no recipient resolved — skipping`);
     return;
   }
 
   const token = await getGoogleAccessToken();
   if (!token) {
-    console.warn(`[google] Gmail reply on thread ${threadId.slice(0, 12)}…: no access token — skipping`);
+    log.warn(`Gmail reply on thread ${threadId.slice(0, 12)}…: no access token — skipping`);
     return;
   }
 
@@ -328,12 +331,12 @@ async function handleReply(msg: BusMessage): Promise<void> {
   );
   if (!sendResp.ok) {
     const errText = await sendResp.text().catch(() => "");
-    console.warn(
-      `[google] Gmail reply on thread ${threadId.slice(0, 12)}… failed: ${sendResp.status} ${errText.slice(0, 200)}`,
+    log.warn(
+      `Gmail reply on thread ${threadId.slice(0, 12)}… failed: ${sendResp.status} ${errText.slice(0, 200)}`,
     );
     return;
   }
-  console.log(`[google] Gmail reply sent on thread ${threadId.slice(0, 12)}… → ${ctx.to}`);
+  log.info(`Gmail reply sent on thread ${threadId.slice(0, 12)}… → ${ctx.to}`);
 }
 
 /**
