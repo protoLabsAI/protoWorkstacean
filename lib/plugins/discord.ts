@@ -13,6 +13,7 @@ import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
 import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer } from "../conversation/conversation-tracer.ts";
 import { IdentityRegistry } from "../identity/identity-registry.ts";
+import { logger } from "../log.ts";
 
 import { loadConfig, createMainClient, buildContext, type DiscordContext } from "./discord/core.ts";
 import { compileSpamPatterns, openRateLimitDb } from "./discord/rate-limit.ts";
@@ -22,6 +23,8 @@ import { registerInboundHandlers, handleDM, setupDmAccumulator } from "./discord
 import { registerSlashCommandHandlers, registerSlashCommands } from "./discord/slash-commands.ts";
 import { registerOutboundHandlers } from "./discord/outbound.ts";
 import { registerLifecycleHandlers } from "./discord/lifecycle.ts";
+
+const log = logger("discord");
 
 // Re-export for API routes (discord operations agent)
 export { pendingReplies, canSendProgress } from "./discord/outbound.ts";
@@ -72,13 +75,13 @@ export class DiscordPlugin implements Plugin {
         conversationId: entry.conversationId,
         turnCount: entry.turnNumber,
         endedBy: "timeout",
-      }).catch(err => console.error("[discord] Langfuse endTrace error:", err));
+      }).catch(err => log.error("Langfuse endTrace error", { err }));
     });
   }
 
   install(bus: EventBus): void {
     if (!process.env.DISCORD_BOT_TOKEN) {
-      console.log("[discord] DISCORD_BOT_TOKEN not set — plugin disabled");
+      log.info("DISCORD_BOT_TOKEN not set — plugin disabled");
       return;
     }
 
@@ -128,7 +131,7 @@ export class DiscordPlugin implements Plugin {
 
     // ── Ready ──────────────────────────────────────────────────────────────
     this.client.once(Events.ClientReady, async c => {
-      console.log(`[discord] Logged in as ${c.user.tag}`);
+      log.info(`Logged in as ${c.user.tag}`);
       await registerSlashCommands(ctx);
       warmDmChannels(ctx, c).catch(() => {});
     });
@@ -148,10 +151,10 @@ export class DiscordPlugin implements Plugin {
       const prevCmds = JSON.stringify(prev.commands ?? []);
       const newCmds = JSON.stringify(newConfig.commands ?? []);
       if (prevCmds !== newCmds && this.client?.isReady()) {
-        console.log("[discord] discord.yaml changed — re-registering slash commands");
-        await registerSlashCommands(ctx).catch(console.error);
+        log.info("discord.yaml changed — re-registering slash commands");
+        await registerSlashCommands(ctx).catch(err => log.error("slash command re-registration failed", { err }));
       } else {
-        console.log("[discord] discord.yaml reloaded");
+        log.info("discord.yaml reloaded");
       }
     });
 
@@ -164,7 +167,7 @@ export class DiscordPlugin implements Plugin {
     const agentsPath = join(this.workspaceDir, "agents.yaml");
     if (existsSync(agentsPath)) {
       watchFile(agentsPath, { interval: 5_000 }, () => {
-        console.log("[discord] agents.yaml changed — reloading agent client pool");
+        log.info("agents.yaml changed — reloading agent client pool");
         reloadAgentPool(ctx);
       });
     }
@@ -178,7 +181,7 @@ export class DiscordPlugin implements Plugin {
 
       for (const [name, client] of ctx.agentClients) {
         client.destroy();
-        console.log(`[discord] Destroyed agent client: ${name}`);
+        log.info(`Destroyed agent client: ${name}`);
       }
       ctx.agentClients.clear();
 

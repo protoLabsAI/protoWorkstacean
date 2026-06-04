@@ -12,6 +12,9 @@ import { Events, type ChatInputCommandInteraction } from "discord.js";
 import { makeId, OPTION_TYPE_CODES } from "./core.ts";
 import { pendingReplies } from "./outbound.ts";
 import type { DiscordContext, CommandOption } from "./core.ts";
+import { logger } from "../../log.ts";
+
+const log = logger("discord");
 
 // ── Content interpolation ─────────────────────────────────────────────────────
 
@@ -37,11 +40,11 @@ export function interpolateContent(
 
 export async function registerSlashCommands(ctx: DiscordContext): Promise<void> {
   const guildId = process.env.DISCORD_GUILD_ID;
-  if (!guildId) { console.log("[discord] DISCORD_GUILD_ID not set — skipping slash command registration"); return; }
+  if (!guildId) { log.info("DISCORD_GUILD_ID not set — skipping slash command registration"); return; }
 
   const guild = ctx.client.guilds.cache.get(guildId);
-  if (!guild) { console.log(`[discord] Guild ${guildId} not found`); return; }
-  if (!ctx.config.commands.length) { console.log("[discord] No commands configured in discord.yaml"); return; }
+  if (!guild) { log.warn(`Guild ${guildId} not found`); return; }
+  if (!ctx.config.commands.length) { log.info("No commands configured in discord.yaml"); return; }
 
   const commandData = ctx.config.commands.map(cmd => {
     if (cmd.options?.length && !cmd.subcommands?.length) {
@@ -66,7 +69,7 @@ export async function registerSlashCommands(ctx: DiscordContext): Promise<void> 
   });
 
   await guild.commands.set(commandData);
-  console.log(`[discord] Registered ${commandData.length} command(s): ${commandData.map(c => `/${c.name}`).join(", ")}`);
+  log.info(`Registered ${commandData.length} command(s): ${commandData.map(c => `/${c.name}`).join(", ")}`);
 }
 
 // ── Register interaction handlers ─────────────────────────────────────────────
@@ -83,7 +86,7 @@ export function registerSlashCommandHandlers(ctx: DiscordContext): void {
         const choices = projects
           .filter(p => p.slug.toLowerCase().includes(typed) || p.name.toLowerCase().includes(typed))
           .slice(0, 25).map(p => ({ name: p.name, value: p.slug }));
-        await interaction.respond(choices).catch(console.error);
+        await interaction.respond(choices).catch(err => log.error("autocomplete respond failed", { err }));
       }
       return;
     }
@@ -95,7 +98,7 @@ export function registerSlashCommandHandlers(ctx: DiscordContext): void {
     if (!cmdConfig) return;
 
     if (ctx.config.admins?.length && !ctx.config.admins.includes(interaction.user.id)) {
-      console.log(`[discord] slash command from ${interaction.user.id} ignored — not in admins list`);
+      log.info(`slash command from ${interaction.user.id} ignored — not in admins list`);
       await interaction.reply({ content: "Not authorised.", ephemeral: true }).catch(() => {});
       return;
     }
@@ -131,7 +134,7 @@ export function registerSlashCommandHandlers(ctx: DiscordContext): void {
     const subcommands = cmdConfig.subcommands ?? [];
     const subName = interaction.options.getSubcommand(false) ?? subcommands[0]?.name;
     const subConfig = subcommands.find(s => s.name === subName) ?? subcommands[0];
-    if (!subConfig) { await interaction.editReply("Unknown subcommand.").catch(console.error); return; }
+    if (!subConfig) { await interaction.editReply("Unknown subcommand.").catch(err => log.error("editReply failed", { err })); return; }
 
     const content = interpolateContent(subConfig.content, subConfig.options ?? [], interaction);
     const correlationId = makeId();

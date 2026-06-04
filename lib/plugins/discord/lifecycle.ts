@@ -9,26 +9,30 @@
  */
 
 import { Events, type Client } from "discord.js";
+import { logger } from "../../log.ts";
+
+const log = logger("discord");
 
 export function registerLifecycleHandlers(client: Client, label = "main"): void {
   client.on(Events.Error, (err) => {
-    console.error(`[discord:${label}] client error:`, err instanceof Error ? err.message : err);
+    log.error("client error", { label, err: err instanceof Error ? err.message : err });
   });
   client.on(Events.Warn, (msg) => {
-    console.warn(`[discord:${label}] warn: ${msg}`);
+    log.warn(`warn: ${msg}`, { label });
   });
   client.on(Events.ShardError, (err, shardId) => {
-    console.error(`[discord:${label}] shard ${shardId} error:`, err instanceof Error ? err.message : err);
+    log.error("shard error", { label, shardId, err: err instanceof Error ? err.message : err });
   });
   client.on(Events.ShardDisconnect, (event, shardId) => {
-    console.warn(
-      `[discord:${label}] shard ${shardId} disconnected (code ${event?.code ?? "?"}) — auto-reconnecting`,
+    log.warn(
+      `shard ${shardId} disconnected (code ${event?.code ?? "?"}) — auto-reconnecting`,
+      { label },
     );
   });
   client.on(Events.ShardReconnecting, (shardId) => {
-    console.log(`[discord:${label}] shard ${shardId} reconnecting…`);
+    log.info(`shard ${shardId} reconnecting…`, { label });
   });
   client.on(Events.ShardResume, (shardId, replayed) => {
-    console.log(`[discord:${label}] shard ${shardId} resumed (${replayed} event(s) replayed)`);
+    log.info(`shard ${shardId} resumed (${replayed} event(s) replayed)`, { label });
   });
 }
