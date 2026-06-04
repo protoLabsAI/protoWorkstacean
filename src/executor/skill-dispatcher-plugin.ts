@@ -31,6 +31,10 @@ import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "./task-tracker.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
 import { metrics } from "../../lib/metrics.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("skill-dispatcher");
+const latencyLog = logger("skill-latency");
 
 const WORKING_STATES = new Set(["submitted", "working"]);
 
@@ -186,7 +190,7 @@ export class SkillDispatcherPlugin implements Plugin {
     });
     this.subscriptionIds.push(subId);
 
-    console.log("[skill-dispatcher] Installed");
+    log.info("installed");
   }
 
   uninstall(): void {
@@ -234,7 +238,7 @@ export class SkillDispatcherPlugin implements Plugin {
     if (!skill) {
       this.activeExecutions.delete(correlationId);
       const dropMsg = "Received skill request with no skill — dropping";
-      console.warn(`[skill-dispatcher] ${dropMsg}`);
+      log.warn(dropMsg);
       this._publishDispatchDropped("no_skill", correlationId, dropMsg, { targets });
       this._publishResponse(replyTopic, correlationId, undefined, "No skill specified");
       return;
@@ -248,7 +252,7 @@ export class SkillDispatcherPlugin implements Plugin {
         ? `targets [${targets.join(", ")}] or skill "${skill}"`
         : `skill "${skill}"`;
       const dropMsg = `No executor found for ${searched} — dropping`;
-      console.warn(`[skill-dispatcher] ${dropMsg}`);
+      log.warn(dropMsg);
       this._publishDispatchDropped("target_unresolved", correlationId, dropMsg, { skill, targets });
       this._publishResponse(replyTopic, correlationId, undefined, `No executor registered for ${searched}`);
       return;
@@ -269,7 +273,7 @@ export class SkillDispatcherPlugin implements Plugin {
         const remaining = cooldownMs - elapsed;
         this.activeExecutions.delete(correlationId);
         const dropMsg = `Cooldown drop: "${key}" dispatched ${elapsed}ms ago (window=${cooldownMs}ms, ${remaining}ms remaining)`;
-        console.warn(`[skill-dispatcher] ${dropMsg}`);
+        log.warn(dropMsg);
         this._publishDispatchDropped("cooldown", correlationId, dropMsg, {
           skill,
           targets,
@@ -283,8 +287,8 @@ export class SkillDispatcherPlugin implements Plugin {
       this.lastDispatchAt.set(key, Date.now());
     }
 
-    console.log(
-      `[skill-dispatcher] Dispatching "${skill}" via ${executor.type}` +
+    log.info(
+      `Dispatching "${skill}" via ${executor.type}` +
       (targets.length > 0 ? ` (targets: ${targets.join(", ")})` : ""),
     );
 
@@ -427,13 +431,13 @@ export class SkillDispatcherPlugin implements Plugin {
           const callbackUrl = `${callbackBaseUrl.replace(/\/$/, "")}/api/a2a/callback/${encodeURIComponent(taskId)}`;
           void a2aExecutor.registerPushNotification(taskId, callbackUrl, callbackToken, correlationId, parentId)
             .then(ok => {
-              if (ok) console.log(`[skill-dispatcher] Push-notification registered for ${taskId.slice(0, 8)}… at ${callbackUrl}`);
+              if (ok) log.info("push-notification registered", { taskId: taskId.slice(0, 8), callbackUrl });
               // Failure path is logged by A2AExecutor.registerPushNotification with agent + reason.
             })
-            .catch(err => console.log("[skill-dispatcher] push-notification register failed:", err));
+            .catch(err => log.warn("push-notification register failed", { err }));
         } else if (callbackBaseUrl) {
-          console.log(
-            `[skill-dispatcher] ${a2aExecutor.name}: card.capabilities.pushNotifications=false — using polling for ${taskId.slice(0, 8)}…`,
+          log.info(
+            `${a2aExecutor.name}: card.capabilities.pushNotifications=false — using polling for ${taskId.slice(0, 8)}…`,
           );
         }
 
@@ -449,8 +453,8 @@ export class SkillDispatcherPlugin implements Plugin {
       }
 
       if (result.isError) {
-        console.error(
-          `[skill-dispatcher] Executor "${executor.type}" error for skill "${skill}": ${(result.text ?? "").slice(0, 500)}`,
+        log.error(
+          `Executor "${executor.type}" error for skill "${skill}": ${(result.text ?? "").slice(0, 500)}`,
         );
         this._publishActivity("skill.error", {
           agentName: targetAgent,
@@ -484,8 +488,8 @@ export class SkillDispatcherPlugin implements Plugin {
         // returned — critical for debugging A2A/agent behaviour when the skill
         // completes but produces no board side-effects.
         const preview = (result.text ?? "").replace(/\s+/g, " ").slice(0, 300);
-        console.log(
-          `[skill-dispatcher] Skill "${skill}" completed via ${executor.type} — ${(result.text ?? "").length} chars: ${preview}${(result.text ?? "").length > 300 ? "…" : ""}`,
+        log.info(
+          `Skill "${skill}" completed via ${executor.type} — ${(result.text ?? "").length} chars: ${preview}${(result.text ?? "").length > 300 ? "…" : ""}`,
         );
 
         // Trigger-to-done latency. When a surface plugin (today: github
@@ -505,8 +509,8 @@ export class SkillDispatcherPlugin implements Plugin {
           const repoRef = gh?.owner && gh?.repo && gh?.number
             ? ` [${gh.owner}/${gh.repo}#${gh.number}]`
             : "";
-          console.log(
-            `[skill-latency] ${skill} webhook→done ${(totalMs / 1000).toFixed(2)}s ` +
+          latencyLog.info(
+            `${skill} webhook→done ${(totalMs / 1000).toFixed(2)}s ` +
               `(queue ${queueMs}ms, execute ${(executeMs / 1000).toFixed(2)}s)${repoRef}`,
           );
 
@@ -532,9 +536,7 @@ export class SkillDispatcherPlugin implements Plugin {
                 },
               });
             } catch (err) {
-              console.warn(
-                `[skill-dispatcher] failed to publish agent.skill.latency: ${err instanceof Error ? err.message : err}`,
-              );
+              log.warn("failed to publish agent.skill.latency", { err });
             }
           }
         }
@@ -547,7 +549,7 @@ export class SkillDispatcherPlugin implements Plugin {
           durationMs: Date.now() - dispatchedAt,
         });
         if (result.data?.stopReason === "max_turns") {
-          console.warn("[skill-dispatcher] Agent hit maxTurns limit");
+          log.warn("agent hit maxTurns limit");
         }
 
         const completedAt = Date.now();
@@ -606,7 +608,7 @@ export class SkillDispatcherPlugin implements Plugin {
       );
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error(`[skill-dispatcher] Unhandled error dispatching "${skill}": ${errorMsg}`);
+      log.error(`Unhandled error dispatching "${skill}": ${errorMsg}`);
       this._publishActivity("skill.error", {
         agentName: targetAgent,
         correlationId,
@@ -661,8 +663,8 @@ export class SkillDispatcherPlugin implements Plugin {
     if (queued.length === 0) return;
 
     const formatted = ContextMailbox.format(queued);
-    console.log(
-      `[skill-dispatcher] Draining ${queued.length} queued message(s) for ${correlationId} — starting new turn`,
+    log.info(
+      `Draining ${queued.length} queued message(s) for ${correlationId} — starting new turn`,
     );
 
     this.bus.publish("agent.skill.request", {
@@ -781,12 +783,12 @@ export class SkillDispatcherPlugin implements Plugin {
         body: JSON.stringify({ projectPath, title, description, status: "backlog", source: "github-triage" }),
       });
       if (resp.ok) {
-        console.log(`[skill-dispatcher] Filed GitHub triage on board: ${title}`);
+        log.info(`Filed GitHub triage on board: ${title}`);
       } else {
-        console.warn(`[skill-dispatcher] Board filing failed: ${resp.status}`);
+        log.warn(`Board filing failed: ${resp.status}`);
       }
     } catch (err) {
-      console.warn("[skill-dispatcher] Board filing error:", err);
+      log.warn("Board filing error", { err });
     }
   }
 
@@ -824,7 +826,7 @@ export class SkillDispatcherPlugin implements Plugin {
         payload,
       });
     } catch (err) {
-      console.warn(`[skill-dispatcher] activity-publish failed (${type}):`, err);
+      log.warn(`activity-publish failed (${type})`, { err });
     }
   }
 
@@ -848,8 +850,8 @@ export class SkillDispatcherPlugin implements Plugin {
   /**
    * Publish a dispatch-dropped telemetry event at the matching chokepoint
    * site. Topic is `dispatch.dropped.{reason}` so subscribers can filter
-   * by reason. The console.warn is kept alongside this for log-tail
-   * visibility — both paths fire independently.
+   * by reason. The `log.warn` at the drop site is kept alongside this for
+   * log-tail visibility — both paths fire independently.
    */
   private _publishDispatchDropped(
     reason: DispatchDropReason,

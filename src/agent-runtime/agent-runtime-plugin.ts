@@ -38,6 +38,9 @@ import { WorkspaceWatcher } from "../../lib/workspace-watcher.ts";
 import { computeAgentDiff, hashDefinition } from "./agent-diff.ts";
 import { existsSync } from "node:fs";
 import { join, basename } from "node:path";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("agent-runtime");
 
 export interface AgentRuntimeConfig {
   workspaceDir: string;
@@ -142,12 +145,12 @@ export class AgentRuntimePlugin implements Plugin {
     for (const { def, file } of entries) {
       counts[def.runtime ?? "deep-agent"] += 1;
       this._register(def, file);
-      console.log(`[agent-runtime] Loaded agent "${def.name}" (${def.role}, model: ${def.model})`);
+      log.info(`Loaded agent "${def.name}" (${def.role}, model: ${def.model})`);
     }
 
     const agentNames = entries.map(e => `${e.def.name}(${e.def.runtime ?? "deep-agent"})`).join(", ") || "(none)";
-    console.log(
-      `[agent-runtime] Registered ${entries.length} agent(s) ` +
+    log.info(
+      `Registered ${entries.length} agent(s) ` +
       `[deep-agent: ${counts["deep-agent"]}, proto-sdk: ${counts["proto-sdk"]}]: ${agentNames}`,
     );
 
@@ -232,7 +235,7 @@ export class AgentRuntimePlugin implements Plugin {
     try {
       entries = loadAgentEntries(this.config.workspaceDir);
     } catch (err) {
-      console.error(`[agent-runtime] reload failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`reload failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
 
@@ -244,8 +247,8 @@ export class AgentRuntimePlugin implements Plugin {
       const reg = this.registered.get(name);
       if (!reg) continue;
       if (existsSync(reg.file)) {
-        console.warn(
-          `[agent-runtime] "${name}" no longer parses from ${basename(reg.file)} — keeping the running instance (fix or delete the file)`,
+        log.warn(
+          `"${name}" no longer parses from ${basename(reg.file)} — keeping the running instance (fix or delete the file)`,
         );
         continue;
       }
@@ -254,7 +257,7 @@ export class AgentRuntimePlugin implements Plugin {
 
     for (const def of diff.added) {
       this._register(def, fileByName.get(def.name) ?? "");
-      console.log(`[agent-runtime] + "${def.name}" hot-added (${def.skills.length} skill(s)) — no restart`);
+      log.info(`+ "${def.name}" hot-added (${def.skills.length} skill(s)) — no restart`);
     }
 
     for (const def of diff.changed) {
@@ -263,7 +266,7 @@ export class AgentRuntimePlugin implements Plugin {
       for (const skill of old.skills) this.executorRegistry.unregister(skill, def.name);
       this._register(def, fileByName.get(def.name) ?? old.file);
       this._disposeExecutor(def.name, old.executor);
-      console.log(`[agent-runtime] ~ "${def.name}" reloaded (${def.skills.length} skill(s)) — no restart`);
+      log.info(`~ "${def.name}" reloaded (${def.skills.length} skill(s)) — no restart`);
     }
 
     // An agent may have just gained a `memory` block via the live edit — start
@@ -275,7 +278,7 @@ export class AgentRuntimePlugin implements Plugin {
     for (const skill of reg.skills) this.executorRegistry.unregister(skill, name);
     this.registered.delete(name);
     this._disposeExecutor(name, reg.executor);
-    console.log(`[agent-runtime] - "${name}" hot-removed (${reg.skills.length} skill(s) unregistered) — no restart`);
+    log.info(`- "${name}" hot-removed (${reg.skills.length} skill(s) unregistered) — no restart`);
   }
 
   /** Best-effort executor teardown — never blocks the apply or aborts in-flight work. */
@@ -283,7 +286,7 @@ export class AgentRuntimePlugin implements Plugin {
     void Promise.resolve()
       .then(() => executor.dispose?.())
       .catch((err) =>
-        console.warn(`[agent-runtime] dispose("${name}") failed: ${err instanceof Error ? err.message : String(err)}`),
+        log.warn(`dispose("${name}") failed: ${err instanceof Error ? err.message : String(err)}`),
       );
   }
 
@@ -328,7 +331,7 @@ export class AgentRuntimePlugin implements Plugin {
         },
       });
     } catch (err) {
-      console.warn(`[agent-runtime] tool.call publish failed for ${event.agentName}:`, err);
+      log.warn(`tool.call publish failed for ${event.agentName}`, { err });
     }
 
     // Also emit real streaming progress: a2a-server translates
@@ -347,7 +350,7 @@ export class AgentRuntimePlugin implements Plugin {
         payload: { text, step: "tool_call", meta: { tools: event.toolNames } },
       });
     } catch (err) {
-      console.warn(`[agent-runtime] progress publish failed for ${event.agentName}:`, err);
+      log.warn(`progress publish failed for ${event.agentName}`, { err });
     }
   };
 
@@ -375,7 +378,7 @@ export class AgentRuntimePlugin implements Plugin {
         payload: { text: event.text, step: event.step ?? "progress" },
       });
     } catch (err) {
-      console.warn(`[agent-runtime] progress publish failed for ${event.agentName}:`, err);
+      log.warn(`progress publish failed for ${event.agentName}`, { err });
     }
   };
 
@@ -401,7 +404,7 @@ export class AgentRuntimePlugin implements Plugin {
         payload: { frame: event.frame },
       });
     } catch (err) {
-      console.warn(`[agent-runtime] toolframe publish failed for ${event.agentName}:`, err);
+      log.warn(`toolframe publish failed for ${event.agentName}`, { err });
     }
   };
 

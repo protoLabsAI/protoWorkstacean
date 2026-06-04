@@ -44,6 +44,9 @@ import {
   type ExtensionContext,
   type ExtensionInterceptor,
 } from "../extension-registry.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("a2a-executor");
 
 /**
  * Auth scheme the executor applies on outbound requests.
@@ -251,7 +254,7 @@ export class A2AExecutor implements IExecutor {
       try {
         await i.before?.(extCtx);
       } catch (err) {
-        console.debug(`[a2a-executor] extension before-hook error:`, err);
+        log.debug("extension before-hook error", { err });
       }
     }
 
@@ -280,8 +283,8 @@ export class A2AExecutor implements IExecutor {
       if (this.config.streaming && !result.isError
         && !result.data?.taskId
         && (!result.text || result.text.startsWith(`Skill "${req.skill}" completed by`))) {
-        console.warn(
-          `[a2a-executor] ${this.config.name}: streaming returned empty result — falling back to message/send (agent SSE events may be missing "kind" field)`,
+        log.warn(
+          `${this.config.name}: streaming returned empty result — falling back to message/send (agent SSE events may be missing "kind" field)`,
         );
         result = await this._executeBlocking(client, params, req);
       }
@@ -299,7 +302,7 @@ export class A2AExecutor implements IExecutor {
           try {
             await i.after?.(extCtx, { text: result.text, data: result.data });
           } catch (err) {
-            console.debug(`[a2a-executor] extension after-hook error:`, err);
+            log.debug("extension after-hook error", { err });
           }
         }
       }
@@ -342,7 +345,7 @@ export class A2AExecutor implements IExecutor {
       try {
         await i.after?.(ctx, { text: "", data });
       } catch (err) {
-        console.debug(`[a2a-executor] extension after-hook error (async):`, err);
+        log.debug("extension after-hook error (async)", { err });
       }
     }
   }
@@ -391,8 +394,8 @@ export class A2AExecutor implements IExecutor {
       return true;
     } catch (err) {
       // Agent doesn't support push notifications — tracker falls back to polling
-      console.log(
-        `[a2a-executor] ${this.config.name}: push-notification register failed for ${taskId.slice(0, 8)}… — ${err instanceof Error ? err.message : String(err)}`,
+      log.warn(
+        `${this.config.name}: push-notification register failed for ${taskId.slice(0, 8)}… — ${err instanceof Error ? err.message : String(err)}`,
       );
       return false;
     }

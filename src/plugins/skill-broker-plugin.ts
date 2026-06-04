@@ -36,6 +36,9 @@ import {
   BLAST_URI,
   type BlastRadius,
 } from "../executor/extensions/blast.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("skill-broker");
 
 interface AgentSkill {
   name: string;
@@ -164,7 +167,7 @@ export class SkillBrokerPlugin implements Plugin {
     this.opsChannel = process.env.DISCORD_AGENT_OPS_CHANNEL ?? "";
 
     for (const agent of this._loadAgents()) this._registerAgent(agent);
-    console.log(`[skill-broker] Registered ${this.agentDefs.size} A2A agent(s) (skills from yaml + agents.d/; discovery in progress)`);
+    log.info(`Registered ${this.agentDefs.size} A2A agent(s) (skills from yaml + agents.d/; discovery in progress)`);
 
     // Control-plane (ADR-0004 P3): live add/remove of A2A agents. The registrar
     // persists the entry to workspace/agents.d/; we register/unregister the
@@ -249,7 +252,7 @@ export class SkillBrokerPlugin implements Plugin {
     this.agentDefs.delete(name);
     this.executors.delete(name);
     this.fleetHealth.delete(name);
-    console.log(`[skill-broker] - A2A agent "${name}" unregistered`);
+    log.info(`- A2A agent "${name}" unregistered`);
   }
 
   uninstall(): void {
@@ -317,8 +320,8 @@ export class SkillBrokerPlugin implements Plugin {
         pushNotifications: caps?.pushNotifications === true,
       });
       if (priorStreaming !== executor.streaming || priorPush !== executor.pushNotifications) {
-        console.log(
-          `[skill-broker] ${agent.name}: capabilities updated — streaming=${executor.streaming} pushNotifications=${executor.pushNotifications}`,
+        log.info(
+          `${agent.name}: capabilities updated — streaming=${executor.streaming} pushNotifications=${executor.pushNotifications}`,
         );
       }
 
@@ -343,25 +346,25 @@ export class SkillBrokerPlugin implements Plugin {
 
       this.registeredSkills.set(agent.name, currentSkills);
       if (added > 0) {
-        console.log(
-          `[skill-broker] ${agent.name}: discovered ${added} new skill(s) from agent card (${Array.from(currentSkills).join(", ")})`,
+        log.info(
+          `${agent.name}: discovered ${added} new skill(s) from agent card (${Array.from(currentSkills).join(", ")})`,
         );
       }
       if (removed.length > 0) {
-        console.warn(
-          `[skill-broker] ${agent.name}: removed ${removed.length} skill(s) no longer in agent card — ${removed.join(", ")}`,
+        log.warn(
+          `${agent.name}: removed ${removed.length} skill(s) no longer in agent card — ${removed.join(", ")}`,
         );
       }
 
       this._loadHitlModeDeclarations(agent.name, card);
       this._loadBlastDeclarations(agent.name, card);
     } catch (err) {
-      // console.debug here would silently swallow real card-discovery
+      // log.debug here would silently swallow real card-discovery
       // bugs — see #593 where weeks of zero-skill agents went unnoticed.
       // Warn at the operator surface so the failure shows up in the same
       // place as the rest of the broker's per-agent lifecycle logs.
-      console.warn(
-        `[skill-broker] ${agent.name}: card discovery failed — ${err instanceof Error ? err.message : err}`,
+      log.warn(
+        `${agent.name}: card discovery failed — ${err instanceof Error ? err.message : err}`,
       );
     }
   }
@@ -400,7 +403,7 @@ export class SkillBrokerPlugin implements Plugin {
     }
 
     if (declared > 0) {
-      console.log(`[skill-broker] ${agentName}: loaded ${declared} hitl-mode declaration(s)`);
+      log.info(`${agentName}: loaded ${declared} hitl-mode declaration(s)`);
     }
   }
 
@@ -430,7 +433,7 @@ export class SkillBrokerPlugin implements Plugin {
     }
 
     if (declared > 0) {
-      console.log(`[skill-broker] ${agentName}: loaded ${declared} blast declaration(s)`);
+      log.info(`${agentName}: loaded ${declared} blast declaration(s)`);
     }
   }
 
@@ -458,8 +461,8 @@ export class SkillBrokerPlugin implements Plugin {
       // Per feedback_fail_fast_and_loud — fail loud at the boundary.
       const primaryMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
       const legacyMsg = legacyErr instanceof Error ? legacyErr.message : String(legacyErr);
-      console.warn(
-        `[skill-broker] Failed to fetch agent card from ${baseUrl}: ` +
+      log.warn(
+        `Failed to fetch agent card from ${baseUrl}: ` +
           `primary path → ${primaryMsg}; legacy /.well-known/agent.json → ${legacyMsg}`,
       );
       return null;
@@ -487,19 +490,19 @@ export class SkillBrokerPlugin implements Plugin {
       try {
         const parsed = JSON.parse(envOverride) as { agents?: AgentDef[] };
         if (Array.isArray(parsed.agents)) {
-          console.log(`[skill-broker] Loaded ${parsed.agents.length} agent(s) from PROTOLABS_AGENTS_JSON`);
+          log.info(`Loaded ${parsed.agents.length} agent(s) from PROTOLABS_AGENTS_JSON`);
           return parsed.agents;
         }
-        console.warn("[skill-broker] PROTOLABS_AGENTS_JSON parsed but has no `agents` array — falling back to yaml");
+        log.warn("PROTOLABS_AGENTS_JSON parsed but has no `agents` array — falling back to yaml");
       } catch (err) {
-        console.error("[skill-broker] Failed to parse PROTOLABS_AGENTS_JSON — falling back to yaml:", err);
+        log.error("Failed to parse PROTOLABS_AGENTS_JSON — falling back to yaml", { err });
       }
     }
 
     // File path — committed default
     const agentsPath = join(this.workspaceDir, "agents.yaml");
     if (!existsSync(agentsPath)) {
-      console.warn("[skill-broker] agents.yaml not found and PROTOLABS_AGENTS_JSON unset — no A2A agents registered");
+      log.warn("agents.yaml not found and PROTOLABS_AGENTS_JSON unset — no A2A agents registered");
       return [];
     }
     try {
@@ -507,7 +510,7 @@ export class SkillBrokerPlugin implements Plugin {
       const parsed = parseYaml(raw) as { agents?: AgentDef[] };
       return parsed.agents ?? [];
     } catch (err) {
-      console.error("[skill-broker] Failed to load agents.yaml:", err);
+      log.error("Failed to load agents.yaml", { err });
       return [];
     }
   }
@@ -527,9 +530,9 @@ export class SkillBrokerPlugin implements Plugin {
         try {
           const def = parseYaml(readFileSync(join(dir, f), "utf8")) as AgentDef;
           if (def?.name && def.url) out.push(def);
-          else console.warn(`[skill-broker] agents.d/${f}: missing name/url — skipped`);
+          else log.warn(`agents.d/${f}: missing name/url — skipped`);
         } catch (err) {
-          console.error(`[skill-broker] Skipping agents.d/${f}: ${err instanceof Error ? err.message : String(err)}`);
+          log.error(`Skipping agents.d/${f}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     } catch { /* dir vanished mid-scan */ }
