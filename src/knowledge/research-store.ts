@@ -242,6 +242,10 @@ export class ResearchStore {
   }
 
   close(): void {
-    if (this.db) { this.db.close(); this.db = null; }
+    if (this.db) {
+      try { this.db.exec("PRAGMA wal_checkpoint(TRUNCATE);"); } catch { /* ignore */ }
+      this.db.close();
+      this.db = null;
+    }
   }
 }

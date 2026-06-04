@@ -205,6 +205,7 @@ export class TelemetryService {
 
   close(): void {
     try {
+      this.db?.exec("PRAGMA wal_checkpoint(TRUNCATE);");
       this.db?.close();
     } catch {
       /* ignore */

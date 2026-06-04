@@ -24,6 +24,10 @@ Config reload behaviour by surface:
 
 So the operational model is: **code lands via watchtower automatically; config lands via `git pull` on the host; ceremonies and in-process agents apply live, and only `workspace/agents.yaml` (A2A) edits need a restart.**
 
+### Graceful shutdown
+
+On `SIGTERM` / `SIGINT` (every watchtower redeploy) the process drains before exiting: it stops the HTTP server, calls `uninstall()` on every plugin (closing webhook listeners, scheduler timers, Discord/Linear clients), flushes the Langfuse tracer, and closes the sqlite stores **checkpointing the WAL** so the last commits aren't lost. An `unhandledRejection` is logged loudly but kept alive (one bad async handler shouldn't take down the switchboard); an `uncaughtException` is logged and the process exits non-zero so the orchestrator restarts cleanly.
+
 ## Docker Compose
 
 A `docker-compose.yml` is provided at the project root. Adjust it for your environment:

@@ -18,7 +18,7 @@ parseEnv();
 // Without this, @langfuse/langchain's CallbackHandler (used by
 // DeepAgentExecutor) falls through to the no-op OTEL tracer and nothing
 // is captured. Gated on LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY.
-import { initLangfuseTracer } from "./telemetry/langfuse-tracer.ts";
+import { initLangfuseTracer, shutdownLangfuseTracer } from "./telemetry/langfuse-tracer.ts";
 const langfuseEnabled = initLangfuseTracer();
 console.log(`[langfuse] OTEL tracer ${langfuseEnabled ? "registered" : "skipped (no credentials)"}`);
 // --- Workspace config ---
@@ -698,7 +698,7 @@ async function serveDashboardAsset(pathname: string): Promise<Response | null> {
   return null;
 }
 
-Bun.serve<BusSubscribeWsData>({
+const httpServer = Bun.serve<BusSubscribeWsData>({
   port: HTTP_PORT,
   fetch: async (req, server) => {
     const url = new URL(req.url);
@@ -782,3 +782,43 @@ console.log(`HTTP API listening on port ${HTTP_PORT}`);
     executorRegistry.setHealthGetter(() => fleetPlugin.getFleetHealth().agents);
   }
 }
+
+// ── Graceful shutdown + crash handlers (#792) ───────────────────────────────
+// The container is restarted several times a day (watchtower auto-pull). Without
+// this, each restart kills in-flight runs, drops un-flushed Langfuse spans, and
+// never checkpoints the sqlite WAL. Drain on SIGTERM/SIGINT; close db-backed
+// stores (each checkpoints WAL first).
+let shuttingDown = false;
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received — draining…`);
+  try { httpServer.stop(); } catch (e) { console.warn("[shutdown] server.stop threw:", e); }
+  for (const plugin of allPlugins) {
+    try { plugin.uninstall?.(); } catch (e) { console.warn(`[shutdown] ${plugin.name} uninstall threw:`, e); }
+  }
+  await shutdownLangfuseTracer();
+  for (const [name, closer] of [
+    ["telemetry", () => telemetry.close()],
+    ["fleet-state", () => fleetStateRepo.close()],
+    ["research-store", () => researchStore.close()],
+  ] as const) {
+    try { closer(); } catch (e) { console.warn(`[shutdown] ${name} close threw:`, e); }
+  }
+  console.log("[shutdown] complete");
+  process.exit(0);
+}
+process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => void gracefulShutdown("SIGINT"));
+
+// An unhandled rejection in a fire-and-forget bus handler must not silently take
+// down the whole switchboard — log loud and stay up. An uncaughtException leaves
+// the process in an undefined state — log loud and exit non-zero so the
+// orchestrator restarts cleanly.
+process.on("unhandledRejection", (reason) => {
+  console.error("[fatal] unhandledRejection (process kept alive):", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[fatal] uncaughtException — exiting for a clean restart:", err);
+  process.exit(1);
+});

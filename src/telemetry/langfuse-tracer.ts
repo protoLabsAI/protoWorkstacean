@@ -21,6 +21,7 @@ import { LangfuseSpanProcessor } from "@langfuse/otel";
 import { setLangfuseTracerProvider } from "@langfuse/tracing";
 
 let initialized = false;
+let activeProvider: NodeTracerProvider | null = null;
 
 /**
  * Register the Langfuse OTEL tracer provider. Returns true when a live
@@ -40,6 +41,23 @@ export function initLangfuseTracer(): boolean {
     spanProcessors: [new LangfuseSpanProcessor()],
   });
   setLangfuseTracerProvider(provider);
+  activeProvider = provider;
   initialized = true;
   return true;
+}
+
+/**
+ * Flush + shut down the tracer provider so batched spans aren't lost on a
+ * graceful redeploy. No-op when no provider was registered. (#792)
+ */
+export async function shutdownLangfuseTracer(): Promise<void> {
+  if (!activeProvider) return;
+  try {
+    await activeProvider.shutdown();
+  } catch (err) {
+    console.warn("[langfuse] tracer shutdown/flush failed:", err);
+  } finally {
+    activeProvider = null;
+    initialized = false;
+  }
 }
