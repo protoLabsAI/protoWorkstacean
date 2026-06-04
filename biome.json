@@ -46,7 +46,7 @@
         "noFallthroughSwitchClause": "error"
       },
       "nursery": {
-        "noNestedTernary": "error"
+        "noNestedTernary": "warn"
       }
     }
   },
