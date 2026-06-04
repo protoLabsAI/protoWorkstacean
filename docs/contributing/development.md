@@ -253,6 +253,10 @@ bunx tsc --noEmit
 
 The project uses TypeScript strict mode. All exported types should have JSDoc comments on non-obvious fields.
 
+## SQLite store conventions
+
+Every bun:sqlite store sets the same connection pragmas at init: `journal_mode=WAL`, `synchronous=NORMAL`, and **`busy_timeout=5000`** (so a contended writer blocks-and-retries instead of throwing `SQLITE_BUSY` — several subsystems share `knowledge.db` / `events.db`). `close()` runs `PRAGMA wal_checkpoint(TRUNCATE)` before closing (graceful shutdown, #792).
+
 ## Changing a SQLite store schema
 
 The bun:sqlite stores back a **persistent prod volume** (`/data`), and deploy is a watchtower image pull with no migration step. So a bare `CREATE TABLE IF NOT EXISTS` change silently no-ops against an existing DB and drifts at query time. Use the versioned migration runner instead (`lib/sqlite-migrate.ts`):
