@@ -47,7 +47,7 @@ jobs:
           echo "Diffing $PREV → $TAG"
 
       - name: Post release notes to Discord
-        uses: protoLabsAI/release-tools@b7c3531dd67accb57ca09242f47d8c0eb1ace8eb # v1.1.0
+        uses: protoLabsAI/release-tools@6ed11005cf2b68dbdf302f0fc2bcf2a13533e42e # v2.1.1
         with:
           version: ${{ steps.tags.outputs.version }}
           previous-version: ${{ steps.tags.outputs.previous }}
