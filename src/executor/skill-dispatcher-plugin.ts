@@ -30,6 +30,7 @@ import { IdentityRegistry } from "../../lib/identity/identity-registry.ts";
 import { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "./task-tracker.ts";
 import type { A2AExecutor } from "./executors/a2a-executor.ts";
+import { metrics } from "../../lib/metrics.ts";
 
 const WORKING_STATES = new Set(["submitted", "working"]);
 
@@ -696,6 +697,10 @@ export class SkillDispatcherPlugin implements Plugin {
     model?: string;
   }): void {
     if (!this.bus) return;
+    // Prometheus metrics — the single per-outcome chokepoint (#800). Labels are
+    // low-cardinality (skill + success); never correlationId/actor-with-ids.
+    metrics.inc("workstacean_dispatch_total", { skill: opts.skill, success: String(opts.success) });
+    metrics.observe("workstacean_dispatch_duration_ms", opts.durationMs, { skill: opts.skill });
     const topic = `autonomous.outcome.${opts.systemActor}.${opts.skill}`;
     const payload: AutonomousOutcomePayload = {
       correlationId: opts.correlationId,

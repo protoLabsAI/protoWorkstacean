@@ -1,4 +1,5 @@
 import type { BusMessage, MessageHandler, Subscription, TopicInfo, ConsumerInfo } from "./types";
+import { metrics } from "./metrics.ts";
 
 export class InMemoryEventBus {
   private subscriptions = new Map<string, Subscription[]>();
@@ -32,6 +33,19 @@ export class InMemoryEventBus {
             sub.handler(message);
           } catch (e) {
             console.error(`Error in handler for ${pattern}:`, e);
+            // App-self observability (#800): count + surface the swallow so a
+            // handler erroring on every message is visible/alertable. Guard
+            // against a loop if the system.error handler itself throws.
+            metrics.inc("workstacean_bus_handler_errors_total", { plugin: sub.pluginName });
+            if (topic !== "system.error") {
+              this.publish("system.error", {
+                id: crypto.randomUUID(),
+                correlationId: message.correlationId,
+                topic: "system.error",
+                timestamp: Date.now(),
+                payload: { source: "bus-handler", pattern, plugin: sub.pluginName, error: e instanceof Error ? e.message : String(e) },
+              });
+            }
           }
         }
       }

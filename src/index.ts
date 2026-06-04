@@ -518,6 +518,16 @@ const pluginRegistry: PluginRegistryEntry[] = [
       return new DispatchDropEscalatorPlugin();
     },
   },
+  {
+    // App-self alerting (#800): system.error (bus handler-throw, etc.) → ops
+    // Discord webhook, throttled. Gated on the webhook being configured.
+    name: "app-alert",
+    condition: () => !!process.env.DISCORD_OPS_WEBHOOK_URL,
+    factory: async () => {
+      const { AppAlertPlugin } = await import("../lib/plugins/app-alert.js");
+      return new AppAlertPlugin();
+    },
+  },
   // Built-ins: opt-in via ENABLED_PLUGINS=echo,...
   {
     name: "echo",
