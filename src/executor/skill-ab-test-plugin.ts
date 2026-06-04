@@ -28,6 +28,9 @@
 import type { Plugin, EventBus, BusMessage } from "../../lib/types.ts";
 import type { ExecutorRegistry } from "./executor-registry.ts";
 import type { IExecutor, SkillRequest, SkillResult } from "./types.ts";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("skill-ab-test");
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -219,8 +222,8 @@ export class SkillAbTestPlugin implements Plugin {
     n: number,
   ): void {
     if (this.tests.has(skill)) {
-      console.warn(
-        `[skill-ab-test] Test for '${skill}' already in progress — ignoring duplicate registerTest()`,
+      log.warn(
+        `Test for '${skill}' already in progress — ignoring duplicate registerTest()`,
       );
       return;
     }
@@ -239,8 +242,8 @@ export class SkillAbTestPlugin implements Plugin {
       new AbTestExecutor(state, (winner, s) => this.commitWinner(winner, s)),
     );
 
-    console.info(
-      `[skill-ab-test] Started test for '${skill}' ` +
+    log.info(
+      `Started test for '${skill}' ` +
       `(n=${n}, control=${controlExecutor.type}, challenger=${challengerExecutor.type})`,
     );
   }
@@ -286,8 +289,8 @@ export class SkillAbTestPlugin implements Plugin {
       payload,
     });
 
-    console.info(
-      `[skill-ab-test] Test resolved for '${state.skill}': winner=${winner} (${reason})`,
+    log.info(
+      `Test resolved for '${state.skill}': winner=${winner} (${reason})`,
     );
   }
 
@@ -307,8 +310,8 @@ export class SkillAbTestPlugin implements Plugin {
     } | null;
 
     if (!p?.skill || typeof p.n !== "number") {
-      console.warn(
-        "[skill-ab-test] skill.ab_test.register message missing required fields (skill, n) — ignored",
+      log.warn(
+        "skill.ab_test.register message missing required fields (skill, n) — ignored",
       );
       return;
     }
@@ -319,8 +322,8 @@ export class SkillAbTestPlugin implements Plugin {
       : this.registry.resolve(p.skill);
 
     if (!controlExec) {
-      console.warn(
-        `[skill-ab-test] No control executor found for skill '${p.skill}' — cannot start test`,
+      log.warn(
+        `No control executor found for skill '${p.skill}' — cannot start test`,
       );
       return;
     }
@@ -330,8 +333,8 @@ export class SkillAbTestPlugin implements Plugin {
       : null;
 
     if (!challengerExec) {
-      console.warn(
-        `[skill-ab-test] No challenger executor found for skill '${p.skill}' — cannot start test`,
+      log.warn(
+        `No challenger executor found for skill '${p.skill}' — cannot start test`,
       );
       return;
     }

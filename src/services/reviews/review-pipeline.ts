@@ -22,6 +22,9 @@ import { assembleReviewPrompt } from "./quinn-review-prompt.ts";
 import { checkHealth } from "../qdrant/client.ts";
 import type { AssembledPrompt } from "./quinn-review-prompt.ts";
 import type { CodebaseContext } from "./context-formatter.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("review-pipeline");
 
 export interface PipelineInput {
   repo: string;
@@ -66,10 +69,10 @@ export async function runReviewPipeline(input: PipelineInput): Promise<PipelineR
         context = { pastDecisions, similarPatterns };
       }
     } catch (err) {
-      console.warn("[review-pipeline] Qdrant context retrieval failed — proceeding with diff-only review:", err);
+      log.warn("Qdrant context retrieval failed — proceeding with diff-only review", { err });
     }
   } else {
-    console.warn("[review-pipeline] Qdrant unavailable — proceeding with diff-only review");
+    log.warn("Qdrant unavailable — proceeding with diff-only review");
   }
 
   const assembled = assembleReviewPrompt({
@@ -82,8 +85,8 @@ export async function runReviewPipeline(input: PipelineInput): Promise<PipelineR
     promptBudget: input.promptBudget,
   });
 
-  console.log(
-    `[review-pipeline] PR #${prNumber} ${repo}: ` +
+  log.info(
+    `PR #${prNumber} ${repo}: ` +
     `${filePaths.length} files, ${symbols.length} symbols, ` +
     `context=${assembled.hasContext}, tokens=${assembled.totalTokens}`,
   );

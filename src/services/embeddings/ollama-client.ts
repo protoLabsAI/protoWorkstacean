@@ -7,6 +7,10 @@
  * Model:    OLLAMA_EMBED_MODEL env var (default: nomic-embed-text)
  */
 
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("ollama");
+
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://ollama:11434";
 const EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL ?? "nomic-embed-text";
 const TIMEOUT_MS = 30_000; // embeddings can take a few seconds
@@ -32,19 +36,19 @@ export async function embed(text: string): Promise<number[] | null> {
     });
 
     if (!res.ok) {
-      console.error(`[ollama] embed failed ${res.status}: ${await res.text()}`);
+      log.error(`embed failed ${res.status}: ${await res.text()}`);
       return null;
     }
 
     const data = await res.json() as OllamaEmbedResponse;
     if (!Array.isArray(data.embedding) || data.embedding.length === 0) {
-      console.error("[ollama] embed returned empty embedding");
+      log.error("embed returned empty embedding");
       return null;
     }
 
     return data.embedding;
   } catch (err) {
-    console.error("[ollama] embed error:", err);
+    log.error("embed error", { err });
     return null;
   } finally {
     clearTimeout(timer);
@@ -70,7 +74,7 @@ export async function embedMany(
       // Alert if failure rate exceeds 10%
       const total = results.length + failureCount;
       if (total >= 10 && failureCount / total > 0.1) {
-        console.warn(`[ollama] High embedding failure rate: ${failureCount}/${total}`);
+        log.warn(`High embedding failure rate: ${failureCount}/${total}`);
       }
     }
   }

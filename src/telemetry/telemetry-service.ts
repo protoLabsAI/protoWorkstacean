@@ -16,6 +16,9 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("telemetry");
 
 export type TelemetryKind = "goal" | "action";
 
@@ -57,7 +60,7 @@ export class TelemetryService {
         try {
           mkdirSync(dir, { recursive: true });
         } catch (mkErr) {
-          console.error("[telemetry] Cannot create data dir — counters disabled:", mkErr);
+          log.error("Cannot create data dir — counters disabled", { err: mkErr });
           this.db = null;
           return;
         }
@@ -80,9 +83,9 @@ export class TelemetryService {
         CREATE INDEX IF NOT EXISTS idx_telemetry_kind_id
           ON telemetry_counters(kind, id);
       `);
-      console.log(`[telemetry] Ready at ${this.dbPath}`);
+      log.info(`Ready at ${this.dbPath}`);
     } catch (err) {
-      console.error("[telemetry] Init failed — counters disabled:", err);
+      log.error("Init failed — counters disabled", { err });
       this.db = null;
     }
   }
@@ -106,7 +109,7 @@ export class TelemetryService {
       );
     } catch (err) {
       // Swallow — telemetry must never break the caller.
-      console.warn("[telemetry] bump failed:", err);
+      log.warn("bump failed", { err });
     }
   }
 
@@ -127,7 +130,7 @@ export class TelemetryService {
         stmt.run(kind, id, event);
       }
     } catch (err) {
-      console.warn("[telemetry] registerKnown failed:", err);
+      log.warn("registerKnown failed", { err });
     }
   }
 
@@ -153,7 +156,7 @@ export class TelemetryService {
         )
         .all();
     } catch (err) {
-      console.warn("[telemetry] snapshot failed:", err);
+      log.warn("snapshot failed", { err });
       return [];
     }
   }

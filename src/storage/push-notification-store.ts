@@ -36,6 +36,9 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { TaskPushNotificationConfig } from "@a2a-js/sdk";
 import type { PushNotificationStore, ServerCallContext } from "@a2a-js/sdk/server";
+import { logger } from "../../lib/log.ts";
+
+const log = logger("push-notification-store");
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -86,9 +89,9 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
       // Cold-start purge — a process that's been off for days shouldn't
       // surface stale configs on its first load() call.
       this._purgeExpired();
-      console.log(`[push-store] Ready at ${this.dbPath} (ttl=${this.ttlMs}ms)`);
+      log.info(`Ready at ${this.dbPath} (ttl=${this.ttlMs}ms)`);
     } catch (err) {
-      console.error("[push-store] Init failed — push-notification persistence disabled:", err);
+      log.error("Init failed — push-notification persistence disabled", { err });
       this.db = null;
     }
   }
@@ -118,7 +121,7 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
       // between INSERT and DELETE.
       this._purgeExpired(now);
     } catch (err) {
-      console.error(`[push-store] save() failed for task ${taskId.slice(0, 8)}…:`, err);
+      log.error(`save() failed for task ${taskId.slice(0, 8)}…`, { err });
     }
   }
 
@@ -136,7 +139,7 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
         .all(taskId, now);
       return rows.map(r => JSON.parse(r.config_json) as TaskPushNotificationConfig);
     } catch (err) {
-      console.error(`[push-store] load() failed for task ${taskId.slice(0, 8)}…:`, err);
+      log.error(`load() failed for task ${taskId.slice(0, 8)}…`, { err });
       return [];
     }
   }
@@ -153,7 +156,7 @@ export class SqlitePushNotificationStore implements PushNotificationStore {
         this.db.run(`DELETE FROM push_notifications WHERE task_id = ?`, [taskId]);
       }
     } catch (err) {
-      console.error(`[push-store] delete() failed for task ${taskId.slice(0, 8)}…:`, err);
+      log.error(`delete() failed for task ${taskId.slice(0, 8)}…`, { err });
     }
   }
 

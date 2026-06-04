@@ -9,6 +9,9 @@ import { extractTypeScriptSymbols } from "./symbols/typescript.ts";
 import { extractPythonSymbols } from "./symbols/python.ts";
 import { extractGoSymbols } from "./symbols/go.ts";
 import type { DiffFile } from "./chunker.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("symbol-extractor");
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -46,7 +49,7 @@ export function extractSymbols(file: DiffFile): ExtractedSymbol[] {
 
   if (language === "unknown") {
     const ext = file.path.split(".").pop() ?? "unknown";
-    console.warn(`[symbol-extractor] Unsupported language extension .${ext} for ${file.path} — skipping pattern extraction`);
+    log.warn(`Unsupported language extension .${ext} for ${file.path} — skipping pattern extraction`);
     return [];
   }
 

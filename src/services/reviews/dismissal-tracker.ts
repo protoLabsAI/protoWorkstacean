@@ -7,6 +7,9 @@
  */
 
 import { recordDismissalEvent } from "../qdrant/review-learnings-indexer.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("dismissal-tracker");
 
 export interface CommentResponseEvent {
   repo: string;
@@ -42,12 +45,12 @@ export async function trackCommentResponse(event: CommentResponseEvent): Promise
       reason: event.reason,
     });
 
-    console.log(
-      `[dismissal-tracker] ${event.dismissed ? "Dismissed" : "Approved"} pattern in ${event.repo} (${fileType})` +
+    log.info(
+      `${event.dismissed ? "Dismissed" : "Approved"} pattern in ${event.repo} (${fileType})` +
       (event.reason ? `: ${event.reason}` : ""),
     );
   } catch (err) {
-    console.error("[dismissal-tracker] Failed to record comment response:", err);
+    log.error("Failed to record comment response", { err });
     // Non-fatal — learning loop failure must not block review
   }
 }

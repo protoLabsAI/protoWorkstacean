@@ -8,6 +8,9 @@
  */
 
 import { HttpClient } from "../http-client.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("qdrant");
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant:6333";
 const TIMEOUT_MS = 5_000;
@@ -60,10 +63,10 @@ export async function ensureCollection(
       return true;
     }
     const text = await res.text();
-    console.error(`[qdrant] ensureCollection(${name}) failed ${res.status}: ${text}`);
+    log.error(`ensureCollection(${name}) failed ${res.status}: ${text}`);
     return false;
   } catch (err) {
-    console.error(`[qdrant] ensureCollection(${name}) error:`, err);
+    log.error(`ensureCollection(${name}) error`, { err });
     return false;
   }
 }
@@ -101,10 +104,10 @@ export async function upsertPoints(
     });
     if (res.ok) return true;
     const text = await res.text();
-    console.error(`[qdrant] upsertPoints(${collection}) failed ${res.status}: ${text}`);
+    log.error(`upsertPoints(${collection}) failed ${res.status}: ${text}`);
     return false;
   } catch (err) {
-    console.error(`[qdrant] upsertPoints(${collection}) error:`, err);
+    log.error(`upsertPoints(${collection}) error`, { err });
     return false;
   }
 }
@@ -135,13 +138,13 @@ export async function searchPoints(
     });
     if (!res.ok) {
       const text = await res.text();
-      console.error(`[qdrant] search(${collection}) failed ${res.status}: ${text}`);
+      log.error(`search(${collection}) failed ${res.status}: ${text}`);
       return [];
     }
     const data = await res.json() as { result?: QdrantSearchResult[] };
     return data.result ?? [];
   } catch (err) {
-    console.error(`[qdrant] search(${collection}) error:`, err);
+    log.error(`search(${collection}) error`, { err });
     return [];
   }
 }

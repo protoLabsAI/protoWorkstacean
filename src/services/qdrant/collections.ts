@@ -10,6 +10,9 @@
  */
 
 import { ensureCollection } from "./client.ts";
+import { logger } from "../../../lib/log.ts";
+
+const log = logger("qdrant");
 
 // Vector dimension must match the configured Ollama embedding model.
 // nomic-embed-text produces 768-dimensional vectors.
@@ -43,9 +46,9 @@ export async function initializeCollections(): Promise<boolean> {
   const allReady = results.every(r => r);
 
   if (allReady) {
-    console.log("[qdrant] Collections initialized: quinn-pr-history, quinn-code-patterns, quinn-review-learnings");
+    log.info("Collections initialized: quinn-pr-history, quinn-code-patterns, quinn-review-learnings");
   } else {
-    console.warn("[qdrant] One or more collections failed to initialize — vector context will be unavailable");
+    log.warn("One or more collections failed to initialize — vector context will be unavailable");
   }
 
   return allReady;
