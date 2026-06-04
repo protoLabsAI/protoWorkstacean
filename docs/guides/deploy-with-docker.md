@@ -24,6 +24,16 @@ Config reload behaviour by surface:
 
 So the operational model is: **code lands via watchtower automatically; config lands via `git pull` on the host; ceremonies and in-process agents apply live, and only `workspace/agents.yaml` (A2A) edits need a restart.**
 
+### Rollback
+
+`:main` auto-deploys on every merge — there's no staging gate, so a bad `:main` ships. The image is also published by digest, so rollback is a tag flip, not a rebuild:
+
+1. Find the last-good image digest in GHCR (or the prior `build-and-push` run's pushed digest).
+2. Re-point the running container at it: `docker pull ghcr.io/protolabsai/workstacean@sha256:<digest>` and `docker tag` it to the tag watchtower watches, or set the compose `image:` to the pinned digest and `docker compose up -d workstacean`.
+3. Revert the offending commit on `main` so the next `:main` build is clean (otherwise watchtower re-pulls the bad image).
+
+Because `EnvSchema` makes every var optional, a lost secret degrades silently (an integration self-disables) rather than failing boot — check `/ready` and the startup logs after any deploy. Add must-have vars to a prod env profile if you want boot to fail loud instead.
+
 ### Graceful shutdown
 
 On `SIGTERM` / `SIGINT` (every watchtower redeploy) the process drains before exiting: it stops the HTTP server, calls `uninstall()` on every plugin (closing webhook listeners, scheduler timers, Discord/Linear clients), flushes the Langfuse tracer, and closes the sqlite stores **checkpointing the WAL** so the last commits aren't lost. An `unhandledRejection` is logged loudly but kept alive (one bad async handler shouldn't take down the switchboard); an `uncaughtException` is logged and the process exits non-zero so the orchestrator restarts cleanly.

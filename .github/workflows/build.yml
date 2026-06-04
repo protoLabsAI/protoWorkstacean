@@ -36,6 +36,9 @@ jobs:
       - name: Type check
         run: bun run tsc --noEmit
 
+      - name: Lint
+        run: bun run lint
+
   dashboard:
     # Dashboard lives in a sub-project with its own tsconfig + build pipeline
     # (Vite + React 19 SPA). The root `test` job does not cover `dashboard/src/`

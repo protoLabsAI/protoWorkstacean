@@ -1,0 +1,32 @@
+# Dependency update automation (#802). Weekly, grouped to keep PR volume low.
+# The A2A transport (@a2a-js/sdk) is pinned to a 1.0 alpha — this surfaces the
+# stable release + security patches across the dep tree instead of drifting.
+version: 2
+updates:
+  - package-ecosystem: npm # covers the bun-managed package.json
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      production:
+        dependency-type: production
+      development:
+        dependency-type: development
+    labels:
+      - tooling
+
+  - package-ecosystem: npm # dashboard workspace has its own deps
+    directory: "/dashboard"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels:
+      - tooling
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - tooling
