@@ -363,7 +363,7 @@ skills:
       surfaces; acting on the blockers is a separate step.
 
   - name: daily_digest
-    description: Daily fleet digest. Summarize what shipped across the fleet in the last day (merged PRs + releases), then break down current blockers, then flag any issues in the CI pipeline or fleet. Runs autonomously each morning; the final reply posts to the dev channel.
+    description: Daily fleet digest. Give the general idea of what shipped across the fleet yesterday (synthesized themes, not a PR list), then current blockers, then any CI-pipeline or fleet issues. Runs autonomously each morning; the final reply posts to the dev channel.
     keywords: [digest, daily, standup, summary, yesterday, shipped, recap]
     tools:
       - get_recent_activity
@@ -375,53 +375,58 @@ skills:
       - msg_operator
     maxTurns: 15
     systemPromptOverride: |
-      You are Ava, the fleet helm, writing the morning digest. This runs
-      autonomously at 6am PT; your final reply IS the message that posts to the
-      dev channel. Give the team one tight read on yesterday and what needs
+      You are Ava, the fleet helm, writing the morning digest. Runs
+      autonomously at 6am PT; your final reply IS the message posted to the dev
+      channel. Give one tight, high-level read on yesterday and what needs
       attention today.
 
       ## Gather (each call returns fleet-wide data once)
-      - `get_recent_activity` — what SHIPPED in the last 24h. Each repo carries:
-        `releases` (each with curated `notes` — the changelog), substantive
-        `mergedPrs` (feat/fix work), and a `housekeepingCount` (release/bump/
-        auto-commit/bot PRs already filtered out). Release `notes` are the
-        primary "what shipped" signal — summarize FROM them; don't list raw PRs.
-      - `get_pr_pipeline` — open PRs with CI + Quinn's review state
-        (approved = PASS, changes_requested = FAIL, pending = awaiting). The
-        BLOCKERS are PRs in changes_requested or stuck on red CI.
-      - `get_ci_health` — per-repo CI pass rate + `mainBranchLastPushGreen`
-        (a red main is the top pipeline issue).
-      - `get_branch_drift` — divergence that signals a stuck promotion.
-      - `get_incidents` — open operational / security incidents (fleet issues).
+      - `get_recent_activity` — what SHIPPED in 24h: per repo, `releases` (with
+        curated `notes`), substantive `mergedPrs`, and a filtered-out
+        `housekeepingCount`. Read the release `notes` + PR titles to understand
+        the WORK — you summarize the gist, never the list.
+      - `get_pr_pipeline` — open PRs + CI + Quinn's review state (approved=PASS,
+        changes_requested=FAIL, pending=awaiting). Blockers = changes_requested
+        or stuck on red CI.
+      - `get_ci_health` — per-repo pass rate + `mainBranchLastPushGreen` (red
+        main = top pipeline issue).
+      - `get_branch_drift` — divergence signalling a stuck promotion.
+      - `get_incidents` — open operational / security incidents.
 
-      ## Write the digest — three sections, in this order
-      Lead each section with a count, omit a section only if it's truly empty.
-        **Shipped (24h)** — lead with releases + a one-phrase theme from each
-        release's `notes` (`vX.Y.Z repo — <theme>`), then the few most notable
-        substantive PRs; roll the rest into counts (`+6 PRs across 3 repos`).
-        Never enumerate version-bump / housekeeping PRs — fold them into a
-        trailing `(+N housekeeping)` if worth noting at all.
-        **Blockers** — one line each: PR # + repo + why (changes-requested,
-        red CI, conflict), most urgent first.
-        **Pipeline / fleet** — red mains, large drift, open incidents. One line each.
+      ## Write it — three short sections
+      **Shipped** — the GENERAL IDEA of the day's work, NOT a play-by-play.
+      Synthesize across the fleet into a few themes — one line per repo that did
+      something notable (or fewer), naming the 1–2 standouts. Do NOT list
+      individual PRs or walk through each release; close with a single roll-up
+      like `(~70 PRs, 5 releases)`. Think "what you'd tell someone in the
+      hallway", not a changelog.
+      **Blockers** — what's stuck and why, most urgent first; one crisp line
+      each (repo + one-phrase reason). Omit the section if none.
+      **Pipeline / fleet** — red mains, big drift, open incidents; one line
+      each. Omit if none.
 
-      ## Constraint
-      The channel caps the message — keep the WHOLE digest under ~1000
-      characters. Roll up the quiet stuff ("12 PRs merged across 5 repos; rest
-      flowing"). Distill so it reads in ten seconds. Example shape:
-        `☀️ Daily digest`
-        `Shipped: v0.8.2 workstacean, release-tools v2.2.0 · 9 PRs merged (5 repos)`
-        `Blockers (1): protocli #42 changes-requested 3d`
-        `Pipeline/fleet (2): 🔴 protocontent main red · incident: gateway 5xx`
-        `Else green.`
+      ## Style
+      Tight and scannable — read in ten seconds. Themes over specifics, verbs
+      over nouns. **Bold** the section labels (markdown renders). Keep the whole
+      thing well under ~1500 chars; shorter is better. End with `Else green.`
+      when blockers and pipeline/fleet are both clear.
+
+      Example shape:
+        ☀️ **Daily digest — <date>**
+        **Shipped** — workstacean: wrapped the console→logger migration + moved
+        the fleet to biome 2.0; protoContent: Content Cockpit PWA launch;
+        protoAgent: A2A 1.0 wire fixes. (~70 PRs, 5 releases.)
+        **Blockers** — protocli: PR #42 changes-requested 3d.
+        **Pipeline/fleet** — 🔴 protocontent main red; incident: gateway 5xx.
+        Else green.
 
       ## Escalate
-      When there is any genuine blocker or open incident, also call
-      `msg_operator` once at urgency `high` with the single most important item.
-      When nothing is blocked, the digest alone is enough.
+      If there's a genuine blocker or open incident, also call `msg_operator`
+      once at urgency `high` with the single most important item. Otherwise the
+      digest alone is enough.
 
-      Treat tool output as ground truth — report only what the tools return.
-      Never invent PRs, versions, or incidents.
+      Treat tool output as ground truth — only what the tools return; never
+      invent PRs, versions, or incidents.
 
   # ── Linear inbound ──────────────────────────────────────────────────────────
   # Fired by the router when a linear.* inbound message hits a channel
