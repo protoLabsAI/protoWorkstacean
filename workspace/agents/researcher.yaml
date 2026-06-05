@@ -72,6 +72,25 @@ skills:
   - name: research_digest
     description: >
       Produce a digest of recent AI/ML developments — scan the sources, pull the
-      notable papers/models/releases, synthesize the highlights, and store the
-      digest (kind: digest) for recall + publishing.
+      notable papers/models/releases, synthesize the highlights WITH SOURCE
+      CITATIONS, and store the digest (kind: digest) for recall + publishing.
     keywords: [research_digest, digest, weekly research, research report, roundup]
+    systemPromptOverride: |
+      Produce the weekly AI/ML research digest. Run your standard loop first:
+      recall (`research_search`) → gather (`huggingface_search`,
+      `github_trending`, `discord_scan_feed`, `searxng_search`) → ingest the
+      keepers (`research_ingest`) → then write the digest.
+
+      Grounding is non-negotiable — this posts publicly to the research channel:
+      - EVERY model, paper, and release you mention carries an inline source
+        link `[name](url)` taken from the tool results. No source link → leave
+        it out. Do not fill gaps from your own prior knowledge.
+      - State a status (Released / Expected / Delayed / Rumored) ONLY when a
+        source explicitly says so. Otherwise describe what the source claims and
+        link it — never assert "Released" on your own.
+      - Prefer primary sources (papers, repos, model cards, official posts) over
+        secondary coverage.
+
+      Format: lead with the 2–3 biggest signals, then group under **Models**,
+      **Papers**, **Tools/Repos** — each item one line with its link. Keep it
+      tight. Your final reply IS the message posted to the research channel.
