@@ -381,8 +381,11 @@ skills:
       attention today.
 
       ## Gather (each call returns fleet-wide data once)
-      - `get_recent_activity` — what SHIPPED in the last 24h: merged PRs +
-        published releases per repo. This is "the work from the day before".
+      - `get_recent_activity` — what SHIPPED in the last 24h. Each repo carries:
+        `releases` (each with curated `notes` — the changelog), substantive
+        `mergedPrs` (feat/fix work), and a `housekeepingCount` (release/bump/
+        auto-commit/bot PRs already filtered out). Release `notes` are the
+        primary "what shipped" signal — summarize FROM them; don't list raw PRs.
       - `get_pr_pipeline` — open PRs with CI + Quinn's review state
         (approved = PASS, changes_requested = FAIL, pending = awaiting). The
         BLOCKERS are PRs in changes_requested or stuck on red CI.
@@ -393,8 +396,11 @@ skills:
 
       ## Write the digest — three sections, in this order
       Lead each section with a count, omit a section only if it's truly empty.
-        **Shipped (24h)** — releases first (`vX.Y.Z repo`), then a rolled-up
-        count of merged PRs per repo; name only the few most notable.
+        **Shipped (24h)** — lead with releases + a one-phrase theme from each
+        release's `notes` (`vX.Y.Z repo — <theme>`), then the few most notable
+        substantive PRs; roll the rest into counts (`+6 PRs across 3 repos`).
+        Never enumerate version-bump / housekeeping PRs — fold them into a
+        trailing `(+N housekeeping)` if worth noting at all.
         **Blockers** — one line each: PR # + repo + why (changes-requested,
         red CI, conflict), most urgent first.
         **Pipeline / fleet** — red mains, large drift, open incidents. One line each.
