@@ -116,6 +116,36 @@ describe("/api/a2a/chat (bus round-trip)", () => {
     expect(json.data.pollUrl).toBe(`/api/a2a/task/${json.data.correlationId}`);
   });
 
+  test("returnImmediately:true hands back the poll handle now, without waiting for the reply", async () => {
+    // A reply WOULD arrive synchronously, but returnImmediately must not block on
+    // it — it dispatches and returns the poll handle, so slow skills never wedge.
+    let dispatched = false;
+    autoReply(bus, () => {
+      dispatched = true;
+      return { content: "the answer", taskState: "completed" };
+    });
+    const { chat } = routesFor({ bus, executorRegistry: fakeRegistry(["researcher"]) });
+
+    const resp = await chat(
+      new Request("http://x/api/a2a/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          agent: "researcher", skill: "deep_research", message: "slow query",
+          returnImmediately: true, contextId: "conv-9",
+        }),
+      }),
+      {},
+    );
+    const json = (await resp.json()) as { success: boolean; data: Record<string, unknown> };
+    expect(resp.status).toBe(200);
+    expect(dispatched).toBe(true); // the skill WAS dispatched
+    expect(json.data.pending).toBe(true); // ...but we got a poll handle, not the answer
+    expect(json.data.response).toBeNull();
+    expect(json.data.taskState).toBe("submitted");
+    expect(json.data.contextId).toBe("conv-9");
+    expect(json.data.pollUrl).toBe(`/api/a2a/task/${json.data.correlationId}`);
+  });
+
   test("404 when no executor is registered for the agent", async () => {
     const { chat } = routesFor({ bus, executorRegistry: fakeRegistry([]) });
     const resp = await chat(

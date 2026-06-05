@@ -60,11 +60,16 @@ export function createRoutes(ctx: ApiContext): Route[] {
   /**
    * POST /api/a2a/chat — multi-turn conversation with an agent over the bus.
    *
-   * Body: { agent, message, contextId?, skill?, done?, dispatcherAgent? }
+   * Body: { agent, message, contextId?, skill?, done?, dispatcherAgent?,
+   *   returnImmediately? }
    * Returns on completion: { success, data: { response, contextId?, taskId?,
    *   taskState, correlationId, agent, usage?, costUsd?, confidence?, durationMs? } }
-   * Returns on timeout: { success, data: { pending: true, response: null,
-   *   taskState: "working", correlationId, contextId?, agent, pollUrl } }
+   * Returns on timeout OR returnImmediately:true: { success, data: { pending: true,
+   *   response: null, taskState, correlationId, contextId?, agent, pollUrl } }
+   *
+   * returnImmediately:true (A2A SendMessageConfiguration) dispatches and returns
+   * the poll handle right away instead of blocking up to the reply timeout —
+   * use it for slow skills (deep_research) so a synchronous caller never wedges.
    *
    * When done=true, the response omits contextId/taskId to signal conversation end.
    */
@@ -86,6 +91,11 @@ export function createRoutes(ctx: ApiContext): Route[] {
     const skill = (body.skill as string) || "chat";
     const done = body.done === true;
     const dispatcherAgent = typeof body.dispatcherAgent === "string" ? body.dispatcherAgent : undefined;
+    // A2A SendMessageConfiguration.returnImmediately: hand back a poll handle
+    // now instead of blocking up to the reply timeout. For slow skills
+    // (deep_research, research_digest) this stops a synchronous caller from
+    // wedging on the 30s timeout — they poll the task endpoint for the result.
+    const returnImmediately = body.returnImmediately === true;
 
     if (!agent || !message) {
       return Response.json(
@@ -126,8 +136,11 @@ export function createRoutes(ctx: ApiContext): Route[] {
     }
 
     // Listen for the terminal result BEFORE dispatching so a fast inline
-    // completion can't fire before we're subscribed.
-    const replyPromise = awaitSkillResponse(ctx.bus, correlationId, replyTimeoutMs());
+    // completion can't fire before we're subscribed. Skipped when the caller
+    // opted into an immediate poll-handle response (nothing to await).
+    const replyPromise = returnImmediately
+      ? undefined
+      : awaitSkillResponse(ctx.bus, correlationId, replyTimeoutMs());
 
     ctx.bus.publish("agent.skill.request", {
       id: crypto.randomUUID(),
@@ -143,7 +156,25 @@ export function createRoutes(ctx: ApiContext): Route[] {
       },
     });
 
-    const reply = await replyPromise;
+    // Dispatched — hand back the poll handle now. The result lands on the same
+    // poll endpoint (GET /api/a2a/task/{correlationId}) when the task finishes.
+    if (returnImmediately) {
+      return Response.json({
+        success: true,
+        data: {
+          pending: true,
+          response: null,
+          taskState: "submitted",
+          correlationId,
+          ...(done ? {} : { contextId: conversationId }),
+          agent,
+          pollUrl: `/api/a2a/task/${correlationId}`,
+        },
+      });
+    }
+
+    // Block up to the reply timeout (replyPromise is defined on this path).
+    const reply = await replyPromise!;
 
     // Timed out — task is still running. TaskTracker will deliver the result to
     // the reply topic + an autonomous.outcome event when it finishes; the caller
