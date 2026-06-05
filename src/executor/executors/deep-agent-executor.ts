@@ -28,6 +28,50 @@ const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGF
 
 /** Sleep used by chat_with_agent's pending-result poller. */
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Classify a shared link by host into the research feed's source buckets. */
+export function classifyFeedLink(u: string): string {
+  return /arxiv\.org/.test(u) ? "arxiv"
+    : /huggingface\.co/.test(u) ? "huggingface"
+    : /github\.com/.test(u) ? "github"
+    : /(youtube\.com|youtu\.be)/.test(u) ? "video"
+    : "web";
+}
+
+/**
+ * Extract shared links from Discord messages — handles plain `content`, classic
+ * `embeds`, AND Components V2 (`type:17` container / `type:10` text-display /
+ * `type:2` button `url`). RSS bots like MonitoRSS now post via Components V2, so
+ * their links live in `components`, not content/embeds — walk the whole message
+ * tree. Returns each unique URL with its source bucket + the message's headline
+ * (the first text-display) as context. Pure + exported for testing.
+ */
+export function extractDiscordFeedLinks(
+  messages: Array<Record<string, unknown>>,
+): Array<{ url: string; type: string; title?: string; from?: string }> {
+  const urlRe = /https?:\/\/[^\s<>")]+/g;
+  const out: Array<{ url: string; type: string; title?: string; from?: string }> = [];
+  for (const m of messages ?? []) {
+    const from = ((m.author as Record<string, unknown> | undefined)?.username as string) || undefined;
+    const urls = new Set<string>();
+    const texts: string[] = [];
+    const walk = (o: unknown): void => {
+      if (typeof o === "string") {
+        for (const u of o.match(urlRe) ?? []) urls.add(u);
+      } else if (Array.isArray(o)) {
+        for (const v of o) walk(v);
+      } else if (o && typeof o === "object") {
+        const rec = o as Record<string, unknown>;
+        if (rec.type === 10 && typeof rec.content === "string") texts.push(rec.content.replace(/\s+/g, " ").trim());
+        for (const v of Object.values(rec)) walk(v);
+      }
+    };
+    walk(m);
+    const title = texts.find((t) => t.length > 0)?.slice(0, 140);
+    for (const u of urls) out.push({ url: u, type: classifyFeedLink(u), title, from });
+  }
+  return out;
+}
 /** chat_with_agent polls a pending A2A result this often, up to this budget,
  *  before handing back the pending marker. Slow skills (recon, pentest) finish
  *  well inside this; it just bounds the wait so a stuck task can't pin the tool.
@@ -626,15 +670,9 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
             headers: { Authorization: `Bot ${token}` },
           });
           if (!res.ok) return JSON.stringify({ error: `Discord ${res.status}` });
-          const msgs = (await res.json()) as Array<{ content?: string; embeds?: Array<{ url?: string; title?: string }>; author?: { username?: string } }>;
-          const urlRe = /https?:\/\/[^\s<>")]+/g;
-          const classify = (u: string): string =>
-            /arxiv\.org/.test(u) ? "arxiv" : /huggingface\.co/.test(u) ? "huggingface" : /github\.com/.test(u) ? "github" : /(youtube|youtu\.be)/.test(u) ? "video" : "web";
-          const links: Array<{ url: string; type: string; from?: string }> = [];
-          for (const m of msgs) {
-            for (const u of (m.content ?? "").match(urlRe) ?? []) links.push({ url: u, type: classify(u), from: m.author?.username });
-            for (const e of m.embeds ?? []) if (e.url) links.push({ url: e.url, type: classify(e.url), from: m.author?.username });
-          }
+          const msgs = (await res.json()) as Array<Record<string, unknown>>;
+          // Handles content + embeds + Components V2 (what MonitoRSS posts).
+          const links = extractDiscordFeedLinks(msgs);
           return JSON.stringify({ scanned: msgs.length, links: links.slice(0, 50) });
         } catch (e) { return JSON.stringify({ error: e instanceof Error ? e.message : String(e) }); }
       },
