@@ -51,10 +51,26 @@ export class LoggerPlugin implements Plugin {
     this.db = new Database(`${this.dataDir}/events.db`);
     this.db.exec("PRAGMA journal_mode=WAL;");
     this.db.exec("PRAGMA busy_timeout=5000;");
-    // INCREMENTAL auto-vacuum so reclaimed space (after retention deletes) can
-    // be returned without a full locking VACUUM. Takes effect on a fresh DB; an
-    // existing one keeps its mode but retention still bounds row growth. (#801)
+    // INCREMENTAL auto-vacuum so retention deletes can return freed pages via
+    // `PRAGMA incremental_vacuum` (the hourly sweep) instead of a full locking
+    // VACUUM. CRITICAL: auto_vacuum can only change on an EXISTING db via a
+    // VACUUM rebuild — the PRAGMA alone is a no-op on a db created NONE. Legacy
+    // DBs (pre-#801) were stuck at NONE, so retention deleted rows but
+    // incremental_vacuum couldn't reclaim them and the file grew unbounded
+    // (observed: a 42 GB file holding 0.7 GB of live events). Migrate once:
+    // set INCREMENTAL, then VACUUM to apply it + reclaim. Runs on our own
+    // connection at install (before writes); ∝ LIVE data, which retention keeps
+    // small. After the first run auto_vacuum is 2, so this is skipped. (#801)
+    const avBefore = (this.db.query("PRAGMA auto_vacuum").get() as { auto_vacuum?: number } | undefined)?.auto_vacuum ?? 0;
     this.db.exec("PRAGMA auto_vacuum=INCREMENTAL;");
+    if (avBefore !== 2) {
+      log.warn(`events.db auto_vacuum=${avBefore} (not INCREMENTAL) — rebuilding once to reclaim free pages`);
+      try {
+        this.db.exec("VACUUM;");
+      } catch (err) {
+        log.error("events.db VACUUM migration failed (continuing — retention still bounds rows)", { err });
+      }
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS events (
         id TEXT NOT NULL,

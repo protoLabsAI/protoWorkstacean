@@ -2,8 +2,12 @@ import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
 import { InMemoryEventBus } from "../../bus.ts";
 import { LoggerPlugin, redactSecrets } from "../logger.ts";
+
+const pragma = (db: Database, name: string): number =>
+  Number(Object.values(db.query(`PRAGMA ${name}`).get() as object)[0]);
 
 describe("redactSecrets (#801)", () => {
   test("masks secret-keyed fields, keeps everything else", () => {
@@ -59,5 +63,36 @@ describe("LoggerPlugin retention + redaction at rest", () => {
     expect(db.query("SELECT COUNT(*) n FROM events").get()).toEqual({ n: 0 });
 
     plugin.uninstall();
+  });
+});
+
+describe("LoggerPlugin events.db compaction (the 42 GB bug)", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test("migrates a legacy auto_vacuum=NONE db to INCREMENTAL + reclaims free pages on install", () => {
+    dir = mkdtempSync(join(tmpdir(), "logger-vac-"));
+    const path = join(dir, "events.db");
+
+    // Simulate the legacy state that grew to 42 GB: auto_vacuum=NONE (sqlite's
+    // default) with free pages left by deletes that NONE can't reclaim.
+    const seed = new Database(path);
+    seed.exec("PRAGMA auto_vacuum=NONE;");
+    seed.exec("CREATE TABLE junk (x TEXT)");
+    const ins = seed.prepare("INSERT INTO junk VALUES (?)");
+    seed.transaction(() => { for (let i = 0; i < 2000; i++) ins.run("x".repeat(400)); })();
+    seed.exec("DROP TABLE junk"); // → free pages the NONE db won't return
+    expect(pragma(seed, "auto_vacuum")).toBe(0);
+    expect(pragma(seed, "freelist_count")).toBeGreaterThan(0);
+    seed.close();
+
+    const plugin = new LoggerPlugin(dir);
+    plugin.install(new InMemoryEventBus()); // runs the one-time VACUUM migration
+    plugin.uninstall();
+
+    const check = new Database(path, { readonly: true });
+    expect(pragma(check, "auto_vacuum")).toBe(2); // INCREMENTAL — now incremental_vacuum works
+    expect(pragma(check, "freelist_count")).toBe(0); // free pages reclaimed
+    check.close();
   });
 });
