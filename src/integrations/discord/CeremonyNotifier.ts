@@ -21,6 +21,73 @@ const STATUS_COLORS: Record<string, number> = {
   timeout: 0xf39c12,  // orange
 };
 
+// Discord embed limits. A description holds 4096 chars (vs a field's 1024), and
+// a single message may carry ≤10 embeds whose text sums to ≤6000 chars. Long
+// results are chunked into description-embeds and split across messages.
+const DESC_CHUNK = 3500;        // headroom under the 4096 description cap
+const MAX_EMBEDS_PER_MSG = 10;
+const MAX_CHARS_PER_MSG = 6000;
+
+type Embed = Record<string, unknown>;
+
+/**
+ * Split text into chunks ≤ `size`, preferring line boundaries so markdown/bullets
+ * aren't cut mid-line. A single over-long line is hard-split. Always ≥1 chunk.
+ */
+export function chunkText(text: string, size: number = DESC_CHUNK): string[] {
+  const chunks: string[] = [];
+  let cur = "";
+  for (const line of (text ?? "").split("\n")) {
+    if (line.length > size) {
+      if (cur) { chunks.push(cur); cur = ""; }
+      for (let i = 0; i < line.length; i += size) chunks.push(line.slice(i, i + size));
+      continue;
+    }
+    if (cur && cur.length + line.length + 1 > size) {
+      chunks.push(cur);
+      cur = line;
+    } else {
+      cur = cur ? `${cur}\n${line}` : line;
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks.length ? chunks : [""];
+}
+
+/** Approximate Discord's per-message char budget for one embed (title + description + fields + footer). */
+export function embedTextLength(e: Embed): number {
+  let n = 0;
+  if (typeof e.title === "string") n += e.title.length;
+  if (typeof e.description === "string") n += e.description.length;
+  if (Array.isArray(e.fields)) {
+    for (const f of e.fields as Array<{ name?: string; value?: string }>) {
+      n += (f.name?.length ?? 0) + (f.value?.length ?? 0);
+    }
+  }
+  const footer = e.footer as { text?: string } | undefined;
+  if (footer?.text) n += footer.text.length;
+  return n;
+}
+
+/** Pack embeds into messages, each ≤10 embeds and ≤6000 total chars (one POST per message). */
+export function packEmbedsIntoMessages(embeds: Embed[]): Embed[][] {
+  const messages: Embed[][] = [];
+  let cur: Embed[] = [];
+  let curLen = 0;
+  for (const e of embeds) {
+    const len = embedTextLength(e);
+    if (cur.length && (cur.length >= MAX_EMBEDS_PER_MSG || curLen + len > MAX_CHARS_PER_MSG)) {
+      messages.push(cur);
+      cur = [];
+      curLen = 0;
+    }
+    cur.push(e);
+    curLen += len;
+  }
+  if (cur.length) messages.push(cur);
+  return messages;
+}
+
 export class CeremonyNotifier {
   private defaultWebhookUrl: string | null;
 
@@ -44,21 +111,23 @@ export class CeremonyNotifier {
       return false;
     }
 
-    const embed = this._buildEmbed(outcome, ceremonyName);
+    const messages = packEmbedsIntoMessages(this._buildEmbeds(outcome, ceremonyName));
 
     try {
-      const resp = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ embeds: [embed] }),
-        signal: AbortSignal.timeout(10_000),
-      });
-
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => "");
-        throw new Error(`Discord webhook error ${resp.status}: ${body}`);
+      // One POST per message; Discord caps each at 10 embeds / 6000 chars. Sent
+      // sequentially so multi-part digests arrive in order.
+      for (const embeds of messages) {
+        const resp = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ embeds }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          throw new Error(`Discord webhook error ${resp.status}: ${body}`);
+        }
       }
-
       return true;
     } catch (err) {
       log.error("Discord integration error", { err });
@@ -91,7 +160,13 @@ export class CeremonyNotifier {
     );
   }
 
-  private _buildEmbed(outcome: CeremonyOutcome, ceremonyName: string): Record<string, unknown> {
+  /**
+   * Build the embed(s) for an outcome. The result goes in the embed
+   * DESCRIPTION (4096 cap, renders markdown) rather than a 1024 field, and is
+   * chunked into continuation embeds when longer. The first embed carries the
+   * title + metadata fields; continuations carry only their description.
+   */
+  private _buildEmbeds(outcome: CeremonyOutcome, ceremonyName: string): Embed[] {
     const color = STATUS_COLORS[outcome.status] ?? STATUS_COLORS.failure;
     const durationSec = (outcome.duration / 1000).toFixed(1);
     const ts = new Date(outcome.completedAt).toISOString();
@@ -104,27 +179,24 @@ export class CeremonyNotifier {
       { name: "Duration", value: `${durationSec}s`, inline: true },
       { name: "Targets", value: outcome.targets.join(", ").slice(0, 200) || "none", inline: false },
     ];
-
-    if (outcome.result) {
-      fields.push({
-        name: "Result",
-        value: outcome.result.slice(0, 1024),
-      });
-    }
-
     if (outcome.error) {
-      fields.push({
-        name: "Error",
-        value: `\`\`\`\n${outcome.error.slice(0, 400)}\n\`\`\``,
-      });
+      fields.push({ name: "Error", value: `\`\`\`\n${outcome.error.slice(0, 400)}\n\`\`\`` });
     }
 
-    return {
-      title: `${statusEmoji} Ceremony: ${ceremonyName}`,
-      color,
-      fields,
-      timestamp: ts,
-      footer: { text: `Run ID: ${outcome.runId} • protoWorkstacean` },
-    };
+    const chunks = chunkText(outcome.result ?? "");
+    return chunks.map((chunk, i) => {
+      const first = i === 0;
+      const embed: Embed = { color, description: chunk };
+      if (first) {
+        embed.title = `${statusEmoji} Ceremony: ${ceremonyName}`;
+        embed.fields = fields;
+      }
+      // Timestamp + footer on the LAST embed so the run id closes the sequence.
+      if (i === chunks.length - 1) {
+        embed.timestamp = ts;
+        embed.footer = { text: `Run ID: ${outcome.runId} • protoWorkstacean` };
+      }
+      return embed;
+    });
   }
 }
