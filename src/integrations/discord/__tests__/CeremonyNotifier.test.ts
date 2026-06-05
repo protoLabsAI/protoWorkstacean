@@ -1,5 +1,5 @@
 import { describe, test, expect, spyOn } from "bun:test";
-import { CeremonyNotifier, chunkText, embedTextLength, packEmbedsIntoMessages } from "../CeremonyNotifier.ts";
+import { CeremonyNotifier, chunkText, buildContentMessages } from "../CeremonyNotifier.ts";
 import type { CeremonyOutcome } from "../../../plugins/CeremonyPlugin.types.ts";
 
 function makeOutcome(status: CeremonyOutcome["status"] = "success"): CeremonyOutcome {
@@ -109,44 +109,42 @@ describe("Discord ceremony notifications", () => {
     delete process.env.DISCORD_RESEARCH_WEBHOOK;
   });
 
-  test("long result goes in the embed DESCRIPTION (not a 1024 field), full text preserved", async () => {
+  test("result is sent as markdown message CONTENT (no embeds), full text preserved", async () => {
     process.env.DISCORD_WEBHOOK_GENERAL = "http://localhost:0/dev";
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 204 }));
     const o = makeOutcome();
-    o.result = "x".repeat(2000); // > the old 1024 field cap, < one description chunk
+    o.result = "**Shipped**\n- repo a — thing\n- repo b — other";
 
     const ok = await new CeremonyNotifier(undefined).notify(o, "Daily Digest", "general");
     expect(ok).toBe(true);
     const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body.embeds).toHaveLength(1);
-    expect(body.embeds[0].description).toBe(o.result); // full 2000 chars, untruncated
-    expect(body.embeds[0].fields.some((f: { name: string }) => f.name === "Result")).toBe(false);
+    expect(body.embeds).toBeUndefined(); // markdown message, not an embed
+    expect(body.content).toContain(o.result); // newlines/bullets preserved
+    expect(body.content).toContain("-#"); // metadata subtext line appended
 
     fetchSpy.mockRestore();
     delete process.env.DISCORD_WEBHOOK_GENERAL;
   });
 
-  test("very long result splits across multiple messages (≤10 embeds / ≤6000 chars each)", async () => {
+  test("very long result splits across multiple messages (≤2000 content chars each)", async () => {
     process.env.DISCORD_WEBHOOK_GENERAL = "http://localhost:0/dev";
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 204 }));
     const o = makeOutcome();
-    o.result = "line\n".repeat(4000); // ~20k chars → several chunks → multiple messages
+    o.result = "line\n".repeat(2000); // ~10k chars → several content chunks → multiple POSTs
 
     const ok = await new CeremonyNotifier(undefined).notify(o, "Daily Digest", "general");
     expect(ok).toBe(true);
-    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1); // multiple POSTs
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1);
     for (const call of fetchSpy.mock.calls) {
       const body = JSON.parse((call[1] as RequestInit).body as string);
-      expect(body.embeds.length).toBeLessThanOrEqual(10);
-      const total = body.embeds.reduce((s: number, e: Record<string, unknown>) => s + embedTextLength(e), 0);
-      expect(total).toBeLessThanOrEqual(6000);
+      expect(body.content.length).toBeLessThanOrEqual(2000);
     }
     fetchSpy.mockRestore();
     delete process.env.DISCORD_WEBHOOK_GENERAL;
   });
 });
 
-describe("CeremonyNotifier chunk/pack helpers", () => {
+describe("CeremonyNotifier content helpers", () => {
   test("chunkText splits on line boundaries, ≥1 chunk, each ≤ size", () => {
     expect(chunkText("", 10)).toEqual([""]);
     expect(chunkText("short", 10)).toEqual(["short"]);
@@ -160,14 +158,24 @@ describe("CeremonyNotifier chunk/pack helpers", () => {
     expect(chunks.join("")).toBe("a".repeat(50));
   });
 
-  test("packEmbedsIntoMessages caps at 10 embeds and 6000 chars per message", () => {
-    const big = Array.from({ length: 15 }, () => ({ description: "z".repeat(1000) }));
-    const msgs = packEmbedsIntoMessages(big);
-    for (const m of msgs) {
-      expect(m.length).toBeLessThanOrEqual(10);
-      expect(m.reduce((s, e) => s + embedTextLength(e), 0)).toBeLessThanOrEqual(6000);
-    }
-    // 15 × 1000-char embeds → 6 per message (6000 cap) → 3 messages.
-    expect(msgs.length).toBe(3);
+  test("buildContentMessages: success → result body + metadata subtext, single message", () => {
+    const msgs = buildContentMessages(
+      { runId: "abcd1234ef", ceremonyId: "daily-digest", skill: "daily_digest", status: "success",
+        duration: 30000, targets: ["ava"], startedAt: 0, completedAt: 1, result: "☀️ digest body" } as never,
+      "Daily Fleet Digest",
+    );
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toContain("☀️ digest body");
+    expect(msgs[0]).toContain("-# ✅ `daily-digest` · daily_digest · 30.0s · run abcd1234");
+  });
+
+  test("buildContentMessages: failure → ❌ header + error block", () => {
+    const msgs = buildContentMessages(
+      { runId: "r1", ceremonyId: "c", skill: "s", status: "failure", duration: 1000,
+        targets: ["all"], startedAt: 0, completedAt: 1, error: "boom" } as never,
+      "Some Ceremony",
+    );
+    expect(msgs[0]).toContain("❌ **Some Ceremony** — failure");
+    expect(msgs[0]).toContain("```\nboom\n```");
   });
 });
