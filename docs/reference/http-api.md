@@ -73,13 +73,13 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/branch-drift` | `src/api/github.ts:679` | — |
+| `GET` | `/api/branch-drift` | `src/api/github.ts:711` | — |
 
 ### `/api/branch-protection`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/branch-protection` | `src/api/github.ts:680` | — |
+| `GET` | `/api/branch-protection` | `src/api/github.ts:712` | — |
 
 ### `/api/bus`
 
@@ -108,7 +108,7 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/ci-health` | `src/api/github.ts:677` | — |
+| `GET` | `/api/ci-health` | `src/api/github.ts:709` | — |
 
 ### `/api/clawpatch`
 
@@ -153,13 +153,13 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `POST` | `/api/github/issues` | `src/api/github.ts:683` | — |
+| `POST` | `/api/github/issues` | `src/api/github.ts:715` | — |
 
 ### `/api/github-issues`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/github-issues` | `src/api/github.ts:681` | — |
+| `GET` | `/api/github-issues` | `src/api/github.ts:713` | — |
 
 ### `/api/google`
 
@@ -240,7 +240,7 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/pr-pipeline` | `src/api/github.ts:678` | — |
+| `GET` | `/api/pr-pipeline` | `src/api/github.ts:710` | — |
 
 ### `/api/projects`
 
@@ -252,7 +252,7 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/recent-activity` | `src/api/github.ts:682` | What shipped recently across the fleet — merged PRs + published releases in a trailing window (default 24h, `?hours=` 1..168). |
+| `GET` | `/api/recent-activity` | `src/api/github.ts:714` | What shipped recently across the fleet — published releases (with their curated notes) + substantive merged PRs in a trailing window (default 24h, `?hours=` 1..168). |
 
 ### `/api/research`
 

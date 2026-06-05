@@ -49,6 +49,22 @@ export function normalizeIssueTitle(title: string): string {
     .trim();
 }
 
+/**
+ * Housekeeping PRs the daily digest should COUNT but not enumerate — release
+ * cuts, version bumps, automated agent commits, and bot PRs. Keeps "what
+ * shipped" focused on substantive feat/fix work; the curated release notes
+ * (the release `body`) carry the real shipped story.
+ */
+export function isHousekeepingPr(title: string, author: string): boolean {
+  const t = (title ?? "").trim().toLowerCase();
+  const a = (author ?? "").toLowerCase();
+  if (a.endsWith("[bot]") || a === "dependabot" || a === "renovate") return true;
+  return (
+    /^(chore|build)(\([^)]*\))?:\s*(release\s+v|bump\b|version bump|auto-commit)/.test(t) ||
+    /^release\s+v?\d/.test(t)
+  );
+}
+
 export function createRoutes(ctx: ApiContext): Route[] {
   const repos = () => ctx.projectRegistry?.getGithubCoords() ?? [];
 
@@ -608,11 +624,14 @@ export function createRoutes(ctx: ApiContext): Route[] {
   }
 
   /**
-   * What shipped recently across the fleet — merged PRs + published releases in
-   * a trailing window (default 24h, `?hours=` 1..168). Backs the daily-digest
-   * ceremony's "yesterday's work" section; this is the same activity the release
-   * channel announces, sourced from GitHub directly so it doesn't depend on
-   * Discord formatting.
+   * What shipped recently across the fleet — published releases (with their
+   * curated notes) + substantive merged PRs in a trailing window (default 24h,
+   * `?hours=` 1..168). Backs the daily-digest's "yesterday's work" section.
+   *
+   * Release notes (the release `body`, themed by release-tools) are the primary
+   * "what shipped" signal. Merged PRs are split: substantive feat/fix work is
+   * enumerated, while housekeeping (release cuts, version bumps, auto-commits,
+   * bot PRs) is only COUNTED — so the digest isn't drowned in version-bump noise.
    */
   async function handleGetRecentActivity(req?: Request): Promise<Response> {
     const repoList = repos();
@@ -622,18 +641,20 @@ export function createRoutes(ctx: ApiContext): Route[] {
     const sinceIso = new Date(sinceMs).toISOString();
 
     if (!repoList.length) {
-      return Response.json({ since: sinceIso, hours, totalMergedPrs: 0, totalReleases: 0, repos: [] });
+      return Response.json({ since: sinceIso, hours, totalReleases: 0, totalMergedPrs: 0, totalHousekeepingPrs: 0, repos: [] });
     }
 
     const repoResults: Array<{
       repo: string;
+      releases: Array<{ tag: string; name: string; publishedAt: string; url: string; notes: string }>;
       mergedPrs: Array<{ number: number; title: string; author: string; mergedAt: string; url: string }>;
-      releases: Array<{ tag: string; name: string; publishedAt: string; url: string }>;
+      housekeepingCount: number;
     }> = [];
 
     for (const repo of repoList) {
       const mergedPrs: (typeof repoResults)[number]["mergedPrs"] = [];
       const releases: (typeof repoResults)[number]["releases"] = [];
+      let housekeepingCount = 0;
       try {
         // Closed PRs, most-recently-updated first; keep those MERGED in-window.
         // Unmerged-closed have a null merged_at → skipped.
@@ -642,7 +663,12 @@ export function createRoutes(ctx: ApiContext): Route[] {
         )) as Array<{ number: number; title: string; merged_at: string | null; html_url: string; user?: { login?: string } }>;
         for (const pr of prs) {
           if (!pr.merged_at || new Date(pr.merged_at).getTime() < sinceMs) continue;
-          mergedPrs.push({ number: pr.number, title: pr.title, author: pr.user?.login ?? "", mergedAt: pr.merged_at, url: pr.html_url });
+          const author = pr.user?.login ?? "";
+          if (isHousekeepingPr(pr.title, author)) {
+            housekeepingCount++;
+            continue;
+          }
+          mergedPrs.push({ number: pr.number, title: pr.title, author, mergedAt: pr.merged_at, url: pr.html_url });
         }
       } catch {
         // skip this repo's PR fetch on error — partial activity beats none
@@ -651,24 +677,30 @@ export function createRoutes(ctx: ApiContext): Route[] {
         const rels = (await ghApi(`/repos/${repo}/releases?per_page=10`)) as Array<{
           tag_name: string;
           name: string | null;
+          body: string | null;
           published_at: string | null;
           html_url: string;
         }>;
         for (const r of rels) {
           if (!r.published_at || new Date(r.published_at).getTime() < sinceMs) continue;
-          releases.push({ tag: r.tag_name, name: r.name ?? r.tag_name, publishedAt: r.published_at, url: r.html_url });
+          // The release body is the curated changelog; trim to keep the payload bounded.
+          const notes = (r.body ?? "").replace(/\r/g, "").trim().slice(0, 600);
+          releases.push({ tag: r.tag_name, name: r.name ?? r.tag_name, publishedAt: r.published_at, url: r.html_url, notes });
         }
       } catch {
         // skip this repo's release fetch on error
       }
-      if (mergedPrs.length || releases.length) repoResults.push({ repo, mergedPrs, releases });
+      if (mergedPrs.length || releases.length || housekeepingCount) {
+        repoResults.push({ repo, releases, mergedPrs, housekeepingCount });
+      }
     }
 
     return Response.json({
       since: sinceIso,
       hours,
-      totalMergedPrs: repoResults.reduce((s, r) => s + r.mergedPrs.length, 0),
       totalReleases: repoResults.reduce((s, r) => s + r.releases.length, 0),
+      totalMergedPrs: repoResults.reduce((s, r) => s + r.mergedPrs.length, 0),
+      totalHousekeepingPrs: repoResults.reduce((s, r) => s + r.housekeepingCount, 0),
       repos: repoResults,
     });
   }
