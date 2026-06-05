@@ -393,32 +393,39 @@ skills:
       - `get_branch_drift` — divergence signalling a stuck promotion.
       - `get_incidents` — open operational / security incidents.
 
-      ## Write it — three short sections
-      **Shipped** — the GENERAL IDEA of the day's work, NOT a play-by-play.
-      Synthesize across the fleet into a few themes — one line per repo that did
-      something notable (or fewer), naming the 1–2 standouts. Do NOT list
-      individual PRs or walk through each release; close with a single roll-up
-      like `(~70 PRs, 5 releases)`. Think "what you'd tell someone in the
-      hallway", not a changelog.
-      **Blockers** — what's stuck and why, most urgent first; one crisp line
-      each (repo + one-phrase reason). Omit the section if none.
-      **Pipeline / fleet** — red mains, big drift, open incidents; one line
-      each. Omit if none.
+      ## Write it — clean Discord markdown
+      It posts as a plain message, so USE REAL STRUCTURE — newlines, bold
+      headers on their own line, and bullet lists render. Format exactly like
+      this skeleton (mind the BLANK LINES between sections and one `- ` bullet
+      per item):
 
-      ## Style
-      Tight and scannable — read in ten seconds. Themes over specifics, verbs
-      over nouns. **Bold** the section labels (markdown renders). Keep the whole
-      thing well under ~1500 chars; shorter is better. End with `Else green.`
-      when blockers and pipeline/fleet are both clear.
+        ☀️ **Daily digest — <Mon D>**
 
-      Example shape:
-        ☀️ **Daily digest — <date>**
-        **Shipped** — workstacean: wrapped the console→logger migration + moved
-        the fleet to biome 2.0; protoContent: Content Cockpit PWA launch;
-        protoAgent: A2A 1.0 wire fixes. (~70 PRs, 5 releases.)
-        **Blockers** — protocli: PR #42 changes-requested 3d.
-        **Pipeline/fleet** — 🔴 protocontent main red; incident: gateway 5xx.
+        **Shipped**
+        - **<repo>** — <2–4 word themes of what it did; the standout first>
+        - **<repo>** — <themes>
+        _~<N> PRs · <M> releases_
+
+        **Blockers**
+        - <repo> — <one-phrase reason it's stuck>
+
+        **Pipeline / fleet**
+        - 🔴 <repo> — main red
+        - incident — <one phrase>
+
         Else green.
+
+      Rules:
+      - **Shipped** = the GENERAL IDEA, not a play-by-play. One bullet per repo
+        that did something notable (or fewer); name the 1–2 standouts; do NOT
+        list individual PRs or walk through releases — the `_~N PRs · M
+        releases_` roll-up line covers volume. "What you'd tell someone in the
+        hallway."
+      - **Blockers** / **Pipeline / fleet** — one crisp bullet each, most urgent
+        first. Omit the whole section (header included) when it's empty.
+      - `Else green.` only when both Blockers and Pipeline/fleet are clear.
+      - Themes over specifics, verbs over nouns. Whole thing well under ~1500
+        chars; shorter is better.
 
       ## Escalate
       If there's a genuine blocker or open incident, also call `msg_operator`
