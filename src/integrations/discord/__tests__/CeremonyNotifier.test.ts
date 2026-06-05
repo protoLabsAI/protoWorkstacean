@@ -1,5 +1,5 @@
 import { describe, test, expect, spyOn } from "bun:test";
-import { CeremonyNotifier } from "../CeremonyNotifier.ts";
+import { CeremonyNotifier, chunkText, embedTextLength, packEmbedsIntoMessages } from "../CeremonyNotifier.ts";
 import type { CeremonyOutcome } from "../../../plugins/CeremonyPlugin.types.ts";
 
 function makeOutcome(status: CeremonyOutcome["status"] = "success"): CeremonyOutcome {
@@ -107,5 +107,67 @@ describe("Discord ceremony notifications", () => {
     fetchSpy.mockRestore();
     delete process.env.DISCORD_WEBHOOK_RESEARCH;
     delete process.env.DISCORD_RESEARCH_WEBHOOK;
+  });
+
+  test("long result goes in the embed DESCRIPTION (not a 1024 field), full text preserved", async () => {
+    process.env.DISCORD_WEBHOOK_GENERAL = "http://localhost:0/dev";
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 204 }));
+    const o = makeOutcome();
+    o.result = "x".repeat(2000); // > the old 1024 field cap, < one description chunk
+
+    const ok = await new CeremonyNotifier(undefined).notify(o, "Daily Digest", "general");
+    expect(ok).toBe(true);
+    const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.embeds).toHaveLength(1);
+    expect(body.embeds[0].description).toBe(o.result); // full 2000 chars, untruncated
+    expect(body.embeds[0].fields.some((f: { name: string }) => f.name === "Result")).toBe(false);
+
+    fetchSpy.mockRestore();
+    delete process.env.DISCORD_WEBHOOK_GENERAL;
+  });
+
+  test("very long result splits across multiple messages (≤10 embeds / ≤6000 chars each)", async () => {
+    process.env.DISCORD_WEBHOOK_GENERAL = "http://localhost:0/dev";
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 204 }));
+    const o = makeOutcome();
+    o.result = "line\n".repeat(4000); // ~20k chars → several chunks → multiple messages
+
+    const ok = await new CeremonyNotifier(undefined).notify(o, "Daily Digest", "general");
+    expect(ok).toBe(true);
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1); // multiple POSTs
+    for (const call of fetchSpy.mock.calls) {
+      const body = JSON.parse((call[1] as RequestInit).body as string);
+      expect(body.embeds.length).toBeLessThanOrEqual(10);
+      const total = body.embeds.reduce((s: number, e: Record<string, unknown>) => s + embedTextLength(e), 0);
+      expect(total).toBeLessThanOrEqual(6000);
+    }
+    fetchSpy.mockRestore();
+    delete process.env.DISCORD_WEBHOOK_GENERAL;
+  });
+});
+
+describe("CeremonyNotifier chunk/pack helpers", () => {
+  test("chunkText splits on line boundaries, ≥1 chunk, each ≤ size", () => {
+    expect(chunkText("", 10)).toEqual([""]);
+    expect(chunkText("short", 10)).toEqual(["short"]);
+    const lines = Array.from({ length: 10 }, (_, i) => `line-${i}`).join("\n");
+    for (const c of chunkText(lines, 20)) expect(c.length).toBeLessThanOrEqual(20);
+  });
+
+  test("chunkText hard-splits a single over-long line", () => {
+    const chunks = chunkText("a".repeat(50), 20);
+    expect(chunks.length).toBe(3);
+    expect(chunks.join("")).toBe("a".repeat(50));
+  });
+
+  test("packEmbedsIntoMessages caps at 10 embeds and 6000 chars per message", () => {
+    const big = Array.from({ length: 15 }, () => ({ description: "z".repeat(1000) }));
+    const msgs = packEmbedsIntoMessages(big);
+    for (const m of msgs) {
+      expect(m.length).toBeLessThanOrEqual(10);
+      expect(m.reduce((s, e) => s + embedTextLength(e), 0)).toBeLessThanOrEqual(6000);
+    }
+    // 15 × 1000-char embeds → 6 per message (6000 cap) → 3 messages.
+    expect(msgs.length).toBe(3);
   });
 });
