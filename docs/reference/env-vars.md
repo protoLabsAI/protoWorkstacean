@@ -10,7 +10,7 @@ Every variable recognised by protoWorkstacean is declared in the zod `EnvSchema`
 
 - **62** variables declared in `EnvSchema`
 - **0** required (no `.optional()`); the rest are optional
-- **34** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
+- **35** variable(s) read via `process.env` at runtime but **not** in `EnvSchema` (see [Read directly (not in EnvSchema)](#read-directly-not-in-envschema))
 
 ## Core / runtime
 
@@ -165,6 +165,7 @@ These variables are read via `process.env` somewhere in `src/` or `lib/` but are
 | `QUINN_DISCORD_TOKEN` | `lib/types/channels.ts` |
 | `RESEARCH_EMBED_DIM` | `src/knowledge/research-store.ts` |
 | `RESEARCH_EMBED_MODEL` | `src/services/embeddings/gateway-embed.ts` |
+| `RESEARCH_FEED_CHANNEL_ID` | `src/executor/executors/deep-agent-executor.ts` |
 | `SEARXNG_URL` | `src/executor/executors/deep-agent-executor.ts` |
 | `WORKSTACEAN_AGENT_BOT_LOGINS` | `lib/plugins/github.ts` |
 | `WORKSTACEAN_DISPATCH_DROP_ESCALATION_COOLDOWN_MS` | `src/plugins/dispatch-drop-escalator-plugin.ts` |

@@ -614,8 +614,15 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
       async (input) => {
         const token = process.env.DISCORD_BOT_TOKEN;
         if (!token) return JSON.stringify({ error: "DISCORD_BOT_TOKEN not set" });
+        // Default to the configured research-feed channel when the caller omits
+        // one — the agent doesn't know channel IDs, so without this it can never
+        // use the feed. Operator sets RESEARCH_FEED_CHANNEL_ID to enable it.
+        const channelId = input.channelId ?? process.env.RESEARCH_FEED_CHANNEL_ID;
+        if (!channelId) {
+          return JSON.stringify({ error: "no feed channel — set RESEARCH_FEED_CHANNEL_ID or pass channelId", scanned: 0, links: [] });
+        }
         try {
-          const res = await fetch(`https://discord.com/api/v10/channels/${input.channelId}/messages?limit=${input.limit ?? 30}`, {
+          const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages?limit=${input.limit ?? 30}`, {
             headers: { Authorization: `Bot ${token}` },
           });
           if (!res.ok) return JSON.stringify({ error: `Discord ${res.status}` });
@@ -633,9 +640,9 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
       },
       {
         name: "discord_scan_feed",
-        description: "Scan a Discord channel's recent messages and extract + classify shared links (arxiv, huggingface, github, video, web) — the team's research feed.",
+        description: "Scan the team's research-feed Discord channel for shared links (arxiv, huggingface, github, video, web). Omit channelId to use the configured feed (RESEARCH_FEED_CHANNEL_ID).",
         schema: z.object({
-          channelId: z.string().describe("Discord channel ID to scan."),
+          channelId: z.string().optional().describe("Discord channel ID to scan. Omit to use the configured research feed."),
           limit: z.number().optional().describe("Messages to scan (default 30, max 100)."),
         }),
       },
