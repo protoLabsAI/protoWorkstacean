@@ -6,8 +6,8 @@ title: HTTP API
 
 ## Summary
 
-- **81** HTTP routes across **34** path groups
-- **15** routes carry a resolved one-line description
+- **94** HTTP routes across **40** path groups
+- **17** routes carry a resolved one-line description
 
 Each row links to the route definition as `path:line` so jumping from this index to the source is a click. Routes are defined as `{ method, path, handler }` literals in `src/api/*.ts` and collected by `src/api/index.ts`.
 
@@ -22,7 +22,7 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `POST` | `/a2a` | `src/api/a2a-server.ts:416` | — |
+| `POST` | `/a2a` | `src/api/a2a-server.ts:457` | — |
 
 ### `/api/a2a`
 
@@ -53,12 +53,12 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/agents` | `src/api/operations.ts:250` | — |
+| `GET` | `/api/agents` | `src/api/operations.ts:310` | — |
 | `POST` | `/api/agents` | `src/api/agents-crud.ts:181` | — |
 | `GET` | `/api/agents/:name` | `src/api/agents-crud.ts:144` | — |
 | `PUT` | `/api/agents/:name` | `src/api/agents-crud.ts:211` | — |
 | `DELETE` | `/api/agents/:name` | `src/api/agents-crud.ts:229` | — |
-| `GET` | `/api/agents/runtime` | `src/api/agents-runtime.ts:67` | — |
+| `GET` | `/api/agents/runtime` | `src/api/agents-runtime.ts:127` | — |
 | `POST` | `/api/agents/test` | `src/api/agents-crud.ts:162` | — |
 
 ### `/api/board`
@@ -73,13 +73,13 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/branch-drift` | `src/api/github.ts:610` | — |
+| `GET` | `/api/branch-drift` | `src/api/github.ts:679` | — |
 
 ### `/api/branch-protection`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/branch-protection` | `src/api/github.ts:611` | — |
+| `GET` | `/api/branch-protection` | `src/api/github.ts:680` | — |
 
 ### `/api/bus`
 
@@ -92,35 +92,41 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/ceremonies` | `src/api/operations.ts:251` | — |
-| `POST` | `/api/ceremonies/:id/delete` | `src/api/operations.ts:255` | — |
-| `POST` | `/api/ceremonies/:id/run` | `src/api/operations.ts:253` | — |
-| `POST` | `/api/ceremonies/:id/update` | `src/api/operations.ts:254` | — |
-| `POST` | `/api/ceremonies/create` | `src/api/operations.ts:252` | — |
+| `GET` | `/api/ceremonies` | `src/api/operations.ts:311` | — |
+| `POST` | `/api/ceremonies/:id/delete` | `src/api/operations.ts:315` | — |
+| `POST` | `/api/ceremonies/:id/run` | `src/api/operations.ts:313` | — |
+| `POST` | `/api/ceremonies/:id/update` | `src/api/operations.ts:314` | — |
+| `POST` | `/api/ceremonies/create` | `src/api/operations.ts:312` | — |
 
 ### `/api/channels`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/channels` | `src/api/operations.ts:257` | — |
+| `GET` | `/api/channels` | `src/api/operations.ts:317` | — |
 
 ### `/api/ci-health`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/ci-health` | `src/api/github.ts:608` | — |
+| `GET` | `/api/ci-health` | `src/api/github.ts:677` | — |
 
 ### `/api/clawpatch`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `POST` | `/api/clawpatch/review` | `src/api/clawpatch.ts:245` | — |
+| `POST` | `/api/clawpatch/review` | `src/api/clawpatch.ts:249` | — |
 
 ### `/api/confidence-summaries`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
 | `GET` | `/api/confidence-summaries` | `src/api/observability.ts:70` | Returns an array of ConfidenceSummary records with calibration metrics (avgConfidence, avgConfidenceOnSuccess/Failure, highConfFailures count). |
+
+### `/api/control-plane`
+
+| Method | Path | Source | Description |
+|---|---|---|---|
+| `GET` | `/api/control-plane/state` | `src/api/control-plane.ts:40` | — |
 
 ### `/api/cost-summaries`
 
@@ -132,28 +138,28 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/discord/channels` | `src/api/discord.ts:59` | — |
-| `POST` | `/api/discord/channels/create` | `src/api/discord.ts:81` | — |
-| `POST` | `/api/discord/channels/delete` | `src/api/discord.ts:119` | — |
-| `GET` | `/api/discord/members` | `src/api/discord.ts:202` | — |
-| `POST` | `/api/discord/progress` | `src/api/discord.ts:313` | — |
-| `POST` | `/api/discord/react` | `src/api/discord.ts:288` | — |
-| `POST` | `/api/discord/send` | `src/api/discord.ts:170` | — |
-| `GET` | `/api/discord/server-stats` | `src/api/discord.ts:35` | — |
-| `GET` | `/api/discord/webhooks` | `src/api/discord.ts:225` | — |
-| `POST` | `/api/discord/webhooks/create` | `src/api/discord.ts:250` | — |
+| `GET` | `/api/discord/channels` | `src/api/discord.ts:62` | — |
+| `POST` | `/api/discord/channels/create` | `src/api/discord.ts:84` | — |
+| `POST` | `/api/discord/channels/delete` | `src/api/discord.ts:122` | — |
+| `GET` | `/api/discord/members` | `src/api/discord.ts:205` | — |
+| `POST` | `/api/discord/progress` | `src/api/discord.ts:316` | — |
+| `POST` | `/api/discord/react` | `src/api/discord.ts:291` | — |
+| `POST` | `/api/discord/send` | `src/api/discord.ts:173` | — |
+| `GET` | `/api/discord/server-stats` | `src/api/discord.ts:38` | — |
+| `GET` | `/api/discord/webhooks` | `src/api/discord.ts:228` | — |
+| `POST` | `/api/discord/webhooks/create` | `src/api/discord.ts:253` | — |
 
 ### `/api/github`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `POST` | `/api/github/issues` | `src/api/github.ts:613` | — |
+| `POST` | `/api/github/issues` | `src/api/github.ts:683` | — |
 
 ### `/api/github-issues`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/github-issues` | `src/api/github.ts:612` | — |
+| `GET` | `/api/github-issues` | `src/api/github.ts:681` | — |
 
 ### `/api/google`
 
@@ -170,7 +176,7 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/hitl/pending` | `src/api/operations.ts:258` | — |
+| `GET` | `/api/hitl/pending` | `src/api/operations.ts:318` | — |
 
 ### `/api/incidents`
 
@@ -184,15 +190,15 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/linear/issues` | `src/api/linear.ts:88` | — |
-| `POST` | `/api/linear/issues` | `src/api/linear.ts:144` | — |
-| `POST` | `/api/linear/issues/:id/comment` | `src/api/linear.ts:182` | — |
-| `GET` | `/api/linear/issues/:idOrKey` | `src/api/linear.ts:128` | — |
-| `GET` | `/api/linear/issues/search` | `src/api/linear.ts:111` | — |
-| `GET` | `/api/linear/oauth/callback` | `src/api/linear-oauth.ts:64` | — |
-| `GET` | `/api/linear/oauth/start` | `src/api/linear-oauth.ts:44` | — |
-| `GET` | `/api/linear/oauth/status` | `src/api/linear-oauth.ts:94` | — |
-| `GET` | `/api/linear/teams` | `src/api/linear.ts:79` | — |
+| `GET` | `/api/linear/issues` | `src/api/linear.ts:91` | — |
+| `POST` | `/api/linear/issues` | `src/api/linear.ts:147` | — |
+| `POST` | `/api/linear/issues/:id/comment` | `src/api/linear.ts:185` | — |
+| `GET` | `/api/linear/issues/:idOrKey` | `src/api/linear.ts:131` | — |
+| `GET` | `/api/linear/issues/search` | `src/api/linear.ts:114` | — |
+| `GET` | `/api/linear/oauth/callback` | `src/api/linear-oauth.ts:67` | — |
+| `GET` | `/api/linear/oauth/start` | `src/api/linear-oauth.ts:47` | — |
+| `GET` | `/api/linear/oauth/status` | `src/api/linear-oauth.ts:97` | — |
+| `GET` | `/api/linear/teams` | `src/api/linear.ts:82` | — |
 
 ### `/api/mailbox`
 
@@ -201,11 +207,22 @@ Each row links to the route definition as `path:line` so jumping from this index
 | `GET` | `/api/mailbox/:contextId` | `src/api/mailbox.ts:20` | — |
 | `POST` | `/api/mailbox/:contextId` | `src/api/mailbox.ts:35` | — |
 
+### `/api/mcp-servers`
+
+| Method | Path | Source | Description |
+|---|---|---|---|
+| `GET` | `/api/mcp-servers` | `src/api/mcp-crud.ts:142` | — |
+| `POST` | `/api/mcp-servers` | `src/api/mcp-crud.ts:169` | — |
+| `GET` | `/api/mcp-servers/:name` | `src/api/mcp-crud.ts:150` | — |
+| `PUT` | `/api/mcp-servers/:name` | `src/api/mcp-crud.ts:195` | — |
+| `DELETE` | `/api/mcp-servers/:name` | `src/api/mcp-crud.ts:215` | — |
+| `POST` | `/api/mcp-servers/test` | `src/api/mcp-crud.ts:126` | — |
+
 ### `/api/onboard`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `POST` | `/api/onboard` | `src/api/operations.ts:248` | — |
+| `POST` | `/api/onboard` | `src/api/operations.ts:308` | — |
 
 ### `/api/operator`
 
@@ -217,19 +234,33 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `POST` | `/api/pr/inspect` | `src/api/pr-inspector.ts:540` | — |
+| `POST` | `/api/pr/inspect` | `src/api/pr-inspector.ts:541` | — |
 
 ### `/api/pr-pipeline`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/pr-pipeline` | `src/api/github.ts:609` | — |
+| `GET` | `/api/pr-pipeline` | `src/api/github.ts:678` | — |
 
 ### `/api/projects`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/projects` | `src/api/operations.ts:249` | — |
+| `GET` | `/api/projects` | `src/api/operations.ts:309` | — |
+
+### `/api/recent-activity`
+
+| Method | Path | Source | Description |
+|---|---|---|---|
+| `GET` | `/api/recent-activity` | `src/api/github.ts:682` | What shipped recently across the fleet — merged PRs + published releases in a trailing window (default 24h, `?hours=` 1..168). |
+
+### `/api/research`
+
+| Method | Path | Source | Description |
+|---|---|---|---|
+| `POST` | `/api/research/ingest` | `src/api/research.ts:45` | — |
+| `POST` | `/api/research/search` | `src/api/research.ts:28` | — |
+| `GET` | `/api/research/stats` | `src/api/research.ts:71` | — |
 
 ### `/api/security-summary`
 
@@ -241,28 +272,36 @@ Each row links to the route definition as `path:line` so jumping from this index
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/api/skills/:agentName` | `src/api/operations.ts:256` | — |
+| `GET` | `/api/skills/:agentName` | `src/api/operations.ts:316` | — |
 
-### `/health` + `/ready`
+### `/health`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `GET` | `/health` | `src/api/operations.ts` | Cheap liveness — the process is up. Always 200. |
-| `GET` | `/ready` | `src/api/operations.ts` | Readiness — gates on local invariants (sqlite open). 200 `ready` / 503 `unready`. The LLM gateway is probed for **reachability** (any HTTP response counts — LiteLLM's `/health` is auth-gated and returns 401, which still means "up") and reported in the body, but does **not** gate readiness (an external outage shouldn't restart-loop the container; agent runs fail fast instead). The prod compose `healthcheck` polls this. |
-| `GET` | `/metrics` | `src/api/operations.ts` | Prometheus text-exposition metrics (`lib/metrics.ts`): `workstacean_dispatch_total{skill,success}`, `workstacean_dispatch_duration_ms` histogram, `workstacean_bus_handler_errors_total{plugin}`. Low-cardinality labels only. (#800) |
+| `GET` | `/health` | `src/api/operations.ts:304` | — |
+
+### `/metrics`
+
+| Method | Path | Source | Description |
+|---|---|---|---|
+| `GET` | `/metrics` | `src/api/operations.ts:306` | — |
 
 ### `/publish`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `POST` | `/publish` | `src/api/operations.ts` | Inject an `{ topic, payload }` event onto the bus. **Admin-key required**, an explicit `topic` is mandatory (no `"#"` default), and internal **control-plane topics are rejected (403)**. |
+| `POST` | `/publish` | `src/api/operations.ts:307` | — |
 
-`/publish` is the external lifecycle/event ingress (protoMaker's `feature.*` / `hitl.request.*`, agents' board/incident events). It refuses to inject internal control-plane topics — `agent.skill.request`, `agent.skill.response.*`, `operator.message.request`, `message.inbound.*`, `cron.*`, `command.*`, `autonomous.*`, `ceremony.*`, `dispatch.*`, `agent.input.*` — so a caller can't forge skill dispatches, spoof the operator, fake inbound user messages, or trigger scheduled work. The denied set is `WORKSTACEAN_PUBLISH_TOPIC_DENYLIST` (CSV override). The whole HTTP/A2A surface **fails closed in production-like envs**: the process refuses to start when `WORKSTACEAN_API_KEY` is unset and `NODE_ENV=production` (or `WORKSTACEAN_PUBLIC_BASE_URL` is set).
+### `/ready`
+
+| Method | Path | Source | Description |
+|---|---|---|---|
+| `GET` | `/ready` | `src/api/operations.ts:305` | Readiness probe (#795). |
 
 ### `/v1`
 
 | Method | Path | Source | Description |
 |---|---|---|---|
-| `POST` | `/v1/chat/completions` | `src/api/openai-compat.ts:290` | the meat. |
-| `GET` | `/v1/models` | `src/api/openai-compat.ts:289` | advertise every fleet skill as a model. |
+| `POST` | `/v1/chat/completions` | `src/api/openai-compat.ts:292` | the meat. |
+| `GET` | `/v1/models` | `src/api/openai-compat.ts:291` | advertise every fleet skill as a model. |
 

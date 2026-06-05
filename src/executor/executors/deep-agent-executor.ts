@@ -396,6 +396,14 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
       async () => JSON.stringify(await http.get("/api/pr-pipeline")),
       { name: "get_pr_pipeline", description: "Open PRs and CI status.", schema: z.object({}) },
     ),
+    get_recent_activity: tool(
+      async (input) => JSON.stringify(await http.get(`/api/recent-activity${input?.hours ? `?hours=${input.hours}` : ""}`)),
+      {
+        name: "get_recent_activity",
+        description: "What shipped recently across the fleet — merged PRs + published releases in a trailing window (default 24h).",
+        schema: z.object({ hours: z.number().int().min(1).max(168).optional() }),
+      },
+    ),
     get_branch_drift: tool(
       async () => JSON.stringify(await http.get("/api/branch-drift")),
       { name: "get_branch_drift", description: "Dev vs main divergence.", schema: z.object({}) },

@@ -153,6 +153,7 @@ export class CeremonyYamlLoader {
       id: c.id,
       name: c.name,
       schedule: c.schedule,
+      timezone: typeof c.timezone === "string" && c.timezone ? c.timezone : undefined,
       skill: c.skill,
       targets: c.targets as string[],
       notifyChannel: typeof c.notifyChannel === "string" ? c.notifyChannel : undefined,

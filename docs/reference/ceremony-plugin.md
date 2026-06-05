@@ -24,7 +24,8 @@ Each ceremony is defined in its own `.yaml` file inside `workspace/ceremonies/`.
 id: board.pr-audit          # required — unique ceremony identifier
 name: PR Audit              # required — human-readable name
 description: "…"            # optional — free-form human-readable purpose
-schedule: "0 9 * * 1-5"    # required — cron expression (UTC)
+schedule: "0 9 * * 1-5"    # required — cron expression (in `timezone`, else container TZ)
+timezone: America/New_York  # optional — IANA tz the cron is evaluated in
 skill: audit-prs            # required — agent skill to invoke
 targets:                    # required — agent names or ['all']
   - quinn
@@ -40,7 +41,8 @@ createdBy: quinn            # optional — owning agent for multi-tenant HTTP AP
 | `id` | string | yes | Unique identifier, e.g. `board.pr-audit`. Used in bus topics. |
 | `name` | string | yes | Human-readable name shown in logs and notifications. |
 | `description` | string | no | Free-form purpose string, surfaced in the API listing. |
-| `schedule` | string | yes | Standard 5-field cron expression (UTC). |
+| `schedule` | string | yes | Standard 5-field cron expression, evaluated in `timezone` (or the process/container TZ if unset). |
+| `timezone` | string | no | IANA timezone the cron is evaluated in, e.g. `America/Los_Angeles`. Stays correct across DST (a `0 6 * * *` + `America/Los_Angeles` fires at 6am PT year-round). Omit to use the container TZ. |
 | `skill` | string | yes | Agent skill invoked when the ceremony fires. |
 | `targets` | string[] | yes | Non-empty list of agent names (e.g. `['quinn']`) or `['all']` for fleet broadcast. Passed as `projectPaths` in the `ceremony.{id}.execute` context for backwards-compatible consumer shape. |
 | `notifyChannel` | string | no | Discord channel ID for outcome notifications. |

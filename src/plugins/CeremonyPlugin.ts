@@ -285,7 +285,13 @@ export class CeremonyPlugin implements Plugin {
     }
 
     try {
-      const interval = CronExpressionParser.parse(ceremony.schedule);
+      // Evaluate the cron in the ceremony's timezone when set (e.g. 6am PT that
+      // stays correct across DST), else the process/container TZ. Mirrors the
+      // scheduler's `tz` handling.
+      const interval = CronExpressionParser.parse(
+        ceremony.schedule,
+        ceremony.timezone ? { tz: ceremony.timezone } : undefined,
+      );
       const nextDate = interval.next().toDate();
       const delay = nextDate.getTime() - Date.now();
       const actualDelay = Math.min(Math.max(delay, 0), 2_147_483_647);
