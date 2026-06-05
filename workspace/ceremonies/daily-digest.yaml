@@ -17,8 +17,8 @@ timezone: America/Los_Angeles
 skill: daily_digest
 targets:
   - ava
-# Resolves to DISCORD_WEBHOOK_PROTOWORKSTACEAN_DEV (slug -> DISCORD_WEBHOOK_<SLUG>).
-notifyChannel: "protoworkstacean-dev"
+# Single shared dev channel (no per-project split) -> DISCORD_WEBHOOK_DEV.
+notifyChannel: "dev"
 # LLM digest + fleet-wide GitHub reads — bound it so a hung run can't wedge.
 timeoutMs: 300000
 enabled: true
