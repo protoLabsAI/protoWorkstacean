@@ -12,6 +12,8 @@ export interface Ceremony {
   name: string;
   /** Cron expression, e.g. "0 /3 * * *" (every 3 hours) */
   schedule: string;
+  /** Optional IANA timezone the cron is evaluated in (e.g. "America/Los_Angeles"). Defaults to the process/container TZ. */
+  timezone?: string;
   /** Agent skill to invoke when ceremony fires */
   skill: string;
   /** Project paths to target, or ['all'] for all projects */

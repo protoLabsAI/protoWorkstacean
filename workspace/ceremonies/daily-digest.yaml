@@ -1,0 +1,24 @@
+id: daily-digest
+name: "Daily Fleet Digest"
+description: >
+  Every morning at 6am PT, Ava posts a digest to the dev channel:
+    1. what SHIPPED across the fleet the day before — merged PRs + releases
+       (get_recent_activity; the same activity the release channel announces),
+    2. current BLOCKERS (PRs in changes_requested, stuck on red CI),
+    3. any PIPELINE / FLEET issues (red mains, branch drift, open incidents).
+
+  Supersedes daily-standup (board_audit -> Quinn) and portfolio-checkin
+  (Ava's per-project sweep) — this digest is a superset of both, so those
+  two ceremonies were removed when this landed.
+# 6am every day, evaluated in Pacific (stays 6am across PST/PDT via the
+# timezone field — CeremonyPlugin passes it to cron-parser as `tz`).
+schedule: "0 6 * * *"
+timezone: America/Los_Angeles
+skill: daily_digest
+targets:
+  - ava
+# Resolves to DISCORD_WEBHOOK_PROTOWORKSTACEAN_DEV (slug -> DISCORD_WEBHOOK_<SLUG>).
+notifyChannel: "protoworkstacean-dev"
+# LLM digest + fleet-wide GitHub reads — bound it so a hung run can't wedge.
+timeoutMs: 300000
+enabled: true

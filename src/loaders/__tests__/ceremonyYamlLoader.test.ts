@@ -181,6 +181,34 @@ enabled: true
     expect(ceremonies[0]!.notifyChannel).toBe("general");
   });
 
+  test("loads timezone when present, undefined when absent", () => {
+    writeFileSync(
+      join(TEST_DIR, "ceremonies", "tz.yaml"),
+      `id: tz.ceremony
+name: TZ Ceremony
+schedule: "0 6 * * *"
+timezone: America/Los_Angeles
+skill: daily_digest
+targets: [ava]
+enabled: true
+`
+    );
+    writeFileSync(
+      join(TEST_DIR, "ceremonies", "no-tz.yaml"),
+      `id: no-tz.ceremony
+name: No TZ Ceremony
+schedule: "0 6 * * *"
+skill: daily_digest
+targets: [ava]
+enabled: true
+`
+    );
+
+    const byId = new Map(loader.loadGlobal().map((c) => [c.id, c]));
+    expect(byId.get("tz.ceremony")!.timezone).toBe("America/Los_Angeles");
+    expect(byId.get("no-tz.ceremony")!.timezone).toBeUndefined();
+  });
+
   test("loadMerged returns global ceremonies when no project slug given", () => {
     writeFileSync(
       join(TEST_DIR, "ceremonies", "board.health.yaml"),

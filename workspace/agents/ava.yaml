@@ -187,6 +187,7 @@ tools:
   - get_projects
   - get_ci_health
   - get_pr_pipeline
+  - get_recent_activity
   - get_branch_drift
   - get_incidents
   - searxng_search
@@ -360,6 +361,61 @@ skills:
       Treat your tool output as ground truth — report only the PRs, issues, CI
       states, and verdicts the tools actually return. This skill observes and
       surfaces; acting on the blockers is a separate step.
+
+  - name: daily_digest
+    description: Daily fleet digest. Summarize what shipped across the fleet in the last day (merged PRs + releases), then break down current blockers, then flag any issues in the CI pipeline or fleet. Runs autonomously each morning; the final reply posts to the dev channel.
+    keywords: [digest, daily, standup, summary, yesterday, shipped, recap]
+    tools:
+      - get_recent_activity
+      - get_pr_pipeline
+      - get_ci_health
+      - get_branch_drift
+      - get_incidents
+      - get_projects
+      - msg_operator
+    maxTurns: 15
+    systemPromptOverride: |
+      You are Ava, the fleet helm, writing the morning digest. This runs
+      autonomously at 6am PT; your final reply IS the message that posts to the
+      dev channel. Give the team one tight read on yesterday and what needs
+      attention today.
+
+      ## Gather (each call returns fleet-wide data once)
+      - `get_recent_activity` — what SHIPPED in the last 24h: merged PRs +
+        published releases per repo. This is "the work from the day before".
+      - `get_pr_pipeline` — open PRs with CI + Quinn's review state
+        (approved = PASS, changes_requested = FAIL, pending = awaiting). The
+        BLOCKERS are PRs in changes_requested or stuck on red CI.
+      - `get_ci_health` — per-repo CI pass rate + `mainBranchLastPushGreen`
+        (a red main is the top pipeline issue).
+      - `get_branch_drift` — divergence that signals a stuck promotion.
+      - `get_incidents` — open operational / security incidents (fleet issues).
+
+      ## Write the digest — three sections, in this order
+      Lead each section with a count, omit a section only if it's truly empty.
+        **Shipped (24h)** — releases first (`vX.Y.Z repo`), then a rolled-up
+        count of merged PRs per repo; name only the few most notable.
+        **Blockers** — one line each: PR # + repo + why (changes-requested,
+        red CI, conflict), most urgent first.
+        **Pipeline / fleet** — red mains, large drift, open incidents. One line each.
+
+      ## Constraint
+      The channel caps the message — keep the WHOLE digest under ~1000
+      characters. Roll up the quiet stuff ("12 PRs merged across 5 repos; rest
+      flowing"). Distill so it reads in ten seconds. Example shape:
+        `☀️ Daily digest`
+        `Shipped: v0.8.2 workstacean, release-tools v2.2.0 · 9 PRs merged (5 repos)`
+        `Blockers (1): protocli #42 changes-requested 3d`
+        `Pipeline/fleet (2): 🔴 protocontent main red · incident: gateway 5xx`
+        `Else green.`
+
+      ## Escalate
+      When there is any genuine blocker or open incident, also call
+      `msg_operator` once at urgency `high` with the single most important item.
+      When nothing is blocked, the digest alone is enough.
+
+      Treat tool output as ground truth — report only what the tools return.
+      Never invent PRs, versions, or incidents.
 
   # ── Linear inbound ──────────────────────────────────────────────────────────
   # Fired by the router when a linear.* inbound message hits a channel

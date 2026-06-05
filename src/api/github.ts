@@ -607,12 +607,79 @@ export function createRoutes(ctx: ApiContext): Route[] {
     });
   }
 
+  /**
+   * What shipped recently across the fleet — merged PRs + published releases in
+   * a trailing window (default 24h, `?hours=` 1..168). Backs the daily-digest
+   * ceremony's "yesterday's work" section; this is the same activity the release
+   * channel announces, sourced from GitHub directly so it doesn't depend on
+   * Discord formatting.
+   */
+  async function handleGetRecentActivity(req?: Request): Promise<Response> {
+    const repoList = repos();
+    const hoursRaw = req ? Number(new URL(req.url).searchParams.get("hours")) : Number.NaN;
+    const hours = Number.isFinite(hoursRaw) && hoursRaw > 0 && hoursRaw <= 168 ? hoursRaw : 24;
+    const sinceMs = Date.now() - hours * 3_600_000;
+    const sinceIso = new Date(sinceMs).toISOString();
+
+    if (!repoList.length) {
+      return Response.json({ since: sinceIso, hours, totalMergedPrs: 0, totalReleases: 0, repos: [] });
+    }
+
+    const repoResults: Array<{
+      repo: string;
+      mergedPrs: Array<{ number: number; title: string; author: string; mergedAt: string; url: string }>;
+      releases: Array<{ tag: string; name: string; publishedAt: string; url: string }>;
+    }> = [];
+
+    for (const repo of repoList) {
+      const mergedPrs: (typeof repoResults)[number]["mergedPrs"] = [];
+      const releases: (typeof repoResults)[number]["releases"] = [];
+      try {
+        // Closed PRs, most-recently-updated first; keep those MERGED in-window.
+        // Unmerged-closed have a null merged_at → skipped.
+        const prs = (await ghApi(
+          `/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=50`,
+        )) as Array<{ number: number; title: string; merged_at: string | null; html_url: string; user?: { login?: string } }>;
+        for (const pr of prs) {
+          if (!pr.merged_at || new Date(pr.merged_at).getTime() < sinceMs) continue;
+          mergedPrs.push({ number: pr.number, title: pr.title, author: pr.user?.login ?? "", mergedAt: pr.merged_at, url: pr.html_url });
+        }
+      } catch {
+        // skip this repo's PR fetch on error — partial activity beats none
+      }
+      try {
+        const rels = (await ghApi(`/repos/${repo}/releases?per_page=10`)) as Array<{
+          tag_name: string;
+          name: string | null;
+          published_at: string | null;
+          html_url: string;
+        }>;
+        for (const r of rels) {
+          if (!r.published_at || new Date(r.published_at).getTime() < sinceMs) continue;
+          releases.push({ tag: r.tag_name, name: r.name ?? r.tag_name, publishedAt: r.published_at, url: r.html_url });
+        }
+      } catch {
+        // skip this repo's release fetch on error
+      }
+      if (mergedPrs.length || releases.length) repoResults.push({ repo, mergedPrs, releases });
+    }
+
+    return Response.json({
+      since: sinceIso,
+      hours,
+      totalMergedPrs: repoResults.reduce((s, r) => s + r.mergedPrs.length, 0),
+      totalReleases: repoResults.reduce((s, r) => s + r.releases.length, 0),
+      repos: repoResults,
+    });
+  }
+
   return [
     { method: "GET",  path: "/api/ci-health",          handler: () => handleGetCiHealth() },
     { method: "GET",  path: "/api/pr-pipeline",        handler: () => handleGetPrPipeline() },
     { method: "GET",  path: "/api/branch-drift",       handler: () => handleGetBranchDrift() },
     { method: "GET",  path: "/api/branch-protection",  handler: () => handleGetBranchProtection() },
     { method: "GET",  path: "/api/github-issues",      handler: () => handleGetGithubIssues() },
+    { method: "GET",  path: "/api/recent-activity",    handler: (req) => handleGetRecentActivity(req) },
     { method: "POST", path: "/api/github/issues",      handler: (req) => handleCreateIssue(req) },
   ];
 }
