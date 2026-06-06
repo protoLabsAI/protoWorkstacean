@@ -98,6 +98,14 @@ export class DispatchDropEscalatorPlugin implements Plugin {
     record.lastPayload = payload;
     // Prune outside the rolling window. Bounded — never more than threshold+a-few entries.
     record.timestamps = record.timestamps.filter(t => now - t < this.windowMs);
+
+    // Delete the key if no timestamps remain — prevents unbounded growth
+    // for drop keys that fire once and never recur.
+    if (record.timestamps.length === 0) {
+      this.drops.delete(key);
+      return;
+    }
+
     record.timestamps.push(now);
     this.drops.set(key, record);
 
@@ -107,6 +115,10 @@ export class DispatchDropEscalatorPlugin implements Plugin {
     if (lastEscalation !== undefined && now - lastEscalation < this.escalationCooldownMs) return;
 
     this.lastEscalatedAt.set(key, now);
+
+    // Lazy-evict expired escalation cooldown keys.
+    this._sweepLastEscalatedAt(now);
+
     this._escalate(key, record);
   }
 
@@ -174,6 +186,15 @@ export class DispatchDropEscalatorPlugin implements Plugin {
         return "Caller published agent.skill.request with no skill field — bug in the caller.";
       default:
         return `Unknown reason: ${reason}`;
+    }
+  }
+
+  /** Purge escalation-cooldown keys whose window has elapsed. */
+  private _sweepLastEscalatedAt(now: number): void {
+    for (const [key, ts] of this.lastEscalatedAt) {
+      if (now - ts >= this.escalationCooldownMs) {
+        this.lastEscalatedAt.delete(key);
+      }
     }
   }
 }
