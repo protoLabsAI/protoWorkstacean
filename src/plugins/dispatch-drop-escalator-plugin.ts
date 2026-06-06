@@ -96,18 +96,17 @@ export class DispatchDropEscalatorPlugin implements Plugin {
 
     const record = this.drops.get(key) ?? { timestamps: [], lastPayload: payload };
     record.lastPayload = payload;
-    // Prune outside the rolling window. Bounded — never more than threshold+a-few entries.
+    // Prune this key's drops outside the rolling window, then record the current one.
+    // (Record BEFORE the threshold check — the previous order returned on the empty
+    // fresh-key array and never counted ANY drop, so no storm ever escalated.)
     record.timestamps = record.timestamps.filter(t => now - t < this.windowMs);
-
-    // Delete the key if no timestamps remain — prevents unbounded growth
-    // for drop keys that fire once and never recur.
-    if (record.timestamps.length === 0) {
-      this.drops.delete(key);
-      return;
-    }
-
     record.timestamps.push(now);
     this.drops.set(key, record);
+
+    // Bound the map: evict OTHER keys whose drops have all aged out of the window —
+    // one-shot drop keys that never recur would otherwise linger forever. Drops are
+    // rare (dispatch failures only), so this O(keys) sweep is cheap on this path.
+    this._sweepDrops(now);
 
     if (record.timestamps.length < this.threshold) return;
 
@@ -186,6 +185,14 @@ export class DispatchDropEscalatorPlugin implements Plugin {
         return "Caller published agent.skill.request with no skill field — bug in the caller.";
       default:
         return `Unknown reason: ${reason}`;
+    }
+  }
+
+  /** Purge drop keys whose timestamps have all aged out of the window (memory bound). */
+  private _sweepDrops(now: number): void {
+    for (const [k, rec] of this.drops) {
+      rec.timestamps = rec.timestamps.filter(t => now - t < this.windowMs);
+      if (rec.timestamps.length === 0) this.drops.delete(k);
     }
   }
 
