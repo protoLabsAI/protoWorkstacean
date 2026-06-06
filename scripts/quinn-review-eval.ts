@@ -87,9 +87,10 @@ for (const [t, n] of Object.entries(s.toolUse.toolFrequency).sort((a, b) => b[1]
 }
 
 if (s.perRepo.length) {
-  console.log("\nPER-REPO (top 8)");
-  for (const r of s.perRepo.slice(0, 8)) {
-    console.log(`  ${r.repo.padEnd(32)} ${r.reviews} reviews  (A${r.approve}/C${r.comment}/RC${r.requestChanges})`);
+  console.log("\nPER-REPO (top 10)");
+  for (const r of s.perRepo.slice(0, 10)) {
+    const fail = r.failures ? `  FAIL ${r.failures}` : "";
+    console.log(`  ${r.repo.padEnd(32)} ${r.reviews} reviews  (A${r.approve}/C${r.comment}/RC${r.requestChanges})${fail}`);
   }
 }
 console.log("");

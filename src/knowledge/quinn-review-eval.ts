@@ -51,7 +51,7 @@ export interface QuinnReviewStats {
     callsPerReview: { median: number; p90: number; max: number } | null;
     toolFrequency: Record<string, number>;
   };
-  perRepo: Array<{ repo: string; reviews: number; approve: number; comment: number; requestChanges: number }>;
+  perRepo: Array<{ repo: string; reviews: number; approve: number; comment: number; requestChanges: number; failures: number }>;
 }
 
 const PR_REVIEW_OUTCOME = /^autonomous\.outcome\..*\.pr_review$/;
@@ -96,6 +96,8 @@ export function computeQuinnReviewStats(events: EvalEvent[]): QuinnReviewStats {
   // ── verdicts / per-repo (from quinn.review.submitted) ──────────────────────
   const verdicts = { APPROVE: 0, COMMENT: 0, REQUEST_CHANGES: 0 };
   const repoMap = new Map<string, { reviews: number; approve: number; comment: number; requestChanges: number }>();
+  // ── failure attribution per repo (from the outcome's github coords) ────────
+  const repoFailures = new Map<string, number>();
 
   for (const e of events) {
     if (e.ts) {
@@ -113,6 +115,11 @@ export function computeQuinnReviewStats(events: EvalEvent[]): QuinnReviewStats {
         failed++;
         const mode = classifyFailure(str(e.body.error) ?? str(e.body.textPreview));
         failureModes[mode] = (failureModes[mode] ?? 0) + 1;
+        const gh = e.body.github as { owner?: unknown; repo?: unknown } | undefined;
+        if (typeof gh?.owner === "string" && typeof gh?.repo === "string") {
+          const repo = `${gh.owner}/${gh.repo}`;
+          repoFailures.set(repo, (repoFailures.get(repo) ?? 0) + 1);
+        }
       }
       continue;
     }
@@ -183,8 +190,11 @@ export function computeQuinnReviewStats(events: EvalEvent[]): QuinnReviewStats {
       callsPerReview: lens.length ? { median: pct(lens, 0.5), p90: pct(lens, 0.9), max: lens[lens.length - 1] } : null,
       toolFrequency,
     },
-    perRepo: [...repoMap.entries()]
-      .map(([repo, r]) => ({ repo, reviews: r.reviews, approve: r.approve, comment: r.comment, requestChanges: r.requestChanges }))
-      .sort((a, b) => b.reviews - a.reviews),
+    perRepo: [...new Set([...repoMap.keys(), ...repoFailures.keys()])]
+      .map((repo) => {
+        const r = repoMap.get(repo) ?? { reviews: 0, approve: 0, comment: 0, requestChanges: 0 };
+        return { repo, reviews: r.reviews, approve: r.approve, comment: r.comment, requestChanges: r.requestChanges, failures: repoFailures.get(repo) ?? 0 };
+      })
+      .sort((a, b) => b.reviews + b.failures - (a.reviews + a.failures)),
   };
 }

@@ -316,6 +316,15 @@ export class SkillDispatcherPlugin implements Plugin {
 
     const rawContent = typeof payload.content === "string" ? payload.content : undefined;
 
+    // GitHub PR coordinates, when this dispatch came from an auto-review. Stamped
+    // onto every autonomous.outcome so a failed (recursion-limit/timeout) review —
+    // which emits no quinn.review.submitted — is still attributable to its PR.
+    const ghDispatch = payload.github as { owner?: unknown; repo?: unknown; number?: unknown } | undefined;
+    const githubCoords =
+      typeof ghDispatch?.owner === "string" && typeof ghDispatch?.repo === "string" && typeof ghDispatch?.number === "number"
+        ? { owner: ghDispatch.owner, repo: ghDispatch.repo, number: ghDispatch.number }
+        : undefined;
+
     const agentName = targets[0] ?? "";
 
     const req: SkillRequest = {
@@ -400,6 +409,7 @@ export class SkillDispatcherPlugin implements Plugin {
               text: content,
               durationMs: Date.now() - dispatchedAt,
               model: requestedModel,
+              github: githubCoords,
             });
 
             const gh = payload.github as { title?: string; owner?: string; repo?: string; number?: number; url?: string } | undefined;
@@ -482,6 +492,7 @@ export class SkillDispatcherPlugin implements Plugin {
           usage: result.data?.usage,
           durationMs: Date.now() - dispatchedAt,
           model: requestedModel,
+          github: githubCoords,
         });
       } else {
         // Log a preview of the response so we can see what the executor actually
@@ -582,6 +593,7 @@ export class SkillDispatcherPlugin implements Plugin {
           usage: result.data?.usage,
           durationMs,
           model: requestedModel,
+          github: githubCoords,
         });
       }
 
@@ -634,6 +646,7 @@ export class SkillDispatcherPlugin implements Plugin {
         text: errorMsg,
         durationMs: Date.now() - dispatchedAt,
         model: requestedModel,
+        github: githubCoords,
       });
       this._publishResponse(replyTopic, correlationId, undefined, errorMsg);
     } finally {
@@ -697,6 +710,7 @@ export class SkillDispatcherPlugin implements Plugin {
     usage?: AutonomousOutcomePayload["usage"];
     durationMs: number;
     model?: string;
+    github?: { owner: string; repo: string; number: number };
   }): void {
     if (!this.bus) return;
     // Prometheus metrics — the single per-outcome chokepoint (#800). Labels are
@@ -718,6 +732,7 @@ export class SkillDispatcherPlugin implements Plugin {
       usage: opts.usage,
       durationMs: opts.durationMs,
       model: opts.model,
+      github: opts.github,
     };
     this.bus.publish(topic, {
       id: crypto.randomUUID(),
