@@ -16,7 +16,7 @@
  *   traffic and can build up a reputation.
  */
 
-import type { IExecutor, ExecutorRegistration, EffectRegistration } from "./types.ts";
+import type { IExecutor, ExecutorRegistration } from "./types.ts";
 
 // Minimal health metrics interface — compatible with AgentFleetMetrics
 // but avoids a direct import from the plugins layer.
@@ -44,8 +44,6 @@ export type ResolveHook = (
 export class ExecutorRegistry {
   private readonly _registrations: ExecutorRegistration[] = [];
   private _default: IExecutor | null = null;
-  /** Secondary index: `${domain}::${path}` → EffectRegistration[] */
-  private readonly _effectIndex = new Map<string, EffectRegistration[]>();
   private _healthGetter: HealthGetter | null = null;
   private _resolveHook: ResolveHook | null = null;
 
@@ -141,49 +139,6 @@ export class ExecutorRegistry {
    */
   setResolveHook(hook: ResolveHook | null): void {
     this._resolveHook = hook;
-  }
-
-  /**
-   * Register a skill's declared world-state effects for effect-based planning.
-   * Multiple calls for the same (domain, path) accumulate — all candidates are
-   * returned by resolveByEffect so the planner can rank them.
-   *
-   * @param skill     - Skill name that produces these effects.
-   * @param agentName - Optional agent name for target-based routing.
-   * @param effects   - One or more effect entries: { domain, path, expectedDelta, confidence }.
-   */
-  registerEffect(
-    skill: string,
-    agentName: string | undefined,
-    effects: Array<{ domain: string; path: string; expectedDelta: number; confidence: number }>,
-  ): void {
-    for (const e of effects) {
-      const key = `${e.domain}::${e.path}`;
-      const entry: EffectRegistration = {
-        skill,
-        agentName,
-        domain: e.domain,
-        path: e.path,
-        expectedDelta: e.expectedDelta,
-        confidence: e.confidence,
-      };
-      const bucket = this._effectIndex.get(key);
-      if (bucket) {
-        bucket.push(entry);
-      } else {
-        this._effectIndex.set(key, [entry]);
-      }
-    }
-  }
-
-  /**
-   * Resolve all skills that declare an effect on a specific (domain, path) target.
-   * Returns candidates in registration order. Returns an empty array when nothing
-   * matches — callers should fall back to skill-name routing if needed.
-   */
-  resolveByEffect(target: { domain: string; path: string }): EffectRegistration[] {
-    const key = `${target.domain}::${target.path}`;
-    return [...(this._effectIndex.get(key) ?? [])];
   }
 
   /** All current registrations — useful for diagnostics and health checks. */
