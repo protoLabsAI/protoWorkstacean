@@ -60,7 +60,7 @@ export function applyMigrations(dbPath: string): void {
     `);
 
     const applied = new Set(
-      db.query<{ id: string }>("SELECT id FROM _migrations").all().map(r => r.id),
+      db.query<{ id: string }, []>("SELECT id FROM _migrations").all().map(r => r.id),
     );
 
     for (const m of migrations) {
