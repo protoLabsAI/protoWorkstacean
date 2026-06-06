@@ -119,9 +119,7 @@ describe("WorldState ceremony extension", () => {
   });
 
   test("does NOT publish on the world.state.# namespace (issue #424 regression guard)", () => {
-    // GoalEvaluatorPlugin subscribes to world.state.#. If ceremony state ever leaks
-    // into that namespace, every loaded goal fires a Selector-not-found violation
-    // each time a ceremony completes. Lock the namespace boundary here.
+    // Ceremony state must not leak into the world.state.# namespace.
     ext.registerCeremony(makeCeremony("board.health"));
     const outcome = makeOutcome("board.health");
 
