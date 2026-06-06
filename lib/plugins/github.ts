@@ -247,6 +247,27 @@ export function quinnLatestReviewState(
 }
 
 /**
+ * Detect a budget-exhausted PR review: the agent's ReAct loop hit its turn
+ * ceiling ("Recursion limit of N reached…") or the run timed out before it
+ * produced a formal verdict. ~1.6% of pr_review runs end this way (see
+ * docs/explanation/code-review-agent-design.md) and historically left the PR
+ * silently unreviewed. We escalate these to a human rather than fail to
+ * nothing — and deliberately do NOT synthesize a COMMENT review, because a
+ * COMMENTED state would let the approve-on-green path (#748) auto-approve a PR
+ * that was never actually reviewed.
+ */
+export function isReviewBudgetExhausted(error: string | undefined): boolean {
+  const m = (error ?? "").toLowerCase();
+  if (!m) return false;
+  return (
+    m.includes("recursion limit") ||
+    m.includes("timed out") ||
+    m.includes("operation was aborted") ||
+    m.includes("without hitting a stop condition")
+  );
+}
+
+/**
  * Normalize a GitHub `release` webhook payload into a ReleasePublishedPayload,
  * or null when it isn't a published release worth surfacing (wrong action,
  * missing owner/repo/tag). Exported for unit testing; called from
@@ -456,11 +477,7 @@ export class GitHubPlugin implements Plugin {
       if (!pending) return;
       pendingComments.delete(correlationId);
 
-      const content = String((msg.payload as Record<string, unknown>).content ?? "").trim();
-      if (!content) return;
-      if (/^Skill ".+" completed by \w+$/i.test(content)) return;
-
-      await this._postComment(getToken, pending, content);
+      await this._handleOutboundReply(pending, correlationId, msg.payload as Record<string, unknown>, bus, getToken);
     });
 
     // ── Inbound: webhook HTTP server ─────────────────────────────────────────
@@ -955,6 +972,53 @@ export class GitHubPlugin implements Plugin {
    * The dispatcher's `@sha7` cooldown (#437) is the backstop against any
    * residual burst from the two event types arriving together.
    */
+  /**
+   * Process a skill reply bound for a GitHub PR (the `message.outbound.github.#`
+   * subscriber body — extracted so the budget-exhaustion path is unit-testable
+   * by driving it directly). On a normal reply, post the agent's content as a
+   * PR comment. On a budget-exhausted review (recursion limit / timeout, no
+   * verdict), escalate to a human instead of failing silently — and never post
+   * it as a review, since a COMMENTED state would let approve-on-green (#748)
+   * auto-approve a PR that was never actually reviewed.
+   */
+  private async _handleOutboundReply(
+    pending: PendingComment,
+    correlationId: string,
+    payload: Record<string, unknown>,
+    bus: EventBus,
+    getToken: (owner: string, repo: string) => Promise<string>,
+  ): Promise<void> {
+    const error = typeof payload.error === "string" ? payload.error : undefined;
+
+    if (isReviewBudgetExhausted(error)) {
+      const slug = `${pending.owner}/${pending.repo}#${pending.number}`;
+      log.warn(`pr_review budget-exhausted for ${slug} — escalating to operator (no verdict produced): ${error}`);
+      bus.publish("operator.message.request", {
+        id: crypto.randomUUID(),
+        correlationId,
+        topic: "operator.message.request",
+        timestamp: Date.now(),
+        payload: {
+          type: "operator_message_request",
+          message:
+            `Quinn could not finish reviewing ${slug} — the review ran out of budget ` +
+            `(${error}) and produced no verdict. The PR is unreviewed; it needs a human ` +
+            `review or a re-run. https://github.com/${pending.owner}/${pending.repo}/pull/${pending.number}`,
+          urgency: "normal",
+          topic: `pr-review-incomplete/${slug}`,
+          from: "github",
+        },
+      });
+      return;
+    }
+
+    const content = String(payload.content ?? "").trim();
+    if (!content) return;
+    if (/^Skill ".+" completed by \w+$/i.test(content)) return;
+
+    await this._postComment(getToken, pending, content);
+  }
+
   private async _handleCiCompletion(
     event: string,
     payload: Record<string, unknown>,

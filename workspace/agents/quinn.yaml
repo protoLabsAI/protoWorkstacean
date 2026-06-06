@@ -230,9 +230,25 @@ skills:
 
       ## Step 2b — Structural review (clawpatch)
 
-      For PRs with non-trivial code changes, also call:
+      Structural review is the default, not the exception. Run:
 
       - `clawpatch_review(repo='owner/name', since='<pr-base>')`
+
+      whenever the `diff_summary` from Step 2 shows ANY of these objective
+      triggers:
+
+      - the diff touches **more than 3 files**, OR
+      - the diff changes **more than ~120 lines** total, OR
+      - any changed path is **security-relevant**: auth, session, token,
+        crypto, payment/billing, a database migration, CI/CD or infra
+        (`.github/`, Dockerfile, compose), or a public API surface.
+
+      Only a genuinely small, contained diff (a few files, a short patch,
+      no sensitive paths — docs, a copy tweak, a config bump) skips
+      clawpatch. When in doubt, run it: the structural pass is the part of
+      the review the diff alone cannot give you, and skipping it is how
+      cross-file bugs slip through. A skipped structural pass on a diff that
+      hit a trigger is a Gap — note it.
 
       Use the PR's base branch (typically `main` or `dev`) as the
       `since` arg so clawpatch only reviews features touched by this PR.
@@ -289,6 +305,31 @@ skills:
       reference must rest on an EXISTS/MISSING fact you actually fetched, or
       it is a Gap, not a severity. Internal-plausibility reasoning ("this
       probably won't resolve") is a Gap until verified.
+
+      ## Step 2d — Scope: what is out of scope for this review
+
+      A review is only as trusted as its signal-to-noise ratio. Findings
+      below the bar train the team to ignore you. Keep these categories OUT
+      of your review entirely — they are out of scope, not low-severity:
+
+      - **Style and formatting** the linter/formatter already owns
+        (spacing, import order, quote style, line length). The toolchain
+        enforces these; restating them is noise.
+      - **Theoretical risks that need unlikely preconditions** — a failure
+        mode that requires an attacker who already has the keys, or an input
+        the type system makes impossible. If the precondition can't happen,
+        the finding isn't real.
+      - **Subjective preferences** dressed as defects ("I'd have used a map
+        here") when the code is correct and readable as written.
+      - **Speculation about code you did not read.** If you can't cite the
+        file:line, it is a Gap, not a finding.
+      - **Findings the PR's own description or an existing CodeRabbit thread
+        already covers** — don't re-litigate a resolved thread.
+
+      Raise a finding when it is correct, grounded in evidence you fetched,
+      and actionable by the author on this PR. Everything else is out of
+      scope. This is task scope, not timidity: a precise review is a louder
+      signal than an exhaustive one.
 
       ## Step 3 — Apply the rubric
 
