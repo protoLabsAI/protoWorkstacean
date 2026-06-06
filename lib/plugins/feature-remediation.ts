@@ -82,11 +82,19 @@ export class FeatureRemediationPlugin implements Plugin {
   install(bus: EventBus): void {
     this.bus = bus;
     this.subscriptionIds.push(bus.subscribe("feature.blocked", this.name, (msg) => this._onBlocked(msg)));
-    // A recovered feature clears its tracker so a later re-block starts fresh.
-    this.subscriptionIds.push(bus.subscribe("feature.unblocked", this.name, (msg) => {
+
+    // Terminal or recovery signals — clear the tracker so a later re-block
+    // starts with a fresh attempt budget.  `feature.completed` and
+    // `feature.failed` are the actual events protoMaker emits today;
+    // `feature.unblocked` is kept for when protoMaker adds that emitter.
+    const evict = (msg: BusMessage) => {
       const p = msg.payload as FeatureBlockedPayload;
       this.tracked.delete(this._key(p));
-    }));
+    };
+    this.subscriptionIds.push(bus.subscribe("feature.unblocked", this.name, evict));
+    this.subscriptionIds.push(bus.subscribe("feature.completed", this.name, evict));
+    this.subscriptionIds.push(bus.subscribe("feature.failed", this.name, evict));
+
     this.sweepTimer = setInterval(() => this._sweep(), ENTRY_TTL_MS);
     this.sweepTimer.unref?.();
     log.info("installed — routing feature.blocked");
