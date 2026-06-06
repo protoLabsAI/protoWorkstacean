@@ -412,6 +412,13 @@ export interface AutonomousOutcomePayload {
    * the default rate otherwise.
    */
   model?: string;
+  /**
+   * GitHub PR coordinates when the dispatch originated from a PR (auto-review).
+   * Lets failure analysis attribute a stuck review to a specific PR — without
+   * this a recursion-limit/timeout review emits no quinn.review.submitted and
+   * carried no traceable parentId, so it was invisible per-PR (#843 follow-up).
+   */
+  github?: { owner: string; repo: string; number: number };
   /** World-state delta produced by this task — populated in Arc 4/5. */
   effectDelta?: Record<string, unknown>;
 }

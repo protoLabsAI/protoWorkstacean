@@ -3,7 +3,10 @@ import { classifyFailure, computeQuinnReviewStats, type EvalEvent } from "../qui
 
 const T0 = 1_780_000_000_000;
 
-function outcome(success: boolean, opts: { ms?: number; error?: string; ts?: number } = {}): EvalEvent {
+function outcome(
+  success: boolean,
+  opts: { ms?: number; error?: string; ts?: number; github?: { owner: string; repo: string; number: number } } = {},
+): EvalEvent {
   return {
     topic: "autonomous.outcome.user.pr_review",
     ts: opts.ts ?? T0,
@@ -14,6 +17,7 @@ function outcome(success: boolean, opts: { ms?: number; error?: string; ts?: num
       taskState: success ? "completed" : "failed",
       durationMs: opts.ms,
       ...(opts.error ? { error: opts.error } : {}),
+      ...(opts.github ? { github: opts.github } : {}),
     },
   };
 }
@@ -109,6 +113,23 @@ describe("computeQuinnReviewStats", () => {
     expect(s.perRepo[0].repo).toBe("protoLabsAI/ORBIS");
     expect(s.perRepo[0].reviews).toBe(3);
     expect(s.perRepo[0].approve).toBe(2);
+  });
+
+  test("failed reviews attribute to their repo via github coords (failure-only repo appears)", () => {
+    const events = [
+      submitted("protoLabsAI", "ORBIS", "COMMENT"),
+      // a stuck review in a repo with no submitted verdict — must still surface
+      outcome(false, { error: "Recursion limit of 37 reached", github: { owner: "protoLabsAI", repo: "protoMaker", number: 9 } }),
+      outcome(false, { error: "The operation timed out.", github: { owner: "protoLabsAI", repo: "protoMaker", number: 12 } }),
+      outcome(false, { error: "Recursion limit of 37 reached", github: { owner: "protoLabsAI", repo: "ORBIS", number: 5 } }),
+    ];
+    const s = computeQuinnReviewStats(events);
+    const byRepo = Object.fromEntries(s.perRepo.map((r) => [r.repo, r]));
+    expect(byRepo["protoLabsAI/protoMaker"].failures).toBe(2);
+    expect(byRepo["protoLabsAI/protoMaker"].reviews).toBe(0); // no formal verdict, failure-only
+    expect(byRepo["protoLabsAI/ORBIS"].failures).toBe(1);
+    expect(byRepo["protoLabsAI/ORBIS"].reviews).toBe(1);
+    expect(s.outcomes.failed).toBe(3);
   });
 
   test("empty input degrades cleanly", () => {
