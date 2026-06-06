@@ -1094,6 +1094,22 @@ export class GitHubPlugin implements Plugin {
             `CI-completion (${event}): auto-approved ${owner}/${repo}#${number} @${headSha.slice(0, 7)} ` +
               `(terminal-green, prior Quinn review COMMENTED) — #748`,
           );
+
+          // ── Enable native auto-merge (squash) for one-off PRs ──────────────
+          // After auto-approving, arm GitHub's native auto-merge so the PR
+          // lands without a manual click. Only for one-off PRs targeting the
+          // default branch — stacked PRs (base != main) are excluded, since
+          // squash would break subsequent stack rebases. Best-effort: a
+          // failure here must never block the approve flow.
+          const baseRef = (pr.base as Record<string, unknown> | undefined)?.ref as string | undefined;
+          if (baseRef === "main") {
+            void this._enableAutoMerge(getToken, owner, repo, number, baseRef, "squash");
+          } else if (baseRef) {
+            log.info(
+              `CI-completion (${event}): skipping auto-merge for ${owner}/${repo}#${number} ` +
+                `(base=${baseRef} — not a one-off PR)`,
+            );
+          }
         } catch (err) {
           log.error(
             `CI-completion (${event}): auto-approve failed for ${owner}/${repo}#${number}`,
@@ -1223,6 +1239,53 @@ export class GitHubPlugin implements Plugin {
     const login = (review?.user as Record<string, unknown> | undefined)?.login as string | undefined;
     if (!login || !login.toLowerCase().startsWith("protoquinn")) return; // only Quinn's own reviews
     await handleReviewDismissal(payload as unknown as ReviewDismissalPayload, (review?.body as string | null) ?? "", "");
+  }
+
+  /**
+   * Enable GitHub native auto-merge on a PR (PUT /repos/{o}/{r}/pulls/{n}/merge_upwards).
+   *
+   * Only for one-off PRs (base = default branch). Stacked PRs are excluded —
+   * squash would break subsequent stack rebases, and arming auto-merge on a
+   * moving stack is a capture-head-SHA footgun.
+   *
+   * Best-effort: failure here must never block the approve-on-green flow.
+   */
+  private async _enableAutoMerge(
+    getToken: (owner: string, repo: string) => Promise<string>,
+    owner: string,
+    repo: string,
+    prNumber: number,
+    baseRef: string,
+    mergeMethod: "squash" | "merge" = "squash",
+  ): Promise<void> {
+    try {
+      const token = await getToken(owner, repo);
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/merge_upwards`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Accept: "application/vnd.github+json",
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ merge_method: mergeMethod, commit_title: `auto-merge: ${owner}/${repo}#${prNumber}` }),
+        }),
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        log.warn(
+          `enableAutoMerge failed ${res.status} for ${owner}/${repo}#${prNumber} (base=${baseRef}): ${body.slice(0, 200)}`,
+        );
+      } else {
+        log.info(
+          `Auto-merge enabled (${mergeMethod}) for ${owner}/${repo}#${prNumber} (base=${baseRef})`,
+        );
+      }
+    } catch (err) {
+      log.error(`enableAutoMerge error for ${owner}/${repo}#${prNumber}`, { err });
+    }
   }
 
   private async _postComment(
