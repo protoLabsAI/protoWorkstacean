@@ -164,7 +164,7 @@ describe("FeatureRemediationPlugin", () => {
     plugin.uninstall();
   });
 
-  it("clears the tracker on feature.unblocked so a re-block gets a fresh budget", () => {
+  it("clears the tracker on feature.completed so a re-block gets a fresh budget", () => {
     const bus = new InMemoryEventBus();
     const clock = fakeClock();
     const plugin = new FeatureRemediationPlugin({ now: clock.now });
@@ -174,16 +174,41 @@ describe("FeatureRemediationPlugin", () => {
     publishBlocked(bus, blocked({ kind: "ci_failure" }));
     expect(dispatches).toHaveLength(1);
 
-    // Feature recovered.
-    bus.publish("feature.unblocked", {
+    // Feature recovered — feature.completed is the event protoMaker actually emits.
+    bus.publish("feature.completed", {
       id: crypto.randomUUID(),
       correlationId: crypto.randomUUID(),
-      topic: "feature.unblocked",
+      topic: "feature.completed",
       timestamp: 0,
       payload: blocked(),
     });
 
     // Re-block immediately — fresh budget means an immediate dispatch (no cooldown carryover).
+    publishBlocked(bus, blocked({ kind: "ci_failure" }));
+    expect(dispatches).toHaveLength(2);
+    plugin.uninstall();
+  });
+
+  it("clears the tracker on feature.failed so a re-block gets a fresh budget", () => {
+    const bus = new InMemoryEventBus();
+    const clock = fakeClock();
+    const plugin = new FeatureRemediationPlugin({ now: clock.now });
+    plugin.install(bus);
+    const dispatches = capture(bus, "agent.skill.request");
+
+    publishBlocked(bus, blocked({ kind: "ci_failure" }));
+    expect(dispatches).toHaveLength(1);
+
+    // Feature failed — also clears the tracker.
+    bus.publish("feature.failed", {
+      id: crypto.randomUUID(),
+      correlationId: crypto.randomUUID(),
+      topic: "feature.failed",
+      timestamp: 0,
+      payload: blocked(),
+    });
+
+    // Re-block immediately — fresh budget.
     publishBlocked(bus, blocked({ kind: "ci_failure" }));
     expect(dispatches).toHaveLength(2);
     plugin.uninstall();
