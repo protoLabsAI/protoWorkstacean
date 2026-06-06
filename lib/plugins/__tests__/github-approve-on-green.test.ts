@@ -1,11 +1,12 @@
 /**
- * Deterministic approve-on-terminal-green (#748).
+ * Deterministic approve-on-terminal-green (#748, #848).
  *
  * Quinn never reliably chooses review_approve on the CI-completion re-dispatch,
  * so the merge-on-green gate never opens. `_handleCiCompletion` now posts a
  * formal APPROVE programmatically when CI is terminal-GREEN and Quinn's latest
- * review is a held COMMENT. These tests cover the pure decision gates plus the
- * orchestration's fire / fall-through behavior with a stubbed GitHub API.
+ * review is a held COMMENT (no blockers) OR a prior CHANGES_REQUESTED (blocker
+ * resolved). These tests cover the pure decision gates plus the orchestration's
+ * fire / fall-through behavior with a stubbed GitHub API.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
@@ -155,12 +156,15 @@ describe("_handleCiCompletion — deterministic approve-on-green", () => {
     expect(captured.approvePosts[0]!.commit_id).toBe(SHA);
   });
 
-  test("(b) terminal-green + prior CHANGES_REQUESTED → no approve (falls through)", async () => {
+  test("(b) terminal-green + prior CHANGES_REQUESTED → posts formal APPROVE (blocker resolved, #848)", async () => {
     const captured = await runCiCompletion({
       reviews: [{ user: { login: "protoquinn[bot]" }, state: "CHANGES_REQUESTED" }],
       checkRuns: [{ status: "completed", conclusion: "success" }],
     });
-    expect(captured.approvePosts.length).toBe(0);
+    expect(captured.approvePosts.length).toBe(1);
+    expect(captured.approvePosts[0]!.event).toBe("APPROVE");
+    expect(captured.approvePosts[0]!.commit_id).toBe(SHA);
+    expect(captured.approvePosts[0]!.body).toContain("blocker resolved");
   });
 
   test("(c) terminal-green + no prior Quinn review → no blind approve (falls through)", async () => {
@@ -174,6 +178,17 @@ describe("_handleCiCompletion — deterministic approve-on-green", () => {
   test("(d) terminal but RED + prior COMMENTED → no approve (falls through)", async () => {
     const captured = await runCiCompletion({
       reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+      checkRuns: [
+        { status: "completed", conclusion: "success" },
+        { status: "completed", conclusion: "failure" },
+      ],
+    });
+    expect(captured.approvePosts.length).toBe(0);
+  });
+
+  test("(f) terminal but RED + prior CHANGES_REQUESTED → no approve (blocker not resolved)", async () => {
+    const captured = await runCiCompletion({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "CHANGES_REQUESTED" }],
       checkRuns: [
         { status: "completed", conclusion: "success" },
         { status: "completed", conclusion: "failure" },

@@ -1049,18 +1049,22 @@ export class GitHubPlugin implements Plugin {
         continue;
       }
 
-      // ── Deterministic approve-on-terminal-green (#748) ───────────────────────
+      // ── Deterministic approve-on-terminal-green (#748, #848) ─────────────────
       // Quinn reliably re-COMMENTs instead of choosing review_approve, so the
       // merge-on-green gate never opens (approvedCount stays 0). When CI is
       // terminal-GREEN and Quinn's latest review is a held COMMENT (no blockers),
       // post the formal APPROVE programmatically rather than re-prompting the LLM.
       //
-      // Fail closed: only the COMMENTED-latest + all-green case auto-approves.
-      // CHANGES_REQUESTED (blockers), an already-APPROVED PR, no prior Quinn
-      // review, or any non-green / unverifiable CI state falls through to the
-      // unchanged LLM re-dispatch below.
+      // A prior CHANGES_REQUESTED + now-green is also auto-approved: the blocker
+      // Quinn raised (typically failing CI) is resolved, so the re-review maps to
+      // PASS, not WARN. Without this, Quinn returns COMMENTED, which does NOT
+      // dismiss the prior CHANGES_REQUESTED → PR stuck in merge-limbo (#848).
+      //
+      // Fail closed: an already-APPROVED PR, no prior Quinn review, or any
+      // non-green / unverifiable CI state falls through to the unchanged LLM
+      // re-dispatch below.
       const latestState = quinnLatestReviewState(reviews ?? undefined);
-      if (latestState === "COMMENTED" && (await this._ciGreen(getToken, owner, repo, headSha))) {
+      if ((latestState === "COMMENTED" || latestState === "CHANGES_REQUESTED") && (await this._ciGreen(getToken, owner, repo, headSha))) {
         // Collapse co-arriving terminal webhooks. GitHub fires check_suite,
         // workflow_run, and check_run completions near-simultaneously; each runs
         // _handleCiCompletion concurrently and reads `reviews` before any has
@@ -1081,18 +1085,21 @@ export class GitHubPlugin implements Plugin {
         this.recentDispatches.set(approveKey, Date.now());
         try {
           const submitter = new GitHubReviewSubmitter(getToken);
+          const isResolvedBlocker = latestState === "CHANGES_REQUESTED";
           await submitter.submitReview(
             owner,
             repo,
             number,
             headSha,
             "APPROVE",
-            "CI terminal-green, no blockers on prior review — auto-approving on green (#748).",
+            isResolvedBlocker
+              ? "CI terminal-green, prior blocker resolved — auto-approving on green (#848)."
+              : "CI terminal-green, no blockers on prior review — auto-approving on green (#748).",
             [],
           );
           log.info(
             `CI-completion (${event}): auto-approved ${owner}/${repo}#${number} @${headSha.slice(0, 7)} ` +
-              `(terminal-green, prior Quinn review COMMENTED) — #748`,
+              `(terminal-green, prior Quinn review ${latestState}${isResolvedBlocker ? ", blocker resolved" : ""})`,
           );
 
           // ── Enable native auto-merge (squash) for one-off PRs ──────────────
