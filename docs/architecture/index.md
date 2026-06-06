@@ -8,7 +8,7 @@ _Architectural deep-dives for every flow in protoWorkstacean. The complement to 
 
 ## What's in here
 
-Nine flows + one cross-cut. Each doc has the same shape:
+Ten flows + one cross-cut. Each doc has the same shape:
 
 - **What & why** — one paragraph
 - **ASCII spine** — terminal-readable shape of the flow
@@ -81,6 +81,7 @@ Everything else — telemetry, dashboard, HITL, fleet health — observes this s
 | 7 | [flow-agent-runtime-telemetry](flow-agent-runtime-telemetry.md) | executor lifecycle | `agent.runtime.activity.*`, `agent.skill.progress.*`, `agent.skill.latency`, `autonomous.outcome.*` |
 | 8 | [flow-a2a-discovery](flow-a2a-discovery.md) | process startup | ExecutorRegistry enrollment |
 | 9 | [flow-dashboard](flow-dashboard.md) | BusHistoryRecorder + API routes | dashboard tiles |
+| 10 | [flow-a2a](flow-a2a.md) | `POST /a2a` (inbound) / `A2AExecutor` (outbound) / `POST /api/a2a/chat` | `agent.skill.response.{cid}` → A2A task events / poll / push callback |
 | ✕ | [chokepoint-invariants](chokepoint-invariants.md) (cross-cut) | every `agent.skill.request` | drop + telemetry, or pass-through |
 
 ---
