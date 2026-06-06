@@ -8,6 +8,7 @@ import { SignalPlugin } from "../lib/plugins/signal";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { A2ADeliveryPlugin } from "../lib/plugins/a2a-delivery";
 import { ControlPlaneRegistrarPlugin } from "./plugins/control-plane-registrar-plugin.ts";
+import { RegistrationStore } from "./storage/registration-store.ts";
 import type { Plugin, } from "../lib/types";
 import { parseEnv } from "./config/env.ts";
 import { isProductionLike, safeKeyEqual } from "../lib/runtime-env.ts";
@@ -153,7 +154,9 @@ const corePlugins: Plugin[] = [
   new SchedulerPlugin(dataDir),
   new A2ADeliveryPlugin(workspaceDir),
   // ADR-0004 P2: sole writer of workspace config for control-plane command.* mutations.
-  new ControlPlaneRegistrarPlugin(workspaceDir),
+  // Backed by a durable RegistrationStore so API-driven a2a registrations
+  // survive a redeploy (the agents.d/ clone is ephemeral) — #850.
+  new ControlPlaneRegistrarPlugin(workspaceDir, new RegistrationStore(`${dataDir}/registrations.db`)),
 ];
 
 for (const plugin of corePlugins) {
