@@ -164,6 +164,9 @@ export class SkillDispatcherPlugin implements Plugin {
    */
   private readonly lastDispatchAt = new Map<string, number>();
 
+  /** Counter for periodic sweep of expired cooldown keys. */
+  private _cooldownDispatchesSinceSweep = 0;
+
   constructor(
     private readonly registry: ExecutorRegistry,
     workspaceDir: string,
@@ -267,9 +270,10 @@ export class SkillDispatcherPlugin implements Plugin {
     const cooldownMs = cooldownMsFor(skill);
     if (cooldownMs > 0) {
       const key = cooldownKeyFor(skill, payload as Record<string, unknown>);
+      const now = Date.now();
       const last = this.lastDispatchAt.get(key);
-      if (last !== undefined && Date.now() - last < cooldownMs) {
-        const elapsed = Date.now() - last;
+      if (last !== undefined && now - last < cooldownMs) {
+        const elapsed = now - last;
         const remaining = cooldownMs - elapsed;
         this.activeExecutions.delete(correlationId);
         const dropMsg = `Cooldown drop: "${key}" dispatched ${elapsed}ms ago (window=${cooldownMs}ms, ${remaining}ms remaining)`;
@@ -284,7 +288,15 @@ export class SkillDispatcherPlugin implements Plugin {
         this._publishResponse(replyTopic, correlationId, undefined, `Cooldown: ${key} (${remaining}ms remaining)`);
         return;
       }
-      this.lastDispatchAt.set(key, Date.now());
+      // Lazy-evict: if the stored timestamp is older than the cooldown window,
+      // the key is no longer useful — delete it to prevent unbounded growth.
+      if (last !== undefined && now - last >= cooldownMs) {
+        this.lastDispatchAt.delete(key);
+      }
+      this.lastDispatchAt.set(key, now);
+      // Sweep: periodically purge any expired keys across the entire map.
+      // Runs at most once per 100 dispatches to avoid O(N) scan on every hit.
+      this._maybeSweepCooldownMap();
     }
 
     log.info(
@@ -889,5 +901,32 @@ export class SkillDispatcherPlugin implements Plugin {
       timestamp: Date.now(),
       payload,
     });
+  }
+
+  /**
+   * Periodically sweep the cooldown map to remove expired keys.
+   * Runs after every 100 cooldown-gated dispatches to prevent unbounded growth.
+   * Max cooldown is 60s (security_triage default), so any key older than that
+   * is safe to evict regardless of which skill it belongs to.
+   */
+  private _maybeSweepCooldownMap(): void {
+    this._cooldownDispatchesSinceSweep++;
+    if (this._cooldownDispatchesSinceSweep < 100) return;
+    this._cooldownDispatchesSinceSweep = 0;
+
+    const now = Date.now();
+    // Max cooldown across all shipped skills is 60s (security_triage).
+    // Any key older than that is expired for every possible skill.
+    const maxCooldownMs = 60_000;
+    let pruned = 0;
+    for (const [key, last] of this.lastDispatchAt) {
+      if (now - last >= maxCooldownMs) {
+        this.lastDispatchAt.delete(key);
+        pruned++;
+      }
+    }
+    if (pruned > 0) {
+      log.info(`cooldown sweep: pruned ${pruned} expired key(s), ${this.lastDispatchAt.size} remaining`);
+    }
   }
 }

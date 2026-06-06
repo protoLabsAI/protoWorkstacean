@@ -413,6 +413,11 @@ export class TaskTracker {
         );
       }
     }
+
+    // Evict immediately after extraction — the set entry has served its
+    // idempotency purpose and serves no further role. This prevents unbounded
+    // growth across the process lifetime.
+    this.publishedDeltaTaskIds.delete(taskId);
   }
 
   private _publishResponse(

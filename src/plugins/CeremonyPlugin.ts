@@ -375,6 +375,12 @@ export class CeremonyPlugin implements Plugin {
       const skillRequestTopic = "agent.skill.request";
       const replyTopic = `agent.skill.response.${context.runId}`;
 
+      // Always use a timeout to guarantee the subscription is torn down.
+      // Without a timeout, ceremonies that set no timeoutMs leak one bus
+      // subscription and a dangling promise per cron tick when no response
+      // is published to the reply topic.
+      const timeoutMs = ceremony.timeoutMs ?? 10 * 60_000; // default: 10 min
+
       const skillResult = await new Promise<string | null>((resolve) => {
         let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -396,13 +402,11 @@ export class CeremonyPlugin implements Plugin {
           resolve(payload?.content ?? null);
         });
 
-        // Set up per-ceremony timeout only if configured
-        if (ceremony.timeoutMs !== undefined) {
-          timeoutTimer = setTimeout(() => {
-            this.bus?.unsubscribe(subId);
-            resolve(null);
-          }, ceremony.timeoutMs);
-        }
+        // Always arm a timeout to guarantee the subscription is torn down.
+        timeoutTimer = setTimeout(() => {
+          this.bus?.unsubscribe(subId);
+          resolve(null);
+        }, timeoutMs);
 
         // Publish skill request
         this.bus!.publish(skillRequestTopic, {
@@ -424,10 +428,10 @@ export class CeremonyPlugin implements Plugin {
         });
       });
 
-      if (skillResult === null && !error && ceremony.timeoutMs !== undefined) {
-        // Per-ceremony timeout fired
+      if (skillResult === null && !error) {
+        // Timeout fired — subscription resolved with null
         status = "timeout";
-        error = `Skill dispatch timed out after ${ceremony.timeoutMs / 1000}s`;
+        error = `Skill dispatch timed out after ${timeoutMs / 1000}s`;
         log.warn(`Skill dispatch timeout for ${ceremony.id} (run ${context.runId})`);
       }
     } catch (err) {
