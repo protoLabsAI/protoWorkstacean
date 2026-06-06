@@ -468,11 +468,13 @@ const pluginRegistry: PluginRegistryEntry[] = [
     // /publish) → Roxy unblock_feature / HITL, bounded + escalating. Subsumes
     // the old pr-remediator (protoMaker now detects stuck PRs as blocked
     // features; non-feature PRs use GitHub-native auto-merge). #776.
+    // Origin-truth check: before escalating, verify linked PR hasn't already
+    // merged — prevents false pages on SHIPPED work.
     name: "feature-remediation",
     condition: () => true,
     factory: async () => {
       const { FeatureRemediationPlugin } = await import("../lib/plugins/feature-remediation.js");
-      return new FeatureRemediationPlugin();
+      return new FeatureRemediationPlugin({ projectRegistry });
     },
   },
   {

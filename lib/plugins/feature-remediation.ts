@@ -18,6 +18,12 @@
  * infinite retry). A `feature.unblocked` event clears the tracker so a feature
  * that recovers and later re-blocks gets a fresh budget.
  *
+ * **Origin-truth check before escalation** — before paging the operator,
+ * check whether the linked PR has already merged. A long-but-successful run
+ * can trip resource caps (runtime, cost) after the work ships. If the PR is
+ * merged, suppress the escalation and log a reconciliation note instead.
+ * This prevents false pages on SHIPPED work.
+ *
  * This SUBSUMES the old pr-remediator: protoMaker now detects stuck PRs (CI red,
  * conflict, fresh-eyes block) as blocked features and emits one canonical kinded
  * signal, instead of workstacean re-deriving PR-pipeline violations and dispatching
@@ -25,7 +31,9 @@
  */
 
 import type { Plugin, EventBus, BusMessage } from "../types.ts";
+import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
 import { getFleetConfig } from "../fleet/fleet-config.ts";
+import { fetchPrState, type PrState } from "../github-pr-state.ts";
 import { logger } from "../log.ts";
 
 const log = logger("feature-remediation");
@@ -63,6 +71,15 @@ interface Tracked {
   escalated: boolean;
 }
 
+export interface FeatureRemediationPluginOptions {
+  /** Overridable clock for tests. */
+  now?: () => number;
+  /** Optional: enables origin-truth checks before escalation. */
+  projectRegistry?: ProjectRegistry;
+  /** Optional: override PR state fetch (for tests). Returns null to skip check. */
+  fetchPrStateFn?: (owner: string, repo: string, prNumber: number) => Promise<PrState | null>;
+}
+
 export class FeatureRemediationPlugin implements Plugin {
   readonly name = "feature-remediation";
   readonly description =
@@ -74,14 +91,22 @@ export class FeatureRemediationPlugin implements Plugin {
   private readonly tracked = new Map<string, Tracked>();
   private sweepTimer?: ReturnType<typeof setInterval>;
   private readonly now: () => number;
+  private readonly projectRegistry: ProjectRegistry | undefined;
+  private readonly fetchPrStateFn: (owner: string, repo: string, prNumber: number) => Promise<PrState | null>;
 
-  constructor(opts: { now?: () => number } = {}) {
+  constructor(opts: FeatureRemediationPluginOptions = {}) {
     this.now = opts.now ?? Date.now;
+    this.projectRegistry = opts.projectRegistry;
+    this.fetchPrStateFn = opts.fetchPrStateFn ?? ((owner, repo, pr) => fetchPrState(owner, repo, pr));
   }
 
   install(bus: EventBus): void {
     this.bus = bus;
-    this.subscriptionIds.push(bus.subscribe("feature.blocked", this.name, (msg) => this._onBlocked(msg)));
+    this.subscriptionIds.push(
+      bus.subscribe("feature.blocked", this.name, (msg) => {
+        void this._onBlocked(msg);
+      }),
+    );
 
     // Terminal or recovery signals — clear the tracker so a later re-block
     // starts with a fresh attempt budget.  `feature.completed` and
@@ -110,7 +135,7 @@ export class FeatureRemediationPlugin implements Plugin {
     return `${p.projectSlug ?? p.projectPath ?? "?"}::${p.featureId}`;
   }
 
-  private _onBlocked(msg: BusMessage): void {
+  private async _onBlocked(msg: BusMessage): Promise<void> {
     const p = (msg.payload ?? {}) as FeatureBlockedPayload;
     if (!p.featureId) {
       log.warn("feature.blocked without featureId — dropping");
@@ -129,12 +154,12 @@ export class FeatureRemediationPlugin implements Plugin {
     this.tracked.set(key, entry);
 
     if (HITL_KINDS.has(kind)) {
-      this._escalate(p, entry, `blocked (${kind}) — needs an operator decision; auto-remediation won't help`);
+      await this._maybeEscalate(p, entry, `blocked (${kind}) — needs an operator decision; auto-remediation won't help`);
       return;
     }
 
     if (entry.attempts >= MAX_ATTEMPTS) {
-      this._escalate(p, entry, `auto-remediation exhausted after ${entry.attempts} attempt(s) (kind=${kind})`);
+      await this._maybeEscalate(p, entry, `auto-remediation exhausted after ${entry.attempts} attempt(s) (kind=${kind})`);
       return;
     }
     if (entry.lastAttemptAt && this.now() - entry.lastAttemptAt < COOLDOWN_MS) {
@@ -178,6 +203,36 @@ export class FeatureRemediationPlugin implements Plugin {
         },
       },
     });
+  }
+
+  /**
+   * Check origin truth before escalating. If the linked PR has already merged,
+   * suppress the escalation — the work shipped, the cap was just tripped by a
+   * long-but-successful run. Also skip if the feature is already done/archived.
+   *
+   * Falls through to `_escalate` only when the work is genuinely incomplete.
+   */
+  private async _maybeEscalate(p: FeatureBlockedPayload, entry: Tracked, why: string): Promise<void> {
+    // Skip if already escalated (one-shot flag).
+    if (entry.escalated) return;
+
+    // Origin-truth check: has the PR already merged?
+    if (p.prNumber && this.projectRegistry) {
+      const project = this.projectRegistry.getBySlug(p.projectSlug ?? "") ??
+        this.projectRegistry.getByPath(p.projectPath ?? "");
+      if (project?.github) {
+        const prState = await this.fetchPrStateFn(project.github.owner, project.github.repo, p.prNumber);
+        if (prState?.merged) {
+          log.info(
+            `${p.featureId} kind=${p.kind} — PR #${p.prNumber} already merged; ` +
+              `suppressing escalation (work shipped, cap tripped by long run)`,
+          );
+          return;
+        }
+      }
+    }
+
+    this._escalate(p, entry, why);
   }
 
   /** Escalate once to the operator; subsequent triggers stay quiet until cleared. */
