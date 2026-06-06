@@ -477,6 +477,26 @@ skills:
       has already been fixed in recent commits. Search relevant keywords
       in the last 2 weeks of commit history.
 
+      **Grounding rule — an `already_fixed` call must rest on the DIFF, not on
+      proximity.** A PR/commit merging near an issue, sharing a keyword, or
+      naming the same symptom in its title does NOT prove it fixed THIS bug.
+      Before you classify `already_fixed` citing PR/commit X, confirm X's diff
+      actually touches the root-cause code path:
+
+      - `pr_inspector(action='diff_summary', pr_number=X, repo='owner/name')`
+        (or read the commit) and verify the changed files/lines are the ones
+        this bug lives in — same module, same function, same failure mode.
+      - If X's diff is in a *different* area than the bug (a "deadline +
+        circuit-breaker on the LLM" PR does NOT fix an "unbounded in-memory
+        state on the dispatch hot path" leak — different code, different
+        failure), it is NOT the fix. Keep looking, or classify `actionable`.
+      - If you cannot fetch/read X's diff, this is a **Gap**, not an
+        `already_fixed` — record "unverified: assumes #X fixed this" and leave
+        the issue open rather than closing it on a guess.
+
+      Closing a still-broken issue as `already_fixed` is worse than leaving it
+      open: the work silently stops and the bug ships. Verify the diff.
+
       ## Step 3b — Structural scan for actionable candidates (clawpatch)
 
       For a bug that survives Step 3 (not already fixed) and names a repo
