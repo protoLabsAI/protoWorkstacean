@@ -1,9 +1,9 @@
 id: board.cleanup
 name: Board Cleanup
 schedule: "0 8 * * *"
-# board_audit is advertised by Quinn — broadcasting to [all] caused 404s on
-# every other agent each fire. Route to Quinn directly.
-skill: board_audit
+# board_audit was dead (not defined on any agent). Quinn's bug_triage is the
+# real board-issue triage skill — repointed here so this ceremony actually runs.
+skill: bug_triage
 targets:
   - quinn
 notifyChannel: ""

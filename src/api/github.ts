@@ -548,6 +548,197 @@ export function createRoutes(ctx: ApiContext): Route[] {
   // Aggregate open issue counts per repo for issue-tracking dashboards.
   // Polls `/repos/{repo}/issues?state=open` and classifies by label priority.
 
+  /** Shared guard: reject mutations on repos not in the project registry. */
+  function requireManagedRepo(repo: string): Response | null {
+    const managed = repos();
+    if (!managed.includes(repo)) {
+      return Response.json(
+        { success: false, error: `Repo "${repo}" is not in the project registry` },
+        { status: 403 },
+      );
+    }
+    return null;
+  }
+
+  /** Shared guard: reject if API key configured but doesn't match. */
+  function requireApiKey(req: Request): Response | null {
+    if (ctx.apiKey && req.headers.get("X-API-Key") !== ctx.apiKey) {
+      return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    return null;
+  }
+
+  async function handleCloseIssue(req: Request): Promise<Response> {
+    const authErr = requireApiKey(req);
+    if (authErr) return authErr;
+    if (!GITHUB_TOKEN) return Response.json({ success: false, error: "GITHUB_TOKEN not set" }, { status: 500 });
+
+    let body: Record<string, unknown>;
+    try { body = (await req.json()) as Record<string, unknown>; }
+    catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
+
+    const repo = body.repo as string | undefined;
+    const number = body.number as number | undefined;
+    const comment = body.comment as string | undefined;
+    const reason = (body.reason as "completed" | "not_planned") ?? "completed";
+
+    if (!repo || typeof number !== "number") {
+      return Response.json({ success: false, error: "repo and number are required" }, { status: 400 });
+    }
+
+    const forbidden = requireManagedRepo(repo);
+    if (forbidden) return forbidden;
+
+    try {
+      // Post explanatory comment first (non-fatal if it fails)
+      if (comment && comment.trim()) {
+        try {
+          const commentResp = await ghHttp.fetch(
+            `https://api.github.com/repos/${repo}/issues/${number}/comments`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/vnd.github+json",
+                Authorization: `Bearer ${GITHUB_TOKEN}`,
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+              body: JSON.stringify({ body: comment }),
+            },
+          );
+          if (!commentResp.ok) {
+            log.warn(`close_issue: comment failed (${commentResp.status}), proceeding with close`);
+          }
+        } catch (e) {
+          log.warn(`close_issue: comment failed (${String(e).slice(0, 200)}), proceeding with close`);
+        }
+      }
+
+      const closeBody: Record<string, unknown> = { state: "closed", state_reason: reason };
+      const resp = await ghHttp.fetch(`https://api.github.com/repos/${repo}/issues/${number}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        body: JSON.stringify(closeBody),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "(no body)");
+        return Response.json({ success: false, error: `GitHub API: ${resp.status} ${errText}` }, { status: resp.status });
+      }
+
+      return Response.json({
+        success: true,
+        data: { repo, number, reason },
+      });
+    } catch (e) {
+      return Response.json({ success: false, error: String(e) }, { status: 502 });
+    }
+  }
+
+  async function handleCommentIssue(req: Request): Promise<Response> {
+    const authErr = requireApiKey(req);
+    if (authErr) return authErr;
+    if (!GITHUB_TOKEN) return Response.json({ success: false, error: "GITHUB_TOKEN not set" }, { status: 500 });
+
+    let body: Record<string, unknown>;
+    try { body = (await req.json()) as Record<string, unknown>; }
+    catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
+
+    const repo = body.repo as string | undefined;
+    const number = body.number as number | undefined;
+    const body_ = body.body as string | undefined;
+
+    if (!repo || typeof number !== "number" || !body_) {
+      return Response.json({ success: false, error: "repo, number, and body are required" }, { status: 400 });
+    }
+
+    const forbidden = requireManagedRepo(repo);
+    if (forbidden) return forbidden;
+
+    try {
+      const resp = await ghHttp.fetch(
+        `https://api.github.com/repos/${repo}/issues/${number}/comments`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${GITHUB_TOKEN}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ body: body_ }),
+        },
+      );
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "(no body)");
+        return Response.json({ success: false, error: `GitHub API: ${resp.status} ${errText}` }, { status: resp.status });
+      }
+
+      const result = await resp.json() as { html_url: string };
+      return Response.json({
+        success: true,
+        data: { repo, number, html_url: result.html_url },
+      });
+    } catch (e) {
+      return Response.json({ success: false, error: String(e) }, { status: 502 });
+    }
+  }
+
+  async function handleLabelIssue(req: Request): Promise<Response> {
+    const authErr = requireApiKey(req);
+    if (authErr) return authErr;
+    if (!GITHUB_TOKEN) return Response.json({ success: false, error: "GITHUB_TOKEN not set" }, { status: 500 });
+
+    let body: Record<string, unknown>;
+    try { body = (await req.json()) as Record<string, unknown>; }
+    catch { return Response.json({ success: false, error: "Invalid JSON" }, { status: 400 }); }
+
+    const repo = body.repo as string | undefined;
+    const number = body.number as number | undefined;
+    const labels = body.labels as string[] | undefined;
+
+    if (!repo || typeof number !== "number" || !labels) {
+      return Response.json({ success: false, error: "repo, number, and labels are required" }, { status: 400 });
+    }
+
+    const forbidden = requireManagedRepo(repo);
+    if (forbidden) return forbidden;
+
+    try {
+      const resp = await ghHttp.fetch(
+        `https://api.github.com/repos/${repo}/issues/${number}/labels`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${GITHUB_TOKEN}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ names: labels }),
+        },
+      );
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "(no body)");
+        return Response.json({ success: false, error: `GitHub API: ${resp.status} ${errText}` }, { status: resp.status });
+      }
+
+      return Response.json({
+        success: true,
+        data: { repo, number, labels },
+      });
+    } catch (e) {
+      return Response.json({ success: false, error: String(e) }, { status: 502 });
+    }
+  }
+
   async function handleGetGithubIssues(): Promise<Response> {
     const repoList = repos();
     if (!repoList.length || !GITHUB_TOKEN) return Response.json({
@@ -713,5 +904,8 @@ export function createRoutes(ctx: ApiContext): Route[] {
     { method: "GET",  path: "/api/github-issues",      handler: () => handleGetGithubIssues() },
     { method: "GET",  path: "/api/recent-activity",    handler: (req) => handleGetRecentActivity(req) },
     { method: "POST", path: "/api/github/issues",      handler: (req) => handleCreateIssue(req) },
+    { method: "POST", path: "/api/github/issues/close",      handler: (req) => handleCloseIssue(req) },
+    { method: "POST", path: "/api/github/issues/comment",    handler: (req) => handleCommentIssue(req) },
+    { method: "POST", path: "/api/github/issues/label",      handler: (req) => handleLabelIssue(req) },
   ];
 }

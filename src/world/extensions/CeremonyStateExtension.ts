@@ -6,12 +6,8 @@
  * state, then publishes a `ceremony.state.snapshot` update to the EventBus.
  *
  * IMPORTANT: This snapshot is NOT a WorldState — it's a CeremoniesState payload
- * scoped to the ceremony subsystem. It MUST NOT publish on the `world.state.#`
- * namespace because GoalEvaluatorPlugin subscribes there and expects a full
- * WorldState shape ({ domains, extensions, ... }). A previous version published
- * on `world.state.snapshot`, which caused every loaded goal to fire a
- * `Selector "..." not found in world state` violation each time a ceremony
- * completed (every 15min cron tick). See issue #424.
+ * scoped to the ceremony subsystem. It publishes on `ceremony.state.snapshot`,
+ * not `world.state.#` (see issue #424).
  *
  * Consumers can read CeremoniesState to get:
  *   - registered ceremonies
