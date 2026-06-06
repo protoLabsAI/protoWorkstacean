@@ -19,6 +19,7 @@ import type { Route, ApiContext } from "./types.ts";
 import { LinearClient, type LinearPriority } from "../../lib/linear-client.ts";
 import { getLinearAvaTokenManager } from "../../lib/linear/ava-oauth-token-manager.ts";
 import { LinearAgentActivityClient } from "../../lib/linear/agent-activity-client.ts";
+import { normalizeIssueTitle as normalizeLinearTitle } from "./github.ts";
 import { logger } from "../../lib/log.ts";
 
 const log = logger("api-linear");
@@ -168,6 +169,44 @@ export function createRoutes(ctx: ApiContext): Route[] {
           return Response.json({ success: false, error: `invalid priority — must be one of urgent/high/medium/low/none` }, { status: 400 });
         }
         return withClient(async (c) => {
+          // ── Dedup guard ──────────────────────────────────────────────────────
+          // Port of the GitHub title-normalized dedup. Search for recent open
+          // issues in the same team with a matching normalized title. Like the
+          // GitHub path, this prevents any future ceremony/loop wired to this
+          // endpoint from duplicating every run.
+          const wantTitle = normalizeLinearTitle(input.title!);
+          try {
+            const recent = await c.listIssues({
+              teamKey: input.teamKey!,
+              max: 50,
+            });
+            const dedupWindowMs = 6 * 60 * 60 * 1000;
+            const now = Date.now();
+            const match = recent.find((i) => {
+              if (normalizeLinearTitle(i.title) !== wantTitle) return false;
+              // Only block on open issues, or recently created closed issues
+              if (i.state.toLowerCase() !== "cancelled" && i.state.toLowerCase() !== "done") return true;
+              const age = now - new Date(i.updatedAt).getTime();
+              return age < dedupWindowMs;
+            });
+            if (match) {
+              log.info(
+                `linear create dedup: skipping "${input.title}" — existing ${match.identifier} (${match.state}) matches`,
+              );
+              return {
+                id: match.id,
+                teamKey: input.teamKey,
+                title: input.title,
+                deduped: true,
+                existingIdentifier: match.identifier,
+                existingState: match.state,
+              };
+            }
+          } catch (e) {
+            // Dedup is best-effort — proceed with create on failure
+            log.warn(`linear create dedup lookup failed (proceeding): ${String(e).slice(0, 200)}`);
+          }
+
           const id = await c.createIssue({
             teamKey: input.teamKey!,
             title: input.title!,

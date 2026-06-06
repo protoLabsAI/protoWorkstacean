@@ -402,6 +402,45 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
         }),
       },
     ),
+    close_github_issue: tool(
+      async (input) => JSON.stringify(await http.post("/api/github/issues/close", input)),
+      {
+        name: "close_github_issue",
+        description:
+          "Close an existing GitHub issue on a managed repo. Optionally posts a comment explaining the close. " +
+          "Use `reason: 'not_planned'` for stale, superseded, or resolved-differently closes. Default is 'completed'.",
+        schema: z.object({
+          repo: z.string().describe("Repository in owner/name format."),
+          number: z.number().int().describe("Issue number."),
+          comment: z.string().optional().describe("Explanatory comment posted before closing (recommended)."),
+          reason: z.enum(["completed", "not_planned"]).optional().describe("Close reason: 'completed' (default) or 'not_planned' (stale/superseded)."),
+        }),
+      },
+    ),
+    comment_github_issue: tool(
+      async (input) => JSON.stringify(await http.post("/api/github/issues/comment", input)),
+      {
+        name: "comment_github_issue",
+        description: "Post a comment on an existing GitHub issue.",
+        schema: z.object({
+          repo: z.string().describe("Repository in owner/name format."),
+          number: z.number().int().describe("Issue number."),
+          body: z.string().describe("Comment text."),
+        }),
+      },
+    ),
+    label_github_issue: tool(
+      async (input) => JSON.stringify(await http.post("/api/github/issues/label", input)),
+      {
+        name: "label_github_issue",
+        description: "Set (replace all) labels on an existing GitHub issue. Replaces any existing labels with the provided list.",
+        schema: z.object({
+          repo: z.string().describe("Repository in owner/name format."),
+          number: z.number().int().describe("Issue number."),
+          labels: z.array(z.string()).describe("Full list of labels to set (replaces existing)."),
+        }),
+      },
+    ),
     manage_cron: tool(
       async (input) => {
         if (input.action === "list") return JSON.stringify(await http.get("/api/ceremonies"));

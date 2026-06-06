@@ -1,0 +1,19 @@
+id: roxy.board-pulse
+name: "Roxy Board Pulse"
+description: >
+  Hourly: dispatch board_sweep to roxy so she sweeps the fleet, keeps auto-mode
+  topped up on ready projects, and REACTS to board events — PR/CI → Quinn
+  pr_review, blocked/escalated → fix-or-escalate, stuck in_progress → steer/reset,
+  auto-mode paused → diagnose/restart, bug → Quinn bug_triage — then updates her
+  ledger. This is the review→merge half of the factory loop: it's why agent PRs
+  get reviewed + merged instead of piling up.
+
+  Targets ONLY roxy — never [all] (agents lacking board_sweep 404 at the
+  dispatcher, per the disabled agent-health/board.retro). Durable home is
+  protoWorkstacean#817; this lives in the deploy clone (hot-reloaded).
+schedule: "0 * * * *"
+skill: board_sweep
+targets:
+  - roxy
+notifyChannel: ""
+enabled: true
