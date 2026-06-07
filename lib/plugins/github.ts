@@ -1064,7 +1064,32 @@ export class GitHubPlugin implements Plugin {
       // non-green / unverifiable CI state falls through to the unchanged LLM
       // re-dispatch below.
       const latestState = quinnLatestReviewState(reviews ?? undefined);
+      let autoApprove = false;
+      let isResolvedBlocker = false;
       if ((latestState === "COMMENTED" || latestState === "CHANGES_REQUESTED") && (await this._ciGreen(getToken, owner, repo, headSha))) {
+        if (latestState === "CHANGES_REQUESTED") {
+          // A prior block only clears when the *requested change is in* — not
+          // on CI-green alone. A code finding (auth bypass, data-loss, logic
+          // bug) leaves an unresolved review thread that green CI doesn't
+          // resolve; a CI-only block leaves none. Gate on unresolved threads
+          // (#858). Fail safe: unknown thread state → don't auto-clear; defer
+          // to the LLM re-review below.
+          const unresolved = await this._hasUnresolvedReviewThreads(getToken, owner, repo, number);
+          if (unresolved === false) {
+            autoApprove = true;
+            isResolvedBlocker = true;
+          } else {
+            log.info(
+              `CI-completion (${event}): ${owner}/${repo}#${number} prior CHANGES_REQUESTED + green but ` +
+                `${unresolved === null ? "review-thread state unverifiable" : "unresolved review threads remain"} ` +
+                `— not auto-clearing the block, deferring to re-review (#858)`,
+            );
+          }
+        } else {
+          autoApprove = true;
+        }
+      }
+      if (autoApprove) {
         // Collapse co-arriving terminal webhooks. GitHub fires check_suite,
         // workflow_run, and check_run completions near-simultaneously; each runs
         // _handleCiCompletion concurrently and reads `reviews` before any has
@@ -1085,7 +1110,6 @@ export class GitHubPlugin implements Plugin {
         this.recentDispatches.set(approveKey, Date.now());
         try {
           const submitter = new GitHubReviewSubmitter(getToken);
-          const isResolvedBlocker = latestState === "CHANGES_REQUESTED";
           await submitter.submitReview(
             owner,
             repo,
@@ -1210,6 +1234,46 @@ export class GitHubPlugin implements Plugin {
       | { check_runs?: Array<Record<string, unknown>> }
       | null;
     return allChecksGreen(data?.check_runs);
+  }
+
+  /**
+   * True if the PR has any unresolved review thread. Used to decide whether a
+   * prior CHANGES_REQUESTED is actually resolved before auto-clearing it on
+   * green (#858) — a code finding leaves an unresolved thread; a CI-only block
+   * leaves none. Thread-resolution state is GraphQL-only (REST doesn't expose
+   * it). Returns null when it can't be determined (auth/network/GraphQL error),
+   * and the caller treats null as "don't auto-clear" (fail safe).
+   */
+  private async _hasUnresolvedReviewThreads(
+    getToken: (owner: string, repo: string) => Promise<string>,
+    owner: string,
+    repo: string,
+    number: number,
+  ): Promise<boolean | null> {
+    try {
+      const token = await getToken(owner, repo);
+      const query =
+        "query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){" +
+        "pullRequest(number:$num){reviewThreads(first:100){nodes{isResolved}}}}}";
+      const resp = await fetch("https://api.github.com/graphql", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "User-Agent": "protoWorkstacean/1.0",
+        },
+        body: JSON.stringify({ query, variables: { owner, repo, num: number } }),
+      });
+      if (!resp.ok) return null;
+      const json = (await resp.json()) as {
+        data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: Array<{ isResolved?: boolean }> } } } };
+      };
+      const nodes = json.data?.repository?.pullRequest?.reviewThreads?.nodes;
+      if (!Array.isArray(nodes)) return null;
+      return nodes.some((n) => n?.isResolved === false);
+    } catch {
+      return null;
+    }
   }
 
   /**
