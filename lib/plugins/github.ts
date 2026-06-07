@@ -1049,22 +1049,45 @@ export class GitHubPlugin implements Plugin {
         continue;
       }
 
-      // ── Deterministic approve-on-terminal-green (#748, #848) ─────────────────
+      // ── Deterministic approve-on-terminal-green (#748, #848, #856) ──────────
       // Quinn reliably re-COMMENTs instead of choosing review_approve, so the
       // merge-on-green gate never opens (approvedCount stays 0). When CI is
       // terminal-GREEN and Quinn's latest review is a held COMMENT (no blockers),
       // post the formal APPROVE programmatically rather than re-prompting the LLM.
       //
-      // A prior CHANGES_REQUESTED + now-green is also auto-approved: the blocker
-      // Quinn raised (typically failing CI) is resolved, so the re-review maps to
-      // PASS, not WARN. Without this, Quinn returns COMMENTED, which does NOT
-      // dismiss the prior CHANGES_REQUESTED → PR stuck in merge-limbo (#848).
+      // A prior CHANGES_REQUESTED + now-green also auto-approves, but only when
+      // there are **no unresolved review threads** — a code finding (auth bypass,
+      // data-loss) that stands unresolved should not be cleared by CI-green alone.
+      // CI-color isn't enough to discriminate (a typecheck failure is also tagged
+      // CRITICAL), so the clean signal is orthogonal: `reviewThreads.isResolved`.
+      // Thread state unknown (API error) → conservative: do NOT auto-clear.
       //
       // Fail closed: an already-APPROVED PR, no prior Quinn review, or any
       // non-green / unverifiable CI state falls through to the unchanged LLM
       // re-dispatch below.
       const latestState = quinnLatestReviewState(reviews ?? undefined);
-      if ((latestState === "COMMENTED" || latestState === "CHANGES_REQUESTED") && (await this._ciGreen(getToken, owner, repo, headSha))) {
+      const isGreen = await this._ciGreen(getToken, owner, repo, headSha);
+
+      // CHANGES_REQUESTED path: also require no unresolved threads (#856 follow-up)
+      let mayClearBlocker = false;
+      if (latestState === "CHANGES_REQUESTED" && isGreen) {
+        const unresolved = await this._hasUnresolvedThreads(getToken, owner, repo, number);
+        if (unresolved === false) {
+          mayClearBlocker = true;
+        } else if (unresolved === true) {
+          log.info(
+            `CI-completion (${event}): ${owner}/${repo}#${number} — CHANGES_REQUESTED + green ` +
+              `but unresolved threads remain, NOT auto-approving`,
+          );
+        } else {
+          log.info(
+            `CI-completion (${event}): ${owner}/${repo}#${number} — CHANGES_REQUESTED + green ` +
+              `but thread state unknown (API error), NOT auto-approving (conservative)`,
+          );
+        }
+      }
+
+      if ((latestState === "COMMENTED" && isGreen) || (latestState === "CHANGES_REQUESTED" && mayClearBlocker)) {
         // Collapse co-arriving terminal webhooks. GitHub fires check_suite,
         // workflow_run, and check_run completions near-simultaneously; each runs
         // _handleCiCompletion concurrently and reads `reviews` before any has
@@ -1210,6 +1233,60 @@ export class GitHubPlugin implements Plugin {
       | { check_runs?: Array<Record<string, unknown>> }
       | null;
     return allChecksGreen(data?.check_runs);
+  }
+
+  /**
+   * Check for unresolved review threads on a PR via GitHub GraphQL (#856 follow-up).
+   *
+   * Returns `true` if unresolved threads exist, `false` if all resolved,
+   * `undefined` on any API error (conservative: treat unknown as "do not clear").
+   */
+  private async _hasUnresolvedThreads(
+    getToken: (owner: string, repo: string) => Promise<string>,
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<boolean | undefined> {
+    try {
+      const token = await getToken(owner, repo);
+      const query = `query($o: String!, $r: String!, $n: Int!) {
+        repository(owner: $o, name: $r) {
+          pullRequest(number: $n) {
+            reviewThreads(first: 10, states: UNRESOLVED) { totalCount }
+          }
+        }
+      }`;
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch("https://api.github.com/graphql", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Accept: "application/vnd.github+json",
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ query, variables: { o: owner, r: repo, n: prNumber } }),
+        }),
+      );
+      if (!res.ok) {
+        log.warn(`GraphQL reviewThreads → ${res.status} for ${owner}/${repo}#${prNumber}`);
+        return undefined;
+      }
+      const data = (await res.json()) as {
+        errors?: Array<{ message: string }>;
+        data?: { repository?: { pullRequest?: { reviewThreads?: { totalCount: number } } } };
+      };
+      if (data.errors?.length) {
+        log.warn(`GraphQL reviewThreads error: ${data.errors[0]?.message}`);
+        return undefined;
+      }
+      const count = data?.data?.repository?.pullRequest?.reviewThreads?.totalCount ?? 0;
+      return count > 0;
+    } catch (err) {
+      log.error(`reviewThreads check failed for ${owner}/${repo}#${prNumber}`, { err });
+      return undefined;
+    }
   }
 
   /**

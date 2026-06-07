@@ -81,6 +81,10 @@ interface StubOpts {
   /** Returns the check-runs body, or a 403 Response to simulate the CiAccessError path. */
   checkRuns?: Array<Record<string, unknown>>;
   checkRunsStatus?: number; // default 200
+  /** Unresolved review thread count for GraphQL query (CHANGES_REQUESTED path). Default: 0 (no unresolved). */
+  reviewThreadsTotalCount?: number;
+  /** Simulate GraphQL API error for thread check. */
+  reviewThreadsError?: boolean;
 }
 
 /** Records every POST .../reviews submission so a test can assert the APPROVE. */
@@ -124,6 +128,21 @@ function stubFetch(opts: StubOpts): Captured {
       captured.approvePosts.push(JSON.parse(String(init?.body ?? "{}")));
       return json({ id: 999 });
     }
+    // GraphQL reviewThreads check (CHANGES_REQUESTED path, #856 follow-up)
+    if (url.includes("/graphql") && method === "POST") {
+      if (opts.reviewThreadsError) return json({ message: "GraphQL error" }, 500);
+      return json({
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                totalCount: opts.reviewThreadsTotalCount ?? 0,
+              },
+            },
+          },
+        },
+      });
+    }
     throw new Error(`unexpected fetch in test: ${method} ${url}`);
   }) as typeof fetch;
 
@@ -156,15 +175,34 @@ describe("_handleCiCompletion — deterministic approve-on-green", () => {
     expect(captured.approvePosts[0]!.commit_id).toBe(SHA);
   });
 
-  test("(b) terminal-green + prior CHANGES_REQUESTED → posts formal APPROVE (blocker resolved, #848)", async () => {
+  test("(b) terminal-green + prior CHANGES_REQUESTED + no unresolved threads → posts formal APPROVE (#848, #856)", async () => {
     const captured = await runCiCompletion({
       reviews: [{ user: { login: "protoquinn[bot]" }, state: "CHANGES_REQUESTED" }],
       checkRuns: [{ status: "completed", conclusion: "success" }],
+      reviewThreadsTotalCount: 0,
     });
     expect(captured.approvePosts.length).toBe(1);
     expect(captured.approvePosts[0]!.event).toBe("APPROVE");
     expect(captured.approvePosts[0]!.commit_id).toBe(SHA);
     expect(captured.approvePosts[0]!.body).toContain("blocker resolved");
+  });
+
+  test("(b2) terminal-green + prior CHANGES_REQUESTED + unresolved threads → no approve (code finding stands, #856)", async () => {
+    const captured = await runCiCompletion({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "CHANGES_REQUESTED" }],
+      checkRuns: [{ status: "completed", conclusion: "success" }],
+      reviewThreadsTotalCount: 1,
+    });
+    expect(captured.approvePosts.length).toBe(0);
+  });
+
+  test("(b3) terminal-green + prior CHANGES_REQUESTED + thread API error → no approve (conservative, #856)", async () => {
+    const captured = await runCiCompletion({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "CHANGES_REQUESTED" }],
+      checkRuns: [{ status: "completed", conclusion: "success" }],
+      reviewThreadsError: true,
+    });
+    expect(captured.approvePosts.length).toBe(0);
   });
 
   test("(c) terminal-green + no prior Quinn review → no blind approve (falls through)", async () => {
