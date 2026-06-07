@@ -72,6 +72,35 @@ export async function ensureCollection(
 }
 
 /**
+ * Return a collection's configured vector size, or null if it doesn't exist or
+ * Qdrant is unavailable. Used to detect an embedding-dimension change so a stale
+ * collection can be recreated — Qdrant cannot resize vectors in place.
+ */
+export async function getCollectionVectorSize(name: string): Promise<number | null> {
+  try {
+    const res = await http.fetch(`${QDRANT_URL}/collections/${name}`, { method: "GET" });
+    if (!res.ok) return null; // 404 (absent) or unavailable
+    const data = await res.json() as {
+      result?: { config?: { params?: { vectors?: { size?: number } } } };
+    };
+    return data.result?.config?.params?.vectors?.size ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Delete a collection. Returns true on success or if it was already absent. */
+export async function deleteCollection(name: string): Promise<boolean> {
+  try {
+    const res = await http.fetch(`${QDRANT_URL}/collections/${name}`, { method: "DELETE" });
+    return res.status === 200 || res.status === 404;
+  } catch (err) {
+    log.error(`deleteCollection(${name}) error`, { err });
+    return false;
+  }
+}
+
+/**
  * List all collection names. Returns empty array if Qdrant is unavailable.
  */
 export async function listCollections(): Promise<string[]> {

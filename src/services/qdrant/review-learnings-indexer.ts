@@ -8,7 +8,7 @@
 
 import { upsertPoints, searchPoints } from "./client.ts";
 import { COLLECTION_REVIEW_LEARNINGS } from "./collections.ts";
-import { embed } from "../embeddings/ollama-client.ts";
+import { embed } from "../embeddings/gateway-embed.ts";
 
 export interface DismissalEvent {
   repo: string;
