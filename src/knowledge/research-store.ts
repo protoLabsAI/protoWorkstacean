@@ -7,7 +7,7 @@
  * two ranked lists with Reciprocal Rank Fusion — the combination that, per
  * protoResearcher, fixes the failure modes of either signal alone.
  *
- * Embeddings come from the existing Ollama client. The vector half is
+ * Embeddings come from the gateway (qwen3-embedding via gateway-embed.ts). The vector half is
  * best-effort: if the embedding service is down (embed returns null) we simply
  * store the chunk without a vector and degrade to keyword-only search, never
  * blocking ingestion. Same file as the rest of the knowledge layer.
