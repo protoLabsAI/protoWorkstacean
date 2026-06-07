@@ -2,13 +2,13 @@
  * PR history indexer — indexes merged PR diff chunks into quinn-pr-history.
  *
  * Called on PR merge webhook. For each file chunk in the diff:
- *   1. Embed the chunk text via Ollama
+ *   1. Embed the chunk text via the gateway (qwen3-embedding)
  *   2. Store to Qdrant with metadata: repo, pr_number, file, decision, merged_at, pr_url
  */
 
 import { upsertPoints } from "./client.ts";
 import { COLLECTION_PR_HISTORY } from "./collections.ts";
-import { embed } from "../embeddings/ollama-client.ts";
+import { embed } from "../embeddings/gateway-embed.ts";
 import type { DiffChunk } from "../diff/chunker.ts";
 import type { PRMetadata, ReviewDecision } from "../github/diff-fetcher.ts";
 import { logger } from "../../../lib/log.ts";

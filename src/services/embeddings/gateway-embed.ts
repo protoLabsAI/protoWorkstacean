@@ -17,7 +17,9 @@ const log = logger("gateway-embed");
 
 const GATEWAY_URL = process.env.LLM_GATEWAY_URL ?? process.env.OPENAI_BASE_URL ?? "http://gateway:4000/v1";
 const API_KEY = process.env.OPENAI_API_KEY ?? "";
-const EMBED_MODEL = process.env.RESEARCH_EMBED_MODEL ?? "text-embedding-3-small";
+// The fleet's shared embedding model: `qwen3-embedding` (Qwen3-Embedding-0.6B,
+// 1024-dim) served by the gateway. `RESEARCH_EMBED_MODEL` kept for back-compat.
+const EMBED_MODEL = process.env.EMBED_MODEL ?? process.env.RESEARCH_EMBED_MODEL ?? "qwen3-embedding";
 const TIMEOUT_MS = 15_000;
 
 interface EmbeddingsResponse {
@@ -55,4 +57,36 @@ export async function gatewayEmbed(text: string): Promise<number[] | null> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ── Drop-in API (replaces the retired ollama-client.ts) ──────────────────────
+// The Qdrant indexers/retrievers and the review low-signal filter imported
+// `embed` / `embedMany` from ollama-client. They now embed through the gateway
+// with identical signatures, so only the import path changes.
+
+/** Embed one text through the gateway. Returns the vector, or null on failure. */
+export const embed = gatewayEmbed;
+
+/**
+ * Embed multiple texts, skipping failures. Returns `{ text, vector }` for each
+ * success (failed chunks omitted), warning if the failure rate gets high.
+ */
+export async function embedMany(
+  texts: string[],
+): Promise<Array<{ text: string; vector: number[] }>> {
+  const results: Array<{ text: string; vector: number[] }> = [];
+  let failureCount = 0;
+  for (const text of texts) {
+    const vector = await gatewayEmbed(text);
+    if (vector !== null) {
+      results.push({ text, vector });
+    } else {
+      failureCount++;
+      const total = results.length + failureCount;
+      if (total >= 10 && failureCount / total > 0.1) {
+        log.warn(`High embedding failure rate: ${failureCount}/${total}`);
+      }
+    }
+  }
+  return results;
 }

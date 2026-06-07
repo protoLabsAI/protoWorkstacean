@@ -8,7 +8,7 @@
 
 import { searchPoints } from "../qdrant/client.ts";
 import { COLLECTION_REVIEW_LEARNINGS } from "../qdrant/collections.ts";
-import { embed } from "../embeddings/ollama-client.ts";
+import { embed } from "../embeddings/gateway-embed.ts";
 
 export interface LowSignalCheckResult {
   isLowSignal: boolean;

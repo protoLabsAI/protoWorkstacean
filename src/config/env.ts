@@ -111,8 +111,7 @@ export const EnvSchema = z
     // Vector memory
     QDRANT_URL:         z.string().optional(),
     QDRANT_VECTOR_SIZE: z.string().optional(),
-    OLLAMA_URL:         z.string().optional(),
-    OLLAMA_EMBED_MODEL: z.string().optional(),
+    EMBED_MODEL:        z.string().optional(),
     REDIS_URL:          z.string().optional(),
 
     // Router

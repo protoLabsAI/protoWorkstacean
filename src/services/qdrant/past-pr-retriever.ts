@@ -5,7 +5,7 @@
 
 import { searchPoints } from "./client.ts";
 import { COLLECTION_PR_HISTORY } from "./collections.ts";
-import { embed } from "../embeddings/ollama-client.ts";
+import { embed } from "../embeddings/gateway-embed.ts";
 
 const PAST_PR_LIMIT = 3;
 

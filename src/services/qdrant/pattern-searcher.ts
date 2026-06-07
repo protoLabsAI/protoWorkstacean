@@ -5,7 +5,7 @@
 
 import { searchPoints } from "./client.ts";
 import { COLLECTION_CODE_PATTERNS } from "./collections.ts";
-import { embed } from "../embeddings/ollama-client.ts";
+import { embed } from "../embeddings/gateway-embed.ts";
 import type { ExtractedSymbol } from "../diff/symbol-extractor.ts";
 
 const TOP_K = 5;
