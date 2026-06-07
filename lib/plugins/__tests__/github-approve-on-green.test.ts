@@ -81,6 +81,12 @@ interface StubOpts {
   /** Returns the check-runs body, or a 403 Response to simulate the CiAccessError path. */
   checkRuns?: Array<Record<string, unknown>>;
   checkRunsStatus?: number; // default 200
+  /**
+   * Review-thread resolution for the GraphQL gate (#858):
+   *   true  → an unresolved thread remains, false → all resolved/none,
+   *   null  → GraphQL errors (unknown). Default false (no unresolved threads).
+   */
+  threadsUnresolved?: boolean | null;
 }
 
 /** Records every POST .../reviews submission so a test can assert the APPROVE. */
@@ -119,6 +125,13 @@ function stubFetch(opts: StubOpts): Captured {
       if (status !== 200) return json({ message: "Forbidden" }, status);
       return json({ check_runs: opts.checkRuns ?? [] });
     }
+    // GraphQL review-thread resolution (#858 gate for CHANGES_REQUESTED)
+    if (url.includes("/graphql") && method === "POST") {
+      const u = opts.threadsUnresolved === undefined ? false : opts.threadsUnresolved;
+      if (u === null) return json({ message: "error" }, 500); // unknown
+      const nodes = u ? [{ isResolved: false }] : [{ isResolved: true }];
+      return json({ data: { repository: { pullRequest: { reviewThreads: { nodes } } } } });
+    }
     // APPROVE submission (POST .../reviews) via GitHubReviewSubmitter
     if (url.includes(`/pulls/${PR}/reviews`) && method === "POST") {
       captured.approvePosts.push(JSON.parse(String(init?.body ?? "{}")));
@@ -156,15 +169,34 @@ describe("_handleCiCompletion — deterministic approve-on-green", () => {
     expect(captured.approvePosts[0]!.commit_id).toBe(SHA);
   });
 
-  test("(b) terminal-green + prior CHANGES_REQUESTED → posts formal APPROVE (blocker resolved, #848)", async () => {
+  test("(b) terminal-green + prior CHANGES_REQUESTED + no unresolved threads → APPROVE (blocker resolved, #848/#858)", async () => {
     const captured = await runCiCompletion({
       reviews: [{ user: { login: "protoquinn[bot]" }, state: "CHANGES_REQUESTED" }],
       checkRuns: [{ status: "completed", conclusion: "success" }],
+      threadsUnresolved: false,
     });
     expect(captured.approvePosts.length).toBe(1);
     expect(captured.approvePosts[0]!.event).toBe("APPROVE");
     expect(captured.approvePosts[0]!.commit_id).toBe(SHA);
     expect(captured.approvePosts[0]!.body).toContain("blocker resolved");
+  });
+
+  test("(b2) terminal-green + prior CHANGES_REQUESTED + UNRESOLVED thread → no approve (#858 — code concern remains)", async () => {
+    const captured = await runCiCompletion({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "CHANGES_REQUESTED" }],
+      checkRuns: [{ status: "completed", conclusion: "success" }],
+      threadsUnresolved: true,
+    });
+    expect(captured.approvePosts.length).toBe(0); // a real concern → don't auto-clear
+  });
+
+  test("(b3) terminal-green + prior CHANGES_REQUESTED + thread state unknown → no approve (#858 fail-safe)", async () => {
+    const captured = await runCiCompletion({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "CHANGES_REQUESTED" }],
+      checkRuns: [{ status: "completed", conclusion: "success" }],
+      threadsUnresolved: null,
+    });
+    expect(captured.approvePosts.length).toBe(0); // unknown → conservative, defer to re-review
   });
 
   test("(c) terminal-green + no prior Quinn review → no blind approve (falls through)", async () => {
