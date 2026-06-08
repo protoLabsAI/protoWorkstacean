@@ -28,6 +28,7 @@ import { createRoutes as prInspectorRoutes } from "./pr-inspector.ts";
 import { createRoutes as clawpatchRoutes } from "./clawpatch.ts";
 import { createRoutes as agentsRuntimeRoutes } from "./agents-runtime.ts";
 import { createRoutes as busHistoryRoutes } from "./bus-history.ts";
+import { createRoutes as flowRoutes } from "./flows.ts";
 import { createRoutes as humanInputRoutes } from "./human-input.ts";
 import { createRoutes as agentsCrudRoutes } from "./agents-crud.ts";
 import { createRoutes as controlPlaneRoutes } from "./control-plane.ts";
@@ -61,6 +62,7 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...clawpatchRoutes(ctx),
     ...agentsRuntimeRoutes(ctx),
     ...busHistoryRoutes(ctx),
+    ...flowRoutes(ctx),
     ...humanInputRoutes(ctx),
     ...agentsCrudRoutes(ctx),
     ...controlPlaneRoutes(ctx),
