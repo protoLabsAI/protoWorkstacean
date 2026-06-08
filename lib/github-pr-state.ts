@@ -59,17 +59,22 @@ export async function fetchPrState(
     return null;
   }
 
-  const resp = await doFetch(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`,
-    { headers: ghHeaders(token) },
-  );
-
-  if (!resp.ok) return null;
-
-  const data = (await resp.json()) as Record<string, unknown>;
-  return {
-    number: prNumber,
-    state: (data.state as string | null) ?? null,
-    merged: Boolean(data.merged),
-  };
+  // Honor the null-on-failure contract: a network error (fetch throws) or a
+  // malformed body (json throws) must return null, not propagate into the
+  // caller's escalation path.
+  try {
+    const resp = await doFetch(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`,
+      { headers: ghHeaders(token) },
+    );
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as Record<string, unknown>;
+    return {
+      number: prNumber,
+      state: (data.state as string | null) ?? null,
+      merged: Boolean(data.merged),
+    };
+  } catch {
+    return null;
+  }
 }

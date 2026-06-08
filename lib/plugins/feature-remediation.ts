@@ -208,7 +208,11 @@ export class FeatureRemediationPlugin implements Plugin {
   /**
    * Check origin truth before escalating. If the linked PR has already merged,
    * suppress the escalation — the work shipped, the cap was just tripped by a
-   * long-but-successful run. Also skip if the feature is already done/archived.
+   * long-but-successful run.
+   *
+   * (A feature already marked done/archived with *no* merged PR isn't detectable
+   * from `feature.blocked` alone — that needs a board read, deferred. The
+   * merged-PR check covers the common shipped-work case.)
    *
    * Falls through to `_escalate` only when the work is genuinely incomplete.
    */
@@ -249,13 +253,15 @@ export class FeatureRemediationPlugin implements Plugin {
     ].join("\n");
     const urgency = HITL_KINDS.has(p.kind ?? "") ? "high" : "medium";
     log.warn(`STUCK → escalating to operator: ${p.featureId} (kind=${p.kind}) — ${why}`);
+    const correlationId = crypto.randomUUID();
     this.bus.publish("operator.message.request", {
       id: crypto.randomUUID(),
-      correlationId: crypto.randomUUID(),
+      correlationId,
       topic: "operator.message.request",
       timestamp: this.now(),
       payload: {
         type: "operator_message_request",
+        correlationId,
         message,
         urgency,
         topic: `feature-blocked/${project}/${p.featureId}`,
