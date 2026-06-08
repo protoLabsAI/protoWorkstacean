@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: "/system", label: "System", title: "System" },
   { to: "/trace", label: "Trace", title: "Skill Trace" },
   { to: "/events", label: "Events", title: "Events" },
+  { to: "/executions", label: "Executions", title: "Executions — live dispatch log" },
   { to: "/agents", label: "Agents", title: "Agents" },
   { to: "/console", label: "Console", title: "Console" },
 ] as const;

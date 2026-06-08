@@ -83,6 +83,26 @@ export function peek<T>(path: string): T | undefined {
 export const getAgentsRuntime = (force = false) =>
   apiFetch<AgentsRuntimeResponse>("/api/agents/runtime", { ttl: 30_000, force });
 
+/** A persisted dispatch record (one per correlationId) — the orchestration canvas's execution log. */
+export interface FlowRecord {
+  id: string;
+  type: string | null;
+  status: string | null;
+  stage: string | null;
+  createdAt: number | null;
+  startedAt: number | null;
+  completedAt: number | null;
+  durationMs: number | null;
+  skill: string | null;
+  executorType: string | null;
+  targetAgent: string | null;
+  errorPreview: string | null;
+  updatedAt: number;
+}
+
+export const getFlows = (force = false) =>
+  apiFetch<{ count: number; flows: FlowRecord[] }>("/api/flows", { ttl: 10_000, force });
+
 export const getCiHealth = (force = false) =>
   apiFetch<CiHealthResponse>("/api/ci-health", { ttl: 300_000, force });
 
