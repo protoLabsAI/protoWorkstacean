@@ -1,7 +1,16 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { getFlows, type FlowRecord } from "../lib/api";
 
 const POLL_INTERVAL = 10_000;
+
+/** The flow id is `skill-<correlationId>` — strip the prefix to drill into the trace. */
+function correlationIdOf(flowId: string): string {
+  return flowId.startsWith("skill-") ? flowId.slice("skill-".length) : flowId;
+}
+
+const STATUS_FILTERS = ["all", "active", "complete", "blocked"] as const;
+type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 /** Map executor type → node tier (ADR-0008: builtin in-process vs distributed a2a). */
 function tier(executorType: string | null): { label: string; cls: string } {
@@ -48,9 +57,11 @@ function fmtAge(ts: number | null): string {
 }
 
 export default function Executions() {
+  const navigate = useNavigate();
   const [flows, setFlows] = useState<FlowRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<StatusFilter>("all");
 
   async function refresh(force = false) {
     try {
@@ -80,14 +91,35 @@ export default function Executions() {
     acc[k] = (acc[k] ?? 0) + 1;
     return acc;
   }, {});
+  const visible = filter === "all" ? flows : flows.filter((f) => f.status === filter);
 
   return (
     <div style={{ padding: 16 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
         <h1 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Executions</h1>
         <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono, monospace)" }}>
           {flows.length} flows · {counts.complete ?? 0} complete · {counts.active ?? 0} active · {counts.blocked ?? 0} blocked
         </span>
+        <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
+          {STATUS_FILTERS.map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilter(s)}
+              style={{
+                fontSize: 11,
+                fontFamily: "var(--font-mono, monospace)",
+                padding: "3px 8px",
+                borderRadius: 5,
+                border: "1px solid var(--border)",
+                background: filter === s ? "var(--bg-hover, rgba(255,255,255,0.06))" : "transparent",
+                color: filter === s ? "var(--text, #ededed)" : "var(--text-muted)",
+                cursor: "pointer",
+              }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && (
@@ -100,7 +132,11 @@ export default function Executions() {
         <div style={{ color: "var(--text-muted)", padding: 48, textAlign: "center" }}>No dispatches recorded yet.</div>
       )}
 
-      {flows.length > 0 && (
+      {!error && flows.length > 0 && visible.length === 0 && (
+        <div style={{ color: "var(--text-muted)", padding: 48, textAlign: "center" }}>No {filter} dispatches.</div>
+      )}
+
+      {visible.length > 0 && (
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ color: "var(--text-muted)", fontSize: 11, textAlign: "left" }}>
@@ -113,10 +149,15 @@ export default function Executions() {
             </tr>
           </thead>
           <tbody>
-            {flows.map((f) => {
+            {visible.map((f) => {
               const t = tier(f.executorType);
               return (
-                <tr key={f.id} style={{ borderTop: "1px solid var(--border)" }} title={f.errorPreview ?? undefined}>
+                <tr
+                  key={f.id}
+                  onClick={() => navigate(`/trace?correlationId=${correlationIdOf(f.id)}`)}
+                  style={{ borderTop: "1px solid var(--border)", cursor: "pointer" }}
+                  title={f.errorPreview ?? `View trace for ${correlationIdOf(f.id)}`}
+                >
                   <td style={{ padding: "6px 8px" }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                       <span style={{ width: 7, height: 7, borderRadius: 999, background: statusColor(f.status) }} />
