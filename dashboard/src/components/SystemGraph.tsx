@@ -25,6 +25,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ReactFlow, Background, Controls, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import AgentNode, { type AgentActivityState } from "./AgentNode.tsx";
@@ -337,6 +338,7 @@ function applyActivity(state: Map<string, AgentActivityState>, ev: AgentActivity
 const NODE_TYPES = { agent: AgentNode, service: ServiceNode };
 
 export default function SystemGraph() {
+  const navigate = useNavigate();
   const [topology, setTopology] = useState<PluginTopologyEntry[] | null>(null);
   const [agents, setAgents] = useState<AgentRuntimeEntry[]>([]);
   const [agentActivity, setAgentActivity] = useState<Map<string, AgentActivityState>>(new Map());
@@ -496,6 +498,15 @@ export default function SystemGraph() {
         nodeTypes={NODE_TYPES}
         fitView
         minZoom={0.2}
+        onNodeClick={(_evt: unknown, node: Node) => {
+          // Agent nodes (id `agent-<name>`) drill into the execution log
+          // pre-filtered to that agent's dispatches. Plugin/service/api-route
+          // nodes have no execution view — those clicks are inert.
+          if (node.id.startsWith("agent-")) {
+            const agent = node.id.slice("agent-".length);
+            navigate(`/executions?target=${encodeURIComponent(agent)}`);
+          }
+        }}
         onEdgeClick={(_evt: unknown, edge: Edge) => {
           // Edges built from publisher → subscriber carry their topic as the
           // edge label. Static plugin → service edges have no topic — those

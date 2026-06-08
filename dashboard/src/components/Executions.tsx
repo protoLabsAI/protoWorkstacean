@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { getFlows, type FlowRecord } from "../lib/api";
 
 const POLL_INTERVAL = 10_000;
@@ -58,10 +58,20 @@ function fmtAge(ts: number | null): string {
 
 export default function Executions() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // `?target=<agent>` arrives from a SystemGraph agent-node click — land the
+  // page pre-filtered to that agent's dispatches.
+  const target = searchParams.get("target");
   const [flows, setFlows] = useState<FlowRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<StatusFilter>("all");
+
+  const clearTarget = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("target");
+    setSearchParams(next, { replace: true });
+  };
 
   async function refresh(force = false) {
     try {
@@ -91,7 +101,11 @@ export default function Executions() {
     acc[k] = (acc[k] ?? 0) + 1;
     return acc;
   }, {});
-  const visible = filter === "all" ? flows : flows.filter((f) => f.status === filter);
+  const visible = flows.filter((f) => {
+    if (filter !== "all" && f.status !== filter) return false;
+    if (target && f.targetAgent !== target) return false;
+    return true;
+  });
 
   return (
     <div style={{ padding: 16 }}>
@@ -100,6 +114,28 @@ export default function Executions() {
         <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono, monospace)" }}>
           {flows.length} flows · {counts.complete ?? 0} complete · {counts.active ?? 0} active · {counts.blocked ?? 0} blocked
         </span>
+        {target && (
+          <button
+            onClick={clearTarget}
+            title="Clear agent filter"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11,
+              fontFamily: "var(--font-mono, monospace)",
+              padding: "3px 8px",
+              borderRadius: 5,
+              border: "1px solid var(--border)",
+              background: "var(--bg-hover, rgba(255,255,255,0.06))",
+              color: "var(--text, #ededed)",
+              cursor: "pointer",
+            }}
+          >
+            target: {target}
+            <span style={{ color: "var(--text-muted)" }}>×</span>
+          </button>
+        )}
         <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
           {STATUS_FILTERS.map((s) => (
             <button
@@ -133,7 +169,9 @@ export default function Executions() {
       )}
 
       {!error && flows.length > 0 && visible.length === 0 && (
-        <div style={{ color: "var(--text-muted)", padding: 48, textAlign: "center" }}>No {filter} dispatches.</div>
+        <div style={{ color: "var(--text-muted)", padding: 48, textAlign: "center" }}>
+          No {filter === "all" ? "" : `${filter} `}dispatches{target ? ` for ${target}` : ""}.
+        </div>
       )}
 
       {visible.length > 0 && (
