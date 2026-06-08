@@ -862,6 +862,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     ["fleet-state", () => fleetStateRepo.close()],
     ["research-store", () => researchStore.close()],
     ["task-store", () => taskTrackerStore.close()],
+    ["flow-store", () => flowStore.close()],
   ] as const) {
     try { closer(); } catch (e) { shutdownLog.warn(`${name} close threw`, { err: e }); }
   }

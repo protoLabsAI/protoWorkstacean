@@ -85,6 +85,20 @@ describe("FlowStore", () => {
     s2.close();
   });
 
+  test("a row first seen from an update (no createdAt) is still stored + returned", () => {
+    const s = new FlowStore(tmpDb());
+    s.upsert({ id: "skill-late", status: "active", stage: "running", meta: { skill: "y" } });
+    expect(s.recent().map((r) => r.id)).toContain("skill-late");
+    expect(s.get("skill-late")?.skill).toBe("y");
+    s.close();
+  });
+
+  test("isReady reflects a healthy store", () => {
+    const s = new FlowStore(tmpDb());
+    expect(s.isReady()).toBe(true);
+    s.close();
+  });
+
   test("get of an absent id → null; empty store degrades cleanly", () => {
     const s = new FlowStore(tmpDb());
     expect(s.get("nope")).toBeNull();

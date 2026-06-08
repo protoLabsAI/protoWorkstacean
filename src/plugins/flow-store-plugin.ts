@@ -25,6 +25,7 @@ export class FlowStorePlugin implements Plugin {
   readonly capabilities = ["flow-persistence"];
   readonly subscribes = ["flow.item.created", "flow.item.updated", "flow.item.completed"];
 
+  private bus?: EventBus;
   private subscriptionIds: string[] = [];
   private sweepTimer?: ReturnType<typeof setInterval>;
   private readonly retentionMs: number;
@@ -39,25 +40,39 @@ export class FlowStorePlugin implements Plugin {
   }
 
   install(bus: EventBus): void {
+    this.bus = bus;
     const persist = (msg: BusMessage) => {
-      const payload = msg.payload as FlowItemPayload | undefined;
-      if (payload?.id) this.store.upsert(payload);
+      // The store already swallows its own errors, but guard here too so a
+      // persistence failure can never propagate into the bus dispatch.
+      try {
+        const payload = msg.payload as FlowItemPayload | undefined;
+        if (payload?.id) this.store.upsert(payload);
+      } catch (err) {
+        log.error("persist failed", { err });
+      }
     };
     for (const topic of this.subscribes) {
       this.subscriptionIds.push(bus.subscribe(topic, this.name, persist));
     }
-    // Cold-start prune + hourly sweep so the log stays bounded.
-    this.store.prune(this.now() - this.retentionMs);
-    this.sweepTimer = setInterval(() => {
-      this.store.prune(this.now() - this.retentionMs);
-    }, SWEEP_INTERVAL_MS);
+    // Cold-start prune + hourly sweep so the log stays bounded. Guarded so a
+    // prune failure can't crash install() or the interval.
+    const sweep = () => {
+      try {
+        this.store.prune(this.now() - this.retentionMs);
+      } catch (err) {
+        log.error("retention sweep failed", { err });
+      }
+    };
+    sweep();
+    this.sweepTimer = setInterval(sweep, SWEEP_INTERVAL_MS);
     this.sweepTimer.unref?.();
     log.info(`installed — persisting flow.item.* (retention ${Math.round(this.retentionMs / 86_400_000)}d)`);
   }
 
   uninstall(): void {
+    for (const id of this.subscriptionIds) this.bus?.unsubscribe(id);
+    this.subscriptionIds = [];
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.sweepTimer = undefined;
-    this.subscriptionIds = [];
   }
 }

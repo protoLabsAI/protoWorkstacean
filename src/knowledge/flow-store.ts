@@ -116,6 +116,11 @@ export class FlowStore {
     }
   }
 
+  /** True once the DB initialized; false if init failed (callers can 503 instead of looking empty). */
+  isReady(): boolean {
+    return this.db !== null;
+  }
+
   /** Upsert a flow item from a `flow.item.*` event payload (merge across lifecycle). */
   upsert(item: FlowItemPayload): void {
     if (!this.db || !item?.id) return;
@@ -169,7 +174,9 @@ export class FlowStore {
     const limit = Math.min(Math.max(1, q.limit ?? 200), 1000);
     const clauses: string[] = [];
     const params: (number | string)[] = [];
-    if (q.sinceMs !== undefined) { clauses.push("created_at >= ?"); params.push(q.sinceMs); }
+    // Match the ORDER BY: createdAt is optional (a row first seen from an
+    // updated/completed event has none), so fall back to updated_at.
+    if (q.sinceMs !== undefined) { clauses.push("COALESCE(created_at, updated_at) >= ?"); params.push(q.sinceMs); }
     if (q.status) { clauses.push("status = ?"); params.push(q.status); }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     try {

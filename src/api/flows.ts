@@ -16,18 +16,18 @@ export function createRoutes(ctx: ApiContext): Route[] {
       method: "GET",
       path: "/api/flows",
       handler: (req) => {
-        if (!ctx.flowStore) {
-          return Response.json({ success: false, error: "flow-store not installed" }, { status: 503 });
+        if (!ctx.flowStore?.isReady()) {
+          return Response.json({ success: false, error: "flow-store unavailable" }, { status: 503 });
         }
         const url = new URL(req.url);
         const sinceRaw = url.searchParams.get("since");
         const since = sinceRaw ? Number.parseInt(sinceRaw, 10) : undefined;
-        const status = url.searchParams.get("status") ?? undefined;
+        const status = url.searchParams.get("status") || undefined;
         const limitRaw = url.searchParams.get("limit");
         const limit = limitRaw ? Number.parseInt(limitRaw, 10) : undefined;
         const flows = ctx.flowStore.recent({
           sinceMs: Number.isFinite(since) ? since : undefined,
-          status: status || undefined,
+          status,
           limit: Number.isFinite(limit) ? limit : undefined,
         });
         return Response.json({ success: true, data: { count: flows.length, flows } });
@@ -37,8 +37,8 @@ export function createRoutes(ctx: ApiContext): Route[] {
       method: "GET",
       path: "/api/flows/:id",
       handler: (_req, p) => {
-        if (!ctx.flowStore) {
-          return Response.json({ success: false, error: "flow-store not installed" }, { status: 503 });
+        if (!ctx.flowStore?.isReady()) {
+          return Response.json({ success: false, error: "flow-store unavailable" }, { status: 503 });
         }
         const flow = ctx.flowStore.get(p.id);
         if (!flow) {
