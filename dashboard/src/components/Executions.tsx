@@ -151,10 +151,19 @@ export default function Executions() {
           <tbody>
             {visible.map((f) => {
               const t = tier(f.executorType);
+              const openTrace = () => navigate(`/trace?correlationId=${encodeURIComponent(correlationIdOf(f.id))}`);
               return (
                 <tr
                   key={f.id}
-                  onClick={() => navigate(`/trace?correlationId=${correlationIdOf(f.id)}`)}
+                  role="button"
+                  tabIndex={0}
+                  onClick={openTrace}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openTrace();
+                    }
+                  }}
                   style={{ borderTop: "1px solid var(--border)", cursor: "pointer" }}
                   title={f.errorPreview ?? `View trace for ${correlationIdOf(f.id)}`}
                 >
