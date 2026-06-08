@@ -15,6 +15,7 @@ import type { ContextMailbox } from "../../lib/dm/context-mailbox.ts";
 import type { TaskTracker } from "../executor/task-tracker.ts";
 import type { AgentKeyRegistry } from "../../lib/auth/agent-keys.ts";
 import type { BusHistoryRecorder } from "../event-bus/history-recorder.ts";
+import type { FlowStore } from "../knowledge/flow-store.ts";
 import type { SkillResponseCache } from "../event-bus/skill-response-cache.ts";
 import type { ChannelRegistry } from "../../lib/channels/channel-registry.ts";
 import type { ProjectRegistry } from "../plugins/project-registry.ts";
@@ -56,6 +57,12 @@ export interface ApiContext {
    * when the bus-history-recorder plugin is installed.
    */
   busHistory?: BusHistoryRecorder;
+  /**
+   * Durable execution log of `flow.item.*` dispatch records. Backs
+   * GET /api/flows (the orchestration canvas, ADR-0008 P1). Wired in
+   * src/index.ts when the flow-store plugin is installed.
+   */
+  flowStore?: FlowStore;
   /**
    * Terminal skill-response cache keyed by correlationId. Backs
    * GET /api/a2a/task/:correlationId so a caller that stopped awaiting a
