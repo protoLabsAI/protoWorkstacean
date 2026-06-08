@@ -4,6 +4,7 @@ import OverviewGrid from "./components/OverviewGrid";
 import SystemGraph from "./components/SystemGraph";
 import SkillTrace from "./components/SkillTrace";
 import EventStream from "./components/EventStream";
+import Executions from "./components/Executions";
 import AgentsView from "./components/AgentsView";
 import Console from "./components/Console";
 
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/system" element={<SystemGraph />} />
         <Route path="/trace" element={<SkillTrace />} />
         <Route path="/events" element={<EventStream />} />
+        <Route path="/executions" element={<Executions />} />
         <Route path="/agents" element={<AgentsView />} />
         <Route path="/console" element={<Console />} />
       </Route>
