@@ -7,7 +7,7 @@ _This is a how-to guide. It covers webhook setup, triggering PR review, and unde
 
 ---
 
-Quinn reviews pull requests and issues via GitHub webhook. It uses codebase-wide vector search (Qdrant + Ollama) to provide context-aware reviews informed by past PR decisions and code patterns.
+Quinn reviews pull requests and issues via GitHub webhook. It uses codebase-wide vector search (Qdrant + gateway qwen3-embedding) to provide context-aware reviews informed by past PR decisions and code patterns.
 
 ---
 
@@ -21,8 +21,8 @@ Quinn reviews pull requests and issues via GitHub webhook. It uses codebase-wide
 | `GITHUB_APP_ID` | For bot comments | GitHub App ID — Quinn posts as `protoquinn[bot]` |
 | `GITHUB_APP_PRIVATE_KEY` | For bot comments | GitHub App private key (PKCS#1 PEM) |
 | `QDRANT_URL` | For vector context | `http://qdrant:6333` |
-| `OLLAMA_URL` | For embeddings | `http://ollama:11434` |
-| `OLLAMA_EMBED_MODEL` | For embeddings | `nomic-embed-text` |
+| `EMBED_MODEL` | For embeddings | `qwen3-embedding` |
+| `LLM_GATEWAY_URL` | For embeddings | `http://gateway:4000/v1` |
 
 ---
 

@@ -44,7 +44,6 @@ INFRA=(
   "graphiti::container:Graphiti (Knowledge Graph)"
   "open-webui:3000:http:Open WebUI"
   "vllm:8000:http:vLLM Inference"
-  "ollama:11434:http:Ollama"
   "langfuse-web:3001:http:Langfuse"
   "caddy::container:Caddy (TLS Proxy)"
   "cloudflared::container:Cloudflared (Tunnel)"

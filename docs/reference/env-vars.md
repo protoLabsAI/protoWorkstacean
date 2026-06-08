@@ -115,8 +115,8 @@ Every variable recognised by protoWorkstacean is declared in the zod `EnvSchema`
 
 | Variable | Required? | Description |
 |---|---|---|
-| `OLLAMA_EMBED_MODEL` | optional | — |
-| `OLLAMA_URL` | optional | — |
+| `EMBED_MODEL` | optional | — |
+| `LLM_GATEWAY_URL` | optional | — |
 | `QDRANT_URL` | optional | — |
 | `QDRANT_VECTOR_SIZE` | optional | — |
 | `REDIS_URL` | optional | — |

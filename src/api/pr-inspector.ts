@@ -248,11 +248,37 @@ async function checkCi(owner: string, name: string, pr: number): Promise<string>
     throw err;
   }
   const { headSha, runs } = result;
+  return formatCheckCiResult(pr, headSha, runs);
+}
+
+/**
+ * Format the `check_ci` result for Quinn. When any check is non-terminal the
+ * result carries an explicit comment-and-exit directive.
+ *
+ * Without it Quinn busy-waits: she re-polls `check_ci` waiting for terminal CI
+ * and burns the whole ReAct turn budget → recursion limit → no verdict (live:
+ * ORBIS#436, a release PR whose CI runs long; the #843 escalation paged the
+ * operator). There is nothing to wait for on this pass — the CI-completion
+ * re-dispatch plus deterministic approve-on-green deliver the formal verdict
+ * once checks settle. So the right move on pending CI is: comment once, stop.
+ */
+export function formatCheckCiResult(pr: number, headSha: string, runs: CheckRun[]): string {
   if (runs.length === 0) return `No CI checks found for PR#${pr} (head ${headSha.slice(0, 7)}).`;
   const lines = [`**CI Checks for PR#${pr}** (head ${headSha.slice(0, 7)}):`];
   for (const c of runs) {
     const state = c.conclusion ?? c.status;
     lines.push(`- ${c.name}: ${state}`);
+  }
+  const pending = pendingCheckNames(runs);
+  if (pending.length > 0) {
+    lines.push("");
+    lines.push(
+      `⏳ Non-terminal CI — ${pending.length} check(s) still running (${pending.join(", ")}). ` +
+        `Submit your findings now with review_comment (non-blocking), then return your one-line ` +
+        `confirmation to END the review. Do not call check_ci again to wait: a CI-completion event ` +
+        `re-dispatches you for the formal PASS/FAIL once checks settle, and the merge loop auto-approves ` +
+        `on terminal-green. Nothing to wait for on this pass — comment once, then stop.`,
+    );
   }
   return lines.join("\n");
 }

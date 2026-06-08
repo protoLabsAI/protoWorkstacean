@@ -208,3 +208,15 @@ export const SYSTEM_TOPICS = {
    */
   SYSTEM_ERROR: "system.error",
 } as const;
+
+export const FLOW_TOPICS = {
+  /**
+   * Flow-item lifecycle — published by SkillDispatcherPlugin for every dispatch
+   * (one item per correlationId, id = `skill-<correlationId>`). Consumed by the
+   * BusHistoryRecorder + FlowStorePlugin (the durable execution log behind
+   * `GET /api/flows` / the orchestration canvas, ADR-0008). Payload: FlowItemPayload.
+   */
+  FLOW_ITEM_CREATED: "flow.item.created",
+  FLOW_ITEM_UPDATED: "flow.item.updated",
+  FLOW_ITEM_COMPLETED: "flow.item.completed",
+} as const;

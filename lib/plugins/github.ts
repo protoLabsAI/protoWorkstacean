@@ -1000,6 +1000,7 @@ export class GitHubPlugin implements Plugin {
         timestamp: Date.now(),
         payload: {
           type: "operator_message_request",
+          correlationId,
           message:
             `Quinn could not finish reviewing ${slug} — the review ran out of budget ` +
             `(${error}) and produced no verdict. The PR is unreviewed; it needs a human ` +
@@ -1329,31 +1330,77 @@ export class GitHubPlugin implements Plugin {
     baseRef: string,
     mergeMethod: "squash" | "merge" = "squash",
   ): Promise<void> {
+    const REST_HEADERS = (token: string) => ({
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/vnd.github+json",
+      "User-Agent": "protoWorkstacean/1.0",
+      "X-GitHub-Api-Version": "2022-11-28",
+    });
     try {
       const token = await getToken(owner, repo);
-      const res = await withCircuitBreaker("github-api", () =>
-        fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/merge_upwards`, {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-            Accept: "application/vnd.github+json",
-            "User-Agent": "protoWorkstacean/1.0",
-            "X-GitHub-Api-Version": "2022-11-28",
-          },
-          body: JSON.stringify({ merge_method: mergeMethod, commit_title: `auto-merge: ${owner}/${repo}#${prNumber}` }),
+
+      // Resolve the PR's GraphQL node id. Enabling auto-merge is a GraphQL-only
+      // mutation — there is NO REST endpoint (the prior PUT to /merge_upwards
+      // 404'd every time, so no approved+green PR ever landed).
+      const prRes = await withCircuitBreaker("github-api", () =>
+        fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`, {
+          headers: REST_HEADERS(token),
         }),
       );
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        log.warn(
-          `enableAutoMerge failed ${res.status} for ${owner}/${repo}#${prNumber} (base=${baseRef}): ${body.slice(0, 200)}`,
-        );
-      } else {
-        log.info(
-          `Auto-merge enabled (${mergeMethod}) for ${owner}/${repo}#${prNumber} (base=${baseRef})`,
-        );
+      if (!prRes.ok) {
+        log.warn(`enableAutoMerge: PR fetch ${prRes.status} for ${owner}/${repo}#${prNumber}`);
+        return;
       }
+      const prNodeId = ((await prRes.json()) as { node_id?: string }).node_id;
+      if (!prNodeId) {
+        log.warn(`enableAutoMerge: no node_id for ${owner}/${repo}#${prNumber}`);
+        return;
+      }
+
+      // Arm GitHub native auto-merge (merges once branch protection is satisfied —
+      // covers the brief window where the just-submitted approval hasn't been
+      // counted yet). GraphQL enum is upper-case: SQUASH | MERGE | REBASE.
+      const mutation =
+        `mutation($id:ID!,$m:PullRequestMergeMethod!){` +
+        `enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:$m}){pullRequest{number}}}`;
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(`https://api.github.com/graphql`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "User-Agent": "protoWorkstacean/1.0" },
+          body: JSON.stringify({ query: mutation, variables: { id: prNodeId, m: mergeMethod.toUpperCase() } }),
+        }),
+      );
+      const data = (await res.json().catch(() => ({}))) as { errors?: Array<{ message?: string }> };
+      const errMsg = (data.errors ?? []).map((e) => e.message ?? "").join("; ");
+      if (res.ok && !errMsg) {
+        log.info(`Auto-merge enabled (${mergeMethod}) for ${owner}/${repo}#${prNumber} (base=${baseRef})`);
+        return;
+      }
+
+      // GitHub refuses auto-merge when the PR is ALREADY mergeable with nothing
+      // pending ("Pull request is in clean status"). By this path CI is
+      // terminal-green and Quinn approved, so that's the common case — just merge
+      // it directly via the real REST merge endpoint.
+      if (/clean status|correct state|mergeable|not required/i.test(errMsg)) {
+        const mergeRes = await withCircuitBreaker("github-api", () =>
+          fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/merge`, {
+            method: "PUT",
+            headers: REST_HEADERS(token),
+            body: JSON.stringify({ merge_method: mergeMethod }),
+          }),
+        );
+        if (mergeRes.ok) {
+          log.info(`Direct-merged (${mergeMethod}) ${owner}/${repo}#${prNumber} — already mergeable (base=${baseRef})`);
+        } else {
+          log.warn(
+            `Direct merge ${mergeRes.status} for ${owner}/${repo}#${prNumber}: ${(await mergeRes.text().catch(() => "")).slice(0, 200)}`,
+          );
+        }
+        return;
+      }
+
+      log.warn(`enableAutoMerge failed for ${owner}/${repo}#${prNumber} (base=${baseRef}): ${errMsg.slice(0, 200)}`);
     } catch (err) {
       log.error(`enableAutoMerge error for ${owner}/${repo}#${prNumber}`, { err });
     }

@@ -66,8 +66,8 @@ _This is a reference doc. It covers all `workspace/*.yaml` schemas and environme
 |----------|----------|-------------|
 | `QDRANT_URL` | Yes (for vector) | `http://qdrant:6333` |
 | `QDRANT_VECTOR_SIZE` | No | Embedding dimensions (default: `768`) |
-| `OLLAMA_URL` | Yes (for embeddings) | `http://ollama:11434` |
-| `OLLAMA_EMBED_MODEL` | No | Embedding model (default: `nomic-embed-text`) |
+| `EMBED_MODEL` | No | Gateway embedding model (default: `qwen3-embedding`) |
+| `LLM_GATEWAY_URL` | No | Gateway base URL (default: `http://gateway:4000/v1`) |
 
 ### Scheduler Plugin
 

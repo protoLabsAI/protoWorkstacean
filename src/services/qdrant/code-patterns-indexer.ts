@@ -8,7 +8,7 @@
 
 import { upsertPoints } from "./client.ts";
 import { COLLECTION_CODE_PATTERNS } from "./collections.ts";
-import { embed } from "../embeddings/ollama-client.ts";
+import { embed } from "../embeddings/gateway-embed.ts";
 import type { SymbolContext } from "../codebase/symbol-fetcher.ts";
 import { logger } from "../../../lib/log.ts";
 

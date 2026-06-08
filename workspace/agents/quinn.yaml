@@ -366,14 +366,21 @@ skills:
 
       **A formal verdict needs terminal CI.** A PASS or FAIL reflects the
       PR's settled state, so submit `review_approve` / `review_request_changes`
-      once every check has completed. While `check_ci` still shows a
-      `queued` or `in_progress` check, record your findings with
-      `review_comment` (non-blocking) and let the formal verdict land on a
-      later pass once checks are terminal — a "broken CI" FAIL means a
-      check that *completed* with a failure conclusion, not one still
-      running. pr_inspector enforces this: an approve / request-changes
-      call while CI is pending returns a 409 asking you to comment instead,
-      so a re-review after checks finish is the clean path.
+      once every check has completed. A "broken CI" FAIL means a check that
+      *completed* with a failure conclusion, not one still running. pr_inspector
+      enforces this: an approve / request-changes call while CI is pending
+      returns a 409 asking you to comment instead.
+
+      **Pending CI → comment once, then stop. Never wait.** The moment
+      `check_ci` shows any `queued` / `in_progress` check, submit a single
+      `review_comment` with the findings you have and return your one-line
+      confirmation — that ends this review. Do not call `check_ci` again to
+      see if CI finished, and do not loop waiting for it. There is nothing to
+      wait for: when checks settle, a CI-completion event re-dispatches you for
+      the formal PASS/FAIL, and the merge loop auto-approves a clean PR on
+      terminal-green without you. Re-polling pending CI is the one way a simple
+      review runs out of turns and produces no verdict — so on pending CI you
+      take exactly one action (comment) and finish.
 
       **CI you cannot access is a Gap, not a broken-CI FAIL.** When
       `check_ci` reports CI as inaccessible (HTTP 403 — a fork PR, a repo

@@ -2,7 +2,7 @@
   "collections": {
     "quinn-pr-history": {
       "description": "Embedded PR diff chunks with review decisions and metadata",
-      "vector_size": 768,
+      "vector_size": 1024,
       "distance": "Cosine",
       "metadata_fields": {
         "repo": "string — owner/repo slug, e.g. protolabsai/protomaker",
@@ -19,7 +19,7 @@
     },
     "quinn-code-patterns": {
       "description": "Embedded symbol definitions and surrounding context from indexed repositories",
-      "vector_size": 768,
+      "vector_size": 1024,
       "distance": "Cosine",
       "metadata_fields": {
         "repo": "string — owner/repo slug",
@@ -33,7 +33,7 @@
     },
     "quinn-review-learnings": {
       "description": "Dismissed Quinn comment patterns to avoid repeating low-signal feedback",
-      "vector_size": 768,
+      "vector_size": 1024,
       "distance": "Cosine",
       "metadata_fields": {
         "repo": "string — owner/repo slug",
@@ -46,10 +46,10 @@
     }
   },
   "embedding_model": {
-    "provider": "ollama",
-    "model": "nomic-embed-text",
-    "dimensions": 768,
-    "base_url": "http://ollama:11434"
+    "provider": "gateway",
+    "model": "qwen3-embedding",
+    "dimensions": 1024,
+    "base_url": "http://gateway:4000/v1"
   },
   "qdrant": {
     "base_url": "http://qdrant:6333",

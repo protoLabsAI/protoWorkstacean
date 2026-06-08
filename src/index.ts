@@ -55,6 +55,14 @@ const busHistoryRecorder = new BusHistoryRecorder();
 const busHistoryRecorderPlugin = new BusHistoryRecorderPlugin(busHistoryRecorder);
 busHistoryRecorderPlugin.install(bus);
 
+// Durable flow.item.* execution log — backs GET /api/flows + the orchestration
+// canvas (ADR-0008 P1). Persists what the in-memory busHistory ring can't keep.
+import { FlowStore } from "./knowledge/flow-store.ts";
+import { FlowStorePlugin } from "./plugins/flow-store-plugin.ts";
+const flowStore = new FlowStore(`${dataDir}/flow.db`);
+const flowStorePlugin = new FlowStorePlugin(flowStore);
+flowStorePlugin.install(bus);
+
 // --- Skill-response cache — terminal results by correlationId for /api/a2a/task ---
 import { SkillResponseCache, SkillResponseCachePlugin } from "./event-bus/skill-response-cache.ts";
 const skillResponseCache = new SkillResponseCache();
@@ -660,6 +668,7 @@ const apiContext: ApiContext = {
   mailbox: contextMailbox,
   taskTracker,
   busHistory: busHistoryRecorder,
+  flowStore,
   skillResponseCache,
   // Lazy in-flight check — true while a dispatch (in-process or A2A) is executing.
   activeDispatchCheck: (correlationId: string) => skillDispatcher?.isActive(correlationId) ?? false,
@@ -853,6 +862,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     ["fleet-state", () => fleetStateRepo.close()],
     ["research-store", () => researchStore.close()],
     ["task-store", () => taskTrackerStore.close()],
+    ["flow-store", () => flowStore.close()],
   ] as const) {
     try { closer(); } catch (e) { shutdownLog.warn(`${name} close threw`, { err: e }); }
   }
