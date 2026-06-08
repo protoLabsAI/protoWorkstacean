@@ -1000,6 +1000,7 @@ export class GitHubPlugin implements Plugin {
         timestamp: Date.now(),
         payload: {
           type: "operator_message_request",
+          correlationId,
           message:
             `Quinn could not finish reviewing ${slug} — the review ran out of budget ` +
             `(${error}) and produced no verdict. The PR is unreviewed; it needs a human ` +
