@@ -4,7 +4,7 @@
  * must survive both the pending-discovery and registry-discovered paths.
  */
 
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,13 +17,13 @@ import type { ApiContext } from "../types.ts";
 function a2aExecutor(): IExecutor {
   return {
     type: "a2a",
-    execute: mock(async (req: SkillRequest): Promise<SkillResult> => ({ text: "", isError: false, correlationId: req.correlationId })),
+    execute: async (req: SkillRequest): Promise<SkillResult> => ({ text: "", isError: false, correlationId: req.correlationId }),
   };
 }
 function deepAgentExecutor(): IExecutor {
   return {
     type: "deep-agent",
-    execute: mock(async (req: SkillRequest): Promise<SkillResult> => ({ text: "", isError: false, correlationId: req.correlationId })),
+    execute: async (req: SkillRequest): Promise<SkillResult> => ({ text: "", isError: false, correlationId: req.correlationId }),
   };
 }
 
