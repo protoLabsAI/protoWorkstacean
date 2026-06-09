@@ -55,13 +55,18 @@ export default function WireRouteDialog({ agent, onClose, onCreate }: Props) {
       return;
     }
     setBusy(true);
-    const r = await onCreate({ name: name.trim(), when: { topic: topic.trim() }, then: { skill: skill.trim(), agent } });
-    setBusy(false);
-    if (r.ok) {
-      setResult({ ok: true, msg: "Wired — live within the hot-reload window." });
-      setTimeout(onClose, 900);
-    } else {
-      setResult({ ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "create failed"}` });
+    try {
+      const r = await onCreate({ name: name.trim(), when: { topic: topic.trim() }, then: { skill: skill.trim(), agent } });
+      if (r.ok) {
+        setResult({ ok: true, msg: "Wired — live within the hot-reload window." });
+        setTimeout(onClose, 900);
+      } else {
+        setResult({ ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "create failed"}` });
+      }
+    } catch (err) {
+      setResult({ ok: false, msg: `Request failed: ${err instanceof Error ? err.message : String(err)}` });
+    } finally {
+      setBusy(false);
     }
   }
 
