@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { InMemoryEventBus } from "../../../lib/bus.ts";
 import type { BusMessage } from "../../../lib/types.ts";
 import { RoutesPlugin } from "../routes-plugin.ts";
+import { RouteHopGuard } from "../../routes/route-hop-guard.ts";
 
 function trigger(topic: string, payload: Record<string, unknown>, correlationId = "corr-1"): BusMessage {
   return { id: "m1", correlationId, topic, timestamp: 1, payload };
@@ -36,8 +37,8 @@ describe("RoutesPlugin", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function install() {
-    plugin = new RoutesPlugin(root);
+  function install(hopGuard?: RouteHopGuard) {
+    plugin = new RoutesPlugin(root, hopGuard);
     plugin.install(bus);
   }
 
@@ -85,5 +86,16 @@ describe("RoutesPlugin", () => {
     plugin.uninstall();
     bus.publish("test.trigger", trigger("test.trigger", {}));
     expect(dispatched).toHaveLength(0);
+  });
+
+  test("caps a cascade: same correlation chain stops dispatching past the hop limit", () => {
+    writeFileSync(join(routesd, "triage.yaml"), "name: triage\nwhen: { topic: test.trigger }\nthen: { skill: s }\n");
+    install(new RouteHopGuard({ max: 3, windowMs: 10_000 }));
+    // Re-fire the same correlation chain 6×; the guard allows only the first 3.
+    for (let i = 0; i < 6; i++) bus.publish("test.trigger", trigger("test.trigger", { i }, "chain-1"));
+    expect(dispatched).toHaveLength(3);
+    // A fresh correlation chain is unaffected.
+    bus.publish("test.trigger", trigger("test.trigger", {}, "chain-2"));
+    expect(dispatched).toHaveLength(4);
   });
 });
