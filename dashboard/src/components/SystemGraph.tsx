@@ -25,12 +25,12 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { ReactFlow, Background, Controls, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import AgentNode, { type AgentActivityState } from "./AgentNode.tsx";
 import ServiceNode from "./ServiceNode.tsx";
 import MessageDrawer, { type DrawerMessage } from "./MessageDrawer.tsx";
+import NodeInspector, { type InspectorNode } from "./NodeInspector.tsx";
 import QuinnVerdictCounters from "./QuinnVerdictCounters.tsx";
 import LatencyHistogram from "./LatencyHistogram.tsx";
 import { architecturalLayout } from "../lib/layout.ts";
@@ -351,7 +351,6 @@ function applyActivity(state: Map<string, AgentActivityState>, ev: AgentActivity
 const NODE_TYPES = { agent: AgentNode, service: ServiceNode };
 
 export default function SystemGraph() {
-  const navigate = useNavigate();
   const [topology, setTopology] = useState<PluginTopologyEntry[] | null>(null);
   const [agents, setAgents] = useState<AgentRuntimeEntry[]>([]);
   const [agentActivity, setAgentActivity] = useState<Map<string, AgentActivityState>>(new Map());
@@ -360,6 +359,9 @@ export default function SystemGraph() {
   // the host→agent edge animation uniformly across builtin + a2a tiers.
   const [inFlight, setInFlight] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  // Agent name whose inspector is open (WS-3c). Mutually exclusive with the
+  // edge MessageDrawer.
+  const [openNode, setOpenNode] = useState<string | null>(null);
   // Per-topic ring buffer of recent WS-observed messages. Lives in a ref
   // (not state) because every WS frame would otherwise re-trigger the
   // whole graph rebuild — we only need to re-render when the operator
@@ -513,6 +515,11 @@ export default function SystemGraph() {
     return <div style={{ padding: 24, color: "var(--text-secondary)" }}>loading topology…</div>;
   }
 
+  const inspectorAgent = openNode ? agents.find((a) => a.name === openNode) : undefined;
+  const inspectorNode: InspectorNode | null = openNode
+    ? { name: openNode, type: inspectorAgent?.type ?? "deep-agent", host: inspectorAgent?.host, activity: agentActivity.get(openNode) }
+    : null;
+
   return (
     <div style={{ width: "100%", height: "calc(100vh - 64px)", background: "var(--bg-canvas)", position: "relative" }}>
       <ReactFlow
@@ -522,12 +529,13 @@ export default function SystemGraph() {
         fitView
         minZoom={0.2}
         onNodeClick={(_evt: unknown, node: Node) => {
-          // Agent nodes (id `agent-<name>`) drill into the execution log
-          // pre-filtered to that agent's dispatches. Plugin/service/api-route
-          // nodes have no execution view — those clicks are inert.
+          // Agent nodes (id `agent-<name>`) open the in-context inspector
+          // (tier, host, live activity, last flow item, links out to
+          // /executions + /trace). Plugin/service/api-route nodes have no
+          // inspector — those clicks are inert.
           if (node.id.startsWith("agent-")) {
-            const agent = node.id.slice("agent-".length);
-            navigate(`/executions?target=${encodeURIComponent(agent)}`);
+            setOpenNode(node.id.slice("agent-".length));
+            setOpenTopic(null); // inspector + edge drawer are mutually exclusive
           }
         }}
         onEdgeClick={(_evt: unknown, edge: Edge) => {
@@ -535,7 +543,10 @@ export default function SystemGraph() {
           // edge label. Static plugin → service edges have no topic — those
           // skip the drawer.
           const topic = typeof edge.label === "string" ? edge.label : null;
-          if (topic) setOpenTopic(topic);
+          if (topic) {
+            setOpenTopic(topic);
+            setOpenNode(null);
+          }
         }}
       >
         <Background color="var(--bg-subtle)" gap={16} />
@@ -549,6 +560,9 @@ export default function SystemGraph() {
           messages={drawerMessages}
           onClose={() => setOpenTopic(null)}
         />
+      )}
+      {inspectorNode && (
+        <NodeInspector node={inspectorNode} onClose={() => setOpenNode(null)} />
       )}
     </div>
   );
