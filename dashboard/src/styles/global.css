@@ -28,9 +28,9 @@
   --success-rgb: 76, 175, 110;
   --warning-rgb: 210, 153, 34;
   --danger-rgb: 230, 90, 80;
-  /* Layout */
-  --sidebar-width: 220px;
-  --header-height: 56px;
+  /* Shell layout (Shell.tsx grid rows) */
+  --shell-topbar-h: 48px;
+  --shell-utility-h: 28px;
 }
 
 *,
