@@ -31,6 +31,7 @@ import { createRoutes as busHistoryRoutes } from "./bus-history.ts";
 import { createRoutes as flowRoutes } from "./flows.ts";
 import { createRoutes as humanInputRoutes } from "./human-input.ts";
 import { createRoutes as agentsCrudRoutes } from "./agents-crud.ts";
+import { createRoutes as routesCrudRoutes } from "./routes-crud.ts";
 import { createRoutes as controlPlaneRoutes } from "./control-plane.ts";
 import { createRoutes as mcpCrudRoutes } from "./mcp-crud.ts";
 import { createRoutes as researchRoutes } from "./research.ts";
@@ -65,6 +66,7 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...flowRoutes(ctx),
     ...humanInputRoutes(ctx),
     ...agentsCrudRoutes(ctx),
+    ...routesCrudRoutes(ctx),
     ...controlPlaneRoutes(ctx),
     ...mcpCrudRoutes(ctx),
   ];

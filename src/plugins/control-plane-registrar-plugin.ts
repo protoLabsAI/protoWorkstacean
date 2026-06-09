@@ -34,6 +34,7 @@ export class ControlPlaneRegistrarPlugin implements Plugin {
   private readonly agentsRoot: string;     // workspace/agents/        — in-process DeepAgents (P2)
   private readonly agentsdRoot: string;    // workspace/agents.d/      — A2A endpoints (P3)
   private readonly mcpServersRoot: string; // workspace/mcp-servers.d/ — MCP servers (P4, ADR-0005)
+  private readonly routesdRoot: string;    // workspace/routes.d/      — wiring routes (ADR-0008 P2)
   private subscriptionIds: string[] = [];
 
   /**
@@ -48,6 +49,7 @@ export class ControlPlaneRegistrarPlugin implements Plugin {
     this.agentsRoot = resolve(workspaceDir, "agents");
     this.agentsdRoot = resolve(workspaceDir, "agents.d");
     this.mcpServersRoot = resolve(workspaceDir, "mcp-servers.d");
+    this.routesdRoot = resolve(workspaceDir, "routes.d");
     this.store = store;
   }
 
@@ -64,6 +66,8 @@ export class ControlPlaneRegistrarPlugin implements Plugin {
       bus.subscribe("command.a2a.remove", this.name, (msg) => this._delete(this.agentsdRoot, msg)),
       bus.subscribe("command.mcp.upsert", this.name, (msg) => this._write(this.mcpServersRoot, msg)),
       bus.subscribe("command.mcp.remove", this.name, (msg) => this._delete(this.mcpServersRoot, msg)),
+      bus.subscribe("command.route.upsert", this.name, (msg) => this._write(this.routesdRoot, msg)),
+      bus.subscribe("command.route.remove", this.name, (msg) => this._delete(this.routesdRoot, msg)),
     );
   }
 
