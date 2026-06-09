@@ -85,6 +85,24 @@ describe("SkillDispatcherPlugin", () => {
     expect((reply!.payload as Record<string, unknown>).error).toBeUndefined();
   });
 
+  it("flow.item.created carries the target agent (canvas attribution + Executions filter)", async () => {
+    registry.register(
+      "some_skill",
+      new FunctionExecutor(async (req: SkillRequest): Promise<SkillResult> => ({ text: "ok", isError: false, correlationId: req.correlationId })),
+      { agentName: "ava" },
+    );
+    bus.publish("agent.skill.request", makeMsg({ payload: { skill: "some_skill", targets: ["ava"] }, reply: { topic: "reply.t" } }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const created = bus.published.find((m) => m.topic === "flow.item.created");
+    expect(created).toBeDefined();
+    const meta = (created!.payload as { meta?: Record<string, unknown> }).meta;
+    expect(meta?.targetAgent).toBe("ava");
+
+    const completed = bus.published.find((m) => m.topic === "flow.item.completed");
+    expect((completed!.payload as { meta?: Record<string, unknown> }).meta?.targetAgent).toBe("ava");
+  });
+
   it("publishes error response when no executor found", async () => {
     const msg = makeMsg({ reply: { topic: "reply.test" } });
     bus.publish("agent.skill.request", msg);

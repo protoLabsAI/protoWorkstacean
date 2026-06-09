@@ -362,7 +362,7 @@ export class SkillDispatcherPlugin implements Plugin {
       stage: "dispatched",
       createdAt: dispatchedAt,
       startedAt: dispatchedAt,
-      meta: { skill, executorType: executor.type },
+      meta: { skill, executorType: executor.type, targetAgent: targets[0] },
     });
 
     // Live agent telemetry — the /system dashboard subscribes to
@@ -467,7 +467,7 @@ export class SkillDispatcherPlugin implements Plugin {
           id: flowItemId,
           status: "active",
           stage: "running",
-          meta: { skill, taskId, taskState, trackedBy: "task-tracker" },
+          meta: { skill, taskId, taskState, trackedBy: "task-tracker", targetAgent: targets[0] },
         });
         // Don't publish a response — tracker will do it. Still fall through to
         // finally block so activeExecutions gets cleaned up.
@@ -489,7 +489,7 @@ export class SkillDispatcherPlugin implements Plugin {
           id: flowItemId,
           status: "blocked",
           stage: "error",
-          meta: { skill, error: result.text },
+          meta: { skill, error: result.text, targetAgent: targets[0] },
         });
         this._publishAutonomousOutcome({
           correlationId,
@@ -585,6 +585,7 @@ export class SkillDispatcherPlugin implements Plugin {
           meta: {
             skill,
             executorType: executor.type,
+            targetAgent: targets[0],
             durationMs,
             inputTokens: result.data?.usage?.input_tokens,
             outputTokens: result.data?.usage?.output_tokens,
@@ -644,7 +645,7 @@ export class SkillDispatcherPlugin implements Plugin {
         id: flowItemId,
         status: "blocked",
         stage: "error",
-        meta: { skill, error: errorMsg },
+        meta: { skill, error: errorMsg, targetAgent: targets[0] },
       });
       this._publishAutonomousOutcome({
         correlationId,
