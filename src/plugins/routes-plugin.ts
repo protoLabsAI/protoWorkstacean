@@ -18,6 +18,7 @@ import { resolve } from "node:path";
 import type { EventBus, BusMessage, Plugin } from "../../lib/types.ts";
 import { WorkspaceWatcher } from "../../lib/workspace-watcher.ts";
 import { loadRouteEntries, type RouteDefinition } from "../routes/route-definition.ts";
+import { RouteHopGuard } from "../routes/route-hop-guard.ts";
 import { logger } from "../../lib/log.ts";
 
 const log = logger("routes");
@@ -34,9 +35,12 @@ export class RoutesPlugin implements Plugin {
   /** Subscription ids for the live routes — torn down + rebuilt on every reload. */
   private routeSubs: string[] = [];
   private watcher?: WorkspaceWatcher;
+  /** Bounds indirect multi-hop route cascades per correlation chain (ADR-0008 P2 hardening). */
+  private readonly hopGuard: RouteHopGuard;
 
-  constructor(workspaceDir: string) {
+  constructor(workspaceDir: string, hopGuard: RouteHopGuard = new RouteHopGuard()) {
     this.routesdDir = resolve(workspaceDir, "routes.d");
+    this.hopGuard = hopGuard;
   }
 
   install(bus: EventBus): void {
@@ -82,6 +86,13 @@ export class RoutesPlugin implements Plugin {
     const triggerPayload = (msg.payload ?? {}) as Record<string, unknown>;
     // Reuse the trigger's correlationId so the trace stitches end-to-end.
     const correlationId = msg.correlationId ?? crypto.randomUUID();
+    // Cascade guard: bound route dispatches per correlation chain so an
+    // indirect cross-route cycle (agent side-effect → another route → …) can't
+    // run away. Drops loudly past the cap rather than flooding the bus.
+    if (!this.hopGuard.allow(correlationId, Date.now())) {
+      log.warn(`route "${route.name}" dropped — correlation ${correlationId} exceeded the route-hop cap (cascade guard)`);
+      return;
+    }
     this.bus.publish("agent.skill.request", {
       id: crypto.randomUUID(),
       correlationId,
