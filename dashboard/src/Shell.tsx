@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Bot,
+  Boxes,
   GitBranch,
   Hexagon,
   LayoutDashboard,
@@ -41,6 +42,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/trace", label: "Trace", desc: "Per-correlation skill trace — the spine of one dispatch.", icon: GitBranch },
   { to: "/events", label: "Events", desc: "Raw bus event stream, live over the WebSocket.", icon: Radio },
   { to: "/executions", label: "Executions", desc: "Durable dispatch log over the flow store. Drill into any trace.", icon: ListTree },
+  { to: "/palette", label: "Palette", desc: "Searchable fleet registry — builtin/a2a agents + MCP tools. Add a node to the canvas.", icon: Boxes },
   { to: "/agents", label: "Agents", desc: "Registered agents — in-process builtin and remote A2A.", icon: Bot },
   { to: "/console", label: "Console", desc: "Direct skill console — fire a dispatch by hand.", icon: Terminal },
 ];
