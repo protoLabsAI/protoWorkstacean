@@ -6,6 +6,7 @@ import SkillTrace from "./components/SkillTrace";
 import EventStream from "./components/EventStream";
 import Executions from "./components/Executions";
 import Palette from "./components/Palette";
+import Wiring from "./components/Wiring";
 import AgentsView from "./components/AgentsView";
 import Console from "./components/Console";
 
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/events" element={<EventStream />} />
         <Route path="/executions" element={<Executions />} />
         <Route path="/palette" element={<Palette />} />
+        <Route path="/wiring" element={<Wiring />} />
         <Route path="/agents" element={<AgentsView />} />
         <Route path="/console" element={<Console />} />
       </Route>

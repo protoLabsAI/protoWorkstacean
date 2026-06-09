@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Bot,
   Boxes,
+  Cable,
   GitBranch,
   Hexagon,
   LayoutDashboard,
@@ -43,6 +44,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/events", label: "Events", desc: "Raw bus event stream, live over the WebSocket.", icon: Radio },
   { to: "/executions", label: "Executions", desc: "Durable dispatch log over the flow store. Drill into any trace.", icon: ListTree },
   { to: "/palette", label: "Palette", desc: "Searchable fleet registry — builtin/a2a agents + MCP tools. Add a node to the canvas.", icon: Boxes },
+  { to: "/wiring", label: "Wiring", desc: "Author routes — when a topic fires, dispatch a skill to an agent. One hop, no logic.", icon: Cable },
   { to: "/agents", label: "Agents", desc: "Registered agents — in-process builtin and remote A2A.", icon: Bot },
   { to: "/console", label: "Console", desc: "Direct skill console — fire a dispatch by hand.", icon: Terminal },
 ];
