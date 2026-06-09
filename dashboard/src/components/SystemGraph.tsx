@@ -35,6 +35,8 @@ import QuinnVerdictCounters from "./QuinnVerdictCounters.tsx";
 import LatencyHistogram from "./LatencyHistogram.tsx";
 import { architecturalLayout } from "../lib/layout.ts";
 import { applyFlowDispatch, type FlowDispatchItem } from "../lib/flow-dispatch.ts";
+import { getRoutes, createRoute, type RouteSummary } from "../lib/api";
+import WireRouteDialog from "./WireRouteDialog.tsx";
 
 /** Ring-buffer cap for per-topic history shown in the edge drawer. */
 const TOPIC_HISTORY_CAP = 20;
@@ -130,9 +132,11 @@ interface BuildArgs {
   activeEdges: Set<string>;
   /** Agent names with a live dispatch, folded from flow.item.* (WS-3b). */
   inFlight: Set<string>;
+  /** Authored wiring routes, rendered as edges into their target agent (P2-b2). */
+  routes: RouteSummary[];
 }
 
-function buildGraph({ plugins, agents, agentActivity, activeEdges, inFlight }: BuildArgs): { nodes: Node[]; edges: Edge[] } {
+function buildGraph({ plugins, agents, agentActivity, activeEdges, inFlight, routes }: BuildArgs): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
 
@@ -301,6 +305,58 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges, inFlight }: B
     }
   }
 
+  // 8. Wiring routes (ADR-0008 P2). Each authored route — "when when.topic
+  // fires, dispatch then.skill to then.agent" — renders as an edge INTO its
+  // target agent, sourced from the plugin most plausibly publishing the trigger
+  // topic (reusing topicMatches), or a shared synthetic `wiring-triggers` anchor
+  // when no publisher matches. Distinct dashed-lavender "wire" style + the
+  // topic→skill on the label. Routes with no resolvable agent node are skipped.
+  const agentIds = new Set(agents.map((a) => `agent-${a.name}`));
+  let triggersNodeAdded = false;
+  for (const route of routes) {
+    if (!route.then.agent) continue; // skill-resolved routes have no fixed node target
+    const targetId = `agent-${route.then.agent}`;
+    if (!agentIds.has(targetId)) continue;
+    const publisher = plugins.find((p) => (p.publishes ?? []).some((pub) => topicMatches(route.when.topic, pub)));
+    let sourceId: string;
+    if (publisher) {
+      sourceId = `plugin-${publisher.name}`;
+    } else {
+      sourceId = "wiring-triggers";
+      if (!triggersNodeAdded) {
+        triggersNodeAdded = true;
+        nodes.push({
+          id: sourceId,
+          position: PLACEHOLDER_POS,
+          data: { label: "triggers" },
+          style: {
+            background: "var(--bg-default)",
+            color: "var(--accent-fg)",
+            border: "1px dashed var(--accent-fg)",
+            borderRadius: 6,
+            padding: "6px 10px",
+            fontSize: 11,
+            fontFamily: "ui-monospace, SFMono-Regular, monospace",
+          },
+        });
+      }
+    }
+    edges.push({
+      id: `route-${route.name}`,
+      source: sourceId,
+      target: targetId,
+      label: `${route.when.topic} → ${route.then.skill}`,
+      animated: false,
+      style: {
+        stroke: route.enabled === false ? "var(--border-muted)" : "var(--accent-fg)",
+        strokeWidth: 1.5,
+        strokeDasharray: "6 3",
+        opacity: route.enabled === false ? 0.4 : 0.9,
+      },
+      labelStyle: { fill: "var(--accent-fg)", fontSize: 9, fontFamily: "ui-monospace, monospace" },
+    });
+  }
+
   return architecturalLayout(nodes, edges);
 }
 
@@ -362,6 +418,10 @@ export default function SystemGraph() {
   // Agent name whose inspector is open (WS-3c). Mutually exclusive with the
   // edge MessageDrawer.
   const [openNode, setOpenNode] = useState<string | null>(null);
+  // Authored wiring routes, rendered as edges (P2-b2). `wireTarget` holds the
+  // agent a drag-to-connect gesture is wiring into → opens the route dialog.
+  const [routes, setRoutes] = useState<RouteSummary[]>([]);
+  const [wireTarget, setWireTarget] = useState<string | null>(null);
   // Per-topic ring buffer of recent WS-observed messages. Lives in a ref
   // (not state) because every WS frame would otherwise re-trigger the
   // whole graph rebuild — we only need to re-render when the operator
@@ -385,9 +445,10 @@ export default function SystemGraph() {
     let cancelled = false;
     (async () => {
       try {
-        const [topoR, agentsR] = await Promise.all([
+        const [topoR, agentsR, routesR] = await Promise.all([
           fetch("/api/bus/topology").then((r) => r.json()),
           fetch("/api/agents/runtime").then((r) => r.json()),
+          getRoutes(true).catch(() => ({ routes: [] as RouteSummary[] })),
         ]);
         if (cancelled) return;
         if (!topoR.success) {
@@ -396,6 +457,7 @@ export default function SystemGraph() {
         }
         setTopology(topoR.data.plugins);
         setAgents(agentsR.success ? agentsR.data.agents : []);
+        setRoutes(routesR.routes ?? []);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }
@@ -491,9 +553,9 @@ export default function SystemGraph() {
 
   const { nodes, edges } = useMemo(
     () => topology
-      ? buildGraph({ plugins: topology, agents, agentActivity, activeEdges, inFlight })
+      ? buildGraph({ plugins: topology, agents, agentActivity, activeEdges, inFlight, routes })
       : { nodes: [], edges: [] },
-    [topology, agents, agentActivity, activeEdges, inFlight],
+    [topology, agents, agentActivity, activeEdges, inFlight, routes],
   );
 
   // ALL hooks must run before any conditional return (Rules of Hooks). This
@@ -538,7 +600,17 @@ export default function SystemGraph() {
             setOpenTopic(null); // inspector + edge drawer are mutually exclusive
           }
         }}
+        onConnect={(conn: { target: string | null }) => {
+          // Drag-to-wire (P2-b2): dropping a connection on an agent node opens
+          // the route dialog prefilled with that agent as the target.
+          if (typeof conn.target === "string" && conn.target.startsWith("agent-")) {
+            setWireTarget(conn.target.slice("agent-".length));
+          }
+        }}
         onEdgeClick={(_evt: unknown, edge: Edge) => {
+          // Route edges (id `route-*`) carry a "topic → skill" label, not a real
+          // topic — they don't open the message drawer.
+          if (typeof edge.id === "string" && edge.id.startsWith("route-")) return;
           // Edges built from publisher → subscriber carry their topic as the
           // edge label. Static plugin → service edges have no topic — those
           // skip the drawer.
@@ -563,6 +635,20 @@ export default function SystemGraph() {
       )}
       {inspectorNode && (
         <NodeInspector node={inspectorNode} onClose={() => setOpenNode(null)} />
+      )}
+      {wireTarget && (
+        <WireRouteDialog
+          agent={wireTarget}
+          onClose={() => setWireTarget(null)}
+          onCreate={async (def) => {
+            const r = await createRoute(def);
+            if (r.ok) {
+              const fresh = await getRoutes(true).catch(() => ({ routes }));
+              setRoutes(fresh.routes ?? routes);
+            }
+            return r;
+          }}
+        />
       )}
     </div>
   );
