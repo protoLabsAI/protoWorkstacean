@@ -107,6 +107,16 @@ export const ACTION_TOPICS = {
   COMMAND_MCP_UPSERT: "command.mcp.upsert",
   COMMAND_MCP_REMOVE: "command.mcp.remove",
 
+  /**
+   * Route (wiring) mutations (ADR-0008 P2). The registrar persists the route to
+   * workspace/routes.d/<name>.yaml; RoutesPlugin hot-reloads and (un)subscribes
+   * its trigger topic live (no restart).
+   *   command.route.upsert — { name, file, yaml }
+   *   command.route.remove — { name, file }
+   */
+  COMMAND_ROUTE_UPSERT: "command.route.upsert",
+  COMMAND_ROUTE_REMOVE: "command.route.remove",
+
   /** Wildcard subscription pattern — matches all cron events from SchedulerPlugin. */
   CRON_ALL: "cron.#",
 

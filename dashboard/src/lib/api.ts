@@ -292,3 +292,21 @@ export const updateMcpServer = (name: string, def: unknown) =>
 /** Remove an MCP server (→ disconnected + unregistered live). */
 export const deleteMcpServer = (name: string) =>
   adminFetch(`/api/mcp-servers/${encodeURIComponent(name)}`, "DELETE");
+
+// ── Routes (wiring) — ADR-0008 P2 ───────────────────────────────────────────
+/** A declarative wiring route: "when when.topic fires, dispatch then.skill (to then.agent)." */
+export interface RouteSummary {
+  name: string;
+  description?: string;
+  when: { topic: string };
+  then: { skill: string; agent?: string };
+  enabled?: boolean;
+}
+/** GET /api/routes — live wiring routes, rendered as canvas edges. */
+export const getRoutes = (force = false) =>
+  apiFetch<{ routes: RouteSummary[] }>("/api/routes", { ttl: 10_000, force });
+/** Author a route (persisted to routes.d/; live via hot-reload). */
+export const createRoute = (def: unknown) => adminFetch("/api/routes", "POST", def);
+/** Remove a route by name (→ unsubscribed live). */
+export const deleteRoute = (name: string) =>
+  adminFetch(`/api/routes/${encodeURIComponent(name)}`, "DELETE");

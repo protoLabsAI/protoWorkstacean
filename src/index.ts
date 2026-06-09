@@ -8,6 +8,7 @@ import { SignalPlugin } from "../lib/plugins/signal";
 import { SchedulerPlugin } from "../lib/plugins/scheduler";
 import { A2ADeliveryPlugin } from "../lib/plugins/a2a-delivery";
 import { ControlPlaneRegistrarPlugin } from "./plugins/control-plane-registrar-plugin.ts";
+import { RoutesPlugin } from "./plugins/routes-plugin.ts";
 import { RegistrationStore } from "./storage/registration-store.ts";
 import type { Plugin, } from "../lib/types";
 import { parseEnv } from "./config/env.ts";
@@ -165,6 +166,9 @@ const corePlugins: Plugin[] = [
   // Backed by a durable RegistrationStore so API-driven a2a registrations
   // survive a redeploy (the agents.d/ clone is ephemeral) — #850.
   new ControlPlaneRegistrarPlugin(workspaceDir, new RegistrationStore(`${dataDir}/registrations.db`)),
+  // ADR-0008 P2: loads workspace/routes.d/ and dispatches agent.skill.request
+  // on each route's trigger topic. Funnels into the same dispatcher chokepoint.
+  new RoutesPlugin(workspaceDir),
 ];
 
 for (const plugin of corePlugins) {
