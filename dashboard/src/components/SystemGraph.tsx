@@ -34,6 +34,7 @@ import MessageDrawer, { type DrawerMessage } from "./MessageDrawer.tsx";
 import QuinnVerdictCounters from "./QuinnVerdictCounters.tsx";
 import LatencyHistogram from "./LatencyHistogram.tsx";
 import { architecturalLayout } from "../lib/layout.ts";
+import { applyFlowDispatch, type FlowDispatchItem } from "../lib/flow-dispatch.ts";
 
 /** Ring-buffer cap for per-topic history shown in the edge drawer. */
 const TOPIC_HISTORY_CAP = 20;
@@ -127,9 +128,11 @@ interface BuildArgs {
   agents: AgentRuntimeEntry[];
   agentActivity: Map<string, AgentActivityState>;
   activeEdges: Set<string>;
+  /** Agent names with a live dispatch, folded from flow.item.* (WS-3b). */
+  inFlight: Set<string>;
 }
 
-function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs): { nodes: Node[]; edges: Edge[] } {
+function buildGraph({ plugins, agents, agentActivity, activeEdges, inFlight }: BuildArgs): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
 
@@ -210,18 +213,26 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
   }
 
   // 6. Agent → agent-runtime / skill-broker plugin edges. Each agent's
-  // dispatch flows through one of those plugins; render an edge so the
-  // animation reaches the agent node when activity is live.
+  // dispatch flows through one of those plugins; the edge animates while a
+  // dispatch to that agent is in-flight. The live signal is flow.item.* (the
+  // hub's authoritative dispatch lifecycle), so a dispatch out to a distributed
+  // A2A agent animates exactly like an in-process one — both flow through the
+  // hub. A2A edges are dashed, matching the "lives elsewhere" idiom.
   for (const a of agents) {
     const hostPlugin = a.type === "a2a" ? "skill-broker" : "agent-runtime";
     if (!plugins.find((p) => p.name === hostPlugin)) continue;
-    const live = agentActivity.get(a.name)?.status === "running";
+    const live = inFlight.has(a.name);
+    const remote = a.type === "a2a";
     edges.push({
       id: `agent-${a.name}->${hostPlugin}`,
       source: `plugin-${hostPlugin}`,
       target: `agent-${a.name}`,
       animated: live,
-      style: { stroke: live ? "var(--text-success)" : "var(--border-default)", strokeWidth: live ? 2 : 1 },
+      style: {
+        stroke: live ? "var(--text-success)" : "var(--border-default)",
+        strokeWidth: live ? 2 : 1,
+        strokeDasharray: remote ? "5 4" : undefined,
+      },
     });
   }
 
@@ -345,6 +356,9 @@ export default function SystemGraph() {
   const [agents, setAgents] = useState<AgentRuntimeEntry[]>([]);
   const [agentActivity, setAgentActivity] = useState<Map<string, AgentActivityState>>(new Map());
   const [activeEdges, setActiveEdges] = useState<Set<string>>(new Set());
+  // Agent names with a live dispatch, folded from flow.item.* (WS-3b). Drives
+  // the host→agent edge animation uniformly across builtin + a2a tiers.
+  const [inFlight, setInFlight] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   // Per-topic ring buffer of recent WS-observed messages. Lives in a ref
   // (not state) because every WS frame would otherwise re-trigger the
@@ -411,10 +425,17 @@ export default function SystemGraph() {
             timestamp?: number;
           };
           if (!msg.topic) return;
-          // Agent activity → state machine
+          // Agent activity → state machine (in-process node internals: skill + tools)
           if (msg.topic.startsWith("agent.runtime.activity.")) {
             const ev = msg.payload as AgentActivityEvent;
             setAgentActivity((cur) => applyActivity(cur, ev));
+          }
+          // Dispatch lifecycle → in-flight set (the authoritative, tier-agnostic
+          // signal driving the host→agent edge animation).
+          if (msg.topic.startsWith("flow.item.")) {
+            const topic = msg.topic;
+            const item = msg.payload as FlowDispatchItem;
+            setInFlight((cur) => applyFlowDispatch(cur, topic, item));
           }
           // Per-topic ring buffer for D3's edge drawer. Cap at TOPIC_HISTORY_CAP.
           const buf = topicHistoryRef.current.get(msg.topic) ?? [];
@@ -468,9 +489,9 @@ export default function SystemGraph() {
 
   const { nodes, edges } = useMemo(
     () => topology
-      ? buildGraph({ plugins: topology, agents, agentActivity, activeEdges })
+      ? buildGraph({ plugins: topology, agents, agentActivity, activeEdges, inFlight })
       : { nodes: [], edges: [] },
-    [topology, agents, agentActivity, activeEdges],
+    [topology, agents, agentActivity, activeEdges, inFlight],
   );
 
   // ALL hooks must run before any conditional return (Rules of Hooks). This
