@@ -71,7 +71,9 @@ Drawing an edge from a trigger to an agent on the canvas creates a `routes.d/` f
 ## Open questions (resolve in P2-a)
 
 - **Trigger vocabulary** — start with `when.topic` (most general, bus-native). Keyword/channel triggers are already served by `SkillResolver`/`channels.yaml`; only add them to `routes.d/` if authoring them from the canvas proves worth the overlap.
-- **Self-trigger / cascade guards** — a route whose `then` re-emits its own `when` topic would loop. Reuse the dispatcher's cooldown + the self-cascade guard; a route loader sanity-check (then-topic ≠ when-pattern) is cheap insurance.
+- **Self-trigger / cascade guards.** A route *always* emits `agent.skill.request` (never an arbitrary topic), so it can't *directly* re-emit its own `when.topic` — but its dispatch can *indirectly* cause that topic to fire again (agent → effect → another route → same topic), an unbounded cross-route cycle. Note what the existing machinery does **not** cover: the dispatcher's cooldown is per-`(skill, target)` rate-limiting, not a generic cycle breaker, and `activeExecutions` is correlation-keyed, not a hop counter — so neither bounds a multi-hop loop with fresh correlationIds.
+  - **Shipped in P2-a (static guard):** the route loader/validator rejects `when.topic` ∈ {`#`, `agent.skill.request`}, blocking the one-hop loop on the dispatch topic itself. (Note this is a *trigger* check — there is no "then-topic"; `then` is `{ skill, agent? }`.)
+  - **Tracked as P2 hardening (runtime guard):** a **hop/TTL limiter in `RoutesPlugin`** — carry a route-hop count through the dispatched payload's correlation chain and drop past a max — to bound indirect multi-hop cascades. This is the real cycle protection; the static guard only catches the trivial case.
 
 ## Related
 
