@@ -81,15 +81,20 @@ export default function Wiring() {
       then: { skill: skill.trim(), ...(agent ? { agent } : {}) },
     };
     setBusy(true);
-    const r = await createRoute(def);
-    setBusy(false);
-    if (r.ok) {
-      setResult({ ok: true, msg: `Wired "${name}" — live within the hot-reload window (~5s).` });
-      setTopic(""); setSkill(""); setAgent(""); setName("");
-      setTimeout(() => void refresh(), 1500);
-      void refresh();
-    } else {
-      setResult({ ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "create failed"}` });
+    try {
+      const r = await createRoute(def);
+      if (r.ok) {
+        setResult({ ok: true, msg: `Wired "${name}" — live within the hot-reload window (~5s).` });
+        setTopic(""); setSkill(""); setAgent(""); setName("");
+        setTimeout(() => void refresh(), 1500);
+        void refresh();
+      } else {
+        setResult({ ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "create failed"}` });
+      }
+    } catch (err) {
+      setResult({ ok: false, msg: `Request failed: ${err instanceof Error ? err.message : String(err)}` });
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -97,10 +102,15 @@ export default function Wiring() {
     const target = pendingDelete;
     if (!target) return;
     setPendingDelete(null); setBusy(true);
-    const r = await deleteRoute(target);
-    setBusy(false);
-    setResult(r.ok ? { ok: true, msg: `Removed "${target}".` } : { ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "delete failed"}` });
-    if (r.ok) { setTimeout(() => void refresh(), 1500); void refresh(); }
+    try {
+      const r = await deleteRoute(target);
+      setResult(r.ok ? { ok: true, msg: `Removed "${target}".` } : { ok: false, msg: `${r.status}: ${(r.body?.error as string) ?? "delete failed"}` });
+      if (r.ok) { setTimeout(() => void refresh(), 1500); void refresh(); }
+    } catch (err) {
+      setResult({ ok: false, msg: `Request failed: ${err instanceof Error ? err.message : String(err)}` });
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
