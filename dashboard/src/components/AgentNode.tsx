@@ -25,6 +25,8 @@ export interface AgentActivityState {
 export interface AgentNodeData {
   label: string;
   type: string; // "deep-agent" | "a2a" | "function"
+  /** A2A only: endpoint host[:port] (e.g. "roxy:7870") — where the remote node lives. */
+  host?: string;
   activity?: AgentActivityState;
 }
 
@@ -35,11 +37,10 @@ const STATUS_COLOR: Record<AgentStatus, string> = {
   error: "var(--text-danger)",       // GitHub red
 };
 
-const TYPE_LABEL: Record<string, string> = {
-  "deep-agent": "DeepAgent",
-  a2a: "A2A",
-  function: "function",
-};
+/** Tier tag (ADR-0008): in-process `builtin` vs distributed `a2a`. */
+function tierLabel(type: string): string {
+  return type === "a2a" ? "a2a" : "builtin";
+}
 
 function relativeTime(ms: number): string {
   const delta = Date.now() - ms;
@@ -53,13 +54,17 @@ export default function AgentNode({ data }: { data: AgentNodeData }) {
   const activity = data.activity;
   const status: AgentStatus = activity?.status ?? "idle";
   const statusColor = STATUS_COLOR[status];
+  // Remote (A2A) nodes get a dashed border — the same "lives elsewhere" idiom
+  // the graph already uses for service + api-route nodes — so tier reads at a
+  // glance even when idle.
+  const isRemote = data.type === "a2a";
 
   return (
     <div
       style={{
         background: "var(--bg-canvas)",
         color: "var(--text-primary)",
-        border: `1px solid ${statusColor}`,
+        border: `1px ${isRemote ? "dashed" : "solid"} ${statusColor}`,
         borderRadius: 8,
         padding: 10,
         minWidth: 220,
@@ -79,12 +84,12 @@ export default function AgentNode({ data }: { data: AgentNodeData }) {
           style={{
             fontSize: 9,
             padding: "1px 5px",
-            border: "1px solid var(--border-default)",
+            border: `1px ${isRemote ? "dashed" : "solid"} var(--border-default)`,
             borderRadius: 3,
-            color: "var(--text-secondary)",
+            color: isRemote ? "var(--accent-fg)" : "var(--text-secondary)",
           }}
         >
-          {TYPE_LABEL[data.type] ?? data.type}
+          {tierLabel(data.type)}
         </span>
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
           <span
@@ -99,6 +104,13 @@ export default function AgentNode({ data }: { data: AgentNodeData }) {
           <span style={{ fontSize: 10, color: statusColor }}>{status}</span>
         </span>
       </div>
+
+      {/* Remote host — where the distributed A2A node lives */}
+      {isRemote && data.host && (
+        <div style={{ fontSize: 10, color: "var(--text-secondary)", marginBottom: 4 }}>
+          <span style={{ color: "var(--accent-fg)" }}>⤳</span> {data.host}
+        </div>
+      )}
 
       {/* Current skill */}
       {activity?.currentSkill && (
