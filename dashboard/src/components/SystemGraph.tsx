@@ -52,6 +52,8 @@ interface AgentRuntimeEntry {
   name: string;
   type: string;
   skills: string[];
+  /** A2A only: endpoint host[:port] from /api/agents/runtime. */
+  host?: string;
 }
 
 interface AgentActivityEvent {
@@ -137,7 +139,7 @@ function buildGraph({ plugins, agents, agentActivity, activeEdges }: BuildArgs):
       id: `agent-${a.name}`,
       type: "agent",
       position: PLACEHOLDER_POS,
-      data: { label: a.name, type: a.type, activity: agentActivity.get(a.name) },
+      data: { label: a.name, type: a.type, host: a.host, activity: agentActivity.get(a.name) },
     });
   });
 
