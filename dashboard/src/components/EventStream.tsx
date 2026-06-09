@@ -120,8 +120,8 @@ export default function EventStream() {
         .es-root {
           display: flex;
           flex-direction: column;
-          /* Fill the main-content area (which has its own overflow) */
-          min-height: calc(100vh - var(--header-height) - 48px);
+          /* Fill the shell workspace row (chrome = topbar + utility bar) */
+          min-height: calc(100vh - var(--shell-topbar-h) - var(--shell-utility-h));
           margin: -24px;
         }
         .es-sticky {

@@ -1,5 +1,5 @@
 import { Routes, Route } from "react-router-dom";
-import Layout from "./Layout";
+import Shell from "./Shell";
 import OverviewGrid from "./components/OverviewGrid";
 import SystemGraph from "./components/SystemGraph";
 import SkillTrace from "./components/SkillTrace";
@@ -11,7 +11,7 @@ import Console from "./components/Console";
 export default function App() {
   return (
     <Routes>
-      <Route element={<Layout />}>
+      <Route element={<Shell />}>
         <Route path="/" element={<OverviewGrid />} />
         <Route path="/system" element={<SystemGraph />} />
         <Route path="/trace" element={<SkillTrace />} />

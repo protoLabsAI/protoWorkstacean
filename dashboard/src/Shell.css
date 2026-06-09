@@ -1,0 +1,225 @@
+/* Shell — protoAgent-style app frame (ADR-0008 P1, WS-2).
+   Three-row grid; all colors via the semantic --pl-*-mapped tokens in
+   styles/global.css. Only shell-grid geometry lives here. */
+
+.shell {
+  display: grid;
+  grid-template-rows: var(--shell-topbar-h, 48px) 1fr var(--shell-utility-h, 28px);
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Topbar ──────────────────────────────────────────────────────────── */
+.shell__topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 12px 0 16px;
+  background: var(--bg-default);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.shell__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.shell__brand-mark {
+  color: var(--accent-fg);
+}
+
+.shell__brand-text {
+  letter-spacing: 0.01em;
+}
+
+.shell__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.shell__topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shell__panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.shell__panel-toggle:hover {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  border-color: var(--border-muted);
+}
+
+/* ── Body (rail | workspace | dock) ──────────────────────────────────── */
+.shell__body {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 72px lucide icon rail */
+.shell__rail {
+  width: 72px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 8px 0;
+  background: var(--bg-default);
+  border-right: 1px solid var(--border-default);
+  overflow-y: auto;
+}
+
+.shell__rail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  margin: 0 6px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background 0.1s, color 0.1s;
+}
+
+.shell__rail-item:hover {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.shell__rail-item--active,
+.shell__rail-item--active:hover {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent-fg);
+}
+
+.shell__rail-label {
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* Workspace — the routed surface */
+.shell__workspace {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 24px;
+  background: var(--bg-canvas);
+}
+
+.shell__workspace--full {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Resize handle between workspace and dock */
+.shell__resizer {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--border-muted);
+  transition: background 0.1s;
+}
+
+.shell__resizer:hover {
+  background: var(--accent-fg);
+}
+
+/* Right context dock — resizable + collapsible */
+.shell__panel {
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--bg-default);
+  border-left: 1px solid var(--border-default);
+}
+
+.shell__panel-head {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.shell__panel-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+/* ── Utility bar ─────────────────────────────────────────────────────── */
+.shell__utility {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: var(--bg-default);
+  border-top: 1px solid var(--border-default);
+  font-size: 11px;
+  font-family: var(--pl-font-mono);
+  color: var(--text-secondary);
+}
+
+.shell__util-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shell__util-surface {
+  margin-left: auto;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.shell__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.shell__dot--connected {
+  background: var(--text-success);
+  box-shadow: 0 0 4px var(--text-success);
+}
+
+.shell__dot--connecting {
+  background: var(--text-warning);
+  animation: shell-pulse 1.5s ease-in-out infinite;
+}
+
+.shell__dot--disconnected {
+  background: var(--text-danger);
+}
+
+@keyframes shell-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}

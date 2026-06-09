@@ -1,9 +1,9 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
-// Contains a render-time crash to the routed content area so a single bad pane
-// can't blank the whole app (the sidebar + nav stay usable). Also surfaces the
+// Contains a render-time crash to the routed workspace so a single bad pane
+// can't blank the whole app (the rail + chrome stay usable). Also surfaces the
 // error message + stack so the failure is diagnosable instead of a blank screen.
-// Keyed by route path in Layout so navigating away resets it.
+// Keyed by route path in Shell so navigating away resets it.
 
 interface Props {
   children: ReactNode;
