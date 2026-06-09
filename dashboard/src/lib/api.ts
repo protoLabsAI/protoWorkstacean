@@ -132,6 +132,8 @@ export interface AgentsRuntimeResponse {
     skills: string[];
     /** A2A agent known from yaml but not yet discovered (no skills registered). */
     pendingDiscovery?: boolean;
+    /** A2A only: endpoint host[:port] (e.g. "roxy:7870"). */
+    host?: string;
   }>;
 }
 
