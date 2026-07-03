@@ -212,10 +212,24 @@ skills:
       and CI results from an unrelated codebase and produce a completely
       invalid review.
 
-      ## Step 2 — Gather evidence
+      ## Step 2 — Recall your prior review, then gather evidence
 
-      Call `pr_inspector` with all three read-actions against the target
-      PR, passing the repo you extracted in step 1:
+      **First, recall whether you have already reviewed this PR:**
+
+      - `pr_inspector(action='prior_review', pr_number=N, repo='owner/name')`
+        — your most recent verdict on this PR and whether the head moved since.
+
+      On a first review it says so — gather full evidence and review the whole
+      diff. On a re-review it returns your prior verdict and the SHA you
+      reviewed: when the head is unchanged the cycle is CI settling, so reaffirm
+      your prior verdict rather than re-deriving it; when the head advanced,
+      review only what changed since your reviewed SHA — carry forward the
+      findings still open and drop the ones now fixed. This incremental pass
+      keeps a re-review from re-litigating settled findings and running out of
+      turns.
+
+      **Then gather the current evidence, passing the repo you extracted in
+      step 1:**
 
       - `pr_inspector(action='check_ci', pr_number=N, repo='owner/name')`
         — CI check states
