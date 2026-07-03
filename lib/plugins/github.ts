@@ -1200,6 +1200,22 @@ export class GitHubPlugin implements Plugin {
           `(terminal-green, prior Quinn review ${latestState}${isResolvedBlocker ? ", blocker resolved" : ""})`,
       );
 
+      // ── Visible promotion ack on the PR timeline (#887) ────────────────
+      // The formal APPROVE flips GitHub's review state, but Quinn's earlier
+      // COMMENTED body still reads "CI still queued…" — a later reader sees a
+      // WARN-flavored comment under an APPROVED state with no explanation of
+      // why/when it was promoted. Post a short timeline comment so the visible
+      // history is self-explanatory regardless of which path (edge webhook or
+      // reconciliation sweep) did the promoting. Best-effort: a failure here
+      // must never block the approve flow.
+      void this._postComment(
+        getToken,
+        { owner, repo, number },
+        isResolvedBlocker
+          ? `✅ CI went terminal-green and the prior change request is resolved — promoting the earlier review to **APPROVED** per the approve-on-green policy ([#848](https://github.com/protoLabsAI/protoWorkstacean/issues/848)).`
+          : `✅ CI went terminal-green with no blockers on the prior review — promoting it to **APPROVED** per the approve-on-green policy ([#748](https://github.com/protoLabsAI/protoWorkstacean/issues/748)).`,
+      );
+
       // ── Enable native auto-merge (squash) for one-off PRs ──────────────
       // After auto-approving, arm GitHub's native auto-merge so the PR
       // lands without a manual click. Only for one-off PRs targeting the

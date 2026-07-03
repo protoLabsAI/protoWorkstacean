@@ -89,9 +89,10 @@ interface StubOpts {
   threadsUnresolved?: boolean | null;
 }
 
-/** Records every POST .../reviews submission so a test can assert the APPROVE. */
+/** Records every APPROVE review submission and every ack timeline comment. */
 interface Captured {
   approvePosts: Array<Record<string, unknown>>;
+  commentPosts: Array<Record<string, unknown>>;
 }
 
 function ciCompletionPayload(): Record<string, unknown> {
@@ -103,13 +104,19 @@ function ciCompletionPayload(): Record<string, unknown> {
 }
 
 function stubFetch(opts: StubOpts): Captured {
-  const captured: Captured = { approvePosts: [] };
+  const captured: Captured = { approvePosts: [], commentPosts: [] };
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const method = (init?.method ?? "GET").toUpperCase();
+
+    // approve-on-green ack timeline comment (#887)
+    if (url.includes(`/issues/${PR}/comments`) && method === "POST") {
+      captured.commentPosts.push(JSON.parse(String(init?.body ?? "{}")));
+      return json({ id: 1001 });
+    }
 
     // _handleCiCompletion: resolve PRs for the SHA
     if (url.includes(`/commits/${SHA}/pulls`)) {
@@ -158,6 +165,9 @@ async function runCiCompletion(opts: StubOpts): Promise<Captured> {
 const origFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = origFetch; });
 
+/** Let the fire-and-forget ack-comment POST (#887) settle before asserting. */
+const flush = () => new Promise((r) => setTimeout(r, 20));
+
 describe("_handleCiCompletion — deterministic approve-on-green", () => {
   test("(a) terminal-green + prior COMMENTED → posts formal APPROVE", async () => {
     const captured = await runCiCompletion({
@@ -167,6 +177,29 @@ describe("_handleCiCompletion — deterministic approve-on-green", () => {
     expect(captured.approvePosts.length).toBe(1);
     expect(captured.approvePosts[0]!.event).toBe("APPROVE");
     expect(captured.approvePosts[0]!.commit_id).toBe(SHA);
+  });
+
+  test("(a2) approve-on-green posts a visible promotion ack comment (#887)", async () => {
+    const captured = await runCiCompletion({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+      checkRuns: [{ status: "completed", conclusion: "success" }],
+    });
+    await flush();
+    expect(captured.approvePosts.length).toBe(1);
+    expect(captured.commentPosts.length).toBe(1);
+    const body = String(captured.commentPosts[0]!.body);
+    expect(body).toContain("approve-on-green policy");
+    expect(body).toContain("APPROVED");
+  });
+
+  test("no approve → no ack comment (the ack only rides a real promotion)", async () => {
+    const captured = await runCiCompletion({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+      checkRuns: [{ status: "completed", conclusion: "failure" }], // red
+    });
+    await flush();
+    expect(captured.approvePosts.length).toBe(0);
+    expect(captured.commentPosts.length).toBe(0);
   });
 
   test("(b) terminal-green + prior CHANGES_REQUESTED + no unresolved threads → APPROVE (blocker resolved, #848/#858)", async () => {
@@ -308,7 +341,7 @@ interface SweepPr {
 
 /** Stub GitHub REST for a reconciliation sweep over one repo's open PRs. */
 function stubSweepFetch(prs: SweepPr[]): Captured {
-  const captured: Captured = { approvePosts: [] };
+  const captured: Captured = { approvePosts: [], commentPosts: [] };
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   const byNum = new Map(prs.map((p) => [p.number, p]));
@@ -322,6 +355,11 @@ function stubSweepFetch(prs: SweepPr[]): Captured {
     const url = typeof input === "string" ? input : input.toString();
     const method = (init?.method ?? "GET").toUpperCase();
 
+    // approve-on-green ack timeline comment (#887)
+    if (url.match(/\/issues\/\d+\/comments/) && method === "POST") {
+      captured.commentPosts.push(JSON.parse(String(init?.body ?? "{}")));
+      return json({ id: 1001 });
+    }
     // open-PR listing for the sweep
     if (url.includes("/pulls?state=open")) {
       return json(prs.map((p) => ({
@@ -372,6 +410,9 @@ describe("_reconcileApproveOnGreen — level-triggered backstop (#879)", () => {
     expect(captured.approvePosts.length).toBe(1);
     expect(captured.approvePosts[0]!.event).toBe("APPROVE");
     expect(captured.approvePosts[0]!.commit_id).toBe("aaa1111");
+    await flush();
+    expect(captured.commentPosts.length).toBe(1); // visible promotion ack (#887)
+    expect(String(captured.commentPosts[0]!.body)).toContain("approve-on-green policy");
   });
 
   test("leaves an already-APPROVED PR alone (idempotent — no duplicate approve)", async () => {
