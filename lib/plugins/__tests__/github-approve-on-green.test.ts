@@ -248,6 +248,28 @@ describe("_handleCiCompletion — deterministic approve-on-green", () => {
     expect(captured.approvePosts.length).toBe(0);
   });
 
+  test("needs-review (Quinn COMMENTED but CI RED) is not swallowed — still re-dispatches (regression on the refactor)", async () => {
+    // The extraction of _evaluateApproveOnGreen must keep the webhook's LLM
+    // re-dispatch on a "needs-review" decision. Red CI + prior COMMENTED → no
+    // auto-approve, and the CI-completion path re-dispatches pr_review.
+    const captured = stubFetch({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+      checkRuns: [
+        { status: "completed", conclusion: "success" },
+        { status: "completed", conclusion: "failure" },
+      ],
+    });
+    const bus = new InMemoryEventBus();
+    let dispatched = false;
+    bus.subscribe("message.inbound.github.#", "t", () => { dispatched = true; });
+    const plugin = new GitHubPlugin("/tmp/nonexistent-ws", new ProjectRegistry());
+    await (plugin as unknown as {
+      _handleCiCompletion: (e: string, p: Record<string, unknown>, b: InMemoryEventBus, g: () => Promise<string>) => Promise<void>;
+    })._handleCiCompletion("workflow_run", ciCompletionPayload(), bus, async () => "fake-token");
+    expect(captured.approvePosts.length).toBe(0);
+    expect(dispatched).toBe(true); // fell through to the LLM re-review
+  });
+
   test("co-arriving terminal webhooks → exactly one APPROVE (dedup guard)", async () => {
     // Reproduces the duplicate-approval spam: GitHub fires check_suite,
     // workflow_run, and check_run completions near-simultaneously. They run
@@ -268,5 +290,115 @@ describe("_handleCiCompletion — deterministic approve-on-green", () => {
     await Promise.all([drive(), drive(), drive()]);
 
     expect(captured.approvePosts.length).toBe(1);
+  });
+});
+
+// ── Reconciliation sweep: _reconcileApproveOnGreen (#879) ──────────────────────
+// Level-triggered backstop for the edge-triggered CI-completion webhook. When a
+// workflow_run/check_suite completion is missed, the PR sits green forever; the
+// sweep walks every open PR and re-runs the same approve decision.
+
+interface SweepPr {
+  number: number;
+  sha: string;
+  reviews: Array<Record<string, unknown>>;
+  checkRuns: Array<Record<string, unknown>>;
+  base?: string;
+}
+
+/** Stub GitHub REST for a reconciliation sweep over one repo's open PRs. */
+function stubSweepFetch(prs: SweepPr[]): Captured {
+  const captured: Captured = { approvePosts: [] };
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  const byNum = new Map(prs.map((p) => [p.number, p]));
+  const byNumFromUrl = (url: string) => {
+    const m = url.match(/\/pulls\/(\d+)/);
+    return m ? byNum.get(Number(m[1])) : undefined;
+  };
+  const bySha = new Map(prs.map((p) => [p.sha, p]));
+
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    const method = (init?.method ?? "GET").toUpperCase();
+
+    // open-PR listing for the sweep
+    if (url.includes("/pulls?state=open")) {
+      return json(prs.map((p) => ({
+        number: p.number, state: "open", draft: false,
+        head: { sha: p.sha }, base: { ref: p.base ?? "feature/x" },
+        title: "t", html_url: "u", user: { login: "dev" },
+      })));
+    }
+    if (url.match(/\/pulls\/\d+\/reviews/) && method === "GET") {
+      return json(byNumFromUrl(url)?.reviews ?? []);
+    }
+    if (url.includes("/check-runs")) {
+      const sha = url.match(/\/commits\/([^/]+)\/check-runs/)?.[1] ?? "";
+      return json({ check_runs: bySha.get(sha)?.checkRuns ?? [] });
+    }
+    if (url.includes("/graphql") && method === "POST") {
+      return json({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ isResolved: true }] } } } } });
+    }
+    if (url.match(/\/pulls\/\d+\/reviews/) && method === "POST") {
+      captured.approvePosts.push(JSON.parse(String(init?.body ?? "{}")));
+      return json({ id: 999 });
+    }
+    throw new Error(`unexpected fetch in sweep test: ${method} ${url}`);
+  }) as typeof fetch;
+
+  return captured;
+}
+
+async function runSweep(prs: SweepPr[]): Promise<Captured> {
+  const captured = stubSweepFetch(prs);
+  const registry = new ProjectRegistry();
+  // Registry is populated from a remote fetch in prod; stub the one accessor the
+  // sweep reads so it iterates our fixture repo.
+  (registry as unknown as { getGithubCoords: () => string[] }).getGithubCoords = () => [`${OWNER}/${REPO}`];
+  const plugin = new GitHubPlugin("/tmp/nonexistent-ws", registry);
+  await (plugin as unknown as {
+    _reconcileApproveOnGreen: (g: () => Promise<string>) => Promise<void>;
+  })._reconcileApproveOnGreen(async () => "fake-token");
+  return captured;
+}
+
+describe("_reconcileApproveOnGreen — level-triggered backstop (#879)", () => {
+  test("approves a stranded green PR the webhook missed (Quinn COMMENTED + terminal-green)", async () => {
+    const captured = await runSweep([
+      { number: 878, sha: "aaa1111", reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+        checkRuns: [{ status: "completed", conclusion: "success" }] },
+    ]);
+    expect(captured.approvePosts.length).toBe(1);
+    expect(captured.approvePosts[0]!.event).toBe("APPROVE");
+    expect(captured.approvePosts[0]!.commit_id).toBe("aaa1111");
+  });
+
+  test("leaves an already-APPROVED PR alone (idempotent — no duplicate approve)", async () => {
+    const captured = await runSweep([
+      { number: 878, sha: "aaa1111", reviews: [
+        { user: { login: "protoquinn[bot]" }, state: "COMMENTED" },
+        { user: { login: "protoquinn[bot]" }, state: "APPROVED" },
+      ], checkRuns: [{ status: "completed", conclusion: "success" }] },
+    ]);
+    expect(captured.approvePosts.length).toBe(0);
+  });
+
+  test("does not touch a PR Quinn never reviewed (no blind approve, no LLM spam)", async () => {
+    const captured = await runSweep([
+      { number: 878, sha: "aaa1111", reviews: [], checkRuns: [{ status: "completed", conclusion: "success" }] },
+    ]);
+    expect(captured.approvePosts.length).toBe(0);
+  });
+
+  test("skips a still-red PR; approves a sibling green PR in the same sweep", async () => {
+    const captured = await runSweep([
+      { number: 876, sha: "red0000", reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+        checkRuns: [{ status: "completed", conclusion: "failure" }] },
+      { number: 878, sha: "grn1111", reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+        checkRuns: [{ status: "completed", conclusion: "success" }] },
+    ]);
+    expect(captured.approvePosts.length).toBe(1);
+    expect(captured.approvePosts[0]!.commit_id).toBe("grn1111");
   });
 });

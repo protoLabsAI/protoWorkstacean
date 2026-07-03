@@ -404,6 +404,10 @@ export class GitHubPlugin implements Plugin {
   ];
 
   private server: ReturnType<typeof Bun.serve> | null = null;
+  private reconcileTimer: ReturnType<typeof setInterval> | null = null;
+  private reconcileInFlight = false;
+  /** How often the level-triggered approve-on-green sweep runs (#879). */
+  private static readonly RECONCILE_INTERVAL_MS = 3 * 60_000;
   private workspaceDir: string;
   private projectRegistry: ProjectRegistry;
   private config!: GitHubConfig;
@@ -512,10 +516,27 @@ export class GitHubPlugin implements Plugin {
     });
 
     log.info(`Webhook receiver on :${port}/webhook/github`);
+
+    // ── Level-triggered approve-on-green reconciliation sweep (#879) ──────────
+    // Backstops the edge-triggered CI-completion webhook: a missed/raced
+    // workflow_run/check_suite delivery otherwise strands a green PR forever.
+    // The sweep re-runs the same deterministic approve decision over every open
+    // PR. Single-flight so a slow sweep never overlaps itself.
+    this.reconcileTimer = setInterval(() => {
+      if (this.reconcileInFlight) return;
+      this.reconcileInFlight = true;
+      void this._reconcileApproveOnGreen(getToken)
+        .catch((err) => log.error("Approve-on-green reconciliation sweep failed", { err }))
+        .finally(() => { this.reconcileInFlight = false; });
+    }, GitHubPlugin.RECONCILE_INTERVAL_MS);
   }
 
   uninstall(): void {
     this.server?.stop();
+    if (this.reconcileTimer) {
+      clearInterval(this.reconcileTimer);
+      this.reconcileTimer = null;
+    }
     unwatchFile(join(this.workspaceDir, "github.yaml"));
   }
 
@@ -1038,119 +1059,12 @@ export class GitHubPlugin implements Plugin {
     if (!Array.isArray(pulls) || pulls.length === 0) return;
 
     for (const pr of pulls) {
+      const decision = await this._evaluateApproveOnGreen(event, owner, repo, pr, headSha, getToken);
+      if (decision !== "needs-review") continue;
+
+      // Eligible + terminal but not auto-approvable — re-dispatch Quinn's
+      // pr_review LLM pass to upgrade the provisional COMMENT to a formal verdict.
       const number = pr.number as number;
-      if (!prEligibleForCiReview(pr, headSha)) continue;
-
-      const reviews = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/pulls/${number}/reviews`)) as
-        | Array<Record<string, unknown>>
-        | null;
-      if (!quinnHasReviewed(reviews ?? undefined)) continue;
-      if (!(await this._ciTerminal(getToken, owner, repo, headSha))) {
-        log.info(`CI-completion (${event}): ${owner}/${repo}#${number} — checks not all terminal yet, deferring`);
-        continue;
-      }
-
-      // ── Deterministic approve-on-terminal-green (#748, #848) ─────────────────
-      // Quinn reliably re-COMMENTs instead of choosing review_approve, so the
-      // merge-on-green gate never opens (approvedCount stays 0). When CI is
-      // terminal-GREEN and Quinn's latest review is a held COMMENT (no blockers),
-      // post the formal APPROVE programmatically rather than re-prompting the LLM.
-      //
-      // A prior CHANGES_REQUESTED + now-green is also auto-approved: the blocker
-      // Quinn raised (typically failing CI) is resolved, so the re-review maps to
-      // PASS, not WARN. Without this, Quinn returns COMMENTED, which does NOT
-      // dismiss the prior CHANGES_REQUESTED → PR stuck in merge-limbo (#848).
-      //
-      // Fail closed: an already-APPROVED PR, no prior Quinn review, or any
-      // non-green / unverifiable CI state falls through to the unchanged LLM
-      // re-dispatch below.
-      const latestState = quinnLatestReviewState(reviews ?? undefined);
-      let autoApprove = false;
-      let isResolvedBlocker = false;
-      if ((latestState === "COMMENTED" || latestState === "CHANGES_REQUESTED") && (await this._ciGreen(getToken, owner, repo, headSha))) {
-        if (latestState === "CHANGES_REQUESTED") {
-          // A prior block only clears when the *requested change is in* — not
-          // on CI-green alone. A code finding (auth bypass, data-loss, logic
-          // bug) leaves an unresolved review thread that green CI doesn't
-          // resolve; a CI-only block leaves none. Gate on unresolved threads
-          // (#858). Fail safe: unknown thread state → don't auto-clear; defer
-          // to the LLM re-review below.
-          const unresolved = await this._hasUnresolvedReviewThreads(getToken, owner, repo, number);
-          if (unresolved === false) {
-            autoApprove = true;
-            isResolvedBlocker = true;
-          } else {
-            log.info(
-              `CI-completion (${event}): ${owner}/${repo}#${number} prior CHANGES_REQUESTED + green but ` +
-                `${unresolved === null ? "review-thread state unverifiable" : "unresolved review threads remain"} ` +
-                `— not auto-clearing the block, deferring to re-review (#858)`,
-            );
-          }
-        } else {
-          autoApprove = true;
-        }
-      }
-      if (autoApprove) {
-        // Collapse co-arriving terminal webhooks. GitHub fires check_suite,
-        // workflow_run, and check_run completions near-simultaneously; each runs
-        // _handleCiCompletion concurrently and reads `reviews` before any has
-        // posted its APPROVE, so every one sees latestState COMMENTED and submits
-        // a duplicate. Unlike the LLM re-dispatch path below, this branch
-        // `continue`s and never reaches _handleAutoReview's dedup — so guard it
-        // here. The get/set is synchronous (no await between), so exactly one
-        // racing invocation claims the key; the rest skip.
-        const approveKey = `approve-on-green:${owner}/${repo}#${number}@${headSha.slice(0, 7)}`;
-        const lastApproved = this.recentDispatches.get(approveKey);
-        if (lastApproved && Date.now() - lastApproved < GitHubPlugin.DEDUP_WINDOW_MS) {
-          log.info(
-            `CI-completion (${event}): skipping duplicate approve-on-green ${approveKey} ` +
-              `(approved ${Date.now() - lastApproved}ms ago)`,
-          );
-          continue;
-        }
-        this.recentDispatches.set(approveKey, Date.now());
-        try {
-          const submitter = new GitHubReviewSubmitter(getToken);
-          await submitter.submitReview(
-            owner,
-            repo,
-            number,
-            headSha,
-            "APPROVE",
-            isResolvedBlocker
-              ? "CI terminal-green, prior blocker resolved — auto-approving on green (#848)."
-              : "CI terminal-green, no blockers on prior review — auto-approving on green (#748).",
-            [],
-          );
-          log.info(
-            `CI-completion (${event}): auto-approved ${owner}/${repo}#${number} @${headSha.slice(0, 7)} ` +
-              `(terminal-green, prior Quinn review ${latestState}${isResolvedBlocker ? ", blocker resolved" : ""})`,
-          );
-
-          // ── Enable native auto-merge (squash) for one-off PRs ──────────────
-          // After auto-approving, arm GitHub's native auto-merge so the PR
-          // lands without a manual click. Only for one-off PRs targeting the
-          // default branch — stacked PRs (base != main) are excluded, since
-          // squash would break subsequent stack rebases. Best-effort: a
-          // failure here must never block the approve flow.
-          const baseRef = (pr.base as Record<string, unknown> | undefined)?.ref as string | undefined;
-          if (baseRef === "main") {
-            void this._enableAutoMerge(getToken, owner, repo, number, baseRef, "squash");
-          } else if (baseRef) {
-            log.info(
-              `CI-completion (${event}): skipping auto-merge for ${owner}/${repo}#${number} ` +
-                `(base=${baseRef} — not a one-off PR)`,
-            );
-          }
-        } catch (err) {
-          log.error(
-            `CI-completion (${event}): auto-approve failed for ${owner}/${repo}#${number}`,
-            { err },
-          );
-        }
-        continue;
-      }
-
       const ctx: GitHubEventContext = {
         owner,
         repo,
@@ -1170,6 +1084,198 @@ export class GitHubPlugin implements Plugin {
       // normal auto-review (the routed path is proven); the "ci_completed"
       // action just suppresses the opened-only leading comment.
       this._handleAutoReview("pull_request", synthPayload, ctx, bus, getToken, { skipDedup: true });
+    }
+  }
+
+  /**
+   * Deterministic approve-on-terminal-green decision for a single PR (#748,
+   * #848). Shared by the edge-triggered CI-completion webhook and the
+   * level-triggered reconciliation sweep (#879), so both apply identical approve
+   * criteria.
+   *
+   * Quinn reliably re-COMMENTs instead of choosing review_approve, so the
+   * merge-on-green gate never opens (approvedCount stays 0). When CI is
+   * terminal-GREEN and Quinn's latest review is a held COMMENT (no blockers),
+   * post the formal APPROVE programmatically rather than re-prompting the LLM.
+   *
+   * A prior CHANGES_REQUESTED + now-green is also auto-approved: the blocker
+   * Quinn raised (typically failing CI) is resolved, so the re-review maps to
+   * PASS, not WARN. Without this, Quinn returns COMMENTED, which does NOT
+   * dismiss the prior CHANGES_REQUESTED → PR stuck in merge-limbo (#848).
+   *
+   * Returns:
+   *   "approved"     — posted the formal APPROVE (or a racing invocation did).
+   *   "needs-review" — eligible + terminal but not auto-approvable; the caller
+   *                    may re-dispatch the LLM pr_review (webhook path only —
+   *                    the reconciliation sweep ignores this and skips).
+   *   "skip"         — not eligible (stale/draft/closed), Quinn hasn't reviewed,
+   *                    or CI is not all-terminal yet. Nothing to do.
+   *
+   * `source` labels log lines with what triggered the evaluation
+   * ("workflow_run" / "check_suite" / "reconcile").
+   */
+  private async _evaluateApproveOnGreen(
+    source: string,
+    owner: string,
+    repo: string,
+    pr: Record<string, unknown>,
+    headSha: string,
+    getToken: (owner: string, repo: string) => Promise<string>,
+  ): Promise<"approved" | "needs-review" | "skip"> {
+    const number = pr.number as number;
+    if (!prEligibleForCiReview(pr, headSha)) return "skip";
+
+    const reviews = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/pulls/${number}/reviews`)) as
+      | Array<Record<string, unknown>>
+      | null;
+    if (!quinnHasReviewed(reviews ?? undefined)) return "skip";
+    if (!(await this._ciTerminal(getToken, owner, repo, headSha))) {
+      log.info(`CI-completion (${source}): ${owner}/${repo}#${number} — checks not all terminal yet, deferring`);
+      return "skip";
+    }
+
+    // Fail closed: an already-APPROVED PR, no prior Quinn review, or any
+    // non-green / unverifiable CI state returns "needs-review" (caller decides
+    // whether to re-dispatch the LLM).
+    const latestState = quinnLatestReviewState(reviews ?? undefined);
+    let autoApprove = false;
+    let isResolvedBlocker = false;
+    if ((latestState === "COMMENTED" || latestState === "CHANGES_REQUESTED") && (await this._ciGreen(getToken, owner, repo, headSha))) {
+      if (latestState === "CHANGES_REQUESTED") {
+        // A prior block only clears when the *requested change is in* — not
+        // on CI-green alone. A code finding (auth bypass, data-loss, logic
+        // bug) leaves an unresolved review thread that green CI doesn't
+        // resolve; a CI-only block leaves none. Gate on unresolved threads
+        // (#858). Fail safe: unknown thread state → don't auto-clear; defer
+        // to the LLM re-review.
+        const unresolved = await this._hasUnresolvedReviewThreads(getToken, owner, repo, number);
+        if (unresolved === false) {
+          autoApprove = true;
+          isResolvedBlocker = true;
+        } else {
+          log.info(
+            `CI-completion (${source}): ${owner}/${repo}#${number} prior CHANGES_REQUESTED + green but ` +
+              `${unresolved === null ? "review-thread state unverifiable" : "unresolved review threads remain"} ` +
+              `— not auto-clearing the block, deferring to re-review (#858)`,
+          );
+        }
+      } else {
+        autoApprove = true;
+      }
+    }
+    if (!autoApprove) return "needs-review";
+
+    // Collapse co-arriving terminal webhooks. GitHub fires check_suite,
+    // workflow_run, and check_run completions near-simultaneously; each runs
+    // this concurrently and reads `reviews` before any has posted its APPROVE,
+    // so every one sees latestState COMMENTED and submits a duplicate. The
+    // reconciliation sweep (#879) can also race a late webhook for the same
+    // (PR, SHA). Guard here: the get/set is synchronous (no await between), so
+    // exactly one racing invocation claims the key; the rest skip.
+    const approveKey = `approve-on-green:${owner}/${repo}#${number}@${headSha.slice(0, 7)}`;
+    const lastApproved = this.recentDispatches.get(approveKey);
+    if (lastApproved && Date.now() - lastApproved < GitHubPlugin.DEDUP_WINDOW_MS) {
+      log.info(
+        `CI-completion (${source}): skipping duplicate approve-on-green ${approveKey} ` +
+          `(approved ${Date.now() - lastApproved}ms ago)`,
+      );
+      return "approved";
+    }
+    this.recentDispatches.set(approveKey, Date.now());
+    try {
+      const submitter = new GitHubReviewSubmitter(getToken);
+      await submitter.submitReview(
+        owner,
+        repo,
+        number,
+        headSha,
+        "APPROVE",
+        isResolvedBlocker
+          ? "CI terminal-green, prior blocker resolved — auto-approving on green (#848)."
+          : "CI terminal-green, no blockers on prior review — auto-approving on green (#748).",
+        [],
+      );
+      log.info(
+        `CI-completion (${source}): auto-approved ${owner}/${repo}#${number} @${headSha.slice(0, 7)} ` +
+          `(terminal-green, prior Quinn review ${latestState}${isResolvedBlocker ? ", blocker resolved" : ""})`,
+      );
+
+      // ── Enable native auto-merge (squash) for one-off PRs ──────────────
+      // After auto-approving, arm GitHub's native auto-merge so the PR
+      // lands without a manual click. Only for one-off PRs targeting the
+      // default branch — stacked PRs (base != main) are excluded, since
+      // squash would break subsequent stack rebases. Best-effort: a
+      // failure here must never block the approve flow.
+      const baseRef = (pr.base as Record<string, unknown> | undefined)?.ref as string | undefined;
+      if (baseRef === "main") {
+        void this._enableAutoMerge(getToken, owner, repo, number, baseRef, "squash");
+      } else if (baseRef) {
+        log.info(
+          `CI-completion (${source}): skipping auto-merge for ${owner}/${repo}#${number} ` +
+            `(base=${baseRef} — not a one-off PR)`,
+        );
+      }
+    } catch (err) {
+      log.error(
+        `CI-completion (${source}): auto-approve failed for ${owner}/${repo}#${number}`,
+        { err },
+      );
+    }
+    return "approved";
+  }
+
+  /**
+   * Level-triggered reconciliation sweep for approve-on-green (#879).
+   *
+   * The edge-triggered `_handleCiCompletion` fires on a single
+   * `workflow_run`/`check_suite` completion webhook. When that one delivery is
+   * missed or races (e.g. it coincides with the container finishing the PR's own
+   * pr_review), there is no retry — the PR is stranded green forever. This sweep
+   * backstops the webhook with the standard controller edge+level pattern: it
+   * walks every open PR across the monitored repos and re-runs the SAME approve
+   * decision (`_evaluateApproveOnGreen`) with no change to the criteria.
+   *
+   * It deliberately acts ONLY on the approve path. A "needs-review" result
+   * (eligible + terminal but not auto-approvable) is left alone — re-dispatching
+   * the LLM pr_review on every sweep would spam reviews. The idempotency is
+   * natural: once a PR is APPROVED, `quinnLatestReviewState` reads APPROVED and
+   * the decision declines on the next sweep.
+   */
+  private async _reconcileApproveOnGreen(
+    getToken: (owner: string, repo: string) => Promise<string>,
+  ): Promise<void> {
+    const coords = this.projectRegistry.getGithubCoords();
+    let approved = 0;
+    for (const coord of coords) {
+      const slash = coord.indexOf("/");
+      if (slash <= 0) continue;
+      const owner = coord.slice(0, slash);
+      const repo = coord.slice(slash + 1);
+
+      const pulls = (await this._ghGet(
+        getToken,
+        owner,
+        repo,
+        `/repos/${owner}/${repo}/pulls?state=open&per_page=100`,
+      )) as Array<Record<string, unknown>> | null;
+      if (!Array.isArray(pulls) || pulls.length === 0) continue;
+
+      for (const pr of pulls) {
+        const headSha = (pr.head as Record<string, unknown> | undefined)?.sha;
+        if (typeof headSha !== "string" || headSha.length === 0) continue;
+        try {
+          const decision = await this._evaluateApproveOnGreen("reconcile", owner, repo, pr, headSha, getToken);
+          if (decision === "approved") approved++;
+        } catch (err) {
+          log.error(
+            `Reconcile approve-on-green failed for ${owner}/${repo}#${pr.number}`,
+            { err },
+          );
+        }
+      }
+    }
+    if (approved > 0) {
+      log.info(`Approve-on-green reconciliation sweep: ${approved} stranded PR(s) approved`);
     }
   }
 
