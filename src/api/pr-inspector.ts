@@ -29,10 +29,31 @@
 
 import type { Route, ApiContext } from "./types.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
+import { loadFleetConfig } from "../../lib/fleet/fleet-config.ts";
 import { REVIEW_TOPICS } from "../event-bus/topics.ts";
 import { logger } from "../../lib/log.ts";
 
 const log = logger("pr-inspector");
+
+// ── Reviewer identity (fork-aware) ───────────────────────────────────────────
+// Login bases (lowercased, trailing "[bot]" stripped) that identify the reviewer
+// agent's OWN reviews, so `prior_review` can isolate Quinn's verdict from
+// CodeRabbit / human reviews. Config-driven via fleet.yaml's reviewerBotLogins
+// (default `protoquinn`). Memoized — the file is read once per process.
+let _reviewerBases: string[] | undefined;
+function reviewerLoginBases(): string[] {
+  if (!_reviewerBases) {
+    _reviewerBases = [
+      ...new Set(loadFleetConfig().reviewerBotLogins.map((l) => l.toLowerCase().replace(/\[bot\]$/, ""))),
+    ];
+  }
+  return _reviewerBases;
+}
+function isReviewerLogin(login: string | null | undefined): boolean {
+  if (typeof login !== "string") return false;
+  const l = login.toLowerCase();
+  return reviewerLoginBases().some((b) => l.startsWith(b));
+}
 
 // Resolve auth lazily + memoized on first use rather than at module load.
 // Module-load capture bound the getter to whatever env existed at import
@@ -65,6 +86,7 @@ type Action =
   | "check_ci"
   | "coderabbit_threads"
   | "diff_summary"
+  | "prior_review"
   | "path_exists"
   | "review_comment"
   | "review_approve"
@@ -440,6 +462,72 @@ async function diffSummary(owner: string, name: string, pr: number): Promise<str
 }
 
 /**
+ * Recall the reviewer's OWN most-recent verdict on a PR so a re-review is
+ * incremental, not a cold start (re-review memory). Quinn re-reviews the whole
+ * PR from scratch every CI cycle today — no memory of her prior verdict — which
+ * both re-litigates settled findings and is a prime cause of the recursion-limit
+ * thrash. Her findings live in the review *body* (an Observations section), not
+ * inline threads, so the ground-truth recall is that prior verdict body plus the
+ * SHA it was submitted against. Comparing the reviewed SHA to the current head
+ * tells her whether there is a code delta to re-review or the cycle is just CI
+ * settling. GitHub is the source of truth — no local store to drift.
+ */
+async function priorReview(owner: string, name: string, pr: number): Promise<string> {
+  // Current head SHA — to detect whether the code moved since the last review.
+  // Recall is advisory: a 403 (reviewer can't see the PR) degrades to "no
+  // recall — do a full review", never a hard error that derails the review.
+  const prResp = await ghFetch(owner, name, `https://api.github.com/repos/${owner}/${name}/pulls/${pr}`);
+  if (prResp.status === 403) {
+    return `Prior review not accessible for PR#${pr} in ${owner}/${name} (HTTP 403) — proceed with a full review.`;
+  }
+  if (!prResp.ok) throw new Error(`GitHub API error fetching PR#${pr}: ${prResp.status} ${await prResp.text()}`);
+  const headSha = ((await prResp.json()) as { head?: { sha?: string } }).head?.sha ?? "";
+
+  const reviewsResp = await ghFetch(
+    owner,
+    name,
+    `https://api.github.com/repos/${owner}/${name}/pulls/${pr}/reviews?per_page=100`,
+  );
+  if (!reviewsResp.ok) throw new Error(`GitHub API error fetching reviews: ${reviewsResp.status} ${await reviewsResp.text()}`);
+  const reviews = (await reviewsResp.json()) as Array<{
+    user: { login: string } | null;
+    state: string;
+    body: string;
+    commit_id: string | null;
+    submitted_at: string | null;
+  }>;
+
+  // GitHub returns reviews oldest-first; the last reviewer-authored verdict wins.
+  let last: (typeof reviews)[number] | undefined;
+  for (const r of reviews) {
+    if (isReviewerLogin(r.user?.login) && ["COMMENTED", "APPROVED", "CHANGES_REQUESTED"].includes(r.state)) {
+      last = r;
+    }
+  }
+
+  if (!last) {
+    return (
+      `No prior review by you on PR#${pr} — this is your FIRST pass. ` +
+      `Gather full evidence (Step 2) and review the whole diff.`
+    );
+  }
+
+  const reviewedSha = last.commit_id ?? "";
+  const moved = reviewedSha !== "" && headSha !== "" && reviewedSha !== headSha;
+  const when = last.submitted_at ? last.submitted_at.slice(0, 10) : "?";
+  const lines: string[] = [
+    `**Your prior verdict on PR#${pr}: ${last.state}** (submitted ${when} against \`${reviewedSha.slice(0, 7) || "?"}\`).`,
+    moved
+      ? `The head has since advanced to \`${headSha.slice(0, 7)}\`. This is an INCREMENTAL re-review: focus on what changed since \`${reviewedSha.slice(0, 7)}\` and check whether the findings in your prior verdict were addressed — carry forward the ones still open, drop the ones now fixed. Do not re-derive findings whose code is unchanged.`
+      : `The head is unchanged (\`${headSha.slice(0, 7)}\`) — no new commits since your last review. This cycle is CI settling, not new code: reaffirm your prior verdict rather than re-deriving it (a clean prior review promotes to APPROVED automatically once CI is terminal-green).`,
+  ];
+  if (last.body && last.body.trim()) {
+    lines.push(`\nYour prior verdict body (reuse the findings still in scope):\n${last.body.slice(0, 1200)}`);
+  }
+  return lines.join("\n");
+}
+
+/**
  * Fire-and-forget bus notification that Quinn just submitted a formal
  * review. Subscribers (today: quinn-review-notifier-plugin for Discord
  * embeds) react to specific verdicts. Failure to publish must never
@@ -595,6 +683,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
           "check_ci",
           "coderabbit_threads",
           "diff_summary",
+          "prior_review",
           "review_comment",
           "review_approve",
           "review_request_changes",
@@ -632,6 +721,9 @@ export function createRoutes(ctx: ApiContext): Route[] {
               break;
             case "diff_summary":
               result = await diffSummary(owner, name, pr_number!);
+              break;
+            case "prior_review":
+              result = await priorReview(owner, name, pr_number!);
               break;
             case "review_comment":
               if (!body) {

@@ -120,9 +120,21 @@ the raw material exists.
    (diff > N files / > N lines, or sensitive paths) rather than the model's "is this
    non-trivial?" judgement, which is under-firing it (5%).
 
-**P1 — re-review memory**
+**P1 — re-review memory** ✅ *shipped (prior-verdict recall)*
 3. Before a re-review, recall Quinn's own prior verdict + which findings are resolved
    (Cloudflare's re-review contract). Cuts duplicate comments, tokens, and thrash.
+   **Implemented** as a `pr_inspector(action='prior_review')` read-action: it fetches
+   the reviewer bot's own latest formal verdict (state + body + reviewed SHA) and
+   compares that SHA to the current head, so a re-review is incremental — reaffirm on
+   an unchanged head (CI settling), or review only the delta when the head advanced —
+   instead of a cold re-derivation. **GitHub-native by design** (no local memory store
+   to drift): Quinn's findings live in the review *body*, so her prior verdict is the
+   ground-truth recall, and the reviewed-vs-head SHA is the delta signal. This mirrors
+   CodeRabbit's incremental model (*"consider all comments since the most recent review,
+   review only the new changes"*) — the pipeline/orchestration angle, decoupled from the
+   deterministic approve-on-green gate. The AgentMemory flywheel (a `memory:` block +
+   PR-stable `contextId`) remains a separate future additive for *cross-PR* pattern
+   learning, not same-PR re-review state.
 
 **P2 — repo conventions + eval**
 4. Per-repo conventions via AGENTS.md-style injected context, or wire Quinn into the

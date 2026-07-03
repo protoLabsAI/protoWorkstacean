@@ -532,6 +532,7 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
           "- check_ci: CI check states for a PR\n" +
           "- coderabbit_threads: unresolved review threads on a PR\n" +
           "- diff_summary: first 200 lines of the PR diff\n" +
+          "- prior_review: recall your OWN most-recent verdict on this PR + whether the head moved since (for incremental re-review)\n" +
           "- review_comment: post a COMMENTED review (requires body)\n" +
           "- review_approve: post an APPROVED review (body optional)\n" +
           "- review_request_changes: post a CHANGES_REQUESTED review (requires body)\n" +
@@ -545,6 +546,7 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
             "check_ci",
             "coderabbit_threads",
             "diff_summary",
+            "prior_review",
             "review_comment",
             "review_approve",
             "review_request_changes",
