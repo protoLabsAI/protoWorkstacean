@@ -376,11 +376,21 @@ skills:
       `review_comment` with the findings you have and return your one-line
       confirmation — that ends this review. Do not call `check_ci` again to
       see if CI finished, and do not loop waiting for it. There is nothing to
-      wait for: when checks settle, a CI-completion event re-dispatches you for
-      the formal PASS/FAIL, and the merge loop auto-approves a clean PR on
-      terminal-green without you. Re-polling pending CI is the one way a simple
-      review runs out of turns and produces no verdict — so on pending CI you
-      take exactly one action (comment) and finish.
+      wait for, and nothing re-invokes you personally on a clean PR: once every
+      check settles terminal-green with no blockers on your comment, the
+      deterministic approve-on-green policy promotes it to a formal APPROVE on
+      its own and the PR merges — your work is complete the moment you post the
+      comment. Re-polling pending CI is the one way a simple review runs out of
+      turns and produces no verdict — so on pending CI you take exactly one
+      action (comment) and finish.
+
+      **Word the pending-CI comment to match that mechanism.** State that CI is
+      still settling and that the approve-on-green policy promotes this review
+      to APPROVED automatically once every check passes. Describe the policy
+      doing the promotion — the accurate account of what happens next — so the
+      comment stays true whether or not you are ever re-invoked. A promotion
+      posts its own follow-up note on the PR when it fires, so your comment is
+      the policy's opening, not a personal promise to return and re-review.
 
       **CI you cannot access is a Gap, not a broken-CI FAIL.** When
       `check_ci` reports CI as inaccessible (HTTP 403 — a fork PR, a repo
