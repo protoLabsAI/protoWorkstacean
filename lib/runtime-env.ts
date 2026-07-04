@@ -34,9 +34,9 @@ export function safeKeyEqual(a: string | null | undefined, b: string | null | un
  * Topic prefixes that may NOT be injected through the external `/publish`
  * ingress. These are internal control-plane topics — forging them would let a
  * caller drive executors, spoof the operator, fake inbound user messages, or
- * trigger scheduled work. Legitimate external publishers (protoMaker's
- * `feature.*` / `hitl.request.*`, and agents' board/incident events) are
- * unaffected. Overridable via `WORKSTACEAN_PUBLISH_TOPIC_DENYLIST` (CSV).
+ * trigger scheduled work. Legitimate external publishers (`hitl.request.*`
+ * and agents' incident events) are unaffected. Overridable via
+ * `WORKSTACEAN_PUBLISH_TOPIC_DENYLIST` (CSV).
  */
 export const PUBLISH_TOPIC_DENYLIST_DEFAULT: readonly string[] = [
   "agent.skill.request",

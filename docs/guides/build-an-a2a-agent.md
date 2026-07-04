@@ -319,7 +319,7 @@ onTerminal: (content, isError, taskState) => {
 }
 ```
 
-The `AgentFleetHealthPlugin` subscribes to `autonomous.outcome.#` and aggregates per-`systemActor` over a rolling 24h window: success rate, p50/p95 latency, cost per successful outcome, recent failures, orphaned-skill counts. Quinn, protoPen, the protoMaker team — every agent that returns async tasks appears in fleet health automatically.
+The `AgentFleetHealthPlugin` subscribes to `autonomous.outcome.#` and aggregates per-`systemActor` over a rolling 24h window: success rate, p50/p95 latency, cost per successful outcome, recent failures, orphaned-skill counts. Quinn, protoPen — every agent that returns async tasks appears in fleet health automatically.
 
 **What to do on your side:** make sure `success = true` means "the agent achieved its goal," not "the skill returned without crashing." Classic mistake: a tool returns `"Error: ..."` but the agent reports `state: completed` with that string as an artifact. Fleet health now thinks every failure is a success. Propagate tool errors into the task state machine — return `state: failed, error: <msg>` when things go wrong.
 

@@ -9,7 +9,7 @@ title: "ADR-0008: Visual Orchestration Surface — One Command Hub over the Agen
 - **Related:** [ADR-0004](./0004-fleet-control-plane-and-hot-swappable-extension) (this **reframes** its §8 rejection of the "N8N canvas"; builds on its registries + control-plane API + `SystemGraph`); [ADR-0007](./0007-workstacean-as-fleet-a2a-gateway) (the gateway is **the** distribution mechanism — one front door over remote A2A agents); [ADR-0005](./0005-mcp-client-tier-and-trust-tiers) (trust tiers gate which A2A agents you admit)
 - **Tags:** architecture, ux, orchestration, canvas, a2a, observability
 
-> protoLabs wants the **ComfyUI / n8n of agent orchestration** — in *function and UX* — over a fleet of **distributed agents** *and* built-in ones. The model is **one command hub**: workstacean is the single brain that commands every agent. The distributed agents are **A2A agents** physically running on other machines (roxy, ORBIS, pwnDeck, protoAgent), reached through workstacean's **A2A gateway (ADR-0007)** — that gateway *is* the distribution. Workstacean can also **spawn its own in-process agents** (Ava, Quinn, researcher). The canvas is this one hub's view of every agent it commands — in-process + A2A — with live dispatch flowing through. The field splits into a desirable **UX/extensibility ethos** (visual canvas, node palette, hot-swap, self-host, live execution) and an **execution model** (the human draws a data-flow DAG and the graph *is* the logic). ADR-0004 firmly rejected the second; it never rejected the first. **We take the UX and keep choreography** — the "nodes" are *reasoning agents*, the canvas authors **wiring** and **renders** declarative workflows, and it never becomes a surface for `node.output → node.input` logic. "UX yes, logic-authoring no."
+> protoLabs wants the **ComfyUI / n8n of agent orchestration** — in *function and UX* — over a fleet of **distributed agents** *and* built-in ones. The model is **one command hub**: workstacean is the single brain that commands every agent. The distributed agents are **A2A agents** physically running on other machines (ORBIS, pwnDeck, protoAgent), reached through workstacean's **A2A gateway (ADR-0007)** — that gateway *is* the distribution. Workstacean can also **spawn its own in-process agents** (Ava, Quinn, researcher). The canvas is this one hub's view of every agent it commands — in-process + A2A — with live dispatch flowing through. The field splits into a desirable **UX/extensibility ethos** (visual canvas, node palette, hot-swap, self-host, live execution) and an **execution model** (the human draws a data-flow DAG and the graph *is* the logic). ADR-0004 firmly rejected the second; it never rejected the first. **We take the UX and keep choreography** — the "nodes" are *reasoning agents*, the canvas authors **wiring** and **renders** declarative workflows, and it never becomes a surface for `node.output → node.input` logic. "UX yes, logic-authoring no."
 
 ---
 
@@ -19,7 +19,7 @@ title: "ADR-0008: Visual Orchestration Surface — One Command Hub over the Agen
 
 **The topology.** There is **one command hub** — workstacean. It is *not* one of many peer nodes; there is no second workstacean and no hub-to-hub federation. Distribution comes from the **agents** living on different machines, reached over **A2A**. Two node tiers, one brain:
 - **built-in** — in-process DeepAgents the hub *spawns* (Ava, Quinn, researcher, protobot), dispatched via `DeepAgentExecutor`.
-- **a2a** — remote agents the hub *commands*, running on other machines (roxy@steamdeck, ORBIS, pwnDeck, protoAgent), dispatched via `A2AExecutor` behind the **ADR-0007 gateway** (`/a2a/<agent>`, per-agent cards, transparent proxy).
+- **a2a** — remote agents the hub *commands*, running on other machines (ORBIS, pwnDeck, protoAgent), dispatched via `A2AExecutor` behind the **ADR-0007 gateway** (`/a2a/<agent>`, per-agent cards, transparent proxy).
 
 **The field (2026).** [ComfyUI](https://github.com/comfy-org/ComfyUI) is a lazily-evaluated DAG; extensibility is `custom_nodes/` packs. [n8n](https://jimmysong.io/blog/n8n-deep-dive/) is a drag-drop node editor (400+ integrations, community nodes on npm, self-host) whose newer [AI Agent / "cluster" nodes](https://docs.n8n.io/integrations/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.agent/) are a *root node that reasons*. [Flowise/Langflow/Dify/Rivet](https://toolhalla.ai/blog/dify-vs-flowise-vs-langflow-2026) are visual builders over LangChain/LangGraph. **The market is converging toward our bet** — agents reason; you orchestrate and observe them — but with a canvas UX we lack.
 
@@ -79,7 +79,7 @@ Resolved forks:
                                         │  A2A over the network
                     ┌──────────────┬────┴─────────┬──────────────────┐
                     ▼              ▼               ▼                  ▼
-              roxy@steamdeck   ORBIS@host      pwnDeck            protoAgent
+                   ORBIS@host      pwnDeck            protoAgent
                     └──────────  distributed A2A agents (own machines)  ──────┘
 
    Every dispatch — in-process OR out to a distributed A2A agent — flows through the
@@ -92,7 +92,7 @@ Resolved forks:
 
 | Phase | Slice | De-risks |
 |---|---|---|
-| **P1 — The live canvas (the keystone)** | Persist `flow.item.*` to `knowledge.db`; make `SystemGraph` the primary surface; render the palette from `ExecutorRegistry` (builtin + a2a + mcp); animate a live dispatch — *including one out to a distributed A2A agent like roxy@steamdeck* — flowing through the graph, with history + replay. | The whole thesis, on one hub, with assets that exist — **no federation needed.** This alone is the demo. |
+| **P1 — The live canvas (the keystone)** | Persist `flow.item.*` to `knowledge.db`; make `SystemGraph` the primary surface; render the palette from `ExecutorRegistry` (builtin + a2a + mcp); animate a live dispatch — *including one out to a distributed A2A agent like pwnDeck@steamdeck* — flowing through the graph, with history + replay. | The whole thesis, on one hub, with assets that exist — **no federation needed.** This alone is the demo. |
 | **P2 — Wiring authoring** | Draw a subscription/route → registrar writes declarative config. | The "author wiring, not logic" line, in UX. |
 | **P3 — Workflows, rendered** | `WorkflowExecutor` over protoAgent's YAML DAG; render + live-trace; steps may target distributed A2A agents via the gateway. | Multi-step orchestration without a logic-authoring canvas. |
 | **P4 — Palette as marketplace + admission** | Surface protoAgent plugins/skills + MCP as installable node packs; trust-tier admission UX for registering A2A agents. | The extensibility / "ecosystem" story (ADR-0005/0007). |

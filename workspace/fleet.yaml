@@ -5,7 +5,6 @@
 roles:
   helm: ava          # default target for untargeted A2A requests + the OpenAI-compat chat alias
   reviewer: quinn    # runs PR review
-  remediator: roxy   # dispatched to unblock a blocked feature (feature.blocked)
 
 github:
   # The reviewer's own GitHub bot identities — so the review loop recognizes

@@ -7,9 +7,9 @@ description: >
     2. current BLOCKERS (PRs in changes_requested, stuck on red CI),
     3. any PIPELINE / FLEET issues (red mains, branch drift, open incidents).
 
-  Supersedes daily-standup (board_audit -> Quinn) and portfolio-checkin
-  (Ava's per-project sweep) — this digest is a superset of both, so those
-  two ceremonies were removed when this landed.
+  Consolidates the fleet's morning signals (pipeline health, branch drift,
+  open incidents) into a single digest, replacing the earlier per-area
+  standup and check-in ceremonies.
 # 6am every day, evaluated in Pacific (stays 6am across PST/PDT via the
 # timezone field — CeremonyPlugin passes it to cron-parser as `tz`).
 schedule: "0 6 * * *"

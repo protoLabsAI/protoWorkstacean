@@ -57,7 +57,7 @@ Ava's `onboard_project` skill runs these steps in sequence:
 4. **Discord provisioning** — calls Quinn's `provision_discord` skill (via chain), which creates a Discord category with three channels: `dev`, `alerts`, `releases`
 5. **Write-back** — stores Discord channel IDs in `.automaker/settings.json` (in the target repo)
 
-Project metadata itself lives in the **protoMaker registry** (the source of truth), and the workstacean-side channel→agent bindings live in `workspace/channels.yaml` via the `ChannelRegistry` — onboarding does **not** write a `workspace/projects.yaml` (that file no longer exists). To make feature-notifier and slash-commands resolve "the dev channel for this project", add a per-project binding to `workspace/channels.yaml`:
+Project metadata itself comes from the **project registry**, which is compiled from repos tagged with the `protoagent-plugin` GitHub topic (plus an explicit base set) into a static `projects.json` served by the `workstacean-projects` nginx sidecar at `/api/settings/global`; workstacean's `ProjectRegistry` polls that URL every 5 min. To add a project to the registry, tag its repo with the `protoagent-plugin` topic — the 15-min sync cron picks it up. The workstacean-side channel→agent bindings live in `workspace/channels.yaml` via the `ChannelRegistry` — onboarding does **not** write a `workspace/projects.yaml` (that file no longer exists). To make slash-commands resolve "the dev channel for this project", add a per-project binding to `workspace/channels.yaml`:
 
 ```yaml
 - id: project-my-new-repo-dev
@@ -73,7 +73,7 @@ On completion, a summary message is sent to the originating interface (Discord c
 
 ## Verifying the onboard completed
 
-Confirm the project shows up in workstacean's registry (sourced from protoMaker):
+Confirm the project shows up in workstacean's registry (compiled from the `protoagent-plugin` GitHub topic):
 
 ```bash
 curl -s http://workstacean:3000/api/projects | jq '.data[] | select(.github.repo == "my-new-repo")'
@@ -115,5 +115,5 @@ curl -s -X POST http://workstacean:3000/publish \
 ## Related docs
 
 - [reference/agent-skills.md](../reference/agent-skills) — full skill registry including `onboard_project` parameters
-- [reference/config-files.md](../reference/config-files) — workspace config + protoMaker project registry
+- [reference/config-files.md](../reference/config-files) — workspace config + project registry
 - [explanation/agent-identity.md](../explanation/agent-identity) — why Quinn handles Discord provisioning (not Ava)

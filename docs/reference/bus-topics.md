@@ -31,7 +31,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | `agent.skill.latency` | ✅ `AGENT_SKILL_LATENCY` (`ACTION_TOPICS`) | — | `src/executor/skill-dispatcher-plugin.ts:518` | _(none)_ |
 | `agent.skill.progress` | ✅ `AGENT_SKILL_PROGRESS_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
 | `agent.skill.toolframe.{correlationId}` | ✅ `AGENT_SKILL_TOOLFRAME_PREFIX` (`ACTION_TOPICS`) | `ToolCallArtifactData` (tool-call-v1) | `src/agent-runtime/agent-runtime-plugin.ts:394` | `src/api/a2a-server.ts:217` |
-| `agent.skill.request` | ✅ `AGENT_SKILL_REQUEST` (`ACTION_TOPICS`) | — | `src/router/router-plugin.ts:295`<br>`src/router/router-plugin.ts:342`<br>`src/executor/skill-dispatcher-plugin.ts:667`<br>`src/api/openai-compat.ts:171`<br>`src/api/ava-tools.ts:132`<br>`src/api/ava-tools.ts:323`<br>`src/api/a2a-server.ts:390`<br>`src/plugins/fleet-alerts-evaluator-plugin.ts:188`<br>`lib/plugins/feature-remediation.ts:150`<br>`lib/plugins/linear-proto-bridge.ts:105`<br>`lib/plugins/discord/inbound.ts:45` | `src/executor/skill-dispatcher-plugin.ts:183` |
+| `agent.skill.request` | ✅ `AGENT_SKILL_REQUEST` (`ACTION_TOPICS`) | — | `src/router/router-plugin.ts:295`<br>`src/router/router-plugin.ts:342`<br>`src/executor/skill-dispatcher-plugin.ts:667`<br>`src/api/openai-compat.ts:171`<br>`src/api/ava-tools.ts:132`<br>`src/api/ava-tools.ts:323`<br>`src/api/a2a-server.ts:390`<br>`src/plugins/fleet-alerts-evaluator-plugin.ts:188`<br>`lib/plugins/linear-proto-bridge.ts:105`<br>`lib/plugins/discord/inbound.ts:45` | `src/executor/skill-dispatcher-plugin.ts:183` |
 | `agent.skill.response.{correlationId}` | — | — | _(none)_ | `src/api/ava-tools.ts:52` |
 | `agent.skill.response.#` | — | — | _(none)_ | `src/event-bus/skill-response-cache.ts:96` |
 
@@ -117,23 +117,6 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 **`dispatch.dropped`** — Prefix for dispatcher drop events. Full topic is `dispatch.dropped.{reason}` where reason ∈ {no_skill, target_unresolved, cooldown}. Published by SkillDispatcherPlugin at each chokepoint drop site so subscribers (dashboard, drop-rate alerts) can count + filter by reason without scraping stdout. Payload shape: see `DispatchDroppedPayload` in src/event-bus/payloads.ts.
 
-## `feature.*`
-
-| Topic | Declared | Payload | Publishers | Subscribers |
-|---|---|---|---|---|
-| `feature.blocked` | ✅ `FEATURE_BLOCKED` (`FEATURE_TOPICS`) | `FeatureBlockedPayload` | _(protoMaker via POST /publish)_ | `lib/plugins/feature-remediation.ts:80` |
-| `feature.unblocked` | ✅ `FEATURE_UNBLOCKED` (`FEATURE_TOPICS`) | `{ projectSlug?, featureId }` | _(protoMaker via POST /publish)_ | `lib/plugins/feature-remediation.ts:82` |
-| `feature.completed` | — | `{ projectSlug, featureId, featureTitle?, branchName?, prNumber?, githubIssueNumber?, repo? }` | _(protoMaker via POST /publish)_ | `lib/plugins/feature-notifier.ts:62`<br>`lib/plugins/issue-closer.ts:54` |
-| `feature.failed` | — | `{ projectSlug, featureId, featureTitle?, error? }` | _(protoMaker via POST /publish)_ | `lib/plugins/feature-notifier.ts:65` |
-
-**`feature.blocked`** — Declared in `FEATURE_TOPICS` (not yet in the `TOPICS` barrel). Published when a protoMaker feature transitions to blocked — the canonical auto-remediation signal. Raised by protoMaker's automode via the workstacean `POST /publish` ingress; consumed by FeatureRemediationPlugin, which routes by `kind` to Roxy `unblock_feature` or operator HITL (bounded + escalating). Payload shape: `FeatureBlockedPayload` `{ projectSlug?, projectPath?, featureId, featureTitle?, kind?, reason?, prNumber?, branchName?, retryCount?, retryable?, failureCategory?, detail? }`.
-
-**`feature.unblocked`** — Declared in `FEATURE_TOPICS` (not yet in the `TOPICS` barrel). protoMaker recovery signal published when a feature recovers; FeatureRemediationPlugin clears its remediation tracker so a later re-block gets a fresh retry budget.
-
-**`feature.completed`** — Published by protoMaker (via `POST /publish`) when a feature ships. FeatureNotifierPlugin posts a ✅ message to the project's dev channel; IssueCloserPlugin closes the originating `repo#githubIssueNumber` with a comment when both `githubIssueNumber` and `repo` are present (close-the-loop).
-
-**`feature.failed`** — Published by protoMaker (via `POST /publish`) when a feature fails/escalates. FeatureNotifierPlugin posts a ❌ message with the error; IssueCloserPlugin intentionally does not act on it (a failed feature's issue stays open).
-
 ## `flow.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
@@ -146,9 +129,9 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `github.issue.opened` | ✅ `GITHUB_ISSUE_OPENED` (`GITHUB_TOPICS`) | `GithubIssueOpenedPayload` | `lib/plugins/github.ts:452` | `lib/plugins/protomaker-board-bridge.ts:92` |
+| `github.issue.opened` | ✅ `GITHUB_ISSUE_OPENED` (`GITHUB_TOPICS`) | `GithubIssueOpenedPayload` | `lib/plugins/github.ts:452` | _(none)_ |
 
-**`github.issue.opened`** — Published by the GitHub plugin for every opened/reopened issue the webhook covers — additive, independent of the @mention / auto-triage paths. The ProtoMakerBoardBridge subscribes and forwards issues on registered project repos into protoMaker's board intake (workstacean owns repo→project resolution). Payload shape: see `GithubIssueOpenedPayload`.
+**`github.issue.opened`** — Published by the GitHub plugin for every opened/reopened issue the webhook covers — additive, independent of the @mention / auto-triage paths. Emitted for any subscriber that wants an issue-lifecycle signal. Payload shape: see `GithubIssueOpenedPayload`.
 
 ## `google.*`
 
@@ -215,7 +198,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
 | `operator.message.failed.{correlationId}` | — | — | `lib/plugins/operator-routing.ts:90` | _(none)_ |
-| `operator.message.request` | — | — | `src/api/operator.ts:69`<br>`src/plugins/dispatch-drop-escalator-plugin.ts:144`<br>`lib/plugins/feature-remediation.ts:185` | `lib/plugins/operator-routing.ts:76` |
+| `operator.message.request` | — | — | `src/api/operator.ts:69`<br>`src/plugins/dispatch-drop-escalator-plugin.ts:144` | `lib/plugins/operator-routing.ts:76` |
 
 ## `quinn.*`
 
@@ -342,7 +325,7 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:200`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/agents-crud.ts:55`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/feature-notifier.ts:98`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:754` |
+| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:200`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/agents-crud.ts:55`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:754` |
 
 ## Unresolved call sites
 
@@ -355,7 +338,6 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
 | `lib/plugins/cli.ts:201` | publish | `msg.topic` |
 | `lib/plugins/debug.ts:31` | publish | `topic` |
 | `lib/plugins/echo.ts:35` | publish | `reply.topic` |
-| `lib/plugins/feature-notifier.ts:98` | publish | `topic` |
 | `lib/plugins/github.ts:393` | publish | `topic` |
 | `lib/plugins/github.ts:635` | publish | `topic` |
 | `lib/plugins/github.ts:715` | publish | `topic` |

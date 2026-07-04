@@ -48,13 +48,9 @@ flowchart TD
         CSE["CeremonySkillExecutorPlugin\n→ FunctionExecutor for ceremony.*"]
     end
 
-    subgraph Remediation["Auto-remediation (bus subscriber)"]
-        FR["FeatureRemediationPlugin\nfeature.blocked → ignore / HITL /\nRoxy unblock_feature (bounded)"]
-    end
-
     subgraph Executors["Executor implementations"]
         DAE["DeepAgentExecutor\nLangGraph createReactAgent\nin-process (Ava, protoBot)"]
-        A2AE["A2AExecutor\nHTTP JSON-RPC 2.0 + SSE\n(Quinn, protoMaker, Researcher, Jon, protoPen, Roxy)"]
+        A2AE["A2AExecutor\nHTTP JSON-RPC 2.0 + SSE\n(Quinn, Researcher, Jon, protoPen)"]
         FE["FunctionExecutor\ninline function\n(alert.*, ceremony.*)"]
     end
 
@@ -78,9 +74,6 @@ flowchart TD
     ART -- "register DeepAgentExecutor" --> REG
     SKB -- "register A2AExecutor" --> REG
     ASE & CSE -- "register FunctionExecutor" --> REG
-
-    BUS -- "feature.blocked / feature.unblocked\n(from protoMaker via /publish)" --> FR
-    FR -- "agent.skill.request\n(unblock_feature → Roxy)" --> BUS
 ```
 
 ---

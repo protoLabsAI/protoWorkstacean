@@ -95,8 +95,8 @@ export class ChannelRegistry {
   /**
    * Look up a project-bound channel by slug + kind. Returns the channel
    * (any platform) registered with matching `project:` and `kind:` fields,
-   * or undefined when no such binding exists. Used by feature-notifier,
-   * feature-remediation, and slash-commands to resolve "dev channel for project X".
+   * or undefined when no such binding exists. Used by slash-commands to
+   * resolve "dev channel for project X".
    */
   getProjectChannel(projectSlug: string, kind: string): Channel | undefined {
     return this.byProjectKind.get(`${projectSlug}:${kind}`);

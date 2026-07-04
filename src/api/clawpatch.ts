@@ -167,7 +167,7 @@ async function resolveRepoPath(
       status: 400,
       error:
         `repo '${repo}' is not in the project registry — clawpatch only reviews ` +
-        `managed projects. Register it in protoMaker first (or set CLAWPATCH_REPO_PATH_MAP for local dev).`,
+        `managed projects. Register it by tagging the repo with the \`protoagent-plugin\` topic (or set CLAWPATCH_REPO_PATH_MAP for local dev).`,
     };
   }
 

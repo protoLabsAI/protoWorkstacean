@@ -4,6 +4,8 @@ title: "ADR-0002: protoWorkstacean ↔ protoMaker integration boundary"
 
 # ADR-0002: protoWorkstacean ↔ protoMaker integration boundary
 
+> **Status: Superseded (2026-07-03).** protoMaker was decommissioned from the fleet; the org→execution board integration described here no longer exists. Retained as historical record.
+
 - **Status:** Accepted — 2026-05-27
 - **Deciders:** Josh (operator)
 - **Related:** [ADR-0001](./0001-org-to-execution-pipeline), protoMaker#3975

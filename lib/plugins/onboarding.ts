@@ -10,10 +10,11 @@
  *   4. bus_notify     — publish message.inbound.onboard.complete for downstream consumers
  *   5. reply          — send confirmation to reply topic / Discord
  *
- * Project registration itself is owned by protoMaker (the source of truth);
- * this plugin only handles the side-effects (webhook + Drive folder) plus
- * the bus notification. Operators register the project in protoMaker's UI
- * before triggering onboarding here.
+ * Project registration itself happens by tagging the repo with the
+ * `protoagent-plugin` GitHub topic (or adding it to the explicit set in
+ * sync-project-registry.sh); the registry picks it up within ~15 min. This
+ * plugin only handles the side-effects (webhook + Drive folder) plus the bus
+ * notification.
  *
  * Inbound triggers:
  *   message.inbound.onboard   (from POST /api/onboard or Discord /onboard command)
@@ -43,7 +44,7 @@ interface OnboardRequest {
   github: string;            // "owner/repo"
   defaultBranch?: string;    // default: "main"
   team?: string;             // "dev" | "gtm" | etc.
-  agents?: string[];         // ["protomaker", "quinn", "frank"]
+  agents?: string[];         // ["quinn", "frank"]
   discord?: {
     general?: string;
     updates?: string;
@@ -333,7 +334,7 @@ export class OnboardingPlugin implements Plugin {
         github: req.github,
         defaultBranch: req.defaultBranch ?? "main",
         team: req.team ?? "dev",
-        agents: req.agents ?? ["protomaker", "quinn"],
+        agents: req.agents ?? ["quinn"],
         discord: req.discord ?? {},
         driveFolderId: steps.driveFolder?.data?.folderId,
         steps: {
@@ -390,7 +391,7 @@ export class OnboardingPlugin implements Plugin {
       `  • GitHub webhook: ${this._statusEmoji(steps.githubWebhook?.status)} ${steps.githubWebhook?.detail ?? ""}`,
       `  • Drive folder: ${this._statusEmoji(steps.driveFolder?.status)} ${steps.driveFolder?.detail ?? ""}`,
       "",
-      "Project registration itself is owned by protoMaker — register the project there before triggering onboarding.",
+      "Project registration itself happens by tagging the repo with the `protoagent-plugin` GitHub topic (or adding it to the explicit set in sync-project-registry.sh); the registry picks it up within ~15 min.",
     ];
     return lines.join("\n");
   }

@@ -8,7 +8,7 @@
  *      (quinn / ava / protobot) plus the function-executor cluster for
  *      alert.* / ceremony.* / pr.* skills.
  *
- *   2. workspace/agents.yaml — A2A agents (protomaker, protopen). These
+ *   2. workspace/agents.yaml — A2A agents (protopen). These
  *      don't appear in the registry until SkillBrokerPlugin's async card
  *      discovery completes, but they're known statically from yaml. We
  *      surface them eagerly with a `pendingDiscovery: true` marker
@@ -22,7 +22,7 @@
  *     data: {
  *       agents: [
  *         { name: "quinn", type: "deep-agent", skills: ["pr_review", ...] },
- *         { name: "roxy", type: "a2a", skills: [...], host: "roxy:7870" },
+ *         { name: "protopen", type: "a2a", skills: [...], host: "protopen:7870" },
  *         { name: "function", type: "function", skills: ["alert.*", ...] },
  *         ...
  *       ]
@@ -41,7 +41,7 @@ export interface AgentSummary {
   skills: string[];
   /** True iff this agent is known from yaml but hasn't registered any skill yet (A2A card discovery in flight). */
   pendingDiscovery?: boolean;
-  /** For A2A agents: the endpoint host[:port] (e.g. "roxy:7870"), derived from the yaml url. The canvas tags remote nodes with where they live. */
+  /** For A2A agents: the endpoint host[:port] (e.g. "protopen:7870"), derived from the yaml url. The canvas tags remote nodes with where they live. */
   host?: string;
 }
 
@@ -53,7 +53,7 @@ interface YamlAgent {
 
 /**
  * Endpoint host[:port] from an A2A url, or undefined if absent/unparseable.
- * `http://roxy:7870/a2a` → `roxy:7870`. The default-port case keeps the bare
+ * `http://protopen:7870/a2a` → `protopen:7870`. The default-port case keeps the bare
  * host. Pure — unit-tested directly; the canvas shows this on A2A nodes.
  */
 export function hostFromUrl(url?: string): string | undefined {

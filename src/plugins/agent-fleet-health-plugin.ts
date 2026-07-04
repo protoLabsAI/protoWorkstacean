@@ -14,8 +14,8 @@
  * Outcome attribution (issue #459):
  *   Outcome `systemActor` values are whitelisted against the live
  *   ExecutorRegistry before being recorded under the per-agent window.
- *   Unknown actors (plugin names like `feature-remediation`, synthetic labels like
- *   `outcome-analysis`, `goap`, `user`) are routed to a separate
+ *   Unknown actors (plugin names like `dispatch-drop-escalator`, synthetic labels like
+ *   `outcome-analysis`, `ceremony`, `user`) are routed to a separate
  *   `systemActors[]` bucket in the snapshot so they don't pollute agentCount,
  *   reachableCount, orphanedSkillCount, or maxFailureRate1h. Same chokepoint
  *   discipline as the ActionDispatcher cooldown (#437) and registry guard
@@ -116,7 +116,7 @@ export interface AgentFleetMetrics {
  * DeepAgent executor. Tracked separately so dashboards and downstream consumers can
  * see that traffic without treating it as agent health signal.
  *
- * Examples: `goap`, `feature-remediation`, `outcome-analysis`,
+ * Examples: `dispatch-drop-escalator`, `outcome-analysis`,
  * `ceremony.*`. These are plugin / subsystem labels, not agents.
  */
 export interface SystemActorOutcomeSummary {
@@ -148,8 +148,8 @@ export interface FleetHealthSnapshot {
   orphanedSkillCount: number;
   /**
    * Outcomes attributed to systemActor values that are NOT registered
-   * executors — plugin / subsystem labels like `feature-remediation`,
-   * `outcome-analysis`, `goap`. Kept separate so agentCount and the fleet
+   * executors — plugin / subsystem labels like `dispatch-drop-escalator`,
+   * `outcome-analysis`, `ceremony`. Kept separate so agentCount and the fleet
    * health metrics reflect the real agent fleet (#459).
    */
   systemActors: SystemActorOutcomeSummary[];

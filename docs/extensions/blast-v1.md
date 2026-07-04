@@ -15,7 +15,7 @@ Ordered from narrowest to widest impact. One value per skill:
 | Radius | What it affects | Typical skills |
 |---|---|---|
 | `self` | Only the agent's own internal state | `sitrep`, `status_report` |
-| `project` | A single project's state | `manage_feature`, `board_audit` |
+| `project` | A single project's state | `project_status`, `onboard_project` |
 | `repo` | A single git repository | `open_pr`, `rebase_pr`, `pr_review` |
 | `fleet` | Multiple repos or agents | `bulk_migration`, `cross_repo_bump` |
 | `public` | Externally-visible state | `production_deploy`, `public_post` |

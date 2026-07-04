@@ -15,9 +15,9 @@
 #   - When the dispatch payload carries `cwd`, that's where proto runs.
 #   - Without a cwd, falls back to workstacean's process.cwd() — fine for
 #     tasks that don't need a specific repo (research / one-shot scripts).
-#   - For repo-scoped work, route the request through protoMaker first so it
-#     can create a worktree, then dispatch proto with the worktree path as
-#     the cwd. (See #516 "out of scope: worktree management" for the split.)
+#   - For repo-scoped work, the caller supplies a worktree path as the cwd;
+#     proto does not manage worktrees itself. (See #516 "out of scope:
+#     worktree management".)
 #
 # Why not chat_with_agent / delegate_task tools:
 #   proto isn't an orchestrator. Ava delegates TO proto; proto doesn't

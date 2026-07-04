@@ -73,7 +73,7 @@ Fine-grained PAT scoped to the target repo:
 | Actions | Read |
 | Contents | Read |
 
-Issues **Write** covers both comment replies and the close-the-loop (`IssueCloserPlugin` commenting on then closing an issue). The same permissions apply to the Quinn GitHub App installation when used instead of a PAT.
+Issues **Write** covers comment replies and issue state changes. The same permissions apply to the Quinn GitHub App installation when used instead of a PAT.
 
 ## Bus Topics
 
@@ -81,7 +81,7 @@ Issues **Write** covers both comment replies and the close-the-loop (`IssueClose
 |-------|-----------|-------------|
 | `message.inbound.github.{owner}.{repo}.{event}.{number}` | Inbound | @mention received |
 | `message.outbound.github.{owner}.{repo}.{number}` | Outbound | Reply to post as comment |
-| `github.issue.opened` | Inbound (additive) | Every issue opened/reopened — feeds the protoMaker board bridge (see below) |
+| `github.issue.opened` | Inbound (additive) | Every issue opened/reopened — additive signal for any subscriber |
 
 ## Inbound Payload
 
@@ -121,37 +121,6 @@ Match `correlationId` from the inbound message — the plugin uses it to look up
 | `pull_request_review_comment` | Review comment containing `@mention` | `pr_review` |
 | `pull_request` | PR opened/updated with `@mention` in body | `pr_review` |
 | `repository` (created) | New repository created in the org | `message.inbound.onboard` |
-
-## GitHub issue → protoMaker board
-
-Independent of the @mention triage path, every opened or reopened issue is forwarded to protoMaker's board as a backlog idea — but only for repos in the project registry.
-
-**Topic.** On `issues` with action `opened` or `reopened`, `GitHubPlugin` publishes `github.issue.opened` (additive — it fires for every such issue regardless of @mention or skill routing). `ProtoMakerBoardBridgePlugin` (`lib/plugins/protomaker-board-bridge.ts`) is the sole subscriber.
-
-**Registry-gating.** The bridge resolves the repo against the project registry (`registry.getByGithub("{owner}/{repo}")`). If the repo is not a managed project, the issue is ignored — workstacean's own triage path owns those independently.
-
-**Forward.** For a managed repo, the bridge POSTs to `{PROTOMAKER_API_BASE}/api/engine/signal/submit` (default `http://protomaker-server:3008`) with header `X-API-Key`. The signal body carries `source: "github"`, the issue title+body as `content`, a `channelContext` with the resolved `projectPath` / `issueNumber` / `repository`, and an `a2a`-style `trace` block (the dispatch `correlationId` as `traceId`) so the GitHub→board→PRD flow links into one Langfuse trace.
-
-**Env.**
-
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `PROTOMAKER_API_BASE` | protoMaker board-intake base URL | `http://protomaker-server:3008` |
-| `AUTOMAKER_API_KEY` | Value sent as the `X-API-Key` header | (none — if unset, the bridge logs a warning and skips forwarding) |
-
-**Dedup.** protoMaker's `SignalIntakeService.submitSignal` dedups on `github:{repository}#{issueNumber}`, so a reopened or redelivered issue does not double-create a board idea.
-
-## GitHub issue close-the-loop
-
-The portfolio pipeline files GitHub issues as the spine (Ava fans out per-repo issues → protoMaker ingests them as features → execution). Without a consumer to clear them, the work ships but the issues pile up open forever. `IssueCloserPlugin` (`lib/plugins/issue-closer.ts`) closes the loop — the GitHub analog of the Linear close-the-loop.
-
-**Subscribe.** The plugin subscribes to `feature.completed`. protoMaker emits this when a feature reaches `done`, echoing the originating `githubIssueNumber` and `repo` (`"owner/name"`). When both are present, the plugin closes the originating issue; completed features that did not originate from a GitHub issue are ignored.
-
-**Close.** It calls `closeIssue(owner, name, issueNumber, { comment, reason })` from `lib/github-issues.ts`, which POSTs a comment (`✅ Resolved by protoMaker — shipped in PR #N`) then PATCHes `/issues/{n}` to `state=closed` with `state_reason` (`completed` by default, or `not_planned`). Issue-closing — not just PR operations — is now supported on this auth path.
-
-**Best-effort.** A close failure is logged loudly but never disturbs other `feature.completed` consumers (e.g. the Discord feature-notifier on the same event). `feature.failed` is intentionally **not** handled — a failed or escalated feature's issue must stay open for attention.
-
-**Auth.** Like PR operations, `closeIssue` authenticates via the shared `makeGitHubAuth` (`lib/github-auth.ts`): the Quinn GitHub App when `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` are set, otherwise the `GITHUB_TOKEN` PAT fallback. The plugin is registered in `src/index.ts` only when GitHub auth is present. A missing comment is non-fatal (logged, then the close proceeds); a failed PATCH throws so the caller surfaces it.
 
 ## Org Webhook: repository.created
 

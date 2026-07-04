@@ -368,27 +368,6 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
         schema: z.object({}),
       },
     ),
-    manage_board: tool(
-      async (input) => {
-        const ep = input.action === "create" ? "/api/board/features/create" : "/api/board/features/update";
-        return JSON.stringify(await http.post(ep, input));
-      },
-      {
-        name: "manage_board",
-        description: "Create or update features on the protoMaker board.",
-        schema: z.object({
-          action: z.enum(["create", "update"]),
-          projectPath: z.string(),
-          title: z.string().optional(),
-          description: z.string().optional(),
-          featureId: z.string().optional(),
-          status: z.enum(["backlog", "in-progress", "review", "done"]).optional(),
-          priority: z.number().optional(),
-          complexity: z.enum(["small", "medium", "large", "architectural"]).optional(),
-          projectSlug: z.string().optional(),
-        }),
-      },
-    ),
     create_github_issue: tool(
       async (input) => JSON.stringify(await http.post("/api/github/issues", input)),
       {

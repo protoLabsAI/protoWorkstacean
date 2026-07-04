@@ -73,14 +73,14 @@ export interface Channel {
   /**
    * Project channel role — what this channel is *for* within the
    * project. The set is open-ended; current consumers use:
-   *   - "dev"     — feature-notifier ✅/❌ updates, feature-remediation alerts
+   *   - "dev"     — per-project dev channel binding
    *   - "release" — release announcements
    */
   kind?: string;
 
   /**
-   * Optional outbound webhook URL — used by feature-notifier as a direct
-   * POST when the Discord bot client isn't connected to the channel.
+   * Optional outbound webhook URL — used as a direct POST when the Discord
+   * bot client isn't connected to the channel.
    * Supports `${ENV_VAR}` interpolation.
    */
   webhook?: string;
