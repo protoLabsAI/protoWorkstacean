@@ -16,20 +16,39 @@ loop.
 
 ## Live baseline (events.db, ~7 days)
 
-| Metric | Value |
-| --- | --- |
-| pr_review runs | 1,523 (~217/day) |
-| Completed | 1,498 (98.4%) |
-| Failed | 25 (1.6%) — **24 of 25 are "Recursion limit of 37 reached"**, 1 timeout |
-| Verdict mix | COMMENT 51% · APPROVE 43% · REQUEST_CHANGES 2.6% |
-| Tool-calls / review | median 3, p90 4, max 15 |
-| Tool frequency | `pr_inspector` 4,590 · `react` 94 · **`clawpatch_review` 83** · `send_update` 48 |
-| clawpatch usage | **~5% of reviews** |
-| Latency | avg ~44s, max ~7 min (the thrash tail) |
+Reproduce with `bun scripts/quinn-review-eval.ts <events.db>` (read-only). Current
+numbers are from prod on **2026-07-04**; the initial-benchmark column is the
+~2026-06-06 run this doc was first written against, kept for the deltas.
 
-Two facts stand out: Quinn is effectively a **diff-only reviewer 95% of the time**
-(clawpatch, her structural pass, rarely fires), and her only meaningful failure mode
-is the **recursion-limit thrash that produces no verdict** and stalls the PR.
+| Metric | Initial (2026-06-06) | **Current (2026-07-04)** |
+| --- | --- | --- |
+| pr_review runs | 1,523 | 656 |
+| Completed | 1,498 (98.4%) | **652 (99.4%)** |
+| Failed | 25 — **24 recursion-limit**, 1 timeout | **4 — zero recursion-limit** |
+| Verdict mix | COMMENT 51% · APPROVE 43% · RC 2.6% | **COMMENT 90.2% · APPROVE 6.4% · RC 3.4%** |
+| Tool-calls / review | median 3, p90 4, max 15 | median 4, p90 4, **max 6** |
+| clawpatch usage | ~5% | **1.2% (8/652)** |
+| Latency | avg ~44s, max ~7 min (thrash tail) | avg ~45s, **max 3.6 min (no thrash tail)** |
+
+**What changed, and what it means:**
+
+- **The recursion-limit thrash is gone.** It was *"her only meaningful failure mode"*
+  — 24/25 failures — and the current window has **zero** recursion failures out of 656
+  runs (4 unrelated "other" failures, 99.4% completion). #863 (pending-CI comment-and-exit)
+  fixed it; the max-latency tail collapsed from ~7 min to 3.6 min and tool-calls/review
+  capped at 6. **P0 #1 ("never fail to nothing") is effectively moot** — the stuck mode it
+  targeted no longer occurs at meaningful volume.
+- **clawpatch under-fires *worse* than assumed — 1.2%, not 5%.** The #843 prompt-gating did
+  not move it; on the deployed (pre-#891) prompt the structural pass essentially never runs,
+  so Quinn is a **diff-only reviewer ~99% of the time**. This is the strongest evidence yet
+  that a prompt-advisory trigger cannot carry clawpatch — it validates #891 (compute the
+  trigger server-side) and, if the #891 directive still doesn't move the rate after deploy,
+  justifies **hard enforcement** (this 1.2% is the pre-#891 control to measure against).
+- **COMMENT is now 90%** (up from 51%). Largely expected: #863 has Quinn comment once on
+  pending CI and exit, and the deterministic approve-on-green path (not Quinn) posts the
+  formal APPROVE on green — so her own APPROVE rate (6.4%) understates merges. It is *not*
+  evidence of a problem, but it does mean **catch-rate/SNR must be measured from findings and
+  merge outcomes, not from her verdict mix.**
 
 ## What the field does
 
@@ -73,15 +92,21 @@ flag"** list (see the prompt-policy decision below).
 
 Cloudflare biases *explicitly toward approval*: clean/trivial → approve; suggestion-level
 → approve-with-comments; only **critical/safety** → block. Quinn's
-PASS→approve / WARN→comment / FAIL→request_changes maps almost exactly, and her live
-distribution (COMMENT 51%, REQUEST_CHANGES 2.6%) confirms the correct bias. **Keep this.**
+PASS→approve / WARN→comment / FAIL→request_changes maps almost exactly, and her low
+block rate (REQUEST_CHANGES 3.4%) confirms the approval-biased posture. **Keep this.**
+(Her 90% COMMENT share is mostly the #863 pending-CI comment-and-exit + approve-on-green
+doing the formal APPROVE, not a verdict-quality signal — see the baseline note.)
 
 ### Convergence — timeouts, not turn-limits
 
 Cloudflare uses **per-task 5 min (10 for code quality), a 25 min overall cap, and a 60s
 inactivity kill** plus heartbeat logs — and budget exhaustion still yields a *result*.
-Quinn instead hits a raw LangGraph recursion cap (maxTurns=18 → 37 steps) and fails to
-**nothing**, leaving the PR stuck. This is her clearest defect.
+Quinn hit a raw LangGraph recursion cap (maxTurns=18 → 37 steps) and failed to
+**nothing**, leaving the PR stuck — *this was her clearest defect.* **Resolved by #863:**
+the thrash was busy-waiting on pending CI, so `check_ci` now returns a comment-and-exit
+directive and the prompt says "comment once, never re-poll." The 2026-07-04 baseline
+confirms it — **zero recursion failures in 656 runs**, max latency down from ~7 min to
+3.6 min. A hard timeout-yields-a-result backstop (P0 #1) is no longer load-bearing.
 
 ### Memory — recall → review → retain
 
@@ -113,19 +138,25 @@ the raw material exists.
 ## Prioritized roadmap
 
 **P0 — fix the stuck mode**
-1. **Never fail to nothing.** On budget exhaustion (recursion limit / timeout) in a
-   `pr_review` run, force-emit a terminal **COMMENT** ("review incomplete — out of budget;
-   partial findings below") instead of a hard error. Removes the ~1.6% of PRs that get no
-   verdict and stall the merge loop.
+1. ~~**Never fail to nothing.**~~ ✅ *effectively resolved (#863).* The stuck mode was
+   recursion thrash from busy-waiting pending CI; #863's comment-and-exit fixed the cause,
+   and the 2026-07-04 baseline shows **zero recursion failures in 656 runs**. A
+   budget-exhaustion backstop (force-emit COMMENT) is no longer load-bearing — revisit only
+   if the "other" failure class (4/656) grows.
 2. **Make clawpatch deterministic, not discretionary.** ✅ *grounded-trigger half shipped
    (#891).* `diff_summary` now computes the objective trigger (>3 files / >120 lines /
    sensitive path) from authoritative GitHub metrics — PR-JSON totals + full-diff paths,
    neither truncated — and emits an explicit `STRUCTURAL REVIEW REQUIRED` directive. This
    fixes the root defect: the model previously had to eyeball the trigger from a diff
    truncated at 200 lines, so on a large PR it was unevaluable and clawpatch under-fired.
-   **Remaining phase-2:** hard-enforce (block the verdict until clawpatch ran on a
-   REQUIRED diff) + measure the post-deploy firing rate via `scripts/quinn-review-eval.ts`
-   before enforcing (enforcement risks re-opening the recursion-thrash mode #863 fixed).
+   **Pre-#891 control (2026-07-04): 1.2% (8/652) — even worse than the 5% first assumed**,
+   i.e. on the deployed prompt clawpatch essentially never runs and Quinn is diff-only ~99%
+   of the time. **Remaining phase-2:** deploy #891, re-measure against this 1.2% control;
+   if the directive still doesn't move it, **hard-enforce** (block the verdict until
+   clawpatch ran on a REQUIRED diff — the data now justifies it, since prompt-advisory has
+   demonstrably failed twice). Enforce carefully: a required extra tool call must not
+   re-open the recursion-thrash mode #863 fixed, so gate it strictly on the objective
+   trigger and keep it a single bounded call.
 
 **P1 — re-review memory** ✅ *shipped (prior-verdict recall)*
 3. Before a re-review, recall Quinn's own prior verdict + which findings are resolved
