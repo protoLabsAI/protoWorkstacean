@@ -5,21 +5,24 @@
  * HTTP endpoint so the LLM tool wrapper stays a thin caller and shell exec
  * is bounded to this route.
  *
- * Repo resolution
- * ---------------
- * The tool accepts `repo` in owner/name format. Resolution tries, in order:
+ * PR resolution
+ * -------------
+ * The tool accepts `repo` (owner/name) + `pr` (number). The route resolves
+ * the PR's `head.sha` (the tree to review) and `base.sha` (the ref to diff
+ * against) from GitHub itself — the caller never passes SHAs, so an agent
+ * can't strand the review on a hallucinated ref. Then:
  *
  *   1. `CLAWPATCH_REPO_PATH_MAP` env override (JSON owner/name → abs path)
  *      — dev-only escape hatch for pointing at a local working tree.
- *   2. Project-registry allowlist gate, then `CheckoutCache` — every other
- *      repo (including the ones that used to be bind-mounted) goes through
- *      the cache so Quinn always reviews the exact PR ref.
+ *   2. Project-registry allowlist gate, then `CheckoutCache.resolve(repo,
+ *      headSha)` — a git checkout at the PR head with base reachable.
  *
- * No bind-mount fast path. Per C1 sign-off (#578): "better way over fast
- * way" — a single resolution code path means no "did Quinn review the
- * host's checkout or the PR head" ambiguity. See
- * docs/explanation/clawpatch-checkouts.md for the cache's eviction, TTL,
- * and security model.
+ * clawpatch runs `ci --since <base.sha>` inside that checkout, so it scopes
+ * the review to exactly the features the PR touched (not the whole repo).
+ * Reviewing the head diffed against the base is what makes the findings
+ * relevant; a whole-tree review both over-reports and blows the model's
+ * per-feature time budget. See docs/explanation/clawpatch-checkouts.md for
+ * the cache's eviction, TTL, and security model.
  *
  * Env
  * ---
@@ -63,7 +66,8 @@ function stateDirFor(repo: string): string {
 
 interface ReviewRequest {
   repo: string;
-  since?: string;
+  /** PR number. The route resolves head + base SHAs from GitHub. */
+  pr: number;
   limit?: number;
   /** Override the model for this invocation. Defaults to the provider's default. */
   model?: string;
@@ -134,27 +138,85 @@ function loadProjectAllowlist(
 }
 
 /**
- * Resolve a local filesystem path for clawpatch to operate on. One code
- * path, no bind-mount fast path: every repo (including protoWorkstacean
- * itself) routes through the GitHub-tarball cache so Quinn always reviews
- * the exact ref the PR is on, not whatever happens to be checked out on
- * the host. Per the C1 sign-off — "better way over fast way".
+ * Resolve the PR's head + base SHAs from GitHub. `head` is the tree
+ * clawpatch reviews; `base` is the ref it diffs against (`--since`).
+ * Resolving server-side — rather than trusting caller-supplied SHAs — keeps
+ * an agent from stranding the review on a hallucinated ref, and is the only
+ * way the route knows which tree to check out.
+ *
+ * Returns `{ ok: false, error, status }` instead of throwing so the handler
+ * can shape the response without a try/catch.
+ */
+async function resolvePrRefs(
+  owner: string,
+  name: string,
+  pr: number,
+): Promise<
+  | { ok: true; headSha: string; baseSha: string }
+  | { ok: false; error: string; status: number }
+> {
+  const getToken = makeGitHubAuth();
+  if (!getToken) {
+    return {
+      ok: false,
+      status: 500,
+      error: "no GitHub credentials (GITHUB_APP_* or GITHUB_TOKEN) to resolve the PR",
+    };
+  }
+  const token = await getToken(owner, name);
+  const resp = await fetch(
+    `https://api.github.com/repos/${owner}/${name}/pulls/${pr}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "protoquinn-clawpatch",
+      },
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    return {
+      ok: false,
+      status: resp.status === 404 ? 404 : 502,
+      error: `GitHub PR ${owner}/${name}#${pr} lookup failed: ${resp.status} ${body.slice(0, 200)}`,
+    };
+  }
+  const prData = (await resp.json()) as {
+    head?: { sha?: string };
+    base?: { sha?: string };
+  };
+  const headSha = prData.head?.sha;
+  const baseSha = prData.base?.sha;
+  if (!headSha || !baseSha) {
+    return {
+      ok: false,
+      status: 502,
+      error: `GitHub PR ${owner}/${name}#${pr} returned no head/base SHA`,
+    };
+  }
+  return { ok: true, headSha, baseSha };
+}
+
+/**
+ * Resolve a local git-checkout path for the PR head. One code path, no
+ * bind-mount fast path: every repo routes through the CheckoutCache so
+ * clawpatch always reviews the exact head the PR is on, checked out as a
+ * real git tree (so `git diff <base>` resolves). Per the C1 sign-off —
+ * "better way over fast way".
  *
  *   1. `CLAWPATCH_REPO_PATH_MAP` env override — dev-only escape hatch,
- *      lets a developer point clawpatch at a working tree.
+ *      lets a developer point clawpatch at a local working tree.
  *   2. Project-registry allowlist gate — same security boundary as
- *      `create_github_issue`. Agents can't aim clawpatch at arbitrary
- *      GitHub repos.
- *   3. `CheckoutCache.resolve(repo, since)` — fetches the tarball at the
- *      given SHA, extracts under /data/checkouts/<owner>-<repo>/<sha>/,
- *      and returns the path. Content-addressed; 1h TTL.
- *
- * Returns `{ ok: false, error }` instead of throwing so the route handler
- * can shape a 400 response without a try/catch.
+ *      `create_github_issue`. Agents can't aim clawpatch at arbitrary repos.
+ *   3. `CheckoutCache.resolve(repo, headSha)` — git-clones + checks out the
+ *      head under /data/checkouts/<owner>-<repo>/<sha>/. 1h TTL.
  */
-async function resolveRepoPath(
+async function resolveHeadCheckout(
   repo: string,
-  since: string | undefined,
+  headSha: string,
   projectRegistry: ProjectRegistry | undefined,
 ): Promise<{ ok: true; path: string } | { ok: false; error: string; status: number }> {
   const devOverride = resolveDevOverridePath(repo);
@@ -171,22 +233,12 @@ async function resolveRepoPath(
     };
   }
 
-  if (!since) {
-    return {
-      ok: false,
-      status: 400,
-      error:
-        `clawpatch review needs 'since' (the PR head SHA) so the checkout ` +
-        `cache can fetch the right ref from GitHub.`,
-    };
-  }
-
   try {
-    const path = await getCheckoutCache().resolve(repo, since);
+    const path = await getCheckoutCache().resolve(repo, headSha);
     return { ok: true, path };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, status: 502, error: `checkout cache failed: ${msg}` };
+    return { ok: false, status: 502, error: `checkout failed: ${msg}` };
   }
 }
 
@@ -269,14 +321,32 @@ export function createRoutes(ctx: ApiContext): Route[] {
             { status: 400 },
           );
         }
-        const { repo, since, limit, model, provider } = payload;
-        if (!repo) {
+        const { repo, pr, limit, model, provider } = payload;
+        if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
           return Response.json(
-            { success: false, error: "repo is required" },
+            { success: false, error: "repo is required in owner/name format" },
             { status: 400 },
           );
         }
-        const resolution = await resolveRepoPath(repo, since, ctx.projectRegistry);
+        if (typeof pr !== "number" || !Number.isInteger(pr) || pr <= 0) {
+          return Response.json(
+            { success: false, error: "pr (positive integer PR number) is required" },
+            { status: 400 },
+          );
+        }
+        const [owner, name] = repo.split("/");
+
+        // Resolve head + base from the PR itself — the caller never passes
+        // SHAs, so the review can't strand on a hallucinated ref.
+        const refs = await resolvePrRefs(owner, name, pr);
+        if (!refs.ok) {
+          return Response.json(
+            { success: false, error: refs.error },
+            { status: refs.status },
+          );
+        }
+
+        const resolution = await resolveHeadCheckout(repo, refs.headSha, ctx.projectRegistry);
         if (!resolution.ok) {
           return Response.json(
             { success: false, error: resolution.error },
@@ -285,11 +355,13 @@ export function createRoutes(ctx: ApiContext): Route[] {
         }
         const repoPath = resolution.path;
 
-        // Workstacean mounts repo source read-only, so push clawpatch state
-        // into the writable data volume — one dir per owner/repo so we don't
-        // re-map features for every PR review.
+        // clawpatch writes `.clawpatch/` state; the checkout tree is transient
+        // (TTL-evicted), so keep state in the writable data volume — one dir
+        // per owner/repo so we don't re-map features for every PR review.
         const stateDir = stateDirFor(repo);
         const effectiveProvider = provider ?? "gateway";
+        // Diff the head against the PR base so the review is scoped to exactly
+        // the features the PR touched, not the whole repo.
         const args = [
           "ci",
           "--provider",
@@ -297,8 +369,9 @@ export function createRoutes(ctx: ApiContext): Route[] {
           "--json",
           "--state-dir",
           stateDir,
+          "--since",
+          refs.baseSha,
         ];
-        if (since) args.push("--since", since);
         if (typeof limit === "number" && limit > 0)
           args.push("--limit", String(limit));
         if (model) args.push("--model", model);
@@ -341,7 +414,14 @@ export function createRoutes(ctx: ApiContext): Route[] {
 
         return Response.json({
           success: true,
-          data: { repo, repoPath, ...parsed },
+          data: {
+            repo,
+            pr,
+            head: refs.headSha,
+            base: refs.baseSha,
+            repoPath,
+            ...parsed,
+          },
         });
       },
     },

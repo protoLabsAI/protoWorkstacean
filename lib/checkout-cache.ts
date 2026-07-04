@@ -1,22 +1,31 @@
 /**
- * CheckoutCache — content-addressed source-tree cache for clawpatch.
+ * CheckoutCache — content-addressed git-checkout cache for clawpatch.
  *
  * Backs `src/api/clawpatch.ts` so structural review works against every
- * repo in the project registry — including the ones that used to be
- * bind-mounted into the container. Source of truth is GitHub's tarball
- * endpoint (`GET /repos/{owner}/{repo}/tarball/{ref}`); a successful fetch
- * lands at `${CHECKOUT_ROOT}/<owner>-<repo>/<sha>/`.
+ * repo in the project registry. Each entry is a real **git working tree**
+ * checked out at the PR head SHA — not a tarball extraction — because
+ * clawpatch scopes its review with `git diff <base>` and needs git history
+ * to resolve the base ref. A successful checkout lands at
+ * `${CHECKOUT_ROOT}/<owner>-<repo>/<sha>/`.
  *
- * Design notes live in docs/explanation/clawpatch-checkouts.md (C1) — the
- * short version:
+ * Materialization is a **blob-filtered partial clone** (`--filter=blob:none`)
+ * followed by `git checkout <headSha>`:
+ *   - All commit + tree objects are fetched, so any base ref the caller
+ *     passes to `git diff` resolves. Blobs are fetched lazily (checkout
+ *     pulls the head tree's files; a later `git diff <base>` pulls the base
+ *     tree's) in a couple of batched requests, not per-file.
+ *   - The clone URL embeds the short-lived (≈1h) GitHub App installation
+ *     token so lazy blob fetches keep working for the entry's lifetime. The
+ *     token lands in the entry's `.git/config`; the 1h cache TTL is aligned
+ *     with the token lifetime, so a stale token forces a re-clone anyway.
  *
+ * Design notes live in docs/explanation/clawpatch-checkouts.md (C1):
  *   - LRU eviction at 5 GB OR 50 entries, whichever first.
- *   - 1h TTL refresh: per the C1 sign-off — "better way over fast way" —
- *     over the 24h heuristic the doc originally biased toward.
- *   - Per-(repo, sha) extraction mutex: simultaneous reviews on the same PR
- *     head queue rather than racing.
- *   - Security: project-registry allowlist (enforced by the caller) plus
- *     tarball entry filter — reject `..`, absolute paths, and symlinks.
+ *   - 1h TTL refresh: per the C1 sign-off — "better way over fast way".
+ *   - Per-(repo, sha) clone mutex: simultaneous reviews on the same PR head
+ *     queue rather than racing.
+ *   - Security: project-registry allowlist (enforced by the caller). Only
+ *     repos we own are ever cloned — there is no untrusted-repo path.
  *
  * Eviction lives in `prune()`, invoked from a daily ceremony (C3). The hot
  * path never sweeps — inline eviction would add unpredictable tail latency
@@ -31,11 +40,8 @@ import {
   rmSync,
   statSync,
   utimesSync,
-  writeFileSync,
 } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { logger } from "./log.ts";
 
 const log = logger("checkout-cache");
@@ -50,9 +56,9 @@ const DEFAULT_ENTRY_LIMIT = 50;
 // this picks "fresh" over "warm-cache hit-rate". An hour amortizes the
 // review-comment burst case (same PR head re-reviewed several times in
 // quick succession) without holding stale source long enough to risk
-// base-branch drift hiding review-relevant changes. Per C1 sign-off (#578).
+// base-branch drift hiding review-relevant changes, and matches the ~1h
+// GitHub App token lifetime baked into the clone URL. Per C1 sign-off (#578).
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
-const MAX_COMPRESSED_BYTES = 1 * 1024 * 1024 * 1024; // 1 GB
 
 export interface CheckoutCacheConfig {
   root?: string;
@@ -66,15 +72,16 @@ export interface CheckoutCacheConfig {
    */
   getToken?: (owner: string, repo: string) => Promise<string>;
   /**
-   * Override the actual tarball fetch — tests inject a stub that copies a
-   * fixture rather than hitting codeload.github.com.
+   * Override the actual git clone — tests inject a stub that populates the
+   * target dir from a fixture rather than hitting github.com.
    */
-  fetchTarball?: (
+  cloneRepo?: (
     owner: string,
     repo: string,
-    sha: string,
+    headSha: string,
     token: string,
-  ) => Promise<Buffer>;
+    targetDir: string,
+  ) => Promise<void>;
 }
 
 interface ResolvedConfig {
@@ -83,12 +90,13 @@ interface ResolvedConfig {
   entryLimit: number;
   ttlMs: number;
   getToken: (owner: string, repo: string) => Promise<string>;
-  fetchTarball: (
+  cloneRepo: (
     owner: string,
     repo: string,
-    sha: string,
+    headSha: string,
     token: string,
-  ) => Promise<Buffer>;
+    targetDir: string,
+  ) => Promise<void>;
 }
 
 export class CheckoutCache {
@@ -109,17 +117,18 @@ export class CheckoutCache {
       entryLimit: config.entryLimit ?? DEFAULT_ENTRY_LIMIT,
       ttlMs: config.ttlMs ?? DEFAULT_TTL_MS,
       getToken,
-      fetchTarball: config.fetchTarball ?? defaultFetchTarball,
+      cloneRepo: config.cloneRepo ?? defaultCloneRepo,
     };
   }
 
   /**
-   * Resolve a local extracted-tree path for (repo, sha). Returns cache hit
-   * if present and fresh; otherwise fetches + extracts. Throws on any
-   * security / IO failure — never returns null.
+   * Resolve a local git-checkout path for (repo, sha). Returns cache hit
+   * if present and fresh; otherwise clones + checks out. Throws on any
+   * git / IO failure — never returns null.
    *
-   * `repo` is "owner/name". Caller is responsible for enforcing the
-   * project-registry allowlist before calling — this layer trusts its input.
+   * `repo` is "owner/name". `sha` is the PR head SHA — the tree to review.
+   * Caller is responsible for enforcing the project-registry allowlist
+   * before calling — this layer trusts its input.
    */
   async resolve(repo: string, sha: string): Promise<string> {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
@@ -129,8 +138,8 @@ export class CheckoutCache {
       throw new Error(`CheckoutCache: invalid sha '${sha}', expected hex ref`);
     }
     const key = `${repo}@${sha}`;
-    const existingExtract = this.inflight.get(key);
-    if (existingExtract) return existingExtract;
+    const existingClone = this.inflight.get(key);
+    if (existingClone) return existingClone;
 
     const promise = this._resolveImpl(repo, sha);
     this.inflight.set(key, promise);
@@ -154,24 +163,24 @@ export class CheckoutCache {
         return dir;
       }
       log.info(
-        `stale ${repo}@${sha.slice(0, 7)} (age ${(age / 60_000).toFixed(1)}m > ttl) — re-fetching`,
+        `stale ${repo}@${sha.slice(0, 7)} (age ${(age / 60_000).toFixed(1)}m > ttl) — re-cloning`,
       );
       rmSync(dir, { recursive: true, force: true });
     }
 
     const [owner, name] = repo.split("/");
     const token = await this.cfg.getToken(owner, name);
-    const tarball = await this.cfg.fetchTarball(owner, name, sha, token);
-    if (tarball.byteLength > MAX_COMPRESSED_BYTES) {
-      throw new Error(
-        `CheckoutCache: tarball for ${repo}@${sha} is ${tarball.byteLength} bytes ` +
-          `(> ${MAX_COMPRESSED_BYTES} cap) — refusing to extract`,
-      );
+    // git clone creates the leaf dir itself; make sure the <slug>/ parent exists.
+    mkdirSync(dirname(dir), { recursive: true });
+    try {
+      await this.cfg.cloneRepo(owner, name, sha, token, dir);
+    } catch (err) {
+      // Don't leave a half-cloned tree around — the next resolve() would
+      // mistake it for a cache hit.
+      rmSync(dir, { recursive: true, force: true });
+      throw err;
     }
-    await this._extract(tarball, dir, repo, sha);
-    log.info(
-      `miss ${repo}@${sha.slice(0, 7)} extracted (${tarball.byteLength} bytes)`,
-    );
+    log.info(`miss ${repo}@${sha.slice(0, 7)} cloned + checked out`);
     return dir;
   }
 
@@ -238,90 +247,38 @@ export class CheckoutCache {
     const slug = repo.replace("/", "-");
     return join(this.cfg.root, slug, sha);
   }
-
-  private async _extract(
-    tarball: Buffer,
-    targetDir: string,
-    repo: string,
-    sha: string,
-  ): Promise<void> {
-    mkdirSync(targetDir, { recursive: true });
-    const stagingParent = await mkdtemp(join(tmpdir(), "checkout-cache-"));
-    const tarballPath = join(stagingParent, "src.tar.gz");
-    writeFileSync(tarballPath, tarball);
-
-    try {
-      // Inspect entries before extracting — reject anything that would
-      // escape the target dir (absolute path, .. traversal) or land on
-      // host disk via a symlink/hardlink. GitHub's archives are not
-      // adversarial, but the cache is fed by `repo` strings from agent
-      // tool calls, so the filter pays for itself.
-      const listing = await runTar(["-tzf", tarballPath]);
-      const lines = listing.split("\n").filter(Boolean);
-      for (const line of lines) {
-        if (line.startsWith("/")) {
-          throw new Error(`CheckoutCache: tarball for ${repo}@${sha} contains absolute path: ${line}`);
-        }
-        if (line.split("/").some(seg => seg === "..")) {
-          throw new Error(`CheckoutCache: tarball for ${repo}@${sha} contains '..' segment: ${line}`);
-        }
-      }
-
-      // `-h` would dereference symlinks (turning them into the file they point at);
-      // we want to refuse them outright instead, so list with `tar -tvzf` and bail
-      // if any entry's permission string starts with 'l' (symlink) or 'h' (hardlink).
-      const verbose = await runTar(["-tvzf", tarballPath]);
-      for (const line of verbose.split("\n")) {
-        if (!line) continue;
-        const perm = line[0];
-        if (perm === "l" || perm === "h") {
-          throw new Error(`CheckoutCache: tarball for ${repo}@${sha} contains symlink/hardlink: ${line}`);
-        }
-      }
-
-      // GitHub tarballs nest everything under `<repo>-<sha>/` — strip that
-      // top-level dir so the extracted tree is rooted at targetDir.
-      await runTar(["-xzf", tarballPath, "-C", targetDir, "--strip-components=1"]);
-    } catch (err) {
-      // Don't leave a half-extracted tree around — the next resolve() would
-      // mistake it for a cache hit.
-      rmSync(targetDir, { recursive: true, force: true });
-      throw err;
-    } finally {
-      await rm(stagingParent, { recursive: true, force: true });
-    }
-  }
 }
 
-function defaultFetchTarball(
+/**
+ * Blob-filtered partial clone of a repo we own, checked out at `headSha`.
+ * The token is embedded in the remote URL so git's lazy blob fetches (during
+ * checkout and any later `git diff <base>`) authenticate. `GIT_TERMINAL_PROMPT=0`
+ * makes a bad/expired token fail fast instead of hanging on a credential prompt.
+ */
+async function defaultCloneRepo(
   owner: string,
   repo: string,
-  sha: string,
+  headSha: string,
   token: string,
-): Promise<Buffer> {
-  const url = `https://api.github.com/repos/${owner}/${repo}/tarball/${sha}`;
-  return fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "User-Agent": "protoWorkstacean-checkout-cache",
-      Accept: "application/vnd.github+json",
-    },
-    redirect: "follow",
-  }).then(async res => {
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(
-        `CheckoutCache: GitHub tarball ${owner}/${repo}@${sha} returned ${res.status} ${res.statusText} — ${body.slice(0, 200)}`,
-      );
-    }
-    const buf = await res.arrayBuffer();
-    return Buffer.from(buf);
-  });
+  targetDir: string,
+): Promise<void> {
+  const url = `https://x-access-token:${token}@github.com/${owner}/${repo}.git`;
+  // Clone all branch tips (blobless) so any base ref a later `git diff` names
+  // resolves from local history.
+  await runGit(["clone", "--filter=blob:none", "--no-tags", "--quiet", url, targetDir]);
+  // The head commit may be a detached PR ref or a fork head not covered by the
+  // branch fetch above — fetch it explicitly by SHA (GitHub serves PR heads via
+  // allowAnySHA1InWant). A no-op when the clone already has it.
+  await runGit(["-C", targetDir, "fetch", "--filter=blob:none", "--no-tags", "--quiet", "origin", headSha]);
+  await runGit(["-C", targetDir, "checkout", "--quiet", headSha]);
 }
 
-function runTar(args: string[]): Promise<string> {
+function runGit(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn("tar", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn("git", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
     let stdout = "";
     let stderr = "";
     proc.stdout.on("data", chunk => { stdout += String(chunk); });
@@ -329,9 +286,15 @@ function runTar(args: string[]): Promise<string> {
     proc.on("error", reject);
     proc.on("close", code => {
       if (code === 0) resolve(stdout);
-      else reject(new Error(`tar ${args.join(" ")} exited ${code}: ${stderr.trim()}`));
+      // Redact the token if it leaked into an error line before surfacing.
+      else reject(new Error(`git ${redactToken(args.join(" "))} exited ${code}: ${redactToken(stderr.trim())}`));
     });
   });
+}
+
+/** Strip an embedded `x-access-token:<tok>@` credential from any string. */
+function redactToken(s: string): string {
+  return s.replace(/x-access-token:[^@]+@/g, "x-access-token:***@");
 }
 
 function dirSizeBytes(dir: string): number {
