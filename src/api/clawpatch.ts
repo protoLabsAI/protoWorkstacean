@@ -109,13 +109,28 @@ function resolveDevOverridePath(repo: string): string | null {
 }
 
 /**
+ * Memoized GitHub auth. `makeGitHubAuth()` builds a fresh `GitHubAppAuth`
+ * whose installation-token cache lives on the instance — calling it per
+ * request would re-mint a JWT + installation token every review. Memoize the
+ * getter so the token cache persists. Lazy (not a module const) because
+ * `makeGitHubAuth()` throws on partial App config; deferring that to first use
+ * keeps it out of import time and lets `resolvePrRefs` surface it as a clean
+ * error response.
+ */
+let _githubAuth: ((owner: string, repo: string) => Promise<string>) | null | undefined;
+function githubAuth(): ((owner: string, repo: string) => Promise<string>) | null {
+  if (_githubAuth === undefined) _githubAuth = makeGitHubAuth();
+  return _githubAuth;
+}
+
+/**
  * Lazy singleton — first review request after process start initializes it.
  * Test override via the `setCheckoutCacheForTesting` helper below.
  */
 let _cache: CheckoutCache | null = null;
 function getCheckoutCache(): CheckoutCache {
   if (_cache) return _cache;
-  const auth = makeGitHubAuth();
+  const auth = githubAuth();
   _cache = new CheckoutCache({
     getToken: auth ?? undefined,
   });
@@ -155,7 +170,13 @@ async function resolvePrRefs(
   | { ok: true; headSha: string; baseSha: string }
   | { ok: false; error: string; status: number }
 > {
-  const getToken = makeGitHubAuth();
+  let getToken: ((owner: string, repo: string) => Promise<string>) | null;
+  try {
+    getToken = githubAuth();
+  } catch (err) {
+    // Partial App config throws here — surface it as a clean error, not a 500.
+    return { ok: false, status: 500, error: err instanceof Error ? err.message : String(err) };
+  }
   if (!getToken) {
     return {
       ok: false,
@@ -163,64 +184,67 @@ async function resolvePrRefs(
       error: "no GitHub credentials (GITHUB_APP_* or GITHUB_TOKEN) to resolve the PR",
     };
   }
-  const token = await getToken(owner, name);
-  const resp = await fetch(
-    `https://api.github.com/repos/${owner}/${name}/pulls/${pr}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "protoquinn-clawpatch",
+  try {
+    const token = await getToken(owner, name);
+    const resp = await fetch(
+      `https://api.github.com/repos/${owner}/${name}/pulls/${pr}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "protoquinn-clawpatch",
+        },
+        signal: AbortSignal.timeout(15_000),
       },
-      signal: AbortSignal.timeout(15_000),
-    },
-  );
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
-    return {
-      ok: false,
-      status: resp.status === 404 ? 404 : 502,
-      error: `GitHub PR ${owner}/${name}#${pr} lookup failed: ${resp.status} ${body.slice(0, 200)}`,
+    );
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      return {
+        ok: false,
+        status: resp.status === 404 ? 404 : 502,
+        error: `GitHub PR ${owner}/${name}#${pr} lookup failed: ${resp.status} ${body.slice(0, 200)}`,
+      };
+    }
+    const prData = (await resp.json()) as {
+      head?: { sha?: string };
+      base?: { sha?: string };
     };
+    const headSha = prData.head?.sha;
+    const baseSha = prData.base?.sha;
+    if (!headSha || !baseSha) {
+      return {
+        ok: false,
+        status: 502,
+        error: `GitHub PR ${owner}/${name}#${pr} returned no head/base SHA`,
+      };
+    }
+    return { ok: true, headSha, baseSha };
+  } catch (err) {
+    // Network failure, auth throw, or the 15s AbortSignal firing — fail clean.
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, status: 502, error: `GitHub PR ${owner}/${name}#${pr} lookup errored: ${msg}` };
   }
-  const prData = (await resp.json()) as {
-    head?: { sha?: string };
-    base?: { sha?: string };
-  };
-  const headSha = prData.head?.sha;
-  const baseSha = prData.base?.sha;
-  if (!headSha || !baseSha) {
-    return {
-      ok: false,
-      status: 502,
-      error: `GitHub PR ${owner}/${name}#${pr} returned no head/base SHA`,
-    };
-  }
-  return { ok: true, headSha, baseSha };
 }
 
 /**
- * Resolve a local git-checkout path for the PR head. One code path, no
- * bind-mount fast path: every repo routes through the CheckoutCache so
- * clawpatch always reviews the exact head the PR is on, checked out as a
- * real git tree (so `git diff <base>` resolves). Per the C1 sign-off —
- * "better way over fast way".
+ * Gate repo access — the security boundary, and it MUST run before any GitHub
+ * call so an unmanaged `owner/name` can't trigger a PR lookup on the bot's
+ * credentials (which would leak head/base SHA metadata for repos we don't
+ * manage). Same boundary `create_github_issue` checks.
  *
- *   1. `CLAWPATCH_REPO_PATH_MAP` env override — dev-only escape hatch,
- *      lets a developer point clawpatch at a local working tree.
- *   2. Project-registry allowlist gate — same security boundary as
- *      `create_github_issue`. Agents can't aim clawpatch at arbitrary repos.
- *   3. `CheckoutCache.resolve(repo, headSha)` — git-clones + checks out the
- *      head under /data/checkouts/<owner>-<repo>/<sha>/. 1h TTL.
+ *   - `CLAWPATCH_REPO_PATH_MAP` env override — dev-only escape hatch that
+ *     points clawpatch at a local working tree; bypasses the allowlist.
+ *   - Otherwise the repo must be in the project registry.
+ *
+ * Returns the dev-override path (if any) so the handler can skip the cache.
  */
-async function resolveHeadCheckout(
+function gateRepoAccess(
   repo: string,
-  headSha: string,
   projectRegistry: ProjectRegistry | undefined,
-): Promise<{ ok: true; path: string } | { ok: false; error: string; status: number }> {
+): { ok: true; devPath: string | null } | { ok: false; error: string; status: number } {
   const devOverride = resolveDevOverridePath(repo);
-  if (devOverride) return { ok: true, path: devOverride };
+  if (devOverride) return { ok: true, devPath: devOverride };
 
   const allow = loadProjectAllowlist(projectRegistry);
   if (!allow.has(repo)) {
@@ -232,14 +256,7 @@ async function resolveHeadCheckout(
         `managed projects. Register it by tagging the repo with the \`protoagent-plugin\` topic (or set CLAWPATCH_REPO_PATH_MAP for local dev).`,
     };
   }
-
-  try {
-    const path = await getCheckoutCache().resolve(repo, headSha);
-    return { ok: true, path };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, status: 502, error: `checkout failed: ${msg}` };
-  }
+  return { ok: true, devPath: null };
 }
 
 interface ClawpatchExecResult {
@@ -336,6 +353,16 @@ export function createRoutes(ctx: ApiContext): Route[] {
         }
         const [owner, name] = repo.split("/");
 
+        // Allowlist gate FIRST — before any GitHub call — so an unmanaged repo
+        // can't trigger a PR lookup on the bot's credentials.
+        const gate = gateRepoAccess(repo, ctx.projectRegistry);
+        if (!gate.ok) {
+          return Response.json(
+            { success: false, error: gate.error },
+            { status: gate.status },
+          );
+        }
+
         // Resolve head + base from the PR itself — the caller never passes
         // SHAs, so the review can't strand on a hallucinated ref.
         const refs = await resolvePrRefs(owner, name, pr);
@@ -346,14 +373,20 @@ export function createRoutes(ctx: ApiContext): Route[] {
           );
         }
 
-        const resolution = await resolveHeadCheckout(repo, refs.headSha, ctx.projectRegistry);
-        if (!resolution.ok) {
-          return Response.json(
-            { success: false, error: resolution.error },
-            { status: resolution.status },
-          );
+        let repoPath: string;
+        if (gate.devPath) {
+          repoPath = gate.devPath;
+        } else {
+          try {
+            repoPath = await getCheckoutCache().resolve(repo, refs.headSha);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return Response.json(
+              { success: false, error: `checkout failed: ${msg}` },
+              { status: 502 },
+            );
+          }
         }
-        const repoPath = resolution.path;
 
         // clawpatch writes `.clawpatch/` state; the checkout tree is transient
         // (TTL-evicted), so keep state in the writable data volume — one dir

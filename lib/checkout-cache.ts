@@ -264,14 +264,29 @@ async function defaultCloneRepo(
 ): Promise<void> {
   const url = `https://x-access-token:${token}@github.com/${owner}/${repo}.git`;
   // Clone all branch tips (blobless) so any base ref a later `git diff` names
-  // resolves from local history.
-  await runGit(["clone", "--filter=blob:none", "--no-tags", "--quiet", url, targetDir]);
+  // resolves from local history. `--no-checkout` skips materializing the
+  // default branch — with blob:none that would lazily fetch its whole blob
+  // set, only to be replaced by the head checkout below.
+  await runGit(["clone", "--filter=blob:none", "--no-checkout", "--no-tags", "--quiet", url, targetDir]);
   // The head commit may be a detached PR ref or a fork head not covered by the
   // branch fetch above — fetch it explicitly by SHA (GitHub serves PR heads via
-  // allowAnySHA1InWant). A no-op when the clone already has it.
-  await runGit(["-C", targetDir, "fetch", "--filter=blob:none", "--no-tags", "--quiet", "origin", headSha]);
+  // allowAnySHA1InWant). Best-effort: when the clone already has the commit
+  // (same-repo branch head), the checkout below is the real gate, so a fetch
+  // miss here shouldn't abort.
+  try {
+    await runGit(["-C", targetDir, "fetch", "--filter=blob:none", "--no-tags", "--quiet", "origin", headSha]);
+  } catch (err) {
+    log.info(
+      `explicit head fetch for ${owner}/${repo}@${headSha.slice(0, 7)} failed (${err instanceof Error ? err.message : String(err)}) — relying on the clone's refs`,
+    );
+  }
   await runGit(["-C", targetDir, "checkout", "--quiet", headSha]);
 }
+
+// A stalled network clone/fetch must not hang forever: `resolve()` holds the
+// (repo, sha) key in `inflight` until the git promise settles, so a pending
+// git would make every retry for that PR head wait on the same dead promise.
+const GIT_TIMEOUT_MS = 3 * 60 * 1000;
 
 function runGit(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -281,13 +296,24 @@ function runGit(args: string[]): Promise<string> {
     });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGKILL");
+    }, GIT_TIMEOUT_MS);
     proc.stdout.on("data", chunk => { stdout += String(chunk); });
     proc.stderr.on("data", chunk => { stderr += String(chunk); });
-    proc.on("error", reject);
+    proc.on("error", err => { clearTimeout(timer); reject(err); });
     proc.on("close", code => {
-      if (code === 0) resolve(stdout);
-      // Redact the token if it leaked into an error line before surfacing.
-      else reject(new Error(`git ${redactToken(args.join(" "))} exited ${code}: ${redactToken(stderr.trim())}`));
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`git ${redactToken(args.join(" "))} timed out after ${GIT_TIMEOUT_MS}ms`));
+      } else if (code === 0) {
+        resolve(stdout);
+      } else {
+        // Redact the token if it leaked into an error line before surfacing.
+        reject(new Error(`git ${redactToken(args.join(" "))} exited ${code}: ${redactToken(stderr.trim())}`));
+      }
     });
   });
 }
