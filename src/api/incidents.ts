@@ -17,6 +17,8 @@ interface SecurityIncident {
   description?: string;
   affectedProjects?: string[];
   assignee?: string;
+  resolvedAt?: string;
+  resolutionNote?: string;
 }
 
 export function createRoutes(ctx: ApiContext): Route[] {
@@ -113,7 +115,22 @@ export function createRoutes(ctx: ApiContext): Route[] {
       return Response.json({ success: false, error: `Incident "${incidentId}" not found` }, { status: 404 });
     }
 
-    incidents[idx] = { ...incidents[idx], status: "resolved" };
+    // Optional resolution note (e.g. auto-resolve evidence). Body is optional —
+    // a bare POST still resolves.
+    let note: string | undefined;
+    try {
+      const body = (await req.json()) as { note?: unknown };
+      if (typeof body?.note === "string" && body.note.trim()) note = body.note.trim();
+    } catch {
+      // no/invalid body — resolve without a note
+    }
+
+    incidents[idx] = {
+      ...incidents[idx],
+      status: "resolved",
+      resolvedAt: new Date().toISOString(),
+      ...(note ? { resolutionNote: note } : {}),
+    };
     writeFileSync(incidentsPath, stringifyYaml({ incidents }), "utf8");
 
     ctx.bus.publish("security.incident.reported", {

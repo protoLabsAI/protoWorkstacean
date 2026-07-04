@@ -368,6 +368,7 @@ skills:
       - get_ci_health
       - get_branch_drift
       - get_incidents
+      - resolve_incident
       - get_projects
       - msg_operator
     maxTurns: 15
@@ -389,6 +390,18 @@ skills:
         main = top pipeline issue).
       - `get_branch_drift` — divergence signalling a stuck promotion.
       - `get_incidents` — open operational / security incidents.
+
+      ## Clear incidents you can prove are fixed
+      Some open incidents are about your OWN data tooling failing (e.g. "board
+      audit APIs returning socket errors — get_ci_health / get_pr_pipeline /
+      get_branch_drift"). When such an incident is open but the tools it names
+      returned normally for you THIS run, the condition has cleared: call
+      `resolve_incident(id, note)` with the evidence (e.g. "get_ci_health,
+      get_pr_pipeline, get_branch_drift, get_recent_activity all returned
+      normally in today's digest run"). Resolve only on that positive proof from
+      this run — leave domain incidents (a red main, a stuck PR, a security
+      finding) for their owners. A resolved tooling incident drops out of the
+      Pipeline / fleet section below.
 
       ## Write it — clean Discord markdown
       It posts as a plain message, so USE REAL STRUCTURE — newlines, bold

@@ -482,6 +482,15 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
         schema: z.object({ title: z.string(), severity: z.enum(["critical", "high", "medium", "low"]), description: z.string().optional() }),
       },
     ),
+    resolve_incident: tool(
+      async (input) => JSON.stringify(await http.post(`/api/incidents/${encodeURIComponent(input.id)}/resolve`, input.note ? { note: input.note } : {})),
+      {
+        name: "resolve_incident",
+        description:
+          "Mark an OPEN incident resolved by id (e.g. INC-019). Only resolve when you can POSITIVELY verify from this run's own tool output that the reported condition has cleared — e.g. an incident says a data API is returning socket errors and that same API just returned successfully for you. Never resolve a domain incident (a red main, a stuck PR) you cannot confirm is fixed. Include a `note` citing the evidence.",
+        schema: z.object({ id: z.string().describe("Incident id, e.g. INC-019"), note: z.string().optional().describe("Evidence the condition cleared.") }),
+      },
+    ),
     clawpatch_review: tool(
       async (input) => JSON.stringify(await http.post("/api/clawpatch/review", input)),
       {
