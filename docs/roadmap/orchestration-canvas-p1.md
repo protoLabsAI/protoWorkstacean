@@ -53,10 +53,10 @@ Replace `dashboard/src/Layout.tsx` (NavLink sidebar + `Outlet`) with the protoAg
 
 ### WS-3 — Canvas surface (the keystone view)
 Promote `SystemGraph` to the primary stage and make it *execution-aware*.
-- **Tier-tag nodes** `builtin` vs `a2a` (from `/api/agents/runtime` + `ExecutorRegistry`); distinct node styles; A2A nodes show their host (roxy@steamdeck).
+- **Tier-tag nodes** `builtin` vs `a2a` (from `/api/agents/runtime` + `ExecutorRegistry`); distinct node styles; A2A nodes show their host (protopen@steamdeck).
 - **Live dispatch animation** drawn from `flow.item.*` (live via the existing WS `/api/bus/subscribe`), not just topology edges — a dispatch *to a distributed A2A agent* animates the same as an in-process one (it all flows through the hub).
 - Click node → **right-panel inspector** (recent skills, tool-calls, last flow item, jump to `SkillTrace`).
-- *Acceptance — the demo:* a real dispatch to an in-process agent **and** one out to a distributed A2A agent (roxy@steamdeck) both animate live on one canvas, drawn from the one bus.
+- *Acceptance — the demo:* a real dispatch to an in-process agent **and** one out to a distributed A2A agent (protopen@steamdeck) both animate live on one canvas, drawn from the one bus.
 
 ### WS-4 — Palette surface
 - Render the live `ExecutorRegistry` (`/api/control-plane/state`) as a tier-tagged, searchable palette (agents · MCP tools · protoAgent node-packs).

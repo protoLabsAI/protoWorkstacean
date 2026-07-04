@@ -440,7 +440,71 @@ async function coderabbitThreads(owner: string, name: string, pr: number): Promi
   return lines.join("\n");
 }
 
+// ── Structural-review (clawpatch) trigger ────────────────────────────────────
+// The pr_review prompt says "run clawpatch when the diff touches >3 files, >120
+// lines, or a sensitive path" — but the model had to eyeball that from a diff
+// that `diff_summary` truncates at 200 lines, so on a large diff the trigger was
+// literally unevaluable and clawpatch under-fired (~5% of reviews, see
+// docs/explanation/code-review-agent-design.md). We compute the trigger here
+// from authoritative GitHub metrics (PR JSON changed_files/additions/deletions +
+// full-diff paths, neither truncated) so the directive rests on fact, not a
+// guess. (#891)
+const STRUCTURAL_FILE_THRESHOLD = 3; // strictly more than this many files
+const STRUCTURAL_LINE_THRESHOLD = 120; // strictly more than this many changed lines
+
+/** Paths whose change warrants a structural pass regardless of size. Mirrors the prompt's list. */
+const SENSITIVE_PATH_RE =
+  /(^|\/)(\.github\/|dockerfile|docker-compose|compose\.ya?ml)|(auth|session|token|crypto|oauth|password|secret|payment|billing|migrat)/i;
+
+export interface StructuralTrigger {
+  required: boolean;
+  reasons: string[];
+}
+
+/** Pure decision: does this diff cross an objective structural-review trigger? Exported for testing. */
+export function computeStructuralTrigger(input: {
+  changedFiles: number;
+  linesChanged: number;
+  sensitivePaths: string[];
+}): StructuralTrigger {
+  const reasons: string[] = [];
+  if (input.changedFiles > STRUCTURAL_FILE_THRESHOLD) {
+    reasons.push(`${input.changedFiles} files changed (> ${STRUCTURAL_FILE_THRESHOLD})`);
+  }
+  if (input.linesChanged > STRUCTURAL_LINE_THRESHOLD) {
+    reasons.push(`${input.linesChanged} lines changed (> ${STRUCTURAL_LINE_THRESHOLD})`);
+  }
+  if (input.sensitivePaths.length > 0) {
+    reasons.push(`sensitive path(s): ${input.sensitivePaths.slice(0, 5).join(", ")}`);
+  }
+  return { required: reasons.length > 0, reasons };
+}
+
+/** Repo-relative paths touched by a unified diff, parsed from its `diff --git` headers. */
+function changedPathsFromDiff(diff: string): string[] {
+  const paths = new Set<string>();
+  for (const line of diff.split("\n")) {
+    const m = /^diff --git a\/.+? b\/(.+)$/.exec(line);
+    if (m?.[1]) paths.add(m[1]);
+  }
+  return [...paths];
+}
+
 async function diffSummary(owner: string, name: string, pr: number): Promise<string> {
+  // Authoritative change metrics — the PR JSON carries totals that survive the
+  // 200-line preview truncation below, so the structural trigger is evaluated on
+  // the whole diff, not just what fits in the preview.
+  const metaResp = await ghFetch(owner, name, `https://api.github.com/repos/${owner}/${name}/pulls/${pr}`);
+  let changedFiles = 0;
+  let additions = 0;
+  let deletions = 0;
+  if (metaResp.ok) {
+    const m = (await metaResp.json()) as { changed_files?: number; additions?: number; deletions?: number };
+    changedFiles = m.changed_files ?? 0;
+    additions = m.additions ?? 0;
+    deletions = m.deletions ?? 0;
+  }
+
   const getToken = resolveAuth();
   if (!getToken) throw new Error("no GitHub credentials (GITHUB_APP_* or GITHUB_TOKEN)");
   const token = await getToken(owner, name);
@@ -458,7 +522,20 @@ async function diffSummary(owner: string, name: string, pr: number): Promise<str
   const truncated = lines.length > 200;
   const preview = lines.slice(0, 200).join("\n");
   const suffix = truncated ? `\n\n_...truncated (${lines.length} total lines)_` : "";
-  return `**Diff for PR#${pr}:**\n\n\`\`\`diff\n${preview}\n\`\`\`${suffix}`;
+
+  // Sensitive-path detection runs over the FULL diff (only the preview is
+  // truncated), so it's complete even on a large PR.
+  const sensitivePaths = changedPathsFromDiff(diff).filter((p) => SENSITIVE_PATH_RE.test(p));
+  const trigger = computeStructuralTrigger({ changedFiles, linesChanged: additions + deletions, sensitivePaths });
+  const directive = trigger.required
+    ? `**STRUCTURAL REVIEW REQUIRED** — this diff crosses the objective trigger (${trigger.reasons.join("; ")}). ` +
+      `Run \`clawpatch_review\` before issuing your verdict; skipping the structural pass on a triggered diff is a Gap.`
+    : `**Structural review optional** — small contained diff (${changedFiles} file(s), ${additions + deletions} line(s) changed); \`clawpatch_review\` not required.`;
+
+  return (
+    `**Diff for PR#${pr}** (${changedFiles} files, +${additions}/-${deletions}):\n\n` +
+    `${directive}\n\n\`\`\`diff\n${preview}\n\`\`\`${suffix}`
+  );
 }
 
 /**

@@ -28,7 +28,6 @@ github:
 `));
     expect(cfg.helm).toBe("bob");
     expect(cfg.reviewer).toBe("carol");
-    expect(cfg.remediator).toBe("roxy"); // not overridden → default
     expect(cfg.reviewerBotLogins).toEqual(["carolbot", "carolbot[bot]"]);
   });
 

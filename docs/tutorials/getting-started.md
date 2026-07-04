@@ -8,7 +8,7 @@ This tutorial walks you through installing protoWorkstacean, writing a minimal w
 
 - [Bun](https://bun.sh) >= 1.1
 - An Anthropic API key (for in-process agent execution)
-- Optional: a running protoMaker team server for A2A routing (board ops, feature lifecycle)
+- Optional: a reachable remote A2A agent (e.g. protopen) for external skill routing
 
 ## 1. Clone and install
 
@@ -42,13 +42,11 @@ WORKSTACEAN_API_KEY=dev-secret
 WORKSPACE_DIR=./workspace
 ```
 
-If you have the protoMaker team server running, add:
+If you have a remote A2A agent (e.g. protopen) reachable, add its base URL and API key — the env var prefix matches the agent's `baseUrlEnv` / `apiKeyEnv` in `workspace/agents.yaml`:
 
 ```dotenv
-# AVA_* env vars describe the HTTP server identity — historical name,
-# the logical agent slug in workspace/agents.yaml is `protomaker`.
-AVA_BASE_URL=http://localhost:3008
-AVA_API_KEY=your-protomaker-team-key
+PROTOPEN_BASE_URL=http://steamdeck:7870
+PROTOPEN_API_KEY=your-protopen-key
 ```
 
 For a full list of variables, see [reference/env-vars.md](../reference/env-vars).
@@ -70,7 +68,7 @@ cp workspace/agents/frank.yaml.example workspace/agents/frank.yaml
 cp workspace/agents.yaml.example workspace/agents.yaml
 ```
 
-There is no project file to copy — projects come from the **protoMaker registry**, not a workspace file. workstacean pulls the canonical project list from protoMaker at startup (and refreshes it periodically) and serves it at `GET /api/projects`.
+There is no project file to copy — projects come from the **project registry**, not a workspace file. The registry is compiled from repos tagged with the `protoagent-plugin` GitHub topic (plus an explicit base set) into a static `projects.json`, served by the `workstacean-projects` nginx sidecar at `/api/settings/global`. workstacean's `ProjectRegistry` polls that URL (set `PROJECT_REGISTRY_URL`) every 5 min and re-serves the list at `GET /api/projects`. To add a project, tag its repo with the `protoagent-plugin` topic — the 15-min sync cron picks it up.
 
 Edit `workspace/agents/ava.yaml` and set your `systemPrompt`. For a minimal
 chat-only Ava:
@@ -125,7 +123,7 @@ curl -X POST http://localhost:3000/publish \
   -d '{
     "topic": "agent.skill.request",
     "payload": {
-      "skill": "sitrep",
+      "skill": "chat",
       "content": "Give me a quick status summary.",
       "correlationId": "tutorial-001",
       "replyTopic": "agent.skill.response.tutorial-001"
@@ -133,7 +131,7 @@ curl -X POST http://localhost:3000/publish \
   }'
 ```
 
-`SkillDispatcherPlugin` picks this up, resolves `sitrep` to the appropriate executor (the protoMaker team's `A2AExecutor` if you wired it, otherwise the dispatcher will log "no executor" and drop the request). For a pure in-process test, change the skill to `chat` — Ava will answer it directly. The result lands on `agent.skill.response.tutorial-001`.
+`SkillDispatcherPlugin` picks this up and resolves `chat` to Ava's in-process `DeepAgentExecutor`, which answers it directly. (If you dispatch a skill no registered executor provides, the dispatcher logs "no executor" and drops the request.) The result lands on `agent.skill.response.tutorial-001`.
 
 To read the response, query the SQLite event log:
 

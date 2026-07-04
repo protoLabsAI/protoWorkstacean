@@ -5,7 +5,7 @@
       "vector_size": 1024,
       "distance": "Cosine",
       "metadata_fields": {
-        "repo": "string — owner/repo slug, e.g. protolabsai/protomaker",
+        "repo": "string — owner/repo slug, e.g. protolabsai/protocontent",
         "pr_number": "integer — GitHub PR number",
         "file": "string — relative file path in the repo",
         "decision": "string — APPROVE or REQUEST_CHANGES",

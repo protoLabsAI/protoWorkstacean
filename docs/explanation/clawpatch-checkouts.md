@@ -2,7 +2,7 @@
 title: Clawpatch checkouts — on-demand source for any repo
 ---
 
-_RFC + design for the checkout cache that lets Quinn's `clawpatch_review` work against every repo in the protoMaker project registry, not just the few that used to be bind-mounted into the container. Shipped: `src/api/clawpatch.ts` now resolves repos through a `CheckoutCache` gated by the project registry — there is no `BUILT_IN_REPO_PATHS` and no `projects.yaml`._
+_RFC + design for the checkout cache that lets Quinn's `clawpatch_review` work against every repo in the project registry, not just the few that used to be bind-mounted into the container. Shipped: `src/api/clawpatch.ts` now resolves repos through a `CheckoutCache` gated by the project registry — there is no `BUILT_IN_REPO_PATHS` and no `projects.yaml`._
 
 ---
 
@@ -15,7 +15,7 @@ _RFC + design for the checkout cache that lets Quinn's `clawpatch_review` work a
 
 A repo without an entry — or with an entry whose mount the operator forgot to add to the compose file — gets a hard error: _"repo 'X' is not mounted in this container — only mapped+mounted repos work today (…). On-demand PR checkouts are not implemented."_
 
-That ceiling is everywhere Quinn touches a repo she didn't grow up with. As we keep onboarding repos (every entry in the protoMaker project registry is a candidate), the gap widens: edit compose, redeploy, then she can review it. Worse, the mount is a snapshot of the operator's local checkout, not the PR's actual code — Quinn was technically reviewing whatever ref happened to be checked out on the host, not the PR head.
+That ceiling is everywhere Quinn touches a repo she didn't grow up with. As we keep onboarding repos (every entry in the project registry is a candidate), the gap widens: edit compose, redeploy, then she can review it. Worse, the mount is a snapshot of the operator's local checkout, not the PR's actual code — Quinn was technically reviewing whatever ref happened to be checked out on the host, not the PR head.
 
 We want a self-service checkout cache: when Quinn asks to review a PR on a repo she's never seen, the API fetches the exact ref from GitHub, extracts it locally, hands the path to clawpatch, and caches the extracted tree for the next call.
 
@@ -43,7 +43,7 @@ Content-addressed by ref, one tree per (owner, repo, sha):
       src/
       …
     last-access          ← ISO timestamp, updated on hit
-  protoLabsAI-protoMaker/
+  protoLabsAI-protoContent/
     a17e..../
       …
 ```
@@ -75,7 +75,7 @@ Eviction lives in a daily ceremony, **not** inline on each request — see [C3](
 
 Three guards, all enforced before the extract:
 
-1. **Allowlist gate**: `repo` must match a GitHub coordinate in the protoMaker **project registry** (`projectRegistry.getGithubCoords()` in `src/api/clawpatch.ts`). Same registry boundary that `create_github_issue` checks. No arbitrary `owner/name` from a tool call extracts code into our data volume — Quinn can only review repos we've already declared we manage.
+1. **Allowlist gate**: `repo` must match a GitHub coordinate in the **project registry** (`projectRegistry.getGithubCoords()` in `src/api/clawpatch.ts`). Same registry boundary that `create_github_issue` checks. No arbitrary `owner/name` from a tool call extracts code into our data volume — Quinn can only review repos we've already declared we manage.
 2. **Tarball entry sanitization**: every entry path is rejected if it
    * starts with `/`,
    * contains `..` segments,

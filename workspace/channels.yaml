@@ -64,28 +64,20 @@ channels:
   #   agent: ava
 
   # ── Per-project bindings ──────────────────────────────────────────────────
-  # Bind a Discord channel to a (projectSlug, kind) pair so feature-notifier,
-  # feature-remediation, and slash-commands can resolve "the dev channel for
-  # protomaker" without any project-level config file. Lookup:
-  # ChannelRegistry.getProjectChannel(slug, kind).
+  # Bind a Discord channel to a (projectSlug, kind) pair so slash-commands can
+  # resolve "the dev channel for <project>" without any project-level config
+  # file. Lookup: ChannelRegistry.getProjectChannel(slug, kind).
   #
   # Only `dev` bindings live here — release announcements moved to a single
   # shared release channel (not per-project), so the per-project `release`
   # channels were retired. Delivery routes through the connected Discord bot
   # (channelId → DiscordPlugin); no raw webhook URLs in tracked config (secrets).
-  # Projects without a binding just don't get feature-notifier pings — harmless.
 
   - id: project-protoworkstacean-dev
     platform: discord
     project: protoworkstacean
     kind: dev
     channelId: "1490978896911405208"
-
-  - id: project-protomaker-dev
-    platform: discord
-    project: protomaker
-    kind: dev
-    channelId: "1469080556720623699"
 
   - id: project-protocli-dev
     platform: discord

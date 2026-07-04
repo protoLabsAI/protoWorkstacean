@@ -1,0 +1,9 @@
+name: jon
+url: http://jon:7870/a2a
+streaming: true
+auth:
+  scheme: apiKey
+  credentialsEnv: JON_API_KEY
+# Skills (content, market_review) auto-discover from /.well-known/agent-card.json.
+# Jon is A2A-1.0-native (a2a-sdk + protolabs-a2a; emits the 4 fleet extensions).
+# Staged: market_review (Ava-facing) live; content/voice degrade until PAYLOAD_API_KEY is minted.

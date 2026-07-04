@@ -35,21 +35,16 @@ agents:
 **Example**:
 ```yaml
 agents:
-  # protoMaker team — multi-agent runtime for board ops, planning, feature lifecycle.
-  # Historically called "ava" internally; the env var names keep the AVA_* prefix
-  # because they describe the HTTP identity of the protoMaker server, not the
-  # logical agent slug.
-  - name: protomaker
-    url: ${AVA_BASE_URL}/a2a
-    apiKeyEnv: AVA_API_KEY
+  # protoPen — security / pentest / RF-recon agent, running remotely.
+  - name: protopen
+    url: ${PROTOPEN_BASE_URL}/a2a
+    apiKeyEnv: PROTOPEN_API_KEY
     skills:
-      - name: sitrep
-      - name: board_health
-      - name: manage_feature
-      - name: bug_triage
+      - name: security_triage
+      - name: pentest
+      - name: rf_recon
     subscribesTo:
       - message.inbound.#
-      - hitl.response.#
 
   # Quinn — standalone QA engineer.
   - name: quinn
@@ -99,8 +94,8 @@ model: protolabs/reasoning
 systemPrompt: |
   You are Ava, a conversational protoAgent. Your job is to be a
   thoughtful chat partner. You have no tools — when a request needs
-  action, suggest which agent or skill is best suited (protoMaker
-  team for board ops, Quinn for reviews, Frank for infra, etc.).
+  action, suggest which agent or skill is best suited (Quinn for
+  reviews, Frank for infra, protoPen for security, etc.).
 tools: []                           # No tools on purpose — chat-only
 maxTurns: 6
 discordBotTokenEnvKey: DISCORD_BOT_TOKEN_AVA
@@ -114,7 +109,7 @@ skills:
 
 ## Project metadata
 
-There is no `workspace/projects.yaml`. Project metadata comes from the **protoMaker registry** — workstacean pulls the canonical list via `ProjectRegistry` ([`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts)) and serves it at `GET /api/projects`. `RouterPlugin` resolves an inbound `owner/repo` to a project (`ProjectRegistry.getByGithub`) and then looks up its Discord channels in `workspace/channels.yaml` via `ChannelRegistry.getProjectChannel(slug, kind)`.
+There is no `workspace/projects.yaml`. Project metadata is compiled from GitHub — every repo in the `protoLabsAI` org tagged with the `protoagent-plugin` topic (plus an explicit base set) is assembled into a static `projects.json` and served by the `workstacean-projects` nginx sidecar at `/api/settings/global`. workstacean's `ProjectRegistry` ([`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts)) polls that endpoint every 5 minutes and serves the list at `GET /api/projects`. `RouterPlugin` resolves an inbound `owner/repo` to a project (`ProjectRegistry.getByGithub`) and then looks up its Discord channels in `workspace/channels.yaml` via `ChannelRegistry.getProjectChannel(slug, kind)`.
 
 ## workspace/channels.yaml
 

@@ -14,33 +14,25 @@ The current roster:
 
 | Agent | Role | Runtime | GitHub identity | Discord identity |
 |---|---|---|---|---|
-| **protoMaker team** | Board ops, feature lifecycle, planning, sitreps, onboarding | External A2A (`${AVA_BASE_URL}/a2a`) | `@ava[bot]` | *shared — output via protoBot primary client* |
 | **Ava** | Free-form conversational chat, delegation suggestions | In-process (`workspace/agents/ava.yaml`) | *none — Ava is DM-only today* | `@ava#3387` (dedicated pool bot) |
 | **Quinn** | PR review, bug triage, security triage | External A2A (`${QUINN_BASE_URL}/a2a`) | `@protoquinn[bot]` | *shared — output via protoBot primary client* |
 | **Jon / protoContent** | Content strategy, GTM, outreach | External A2A (`${PROTOCONTENT_BASE_URL}/a2a`) | n/a | `@protoJon#6536` (dedicated pool bot) |
+| **protoPen** | Security / pentest / RF recon | External A2A (`${PROTOPEN_BASE_URL}/a2a`) | n/a | *shared — output via protoBot primary client* |
 | **Frank** | Personal chaos lab runtime | External (future) | n/a | `@frank#2599` (dedicated pool bot) |
 
-Two important splits:
-
-1. **"Ava" the conversational agent is not "the protoMaker team."** What used to be a single "ava" slug has been separated. The A2A runtime at `AVA_BASE_URL` is the protoMaker team — multi-agent board operations. The in-process `ava` agent is a standalone chat persona with no tools, dedicated to conversation and delegation suggestions.
-2. **Discord output has two tiers.** The shared primary client (protoBot, `DISCORD_BOT_TOKEN`) handles guild messages, slash commands, HITL interactions, and team-level output from the protoMaker team and Quinn. The agent pool clients (ava, jon, frank) handle DMs directed at their specific identities and pre-warm DM channels on startup so the gateway delivers `MESSAGE_CREATE` to the right bot.
+**Discord output has two tiers.** The shared primary client (protoBot, `DISCORD_BOT_TOKEN`) handles guild messages, slash commands, HITL interactions, and team-level output from external agents like Quinn. The agent pool clients (ava, jon, frank) handle DMs directed at their specific identities and pre-warm DM channels on startup so the gateway delivers `MESSAGE_CREATE` to the right bot.
 
 ---
 
 ## GitHub App identities
 
-Quinn and the protoMaker team each have their own GitHub App installation. Each app has an App ID and a private key (PKCS#1 PEM). The GitHub-acting code paths (the GitHub plugin, `pr-inspector`, the `issue-closer`) mint short-lived installation tokens from those credentials via the shared `makeGitHubAuth` helper, so comments, reviews, and issue closes post with the right attribution.
+Quinn has its own GitHub App installation. The app has an App ID and a private key (PKCS#1 PEM). The GitHub-acting code paths (the GitHub plugin, `pr-inspector`) mint short-lived installation tokens from those credentials via the shared `makeGitHubAuth` helper, so comments and reviews post with the right attribution.
 
 When a PR review response lands for Quinn:
 1. The GitHub context is resolved from the inbound `correlationId` (owner, repo, number)
 2. The Quinn container mints a JWT using `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`
 3. Exchanges it for a GitHub installation token (refreshed every 45 min by an entrypoint daemon)
 4. Submits the formal review via the GitHub API — shows as `@protoquinn[bot]`
-
-When the protoMaker team creates a board feature or comments on an issue:
-1. The same context lookup happens
-2. The comment is posted using `AVA_APP_ID` + `AVA_APP_PRIVATE_KEY` (the env vars keep the historical name — see "Env var naming" below)
-3. The comment appears as `@ava[bot]`
 
 If GitHub App env vars are missing, calls fall back to the PAT (`GITHUB_TOKEN`), which posts as the PAT owner's account. That fallback is a debugging convenience only — production always uses App credentials.
 
@@ -72,13 +64,11 @@ If a message hits the shared protoBot client (guild @-mention, DM to protoBot di
 
 ---
 
-## Why Quinn handles Discord provisioning
+## Project onboarding side-effects
 
-The `onboard_project` skill is owned by the protoMaker team, but the `provision_discord` skill that creates Discord channels is owned by Quinn. This is a chain: protoMaker calls Quinn via `chain[onboard_project]: quinn/provision_discord`.
+Bringing a project online runs in-process via the `OnboardingPlugin` (`lib/plugins/onboarding.ts`): it registers the repo's GitHub webhook, creates its Google Drive folder, and publishes a completion event. It does not create or persist a project record of its own — project metadata comes from the GitHub-topic-driven registry (see [operator-flows](operator-flows)), and channel→agent bindings live in `workspace/channels.yaml` via the `ChannelRegistry`.
 
-The reason is that Quinn has the Discord API client code and the knowledge of the standard channel structure (dev, alerts, releases). The protoMaker team handles the broader project provisioning logic (GitHub scaffold, write-back to the protoMaker project registry — the source of truth for project metadata). The chain keeps these responsibilities separate.
-
-When the channel IDs come back from Discord, they are written to `settings.json` in the target repo and recorded in the protoMaker project registry. This makes the IDs available to both the agent running in the target repo context and the workstacean routing layer.
+The standard per-project channel structure (dev, alerts, releases) is bound in `workspace/channels.yaml`; the registered channel IDs are made available to both the agent running in the target repo context and the workstacean routing layer.
 
 ---
 
@@ -99,21 +89,20 @@ Agent conversation memory is scoped by `contextId` in the JSON-RPC call:
 This means:
 - All messages in the same GitHub issue share a conversation thread in the agent's memory
 - All messages in the same Discord channel share a thread
-- The HITL resume flow (days later) uses the same `correlationId` as the original plan request — the protoMaker team's memory of the conversation is preserved across the approval gap
+- The HITL resume flow (days later) uses the same `correlationId` as the original request — the agent's memory of the conversation is preserved across the approval gap
 
 ---
 
 ## Env var naming — why "AVA_*" stays
 
-The environment variables that describe the A2A connection (`AVA_BASE_URL`, `AVA_API_KEY`, `AVA_APP_ID`, `AVA_APP_PRIVATE_KEY`) keep the `AVA_*` prefix even though the runtime is the protoMaker team. These describe the HTTP service identity (historical reason: the repo has always been called the "ava" server), and renaming them would require a coordinated infisical secret migration + homelab-iac redeploy for no functional gain.
+The environment variables that describe a remote A2A connection (`AVA_BASE_URL`, `AVA_API_KEY`, `AVA_APP_ID`, `AVA_APP_PRIVATE_KEY`) keep the `AVA_*` prefix for historical reasons (the repo has always been called the "ava" server). These describe the HTTP service identity of a remote A2A agent server, and renaming them would require a coordinated infisical secret migration + homelab-iac redeploy for no functional gain.
 
 The split is conceptual:
 
-- **`AVA_*` env vars** = the HTTP/auth identity of the protoMaker server
-- **`protomaker` agent slug** = the logical routing target inside workstacean
+- **`AVA_*` env vars** = the HTTP/auth identity of a remote A2A agent server
 - **`ava` (in-process)** = the conversational chat agent, a separate entity
 
-`DISCORD_BOT_TOKEN_AVA` belongs to the in-process Ava chat agent, not the protoMaker team. `DISCORD_BOT_TOKEN_PROTO` is protoBot, the shared primary client the protoMaker team uses for its output.
+`DISCORD_BOT_TOKEN_AVA` belongs to the in-process Ava chat agent. `DISCORD_BOT_TOKEN_PROTO` is protoBot, the shared primary client used for team-level output.
 
 ---
 

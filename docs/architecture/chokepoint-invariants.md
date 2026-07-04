@@ -19,7 +19,7 @@ Audit reality:
 | #459 | Synthetic actor filter | `src/plugins/agent-fleet-health-plugin.ts:281-334` | ❌ **outside** the dispatcher (fleet-health aggregation site) |
 | #465 | Destructive verdict guard | _retired — lived in `pr-remediator.ts`, deleted #776_ | ❌ **no longer in the codebase** |
 
-Treat #437 and #444 as the actual dispatcher invariants. #459 is the same architectural *pattern* (single chokepoint for an invariant) applied at a *different* chokepoint — the outcome-aggregation site. #465 was that pattern applied at the PR-remediator verdict-handling site; it was removed when `pr-remediator.ts` was deleted (the PR-pipeline-violation derivation it guarded moved to protoMaker — see [flow-alert-remediator](flow-alert-remediator.md)).
+Treat #437 and #444 as the actual dispatcher invariants. #459 is the same architectural *pattern* (single chokepoint for an invariant) applied at a *different* chokepoint — the outcome-aggregation site. #465 was that pattern applied at the PR-remediator verdict-handling site; it was removed when `pr-remediator.ts` was deleted, and the PR-pipeline-violation derivation it guarded was retired along with it.
 
 ---
 
@@ -70,7 +70,7 @@ Order matters: registry guard fires **before** cooldown so a misdirected request
 
 ## #444 — Target-registry guard
 
-**Why it exists:** if `payload.targets: ["protomaker"]` points at an agent that isn't enrolled (typo, undeployed, hostname changed — see #608), failing loudly at dispatch beats a silent timeout downstream.
+**Why it exists:** if `payload.targets: ["quinn"]` points at an agent that isn't enrolled (typo, undeployed, hostname changed — see #608), failing loudly at dispatch beats a silent timeout downstream.
 
 **Implementation:** inside `ExecutorRegistry.resolve(skill, targets)` ([executor-registry.ts:93–97](../../src/executor/executor-registry.ts)):
 
@@ -114,7 +114,7 @@ on autonomous.outcome.{actor}.{skill}:
         → logged once-per-distinct-actor at warn level
 ```
 
-**Known synthetic actors:** `feature-remediation`, `user`.
+**Known synthetic actors:** `user`.
 
 **On trip:** one-time `console.warn` per actor, no escalation. The point is bucketing, not blocking.
 
@@ -126,7 +126,7 @@ on autonomous.outcome.{actor}.{skill}:
 
 **What it did:** inside the old pr-remediator's `diagnose_pr_stuck` verdict handling, when an LLM verdict on a stuck PR was `decomposable` (i.e. "close this and re-cut as smaller PRs"), the handler checked whether the PR was a promotion PR (`head ∈ {dev, staging}` OR `base ∈ {main, staging}` OR title starts with "Promote"). If so, the close was suppressed and an HITL escalation emitted instead.
 
-**Why it's gone:** workstacean no longer re-derives PR-pipeline violations or issues destructive PR verdicts. protoMaker now detects stuck PRs as blocked features and emits a single canonical `feature.blocked` signal; `FeatureRemediationPlugin` routes that to Roxy's `unblock_feature` skill or to HITL (see [flow-alert-remediator](flow-alert-remediator.md)). Roxy may take unblocking actions, but the promotion-PR destructive-close path that #465 guarded no longer exists on the workstacean side.
+**Why it's gone:** workstacean no longer re-derives PR-pipeline violations or issues destructive PR verdicts. That whole responsibility was retired along with the PR-remediator, so the promotion-PR destructive-close path that #465 guarded no longer exists on the workstacean side.
 
 If a new LLM-driven destructive verb appears later (e.g. `delete issue`, `force-update ref`), the right pattern is the same one #465 used — guard it next to the verb's consumer, and only promote it to a dispatcher invariant if it generalizes across skills.
 
@@ -164,5 +164,5 @@ If the check is **specific to one skill or one verb** (as #465's now-retired PR-
 ## Related
 
 - [flow-inbound-message](flow-inbound-message.md) — full dispatcher sequence with these invariants in context
-- [flow-alert-remediator](flow-alert-remediator.md) — #459's downstream consumer; also where the retired #465 guard's responsibility moved (protoMaker + feature-remediation)
+- [flow-alert-remediator](flow-alert-remediator.md) — #459's downstream consumer (the fleet-alerts path)
 - [flow-hitl](flow-hitl.md) — the operator-escalation path

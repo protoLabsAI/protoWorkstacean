@@ -109,10 +109,10 @@ commands:
   - name: dev
     description: "Dev team commands"
     subcommands:
-      - name: sitrep
-        description: "Current sprint status"
-        content: "/sitrep"
-        skillHint: sitrep
+      - name: ask
+        description: "Ask the dev agent a question"
+        content: "/ask"
+        skillHint: chat
 
       - name: audit
         description: "Board audit"
@@ -120,7 +120,7 @@ commands:
         skillHint: board_audit
 ```
 
-Users type `/dev sitrep` or `/dev audit`.
+Users type `/dev ask` or `/dev audit`.
 
 ### Flat command with autocomplete
 
@@ -144,7 +144,7 @@ commands:
     skillHint: bug_triage
 ```
 
-When `project` is an autocomplete option, the plugin reads the in-process project registry (`ctx.projectRegistry.getProjects()`, sourced from protoMaker) at interaction time and returns matching projects (filtered by slug or name) as Discord choices.
+When `project` is an autocomplete option, the plugin reads the in-process project registry (`ctx.projectRegistry.getProjects()`, compiled from the `protoagent-plugin` GitHub topic and served by the nginx sidecar) at interaction time and returns matching projects (filtered by slug or name) as Discord choices.
 
 On submission, the project slug is resolved against the registry; its dev channel is looked up in the `ChannelRegistry` (`getProjectChannel(slug, "dev")`, backed by `workspace/channels.yaml`) and its repo from the registry entry's `github`. Both are added to the inbound bus payload:
 

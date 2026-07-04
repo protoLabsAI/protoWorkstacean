@@ -70,9 +70,8 @@ interface GitHubConfig {
  *   WORKSTACEAN_AGENT_BOT_LOGINS=protoquinn[bot],protoquinn,ava[bot],ava,foo[bot]
  *
  * Auto-review (pull_request opened/synchronize → Quinn) is intentionally
- * NOT filtered — protoMaker automode opens PRs as @protoquinn[bot] and those
- * should still be reviewed; self-approval is already guarded by GitHub
- * itself.
+ * NOT filtered — @protoquinn[bot] opens PRs and those should still be
+ * reviewed; self-approval is already guarded by GitHub itself.
  */
 const DEFAULT_AGENT_BOT_LOGINS = [
   "protoquinn",
@@ -420,7 +419,7 @@ export class GitHubPlugin implements Plugin {
   /**
    * Live per-repo project metadata (slug + projectPath) for the triage path.
    * Read from the registry on each call rather than a cached snapshot so a
-   * project registered in protoMaker after startup is resolvable immediately.
+   * project registered after startup is resolvable immediately.
    */
   private _projectMetaFor(repoSlug: string): { slug: string; projectPath: string | undefined } | undefined {
     const p = this.projectRegistry.getByGithub(repoSlug);
@@ -455,8 +454,8 @@ export class GitHubPlugin implements Plugin {
     }
 
     // ── Hot-reload github.yaml ────────────────────────────────────────────────
-    // Project list lives in protoMaker and is refreshed by the registry's own
-    // 5-min interval — no file watcher needed for it here.
+    // Project list lives in the project registry and is refreshed by the
+    // registry's own interval — no file watcher needed for it here.
     const configPath = join(this.workspaceDir, "github.yaml");
 
     let reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -623,39 +622,6 @@ export class GitHubPlugin implements Plugin {
       return;
     }
 
-    // ── Issue opened/reopened → github.issue.opened (board-ingestion signal) ──
-    // Additive, fires for EVERY opened/reopened issue regardless of @mention or
-    // auto-triage routing (those member-no-mention issues otherwise produce no
-    // bus event). The ProtoMakerBoardBridge subscribes and forwards issues on
-    // registered project repos into protoMaker's board intake. Falls through —
-    // the @mention / auto-triage handling below still runs.
-    if (event === "issues" && (payload.action === "opened" || payload.action === "reopened")) {
-      const issue = payload.issue as Record<string, unknown> | undefined;
-      const repo = payload.repository as Record<string, unknown> | undefined;
-      if (issue && repo) {
-        const owner = ((repo.owner as Record<string, unknown> | undefined)?.login as string) ?? "";
-        const repoName = (repo.name as string) ?? "";
-        const number = issue.number as number;
-        const correlationId = crypto.randomUUID();
-        bus.publish("github.issue.opened", {
-          id: `github-issue-${owner}-${repoName}-${number}-${correlationId.slice(0, 8)}`,
-          correlationId,
-          topic: "github.issue.opened",
-          timestamp: Date.now(),
-          payload: {
-            owner,
-            repo: repoName,
-            number,
-            action: payload.action as string,
-            title: (issue.title as string) ?? "",
-            body: (issue.body as string | null) ?? "",
-            author: ((issue.user as Record<string, unknown> | undefined)?.login as string) ?? "",
-            url: (issue.html_url as string) ?? "",
-          },
-          source: { interface: "github" as const },
-        });
-      }
-    }
 
     // ── PR lifecycle → flow.item.* (independent of @mention) ─────────────────
     if (event === "pull_request") {
@@ -737,8 +703,8 @@ export class GitHubPlugin implements Plugin {
     // by our own agent bots before they reach auto-triage or the @mention path.
     // Without this, Quinn files an issue → GitHub webhook → bug_triage →
     // Quinn files another issue → infinite cascade (protoWorkstacean#556 ate
-    // protoMaker with 23 duplicate triage issues in 60s). pull_request events
-    // are intentionally NOT filtered here — protoMaker automode opens legitimate
+    // itself with 23 duplicate triage issues in 60s). pull_request events
+    // are intentionally NOT filtered here — agents open legitimate
     // bot-authored PRs that should still be reviewed; GitHub's self-approval
     // check already prevents same-account approvals.
     if (
@@ -752,12 +718,9 @@ export class GitHubPlugin implements Plugin {
       return;
     }
 
-    // Issues on registered project repos are owned by protoMaker, not
-    // workstacean: ProtoMakerBoardBridge forwards github.issue.opened into
-    // protoMaker's board intake (ADR-0001). Workstacean does not auto-triage
-    // issues — that single ownership boundary (registry membership) is what
-    // keeps an issue from being double-handled (see JOSH-392). Admins who want
-    // workstacean to act on a specific issue still use the @mention path below.
+    // Issues on managed project repos are handled by workstacean's own triage
+    // path. Workstacean does not blanket auto-triage every issue — admins who
+    // want workstacean to act on a specific issue use the @mention path below.
 
     // ── Auto-review path: pull_request opened/synchronize ─────────────────────
     // Every opened/synchronized PR triggers Quinn's pr_review skill — no
@@ -868,6 +831,16 @@ export class GitHubPlugin implements Plugin {
   private recentDispatches = new Map<string, number>();
   private static readonly DEDUP_WINDOW_MS = 60_000;
 
+  /**
+   * Repos Quinn has auto-reviewed this process. The approve-on-green
+   * reconciliation sweep unions this with the project registry so a repo that
+   * receives webhook auto-reviews but isn't registered still gets the
+   * deterministic approve-on-green — otherwise its held COMMENT is stranded
+   * (never promoted, never merged), the gap that silently stalled a freshly
+   * stood-up protoAgent-family repo (portfolio-plugin).
+   */
+  private readonly reviewedRepoCoords = new Set<string>();
+
   private _handleAutoReview(
     event: string,
     payload: Record<string, unknown>,
@@ -952,6 +925,27 @@ export class GitHubPlugin implements Plugin {
     });
 
     log.info(`Auto-review: ${ctx.owner}/${ctx.repo}#${ctx.number} (${action}) → pr_review`);
+
+    // Record the repo so the approve-on-green sweep covers it even when it's
+    // not in the project registry. A webhook-reviewed repo that isn't
+    // registered would otherwise get COMMENTs but never the deterministic
+    // approve-on-green (the sweep is registry-driven). Warn once so the repo
+    // gets tagged into the registry properly (which persists across restarts).
+    const reviewedCoord = `${ctx.owner}/${ctx.repo}`;
+    if (!this.reviewedRepoCoords.has(reviewedCoord)) {
+      this.reviewedRepoCoords.add(reviewedCoord);
+      const registered = this.projectRegistry
+        .getGithubCoords()
+        .some((c) => c.toLowerCase() === reviewedCoord.toLowerCase());
+      if (!registered) {
+        log.warn(
+          `Auto-review on ${reviewedCoord}, which is NOT in the project registry. ` +
+            `Covering it in the approve-on-green sweep for this process, but tag the ` +
+            `repo with the 'protoagent-plugin' GitHub topic (or add it to ` +
+            `sync-project-registry.sh) so coverage persists across restarts.`,
+        );
+      }
+    }
 
     // Leading acknowledgment comment so the PR shows Quinn engagement
     // immediately, not minutes later when the formal verdict review
@@ -1260,7 +1254,12 @@ export class GitHubPlugin implements Plugin {
   private async _reconcileApproveOnGreen(
     getToken: (owner: string, repo: string) => Promise<string>,
   ): Promise<void> {
-    const coords = this.projectRegistry.getGithubCoords();
+    // Union the registry with repos Quinn has reviewed this process. A repo
+    // that receives webhook auto-reviews but isn't registered would otherwise
+    // be invisible here, so its held COMMENT would never be promoted to the
+    // deterministic approve-on-green (the gap that stranded portfolio-plugin).
+    const coords = new Set(this.projectRegistry.getGithubCoords());
+    for (const c of this.reviewedRepoCoords) coords.add(c);
     let approved = 0;
     for (const coord of coords) {
       const slash = coord.indexOf("/");

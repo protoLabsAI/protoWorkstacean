@@ -264,7 +264,7 @@ export class SkillDispatcherPlugin implements Plugin {
     // ── Per-skill-per-repo cooldown ────────────────────────────────────────
     // Defense-in-depth against cascades (protoWorkstacean#556). Same
     // (skill, repo) pair can only dispatch once per cooldown window; bucketed
-    // per repo so e.g. bug_triage on protoMaker doesn't gate bug_triage on
+    // per repo so e.g. bug_triage on protoContent doesn't gate bug_triage on
     // protoWorkstacean. Defaults in DEFAULT_SKILL_COOLDOWN_MS; override per
     // skill via WORKSTACEAN_COOLDOWN_MS_<SKILL>.
     const cooldownMs = cooldownMsFor(skill);

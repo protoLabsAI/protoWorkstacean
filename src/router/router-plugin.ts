@@ -14,7 +14,7 @@
  *   3. ROUTER_DEFAULT_SKILL env var — optional catch-all (e.g. "sitrep")
  *
  * GitHub enrichment: for inbound github messages, the router looks up the
- * repo in the ProtomakerProjectRegistry and stamps `projectSlug` +
+ * repo in the ProjectRegistry and stamps `projectSlug` +
  * per-project Discord channel IDs (from ChannelRegistry) onto the
  * dispatched payload so downstream skills can address project context.
  */

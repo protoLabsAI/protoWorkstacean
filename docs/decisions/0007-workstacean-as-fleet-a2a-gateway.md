@@ -9,7 +9,7 @@ title: "ADR-0007: workstacean as the Fleet A2A Gateway"
 - **Related:** [ADR-0006](./0006-a2a-1.0-canonical-sdks-and-protolabs-conventions-layer) (the 1.0 migration this builds on — gateway needs 1.0's `tenant` + per-interface cards); [ADR-0005](./0005-mcp-client-tier-and-trust-tiers) (the *tool* tier — this ADR keeps the A2A=agents / MCP=tools split); [ADR-0004](./0004-fleet-control-plane-and-hot-swappable-extension) (ExecutorRegistry already routes skill→executor)
 - **Tags:** architecture, a2a, gateway, multi-tenancy, routing, fleet
 
-> A2A 1.0 blesses the **gateway/proxy pattern**: one endpoint fronts many downstream agents, routed by URL / header / body-`tenant`, each agent publishing its own card. workstacean is *already* a switchboard that fronts the fleet behind one `/a2a` — it just does so with one aggregate card and a `tenant: ""` stamp. This ADR formalizes it: **workstacean is the fleet's A2A gateway.** A caller addresses any agent — in-process (ava/quinn) or remote (roxy/protoAgent/ORBIS/pwnDeck) — through one front door, and the gateway routes to the executor or transparently proxies the remote A2A server. This unifies the in-process-vs-remote distinction at the protocol layer (the structural fix for [#750](https://github.com/protoLabsAI/protoWorkstacean/issues/750)) and makes the fleet self-describing.
+> A2A 1.0 blesses the **gateway/proxy pattern**: one endpoint fronts many downstream agents, routed by URL / header / body-`tenant`, each agent publishing its own card. workstacean is *already* a switchboard that fronts the fleet behind one `/a2a` — it just does so with one aggregate card and a `tenant: ""` stamp. This ADR formalizes it: **workstacean is the fleet's A2A gateway.** A caller addresses any agent — in-process (ava/quinn) or remote (protoAgent/ORBIS/pwnDeck) — through one front door, and the gateway routes to the executor or transparently proxies the remote A2A server. This unifies the in-process-vs-remote distinction at the protocol layer (the structural fix for [#750](https://github.com/protoLabsAI/protoWorkstacean/issues/750)) and makes the fleet self-describing.
 
 ---
 
@@ -54,7 +54,7 @@ external caller / peer node
   ┌─────────────────────────  workstacean A2A gateway  ──────────────────────────┐
   │  resolve <agent> → ExecutorRegistry                                            │
   │      in-process (ava/quinn) ──▶ DeepAgentExecutor   (dispatch on the bus)      │
-  │      remote (roxy/ORBIS/…)  ──▶ A2AExecutor  ──proxy──▶ that agent's /a2a       │
+  │      remote (ORBIS/pwnDeck/…) ─▶ A2AExecutor  ──proxy──▶ that agent's /a2a       │
   │  per-agent cards built via @protolabs/a2a buildAgentCard(agent.skills, url)    │
   └────────────────────────────────────────────────────────────────────────────────┘
         ▲

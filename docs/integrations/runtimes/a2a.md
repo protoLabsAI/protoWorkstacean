@@ -139,18 +139,18 @@ agents:
       - name: pr_review
         description: Review PRs and submit formal APPROVE/REQUEST_CHANGES
       - name: bug_triage
-        description: Triage bugs and file on the board
+        description: Triage bugs and file GitHub issues
       - name: security_triage
         description: CVE/vulnerability triage and escalation
 
-  - name: protomaker
-    url: "${AVA_BASE_URL}/a2a"
-    apiKeyEnv: AVA_API_KEY
+  - name: protopen
+    url: "${PROTOPEN_BASE_URL}/a2a"
+    apiKeyEnv: PROTOPEN_API_KEY
     skills:
-      - name: sitrep
-      - name: board_health
-      - name: manage_feature
-      - name: bug_triage
+      - name: security_scan
+        description: Scan a target for vulnerabilities
+      - name: recon
+        description: Reconnaissance and enumeration
 ```
 
 Environment variables are interpolated at registration time.
@@ -171,7 +171,7 @@ new A2AExecutor(config: {
 ## When to use
 
 Use `A2AExecutor` when:
-- The agent runs in a separate service (Quinn, protoMaker team, protoContent, Frank)
+- The agent runs in a separate service (protopen, protoContent)
 - The agent needs its own container, resources, or deployment lifecycle
 - The agent exposes a standard A2A `message/send` endpoint
 

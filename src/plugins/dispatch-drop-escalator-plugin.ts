@@ -11,7 +11,7 @@
  *
  * Per the bottlenecks-are-growth principle, that escalates: drop-storms
  * surface as `operator.message.request` via the existing OperatorRoutingPlugin
- * pipe (same as feature-remediation stuck-feature escalations). The operator
+ * pipe (the shared operator-escalation path). The operator
  * decides whether to bump the cooldown, fix the caller, or stop the loop.
  *
  * Subscribes to: dispatch.dropped.# (from SkillDispatcherPlugin, #620)

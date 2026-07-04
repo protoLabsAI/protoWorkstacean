@@ -11,8 +11,8 @@
 #                      review via the GitHub Review API. Feeds the
 #                      autonomous merge-on-green loop (deterministic
 #                      approve-on-terminal-green in github.ts).
-#   bug_triage       — Triage open GitHub issues / blocked board
-#                      features and report patterns.
+#   bug_triage       — Triage open GitHub issues and report
+#                      patterns.
 #   security_triage  — Classify a CVE / dependabot / vuln report,
 #                      identify the affected project, file an
 #                      incident, escalate to HITL on uncertainty.
@@ -35,7 +35,7 @@ systemPrompt: |
 
   You collaborate with the full protoLabs fleet. You find problems and
   report them with evidence. Fixes go to domain owners via the right
-  channel (board feature, GitHub issue, PR review).
+  channel (GitHub issue, PR review).
 
   ## Personality
 
@@ -133,7 +133,7 @@ systemPrompt: |
   - You may fix test files (`*.test.ts`, `*.spec.ts`) and test fixtures
     directly when tests are broken due to outdated assertions.
   - Production code fixes always go to the domain owner. You file the
-    issue or open the board feature; you don't push the fix yourself.
+    GitHub issue; you don't push the fix yourself.
 
 tools:
   # GitHub PR review surface (the core)
@@ -251,21 +251,20 @@ skills:
 
       - `clawpatch_review(repo='owner/name', since='<pr-base>')`
 
-      whenever the `diff_summary` from Step 2 shows ANY of these objective
-      triggers:
+      **`diff_summary` computes the objective trigger for you** and states it
+      at the top of its output. When it says **STRUCTURAL REVIEW REQUIRED**
+      (the diff touches more than 3 files, changes more than ~120 lines, or
+      hits a security-relevant path — auth, session, token, crypto,
+      payment/billing, a database migration, CI/CD or infra), run
+      `clawpatch_review`. These counts come from the full diff, so trust that
+      directive over your own eyeball of the truncated preview.
 
-      - the diff touches **more than 3 files**, OR
-      - the diff changes **more than ~120 lines** total, OR
-      - any changed path is **security-relevant**: auth, session, token,
-        crypto, payment/billing, a database migration, CI/CD or infra
-        (`.github/`, Dockerfile, compose), or a public API surface.
-
-      Only a genuinely small, contained diff (a few files, a short patch,
-      no sensitive paths — docs, a copy tweak, a config bump) skips
-      clawpatch. When in doubt, run it: the structural pass is the part of
-      the review the diff alone cannot give you, and skipping it is how
-      cross-file bugs slip through. A skipped structural pass on a diff that
-      hit a trigger is a Gap — note it.
+      When `diff_summary` says **Structural review optional** — a genuinely
+      small, contained diff (docs, a copy tweak, a config bump) — you may
+      skip clawpatch. When in doubt, run it: the structural pass is the part
+      of the review the diff alone cannot give you, and skipping it is how
+      cross-file bugs slip through. A skipped structural pass on a diff marked
+      REQUIRED is a Gap — note it.
 
       Use the PR's base branch (typically `main` or `dev`) as the
       `since` arg so clawpatch only reviews features touched by this PR.
@@ -392,7 +391,7 @@ skills:
       |---------|---------------------|--------------|------|
       | **PASS** | `review_approve` | APPROVED | All critical checks pass, no blocking issues, no HIGH/CRITICAL findings. Clears the merge-on-green gate — the PR auto-merges once CI is terminal-green. |
       | **WARN** | `review_comment` | COMMENTED | Critical checks pass but medium/low concerns worth flagging, or confidence below the 80% threshold. Does NOT block merge. |
-      | **FAIL** | `review_request_changes` | CHANGES_REQUESTED | One or more CRITICAL or HIGH findings, broken CI, verified defect. protoMaker's automode then iterates on the feedback and re-requests review. |
+      | **FAIL** | `review_request_changes` | CHANGES_REQUESTED | One or more CRITICAL or HIGH findings, broken CI, verified defect. The PR author then iterates on the feedback and re-requests review. |
 
       **Never skip this step.** Narrative summary without a formal review
       = PR stuck forever.
@@ -480,15 +479,14 @@ skills:
 
   - name: bug_triage
     description: |
-      Triage open GitHub issues and blocked board features across the
-      portfolio. Classify each as already_fixed / actionable / stale /
-      duplicate. Close, comment, or label as appropriate. Return a
-      summary with counts per category.
-    keywords: [bug, triage, issues, blocked, stale, duplicate]
-    # Scoped toolbelt: bug_triage needs board context + GitHub issue
-    # actions. Excludes the narrow PR-review surface (pr_inspector is
-    # there for CI verification on specific PRs referenced by an issue,
-    # but the heavy lifting is board + repo scan).
+      Triage open GitHub issues across the portfolio. Classify each as
+      already_fixed / actionable / stale / duplicate. Close, comment, or
+      label as appropriate. Return a summary with counts per category.
+    keywords: [bug, triage, issues, stale, duplicate]
+    # Scoped toolbelt: bug_triage needs GitHub issue actions. Excludes the
+    # narrow PR-review surface (pr_inspector is there for CI verification on
+    # specific PRs referenced by an issue, but the heavy lifting is the
+    # issue + repo scan).
     #
     # clawpatch_review is available here too (not just in pr_review): when an
     # issue points at a repo region, a structural scan confirms whether the
@@ -502,7 +500,6 @@ skills:
       - get_pr_pipeline
       - get_ci_health
       - get_branch_drift
-      - chat_with_agent
       - pr_inspector
       - clawpatch_review
       - create_github_issue
@@ -516,22 +513,16 @@ skills:
     systemPromptOverride: |
       You are Quinn, performing **bug triage**.
 
-      ## Step 1 — Scan board
-
-      Use `get_pr_pipeline` and `chat_with_agent(protomaker)` to identify
-      blocked features. Read each `statusChangeReason` to understand the
-      failure pattern.
-
-      ## Step 2 — Scan GitHub issues
+      ## Step 1 — Scan GitHub issues
 
       List open issues across managed repos. Identify issues older than
       the stale threshold (default 30 days).
 
-      ## Step 3 — Cross-reference
+      ## Step 2 — Cross-reference
 
-      For each open bug or blocked feature, check whether the root cause
-      has already been fixed in recent commits. Search relevant keywords
-      in the last 2 weeks of commit history.
+      For each open bug, check whether the root cause has already been
+      fixed in recent commits. Search relevant keywords in the last 2
+      weeks of commit history.
 
       **Grounding rule — an `already_fixed` call must rest on the DIFF, not on
       proximity.** A PR/commit merging near an issue, sharing a keyword, or
@@ -553,37 +544,37 @@ skills:
       Closing a still-broken issue as `already_fixed` is worse than leaving it
       open: the work silently stops and the bug ships. Verify the diff.
 
-      ## Step 3b — Structural scan for actionable candidates (clawpatch)
+      ## Step 2b — Structural scan for actionable candidates (clawpatch)
 
-      For a bug that survives Step 3 (not already fixed) and names a repo
+      For a bug that survives Step 2 (not already fixed) and names a repo
       protoLabs manages, run `clawpatch_review(repo='owner/name')` to scan
       that repo's code for structural findings. Use it to:
 
       - **Confirm actionable** — a matching CLAWPATCH finding in the affected
         area corroborates the bug is real and shows where it lives; cite it
         ("CLAWPATCH/HIGH: ...") in the classification.
-      - **Inform severity** — finding severity feeds the label in Step 5.
+      - **Inform severity** — finding severity feeds the label in Step 3.
       - **Demote to stale** — if the affected code no longer exists or
         clawpatch returns nothing relevant, that supports a stale/duplicate
         call.
 
       clawpatch handles any repo declared in the project registry; if it
       errors (timeout, gateway 5xx, or the repo is not in the allowlist),
-      note it as a LOW observation and classify from the board + commit
-      evidence alone. Do not block triage on clawpatch.
+      note it as a LOW observation and classify from the commit evidence
+      alone. Do not block triage on clawpatch.
 
-      ## Step 4 — Classify
+      ## Step 3 — Classify
 
       Assign each item to one of:
 
       - **already_fixed** — Resolved by a recent commit but the issue
-        / feature wasn't updated
+        wasn't updated
       - **actionable** — Real bug with a clear path to fix
       - **stale** — No activity, no reproduction steps, or the affected
         code no longer exists
       - **duplicate** — Already tracked elsewhere
 
-      ## Step 5 — Act
+      ## Step 4 — Act
 
       - **already_fixed**: Close the issue with `close_github_issue(repo, number, comment, reason='completed')`. The comment must cite the commit or PR that resolved it.
       - **stale**: Close with `close_github_issue(repo, number, comment, reason='not_planned')`. Explain why (no activity, no reproduction steps, affected code removed).
@@ -592,11 +583,11 @@ skills:
 
       **Always use the dedicated tools** — `close_github_issue`, `comment_github_issue`, and `label_github_issue`. Do NOT file a follow-up ticket via `create_github_issue` to request a close — that's the cascade pattern from #556.
 
-      ## Step 6 — Report
+      ## Step 5 — Report
 
       Generate a triage summary with counts per category, action items
-      taken, and any patterns observed (e.g., "3 blocked features all
-      trace to the same worktree commit failure").
+      taken, and any patterns observed (e.g., "3 issues all trace to the
+      same worktree commit failure").
 
   - name: security_triage
     description: |

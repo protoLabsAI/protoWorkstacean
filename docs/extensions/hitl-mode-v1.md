@@ -41,7 +41,7 @@ input-required
   → renderer chain (Discord, Linear, etc.) as final fallback
 ```
 
-`TaskTracker` reads the original dispatch's `source.agentId` to decide the first hop. Sub-agent chains (Ava → Quinn → protoMaker) walk the chain back until a resolver wants the question or the chain terminates at the operator.
+`TaskTracker` reads the original dispatch's `source.agentId` to decide the first hop. Sub-agent chains (Ava → Quinn → protoPen) walk the chain back until a resolver wants the question or the chain terminates at the operator.
 
 A declaration can override this via `reviewer`:
 

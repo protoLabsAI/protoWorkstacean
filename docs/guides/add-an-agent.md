@@ -5,7 +5,7 @@ title: Add an Agent
 protoWorkstacean supports two agent patterns:
 
 - **In-process** — the agent runs inside the workstacean process, powered by LangGraph's `createReactAgent`. Skills execute as LangGraph ReAct sessions with a configurable system prompt, model (via the LiteLLM gateway), and tool whitelist. Defined in `workspace/agents/<name>.yaml`. Examples today: `ava` (conversational chat + fleet-delegation tools), `quinn` (PR review / bug triage — absorbed from a standalone service; it is **not** an A2A agent), `proto`, `protobot`.
-- **External A2A** — the agent runs in a separate service with its own HTTP surface. protoWorkstacean calls it over JSON-RPC 2.0. Right choice for stateful agents with their own infrastructure. The only live A2A agent today is **protopen** (security / pentest / RF recon, remote on the steamdeck at `${PROTOPEN_BASE_URL}/a2a`). Note: **protoMaker is not an A2A agent** — it serves an agent card but no `/a2a` endpoint, and workstacean integrates with it over plain HTTP / webhooks (e.g. `protomaker-board-bridge.ts` POSTs to its `/api/engine/signal/submit` intake).
+- **External A2A** — the agent runs in a separate service with its own HTTP surface. protoWorkstacean calls it over JSON-RPC 2.0. Right choice for stateful agents with their own infrastructure. The only live A2A agent today is **protopen** (security / pentest / RF recon, remote on the steamdeck at `${PROTOPEN_BASE_URL}/a2a`).
 
 Both patterns register into `ExecutorRegistry` and are dispatched by `SkillDispatcherPlugin`. From the bus's perspective they are identical — both consume `agent.skill.request` and reply on `agent.skill.response.<correlationId>`.
 

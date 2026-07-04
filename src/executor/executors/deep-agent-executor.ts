@@ -368,27 +368,6 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
         schema: z.object({}),
       },
     ),
-    manage_board: tool(
-      async (input) => {
-        const ep = input.action === "create" ? "/api/board/features/create" : "/api/board/features/update";
-        return JSON.stringify(await http.post(ep, input));
-      },
-      {
-        name: "manage_board",
-        description: "Create or update features on the protoMaker board.",
-        schema: z.object({
-          action: z.enum(["create", "update"]),
-          projectPath: z.string(),
-          title: z.string().optional(),
-          description: z.string().optional(),
-          featureId: z.string().optional(),
-          status: z.enum(["backlog", "in-progress", "review", "done"]).optional(),
-          priority: z.number().optional(),
-          complexity: z.enum(["small", "medium", "large", "architectural"]).optional(),
-          projectSlug: z.string().optional(),
-        }),
-      },
-    ),
     create_github_issue: tool(
       async (input) => JSON.stringify(await http.post("/api/github/issues", input)),
       {
@@ -1174,6 +1153,12 @@ export class DeepAgentExecutor implements IExecutor {
       // Skills like diagnose_pr_stuck have narrow, structured output requirements
       // that replace the agent's general-purpose prompt.
       let basePrompt = skillDef?.systemPromptOverride ?? this.agentDef.systemPrompt;
+
+      // Anchor every run to the current date. Agents otherwise have no reliable
+      // "today" — Ava's daily digest was stamping a stale date in its header, and
+      // any "what shipped yesterday / is this stale" reasoning needs an anchor.
+      // UTC keeps it unambiguous; the model localizes as needed.
+      basePrompt += `\n\nCurrent date: ${new Date().toUTCString().slice(0, 16)} UTC.`;
 
       // Cross-conversation recall (Phase 2): inject hot memory + BM25 hits for
       // this turn's prompt into the system message.

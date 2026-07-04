@@ -1,9 +1,8 @@
 /**
- * Fleet role bindings — the one place that maps abstract roles (helm, reviewer,
- * remediator) to concrete agent names, plus the reviewer's GitHub bot-login
- * identities. Lets a fork re-skin the fleet by editing `workspace/fleet.yaml`
- * instead of the dispatch/review/remediation code, which used to hardcode
- * `ava` / `quinn` / `roxy` / `protoquinn`.
+ * Fleet role bindings — the one place that maps abstract roles (helm, reviewer)
+ * to concrete agent names, plus the reviewer's GitHub bot-login identities. Lets
+ * a fork re-skin the fleet by editing `workspace/fleet.yaml` instead of the
+ * dispatch/review code, which used to hardcode `ava` / `quinn` / `protoquinn`.
  *
  * Defaults are the proto-labs fleet's values, so an unmodified deploy needs no
  * fleet.yaml. A fork drops one in:
@@ -11,7 +10,6 @@
  *   roles:
  *     helm: bob          # default target for untargeted requests + the chat model alias
  *     reviewer: carol    # PR-review agent
- *     remediator: dave   # feature.blocked unblock agent
  *   github:
  *     reviewerBotLogins: [carolbot, "carolbot[bot]"]   # the reviewer's own GitHub identities
  */
@@ -28,8 +26,6 @@ export interface FleetConfig {
   helm: string;
   /** Agent that runs PR review. */
   reviewer: string;
-  /** Agent dispatched to unblock a blocked feature. */
-  remediator: string;
   /** GitHub login bases identifying the reviewer's OWN reviews (so the review loop matches them). */
   reviewerBotLogins: string[];
 }
@@ -37,12 +33,11 @@ export interface FleetConfig {
 export const FLEET_DEFAULTS: FleetConfig = {
   helm: "ava",
   reviewer: "quinn",
-  remediator: "roxy",
   reviewerBotLogins: ["protoquinn", "protoquinn[bot]"],
 };
 
 interface RawFleet {
-  roles?: Partial<Record<"helm" | "reviewer" | "remediator", string>>;
+  roles?: Partial<Record<"helm" | "reviewer", string>>;
   github?: { reviewerBotLogins?: string[] };
 }
 
@@ -56,7 +51,6 @@ export function loadFleetConfig(workspaceDir: string = process.env.WORKSPACE_DIR
     return {
       helm: raw.roles?.helm?.trim() || FLEET_DEFAULTS.helm,
       reviewer: raw.roles?.reviewer?.trim() || FLEET_DEFAULTS.reviewer,
-      remediator: raw.roles?.remediator?.trim() || FLEET_DEFAULTS.remediator,
       reviewerBotLogins: Array.isArray(logins) && logins.length ? logins : FLEET_DEFAULTS.reviewerBotLogins,
     };
   } catch (e) {

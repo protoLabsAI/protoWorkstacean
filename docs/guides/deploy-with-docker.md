@@ -79,8 +79,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 WORKSTACEAN_API_KEY=change-me-in-production
 
 # ── Optional: external A2A agents ─────────────────────────────────────────────
-AVA_BASE_URL=http://ava:3008
-AVA_API_KEY=your-ava-key
+PROTOPEN_BASE_URL=http://steamdeck:7870
+PROTOPEN_API_KEY=your-protopen-key
 
 # ── Optional: Discord integration ─────────────────────────────────────────────
 DISCORD_BOT_TOKEN=Bot ...
@@ -91,7 +91,7 @@ GITHUB_TOKEN=ghp_...
 GITHUB_WEBHOOK_SECRET=your-webhook-secret
 
 # ── Routing ───────────────────────────────────────────────────────────────────
-ROUTER_DEFAULT_SKILL=sitrep
+ROUTER_DEFAULT_SKILL=chat
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
 WORKSTACEAN_HTTP_PORT=8080
@@ -162,9 +162,9 @@ open http://localhost:8080
 
 Set `DISABLE_EVENT_VIEWER=1` in `.env` to skip the event-viewer plugin entirely (e.g. for headless deployments). See the [Dashboard reference](../reference/dashboard) for pages, API client, and cache behavior.
 
-## Production docker-compose with ava
+## Production docker-compose
 
-If you run ava alongside workstacean in the same Compose project:
+workstacean runs standalone — its in-process agents (Ava, Quinn, …) live inside the process, so there are no agent sidecars to deploy. Remote A2A agents (protopen) run on their own hosts and are reached over the network via their `*_BASE_URL` env vars.
 
 ```yaml
 services:
@@ -175,29 +175,16 @@ services:
     environment:
       - WORKSPACE_DIR=/workspace
       - DATA_DIR=/data
-      - AVA_BASE_URL=http://ava:3008
+      - PROTOPEN_BASE_URL=http://steamdeck:7870
     volumes:
       - ./workspace:/workspace
       - data:/data
-    depends_on:
-      ava:
-        condition: service_healthy
-
-  ava:
-    image: protoLabsAI/protoMaker:latest
-    restart: unless-stopped
-    env_file: .env.ava
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3008/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
 
 volumes:
   data:
 ```
 
-The `AVA_BASE_URL=http://ava:3008` uses Docker's internal DNS — the service name `ava` resolves automatically within the Compose network.
+Remote A2A agents are reached over the network by their `*_BASE_URL` — e.g. `PROTOPEN_BASE_URL=http://steamdeck:7870` points at protopen on its own host. Use Docker's internal DNS (the service name) only for agents that actually run as sidecars in this Compose project.
 
 ## Securing the HTTP API
 

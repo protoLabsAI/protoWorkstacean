@@ -835,16 +835,22 @@ export function createRoutes(ctx: ApiContext): Route[] {
       return Response.json({ since: sinceIso, hours, totalReleases: 0, totalMergedPrs: 0, totalHousekeepingPrs: 0, repos: [] });
     }
 
-    const repoResults: Array<{
+    type RepoActivity = {
       repo: string;
       releases: Array<{ tag: string; name: string; publishedAt: string; url: string; notes: string }>;
       mergedPrs: Array<{ number: number; title: string; author: string; mergedAt: string; url: string }>;
       housekeepingCount: number;
-    }> = [];
+    };
 
-    for (const repo of repoList) {
-      const mergedPrs: (typeof repoResults)[number]["mergedPrs"] = [];
-      const releases: (typeof repoResults)[number]["releases"] = [];
+    // Sweep every repo CONCURRENTLY. Sequential N×2 GitHub reads over the whole
+    // fleet routinely ran >10s and tripped the server idleTimeout, closing the
+    // socket mid-request (INC-019 — get_recent_activity "API down"). Running the
+    // repos in parallel drops wall-time from sum-of-repos to slowest-single-repo.
+    // Promise.all preserves input order, so the result stays deterministic; each
+    // repo's own errors are still swallowed (partial activity beats none).
+    const settled = await Promise.all(repoList.map(async (repo): Promise<RepoActivity | null> => {
+      const mergedPrs: RepoActivity["mergedPrs"] = [];
+      const releases: RepoActivity["releases"] = [];
       let housekeepingCount = 0;
       try {
         // Closed PRs, most-recently-updated first; keep those MERGED in-window.
@@ -881,10 +887,11 @@ export function createRoutes(ctx: ApiContext): Route[] {
       } catch {
         // skip this repo's release fetch on error
       }
-      if (mergedPrs.length || releases.length || housekeepingCount) {
-        repoResults.push({ repo, releases, mergedPrs, housekeepingCount });
-      }
-    }
+      return (mergedPrs.length || releases.length || housekeepingCount)
+        ? { repo, releases, mergedPrs, housekeepingCount }
+        : null;
+    }));
+    const repoResults: RepoActivity[] = settled.filter((r): r is RepoActivity => r !== null);
 
     return Response.json({
       since: sinceIso,

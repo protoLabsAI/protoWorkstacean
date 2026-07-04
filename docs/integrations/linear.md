@@ -168,7 +168,3 @@ LinearPlugin outbound subscriber posts it as a Linear comment.
 ```
 
 Issues without the label are dropped at the bridge (the `linear_agent_respond` mention/assignment path above is independent). The bridge holds **no state** — `reply.topic` is the entire close-the-loop contract; `code.execute` is one-shot.
-
-## GitHub issues → protoMaker board (not Linear)
-
-The "Linear issue → protoMaker board" wiring that older docs describe **no longer exists**. The path that feeds protoMaker's board is `lib/plugins/protomaker-board-bridge.ts`, which subscribes to **`github.issue.opened`** (not Linear) and POSTs the issue to protoMaker's `/api/engine/signal/submit` intake. protoMaker serves **no `/a2a` endpoint** — it is reached over HTTP, not A2A. See the [GitHub integration doc](github) for that flow.

@@ -276,7 +276,7 @@ describe("GitHub plugin — repository.created handler", () => {
     expect(typeof msg.timestamp).toBe("number");
   });
 
-  test("issues event publishes github.issue.opened (board signal), never the onboard topic", () => {
+  test("issues event never publishes the retired board signal or the onboard topic", () => {
     const { bus, publishCalls } = makeMockBus();
     const plugin = new GitHubPlugin(workspaceDir, makeStubProjectRegistry());
 
@@ -305,9 +305,9 @@ describe("GitHub plugin — repository.created handler", () => {
     );
 
     const topics = publishCalls.map((c) => c.topic);
-    // The additive board-ingestion signal fires for every opened issue …
-    expect(topics).toContain("github.issue.opened");
-    // … but the repository.created onboard path must NOT.
+    // The board-ingestion signal was retired with protoMaker — issues no longer fan out here.
+    expect(topics).not.toContain("github.issue.opened");
+    // … and an issues event must never hit the repository.created onboard path.
     expect(topics).not.toContain("message.inbound.onboard");
   });
 

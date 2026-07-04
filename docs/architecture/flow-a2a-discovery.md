@@ -190,7 +190,7 @@ You can't inspect the raw JSON-RPC envelope without forking the SDK.
 ## Failure modes & gotchas (fix #608 made these visible)
 
 - **Card fetch is async, non-blocking** ([line 121–194](../../src/plugins/skill-broker-plugin.ts)) — if an agent's card is slow at startup, the broker registers zero skills initially and dispatch returns "No executor found" until the async fetch completes. **Mitigation:** declare skills in `workspace/agents.yaml` to bootstrap.
-- **Stale hostnames don't fail loudly until #608** — pre-#608, a DNS-unresolvable agent hostname (e.g. `automaker-server` after rename to `protomaker-server`) silent-caught at `_fetchCard` and the agent was dark forever. Post-#608, `console.warn` fires on every retry.
+- **Stale hostnames don't fail loudly until #608** — pre-#608, a DNS-unresolvable agent hostname (e.g. `old-agent-host` after rename to `new-agent-host`) silent-caught at `_fetchCard` and the agent was dark forever. Post-#608, `console.warn` fires on every retry.
 - **Both card paths can fail with different errors** — primary at `/.well-known/agent-card.json`, fallback at `/.well-known/agent.json`. Fix #608 captures and logs both ([line 361–398](../../src/plugins/skill-broker-plugin.ts)).
 - **Card refresh doesn't unregister removed skills** — if a remote agent drops a skill from its card, the old registration sticks until restart. Acceptable today (skill removals are rare); revisit if dynamic skill mutation becomes common.
 - **Extensions are optional and silent on miss** — `card.capabilities.extensions` not advertising the HITL or Blast URI = no-op load. Easy to forget you needed to add the extension to a new agent.

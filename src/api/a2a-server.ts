@@ -274,7 +274,7 @@ class BusAgentExecutor implements AgentExecutor {
         const rawContent = typeof payload.content === "string" ? payload.content : "";
 
         // Detect raw HTML error pages bubbling up from a misrouted A2A sub-call
-        // (e.g. upstream card URL is wrong — see protoLabsAI/protoMaker#3536).
+        // (e.g. upstream card URL is wrong).
         // Sanitize them so the caller doesn't see `<!DOCTYPE html>...Cannot
         // POST /...` as the assistant's reply text. Log the raw payload loudly
         // so operators can trace the upstream misconfiguration.

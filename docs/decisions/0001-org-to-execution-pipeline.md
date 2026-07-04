@@ -4,6 +4,8 @@ title: "ADR-0001: Org-to-execution pipeline"
 
 # ADR-0001: Org-to-execution pipeline
 
+> **Status: Superseded (2026-07-03).** protoMaker was decommissioned from the fleet; the org→execution board integration described here no longer exists. Retained as historical record.
+
 - **Status:** Accepted — 2026-05-27
 - **Deciders:** Josh (operator)
 - **Related:** [ADR-0002](./0002-workstacean-protomaker-integration-boundary), [ADR-0003](./0003-content-surfacing-into-protocontent), protoMaker#3975
