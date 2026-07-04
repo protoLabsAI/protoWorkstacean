@@ -362,6 +362,25 @@ skills:
       [SEVERITY]: [finding]
       ```
 
+      ## Step 3b — Reasonableness pass (drop the noise before you commit)
+
+      Before you map the verdict to an action, re-read every finding in your
+      VERDICT block once and keep only the ones that clear the bar. Drop a
+      finding when it:
+
+      - restates a category Step 2d puts out of scope (style the linter owns,
+        a theoretical risk with an unlikely precondition, a subjective
+        preference, or a thread already resolved),
+      - rests on code you did not actually read — no fetched file:line makes it
+        a Gap, not a finding,
+      - sits below your 80% confidence bar, or
+      - repeats another finding you already listed (consolidate to one).
+
+      A precise review is a louder signal than an exhaustive one: findings
+      below the bar train the team to ignore you. If dropping findings changes
+      the highest surviving severity, recompute the PASS/WARN/FAIL verdict so it
+      reflects the findings you kept — not the ones you first drafted.
+
       ## Step 4 — Map VERDICT → formal review action
 
       **This is the critical step.** The autonomous merge loop depends
