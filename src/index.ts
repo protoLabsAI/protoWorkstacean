@@ -763,6 +763,16 @@ async function serveDashboardAsset(pathname: string): Promise<Response | null> {
 
 const httpServer = Bun.serve<BusSubscribeWsData>({
   port: HTTP_PORT,
+  // Bun's default idleTimeout is 10s — the max time a connection may go without
+  // network activity before the server closes it. The fleet-aggregation
+  // endpoints (get_recent_activity, pr-pipeline, ci-health, branch-drift) sweep
+  // every registered repo with sequential GitHub reads and routinely run >10s,
+  // so the server was closing the socket mid-request — surfacing to Ava's tools
+  // as "socket connection closed unexpectedly" and breaking her daily digest for
+  // days (INC-019: get_recent_activity "API down"). Raise the ceiling so a slow
+  // fleet read completes. Also gentler on quiet /api/bus/subscribe WebSockets,
+  // which previously dropped after 10s idle. (Bun max is 255s.)
+  idleTimeout: 120,
   fetch: async (req, server) => {
     const url = new URL(req.url);
     const { pathname } = url;
