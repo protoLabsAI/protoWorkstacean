@@ -21,13 +21,16 @@ We want a self-service checkout cache: when Quinn asks to review a PR on a repo 
 
 ---
 
-## Source of truth: GitHub tarball
+## Source of truth: git partial clone
 
-GitHub exposes `GET /repos/{owner}/{repo}/tarball/{ref}` which streams a `.tar.gz` of the tree at `ref`. `ref` can be a branch, tag, or commit SHA — for PR reviews we pass the head commit SHA (already in the `since` parameter shape clawpatch uses to derive the diff). The API returns a redirect to `codeload.github.com`; we follow it and stream straight to extraction.
+Each cache entry is a real **git working tree** checked out at the PR head, because clawpatch scopes its review with `git diff <base>` and needs git history to resolve the base ref. (An earlier design extracted GitHub tarballs; that had no `.git`, so `clawpatch ci --since <base>` crashed with "not a git repository" — the review silently fell back to nothing. See the 2026-07-04 smoke-test fix.)
+
+Materialization is a **blob-filtered partial clone** (`git clone --filter=blob:none`) followed by an explicit `git fetch origin <headSha>` (covers detached PR/fork heads) and `git checkout <headSha>`:
+
+- All commit + tree objects come down, so any base ref a later `git diff` names resolves from local history. Blobs are fetched lazily — the checkout pulls the head tree's files, and a `git diff <base>` pulls the base tree's — in a couple of batched requests, not per-file.
+- The clone URL embeds the short-lived (~1h) GitHub App installation token so those lazy fetches keep authenticating. The token lands in the entry's `.git/config`; the 1h cache TTL is aligned with the token lifetime, so a stale token forces a re-clone anyway.
 
 Auth uses the existing `makeGitHubAuth()` helper — same App credentials that file issues, post review comments, and read PR data. No new credential surface.
-
-We do **not** clone with git. We never need `.git` history — clawpatch reads working-tree files and a diff that we hand it via `--since`. Tarballs are smaller, faster, cacheable by SHA, and don't need git installed in the workstacean image.
 
 ---
 
@@ -73,18 +76,9 @@ Eviction lives in a daily ceremony, **not** inline on each request — see [C3](
 
 ## Security
 
-Three guards, all enforced before the extract:
+The trust boundary is the **allowlist gate**: `repo` must match a GitHub coordinate in the **project registry** (`projectRegistry.getGithubCoords()` in `src/api/clawpatch.ts`) — the same boundary that `create_github_issue` checks, and it runs *before* any GitHub call. No arbitrary `owner/name` from a tool call gets cloned into our data volume; Quinn only ever clones repos we've already declared we manage. Because every cloned repo is one we own, there is no untrusted-tree threat model — the elaborate tarball-entry sanitization (path traversal, symlink, oversize) the tarball design needed is gone with the tarball. Git handles its own checkout; a repo we own that tracks a symlink is fine.
 
-1. **Allowlist gate**: `repo` must match a GitHub coordinate in the **project registry** (`projectRegistry.getGithubCoords()` in `src/api/clawpatch.ts`). Same registry boundary that `create_github_issue` checks. No arbitrary `owner/name` from a tool call extracts code into our data volume — Quinn can only review repos we've already declared we manage.
-2. **Tarball entry sanitization**: every entry path is rejected if it
-   * starts with `/`,
-   * contains `..` segments,
-   * resolves outside the per-(repo,sha) extract directory after normalization,
-   * or has `type === "symlink"` / `"link"` (no symlinks honoured — write them as regular files or skip).
-   `tar` with `strip-components=1` (GitHub's tarballs nest under `<repo>-<sha>/`) plus a manual entry filter. The filter is sloppy-allow rather than belt-and-suspenders: GitHub's archives are not adversarial inputs, but the registry isn't a trust boundary either.
-3. **Disk-quota guard**: refuse to extract a tarball larger than 1 GB compressed. Clawpatch is for code review — anyone shipping a binary tree larger than that into Git is misusing it, and we don't want a runaway extract to fill the volume mid-stream.
-
-No symlinks, no special files, no `..`. If a real repo legitimately tracks a symlink, clawpatch loses that fidelity — we accept it. Code review reads file contents; symlinks are out of scope.
+The PR head + base SHAs are resolved server-side from GitHub (`resolvePrRefs`), never taken from the caller — an agent can't strand or redirect the review onto a hallucinated ref.
 
 ---
 
@@ -102,17 +96,15 @@ Implemented as an in-memory `Map<string, Promise<string>>` in `lib/checkout-cach
 // lib/checkout-cache.ts
 export interface CheckoutCache {
   /**
-   * Resolve a local path for (repo, sha). Returns the cached path if one
-   * exists and is fresh (< 24h); otherwise fetches the tarball from GitHub,
-   * extracts it under /data/checkouts/<owner>-<repo>/<sha>/, and returns
-   * the new path. Touches last-access on hit.
+   * Resolve a local git-checkout path for (repo, headSha). Returns the
+   * cached path if one exists and is fresh (< 1h); otherwise git-clones +
+   * checks out the head under /data/checkouts/<owner>-<repo>/<sha>/ and
+   * returns the new path. Touches mtime on hit.
    *
-   * Throws if:
-   *   - repo is not in the project-registry allowlist
-   *   - the GitHub API returns non-2xx
-   *   - tarball validation fails (oversize, traversal, symlink)
+   * Throws if the clone/checkout fails. Caller enforces the project-registry
+   * allowlist before calling.
    */
-  resolve(repo: string, sha: string): Promise<string>;
+  resolve(repo: string, headSha: string): Promise<string>;
 
   /**
    * Prune the cache by both size and entry limits. Returns counts.
@@ -122,26 +114,29 @@ export interface CheckoutCache {
 }
 ```
 
-As shipped, `src/api/clawpatch.ts:resolveRepoPath()` (now `resolveRepoPath`) routes every repo through the project-registry allowlist gate and then the `CheckoutCache` — there is no `BUILT_IN_REPO_PATHS` bind-mount fast path (see the sign-off decision below). The only local-dev escape hatch is the `CLAWPATCH_REPO_PATH_MAP` override; everything else extracts the PR head SHA on demand:
+As shipped, `POST /api/clawpatch/review` takes `{ repo, pr }`. `resolvePrRefs(owner, name, pr)` reads the PR's `head.sha` (the tree to review) and `base.sha` (the `--since` diff anchor) from GitHub, then `resolveHeadCheckout` routes the head through the project-registry allowlist gate and the `CheckoutCache` — there is no `BUILT_IN_REPO_PATHS` bind-mount fast path (see the sign-off decision below). The only local-dev escape hatch is the `CLAWPATCH_REPO_PATH_MAP` override; everything else clones the head on demand:
 
 ```ts
 // roughly:
+const { headSha, baseSha } = await resolvePrRefs(owner, name, pr);   // from GitHub, not the caller
 const allow = new Set(projectRegistry?.getGithubCoords() ?? []);
 if (!allow.has(repo)) { /* reject — not a managed repo */ }
 const override = readOverrideMap()[repo];
-if (override && existsSync(override)) return override;            // local-dev only
-return await getCheckoutCache().resolve(repo, since);             // on-demand checkout
+const repoPath = (override && existsSync(override))
+  ? override                                                        // local-dev only
+  : await getCheckoutCache().resolve(repo, headSha);                 // on-demand git checkout
+// clawpatch ci … --since <baseSha>  → review scoped to what the PR changed
 ```
 
-The handler requires `since` (the PR head SHA) so the cache is content-addressed by ref — that's already what clawpatch is given for diff anchoring, so there's no new caller-side change.
+The caller passes only the PR number; the route derives head + base itself, so the review is always anchored to the PR's real refs and scoped to exactly the features it touched.
 
 ---
 
 ## What this isn't
 
-* Not a Git clone. No commit history, no branches, no `git log`. If clawpatch ever needs blame or history, we'd add a parallel cache mode then.
-* Not a build cache. We don't run `npm install` / `pnpm install` / `bun install` after extraction. Clawpatch reviews source; if a future provider needs node_modules, that's a separate problem.
-* Not a writable workspace. The extracted tree is treated as read-only by clawpatch — review state still goes under `${CLAWPATCH_STATE_ROOT}/<owner>-<repo>/`, untouched by the cache evictor.
+* Not a full clone. Blob-filtered (`--filter=blob:none`): commit + tree history is present so `git diff <base>` resolves, but file blobs are fetched lazily. Enough git for diff-scoping; not a mirror.
+* Not a build cache. We don't run `npm install` / `pnpm install` / `bun install` after checkout. Clawpatch reviews source; if a future provider needs node_modules, that's a separate problem.
+* Not a writable workspace. clawpatch reads the checked-out tree; review state still goes under `${CLAWPATCH_STATE_ROOT}/<owner>-<repo>/`, untouched by the cache evictor.
 * Not multi-tenant. One operator's workstacean serves one fleet; the cache is single-volume and not shared cross-node.
 
 ---

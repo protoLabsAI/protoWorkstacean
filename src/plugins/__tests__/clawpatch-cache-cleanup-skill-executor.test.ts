@@ -9,7 +9,7 @@ class FakeCache extends CheckoutCache {
     super({
       root: "/tmp/fake-not-used",
       getToken: async () => "x",
-      fetchTarball: async () => Buffer.alloc(0),
+      cloneRepo: async () => {},
     });
   }
   override async prune(): Promise<{ evicted: number; bytesFreed: number }> {

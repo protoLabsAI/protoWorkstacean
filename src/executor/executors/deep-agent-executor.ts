@@ -500,10 +500,10 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
           "**Provider choice:**\n" +
           "- `gateway` (default) — stateless LLM call to the LiteLLM endpoint. Prompt has file contents pre-inlined. Fast, cheap, good for nearly every PR.\n" +
           "- `proto` — spawns protoCLI as a live ACP agent during review. Agent has tool access: read additional files, run LSP queries, run typecheck/lint. Slower + more tokens but deeper structural read. Use on non-trivial PRs that warrant active investigation (large diffs, suspicious test coverage, novel patterns).\n\n" +
-          "Today v1 only works for repos already mounted in the container (protoWorkstacean, protoCLI, mythxengine); other repos return a clear error. The `since` arg scopes the review to features touched since that git ref — pass the PR base.",
+          "Pass the `repo` and the `pr` number — the route resolves the PR's head + base SHAs from GitHub, checks out the head, and scopes findings to exactly the features the PR changed vs its base. `repo` must be a managed project (in the project registry); other repos return a clear error.",
         schema: z.object({
           repo: z.string().describe("Repository in owner/name format (e.g. protoLabsAI/protoWorkstacean)."),
-          since: z.string().optional().describe("Git ref (branch or SHA) to diff against. Limits the review to features touched since that ref. Use the PR base (typically 'main' or 'dev')."),
+          pr: z.number().int().describe("PR number to review. The route resolves head + base SHAs from GitHub and diffs head against base — no need to pass any SHA."),
           limit: z.number().int().optional().describe("Maximum number of features to review. Useful for spot-checks on large repos."),
           model: z.string().optional().describe("Model override. Defaults vary per provider (gateway: protolabs/smart; proto: protolabs/reasoning)."),
           provider: z.enum(["gateway", "proto"]).optional().describe("Review path. 'gateway' (default) for fast stateless LLM review; 'proto' for live tool-using ACP agent review on non-trivial changes."),
