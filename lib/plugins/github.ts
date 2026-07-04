@@ -868,6 +868,16 @@ export class GitHubPlugin implements Plugin {
   private recentDispatches = new Map<string, number>();
   private static readonly DEDUP_WINDOW_MS = 60_000;
 
+  /**
+   * Repos Quinn has auto-reviewed this process. The approve-on-green
+   * reconciliation sweep unions this with the project registry so a repo that
+   * receives webhook auto-reviews but isn't registered still gets the
+   * deterministic approve-on-green — otherwise its held COMMENT is stranded
+   * (never promoted, never merged), the gap that silently stalled a freshly
+   * stood-up protoAgent-family repo (portfolio-plugin).
+   */
+  private readonly reviewedRepoCoords = new Set<string>();
+
   private _handleAutoReview(
     event: string,
     payload: Record<string, unknown>,
@@ -952,6 +962,27 @@ export class GitHubPlugin implements Plugin {
     });
 
     log.info(`Auto-review: ${ctx.owner}/${ctx.repo}#${ctx.number} (${action}) → pr_review`);
+
+    // Record the repo so the approve-on-green sweep covers it even when it's
+    // not in the project registry. A webhook-reviewed repo that isn't
+    // registered would otherwise get COMMENTs but never the deterministic
+    // approve-on-green (the sweep is registry-driven). Warn once so the repo
+    // gets tagged into the registry properly (which persists across restarts).
+    const reviewedCoord = `${ctx.owner}/${ctx.repo}`;
+    if (!this.reviewedRepoCoords.has(reviewedCoord)) {
+      this.reviewedRepoCoords.add(reviewedCoord);
+      const registered = this.projectRegistry
+        .getGithubCoords()
+        .some((c) => c.toLowerCase() === reviewedCoord.toLowerCase());
+      if (!registered) {
+        log.warn(
+          `Auto-review on ${reviewedCoord}, which is NOT in the project registry. ` +
+            `Covering it in the approve-on-green sweep for this process, but tag the ` +
+            `repo with the 'protoagent-plugin' GitHub topic (or add it to ` +
+            `sync-project-registry.sh) so coverage persists across restarts.`,
+        );
+      }
+    }
 
     // Leading acknowledgment comment so the PR shows Quinn engagement
     // immediately, not minutes later when the formal verdict review
@@ -1260,7 +1291,12 @@ export class GitHubPlugin implements Plugin {
   private async _reconcileApproveOnGreen(
     getToken: (owner: string, repo: string) => Promise<string>,
   ): Promise<void> {
-    const coords = this.projectRegistry.getGithubCoords();
+    // Union the registry with repos Quinn has reviewed this process. A repo
+    // that receives webhook auto-reviews but isn't registered would otherwise
+    // be invisible here, so its held COMMENT would never be promoted to the
+    // deterministic approve-on-green (the gap that stranded portfolio-plugin).
+    const coords = new Set(this.projectRegistry.getGithubCoords());
+    for (const c of this.reviewedRepoCoords) coords.add(c);
     let approved = 0;
     for (const coord of coords) {
       const slash = coord.indexOf("/");

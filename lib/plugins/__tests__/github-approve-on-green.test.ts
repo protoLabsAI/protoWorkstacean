@@ -442,4 +442,23 @@ describe("_reconcileApproveOnGreen — level-triggered backstop (#879)", () => {
     expect(captured.approvePosts.length).toBe(1);
     expect(captured.approvePosts[0]!.commit_id).toBe("grn1111");
   });
+
+  test("covers a reviewed-but-UNREGISTERED repo (the approve-on-green gap fix)", async () => {
+    // Registry is empty (repo not tagged / not in EXPLICIT), but Quinn reviewed
+    // it this process → the sweep must still cover it via reviewedRepoCoords.
+    // Without the union this green+COMMENTED PR is stranded (portfolio-plugin).
+    const captured = stubSweepFetch([
+      { number: 38, sha: "por0038", reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+        checkRuns: [{ status: "completed", conclusion: "success" }] },
+    ]);
+    const registry = new ProjectRegistry();
+    (registry as unknown as { getGithubCoords: () => string[] }).getGithubCoords = () => []; // NOT registered
+    const plugin = new GitHubPlugin("/tmp/nonexistent-ws", registry);
+    (plugin as unknown as { reviewedRepoCoords: Set<string> }).reviewedRepoCoords.add(`${OWNER}/${REPO}`);
+    await (plugin as unknown as {
+      _reconcileApproveOnGreen: (g: () => Promise<string>) => Promise<void>;
+    })._reconcileApproveOnGreen(async () => "fake-token");
+    expect(captured.approvePosts.length).toBe(1);
+    expect(captured.approvePosts[0]!.commit_id).toBe("por0038");
+  });
 });
