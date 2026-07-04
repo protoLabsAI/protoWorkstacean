@@ -251,21 +251,20 @@ skills:
 
       - `clawpatch_review(repo='owner/name', since='<pr-base>')`
 
-      whenever the `diff_summary` from Step 2 shows ANY of these objective
-      triggers:
+      **`diff_summary` computes the objective trigger for you** and states it
+      at the top of its output. When it says **STRUCTURAL REVIEW REQUIRED**
+      (the diff touches more than 3 files, changes more than ~120 lines, or
+      hits a security-relevant path — auth, session, token, crypto,
+      payment/billing, a database migration, CI/CD or infra), run
+      `clawpatch_review`. These counts come from the full diff, so trust that
+      directive over your own eyeball of the truncated preview.
 
-      - the diff touches **more than 3 files**, OR
-      - the diff changes **more than ~120 lines** total, OR
-      - any changed path is **security-relevant**: auth, session, token,
-        crypto, payment/billing, a database migration, CI/CD or infra
-        (`.github/`, Dockerfile, compose), or a public API surface.
-
-      Only a genuinely small, contained diff (a few files, a short patch,
-      no sensitive paths — docs, a copy tweak, a config bump) skips
-      clawpatch. When in doubt, run it: the structural pass is the part of
-      the review the diff alone cannot give you, and skipping it is how
-      cross-file bugs slip through. A skipped structural pass on a diff that
-      hit a trigger is a Gap — note it.
+      When `diff_summary` says **Structural review optional** — a genuinely
+      small, contained diff (docs, a copy tweak, a config bump) — you may
+      skip clawpatch. When in doubt, run it: the structural pass is the part
+      of the review the diff alone cannot give you, and skipping it is how
+      cross-file bugs slip through. A skipped structural pass on a diff marked
+      REQUIRED is a Gap — note it.
 
       Use the PR's base branch (typically `main` or `dev`) as the
       `since` arg so clawpatch only reviews features touched by this PR.
