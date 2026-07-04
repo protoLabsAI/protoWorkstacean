@@ -1145,6 +1145,12 @@ export class DeepAgentExecutor implements IExecutor {
       // that replace the agent's general-purpose prompt.
       let basePrompt = skillDef?.systemPromptOverride ?? this.agentDef.systemPrompt;
 
+      // Anchor every run to the current date. Agents otherwise have no reliable
+      // "today" — Ava's daily digest was stamping a stale date in its header, and
+      // any "what shipped yesterday / is this stale" reasoning needs an anchor.
+      // UTC keeps it unambiguous; the model localizes as needed.
+      basePrompt += `\n\nCurrent date: ${new Date().toUTCString().slice(0, 16)} UTC.`;
+
       // Cross-conversation recall (Phase 2): inject hot memory + BM25 hits for
       // this turn's prompt into the system message.
       if (memoryOn) {
