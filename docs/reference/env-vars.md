@@ -57,12 +57,12 @@ Every variable recognised by protoWorkstacean is declared in the zod `EnvSchema`
 | `LANGFUSE_PUBLIC_KEY` | optional | — |
 | `LANGFUSE_SECRET_KEY` | optional | — |
 
-## A2A / protoMaker
+## A2A
 
 | Variable | Required? | Description |
 |---|---|---|
-| `AVA_API_KEY` | optional | — |
-| `AVA_BASE_URL` | optional | — |
+| `AVA_API_KEY` | optional | API key for a remote A2A agent server, injected as `X-API-Key`. |
+| `AVA_BASE_URL` | optional | Base URL of a remote A2A agent server. |
 
 ## Discord
 
@@ -144,7 +144,6 @@ These variables are read via `process.env` somewhere in `src/` or `lib/` but are
 | `A2A_INPUT_REQUIRED_TTL_MS` | `src/api/human-input.ts` |
 | `A2A_STREAM_HEARTBEAT_MS` | `src/api/a2a-server.ts` |
 | `AGENT_RUN_BUDGET_MS` | `src/executor/executors/deep-agent-executor.ts` |
-| `AUTOMAKER_API_KEY` | `lib/plugins/protomaker-board-bridge.ts`, `src/plugins/project-registry.ts` |
 | `CLAWPATCH_CHECKOUT_ROOT` | `lib/checkout-cache.ts` |
 | `CLAWPATCH_REPO_PATH_MAP` | `src/api/clawpatch.ts` |
 | `CLAWPATCH_STATE_ROOT` | `src/api/clawpatch.ts` |
@@ -161,7 +160,7 @@ These variables are read via `process.env` somewhere in `src/` or `lib/` but are
 | `MEMORY_SUMMARY_MODEL` | `src/agent-runtime/agent-runtime-plugin.ts` |
 | `OPENAI_BASE_URL` | `src/agent-runtime/agent-runtime-plugin.ts`, `src/executor/executors/deep-agent-executor.ts`, `src/services/embeddings/gateway-embed.ts` |
 | `PROTOLABS_AGENTS_JSON` | `src/plugins/skill-broker-plugin.ts` |
-| `PROTOMAKER_API_BASE` | `lib/plugins/protomaker-board-bridge.ts`, `src/plugins/project-registry.ts` |
+| `PROJECT_REGISTRY_URL` | `src/plugins/project-registry.ts` |
 | `QUINN_DISCORD_TOKEN` | `lib/types/channels.ts` |
 | `RESEARCH_EMBED_DIM` | `src/knowledge/research-store.ts` |
 | `RESEARCH_EMBED_MODEL` | `src/services/embeddings/gateway-embed.ts` |

@@ -108,24 +108,16 @@ describe("ProjectRegistry", () => {
   let server: ReturnType<typeof Bun.serve> | undefined;
   let fakeProjects: Array<{ id: string; name: string; path: string; github?: { owner: string; repo: string }; defaultBranch?: string }>;
   let fetchCount: number;
-  let lastApiKeyHeader: string | null;
-  let requireApiKey: string | undefined;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "wsk-pm-registry-test-"));
     fakeProjects = [];
     fetchCount = 0;
-    lastApiKeyHeader = null;
-    requireApiKey = undefined;
     server = Bun.serve({
       port: 0,
       fetch(req) {
         const url = new URL(req.url);
         if (url.pathname === "/api/settings/global") {
-          lastApiKeyHeader = req.headers.get("X-API-Key");
-          if (requireApiKey && lastApiKeyHeader !== requireApiKey) {
-            return Response.json({ success: false, error: "Authentication required." }, { status: 401 });
-          }
           fetchCount++;
           return Response.json({ success: true, settings: { projects: fakeProjects } });
         }
@@ -144,11 +136,10 @@ describe("ProjectRegistry", () => {
     }
   });
 
-  function newRegistry(opts: { apiKey?: string } = {}): ProjectRegistry {
+  function newRegistry(): ProjectRegistry {
     return new ProjectRegistry({
       apiBase: `http://localhost:${server!.port}`,
       refreshIntervalMs: 50_000,
-      ...opts,
     });
   }
 
@@ -282,26 +273,16 @@ describe("ProjectRegistry", () => {
     expect(registry.getGithubCoords().sort()).toEqual(["org/Beta", "org/alpha"]);
   });
 
-  test("sends X-API-Key header when apiKey is configured", async () => {
-    const projPath = join(tempDir, "x");
-    makeGitRepo(projPath, "foo/x", "main");
-    fakeProjects.push({ id: "p1", name: "x", path: projPath });
-
-    registry = newRegistry({ apiKey: "my-secret-key" });
-    await registry.refreshNow();
-
-    expect(lastApiKeyHeader).toBe("my-secret-key");
-    expect(registry.getProjects()).toHaveLength(1);
-  });
-
-  test("server rejects request without X-API-Key → lastError surfaces 401", async () => {
-    requireApiKey = "expected-key";
-
-    registry = newRegistry(); // no apiKey configured
+  test("non-OK response → lastError surfaces the status, projects stay empty", async () => {
+    // Point the registry at a path the stub server 404s.
+    registry = new ProjectRegistry({
+      apiBase: `http://localhost:${server!.port}/wrong`,
+      refreshIntervalMs: 50_000,
+    });
     await registry.refreshNow();
 
     expect(registry.getProjects()).toHaveLength(0);
-    expect(registry.getLastError()).toContain("HTTP 401");
+    expect(registry.getLastError()).toContain("HTTP 404");
   });
 
   test("duplicate derived slug → first wins, second dropped", async () => {

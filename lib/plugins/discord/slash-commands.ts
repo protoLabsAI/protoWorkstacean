@@ -5,7 +5,7 @@
  * flat commands, and subcommand-based commands.
  *
  * Project autocomplete + project-scoped command payloads read from
- * the in-process ProtomakerProjectRegistry and ChannelRegistry.
+ * the in-process ProjectRegistry and ChannelRegistry.
  */
 
 import { Events, type ChatInputCommandInteraction } from "discord.js";

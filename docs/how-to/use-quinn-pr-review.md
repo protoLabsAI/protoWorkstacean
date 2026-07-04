@@ -150,10 +150,8 @@ Reacting to any GitHub issue comment with 📋 triggers `bug_triage`:
 
 ```
 /quinn comment on GitHub issue
-  → Quinn (bug_triage): classifies bug, may file board item via file_bug tool
+  → Quinn (bug_triage): classifies bug, may file a tracking issue via file_bug tool
     → posts triage comment to GitHub issue
-  → Chain: Ava (manage_feature): reviews Quinn's triage, verifies board state
-    → posts follow-up comment: feature link, close recommendation
 ```
 
 Trigger by @mention: `@protoquinn <description>` (admin users only).

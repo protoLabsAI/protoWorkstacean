@@ -227,8 +227,6 @@ lib/
     github.ts
     linear.ts
     google.ts
-    feature-remediation.ts       # feature.blocked → ignore / HITL / Roxy unblock_feature
-    issue-closer.ts              # feature.completed → close the originating GitHub issue
     scheduler.ts
     a2a-delivery.ts
     operator-routing.ts

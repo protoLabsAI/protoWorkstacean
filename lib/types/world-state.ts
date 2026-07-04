@@ -3,7 +3,7 @@
  *
  * Domain data is entirely application-defined. protoWorkstacean makes no
  * assumptions about what domains exist or what shape their data takes.
- * Applications (e.g. protoMaker/ava) register their own domains with the
+ * Applications (e.g. ava) register their own domains with the
  * WorldStateEngine via registerDomain() or workspace/domains.yaml.
  *
  * The engine provides:

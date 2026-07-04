@@ -10,9 +10,7 @@ _A label-tagged Linear issue becomes a `code.execute` dispatch to the in-process
 
 `RouterPlugin` resolves messages via channels + `skillHint` — neither concept fits a Linear *label* gate (which inspects the issue payload itself). One bridge fills the gap:
 
-- **`linear-proto-bridge`** ([lib/plugins/linear-proto-bridge.ts](../../lib/plugins/linear-proto-bridge.ts)) — issues with the `proto-task` label dispatch `code.execute` to the in-process `proto` agent. Single global label gate; override via `LINEAR_PROTO_BRIDGE_LABEL` env. No per-team mapping — `proto` is one fleet-wide agent, not per-board.
-
-> **There is no Linear → protoMaker board bridge.** The path that feeds protoMaker's board is `protomaker-board-bridge.ts`, which forwards **`github.issue.opened`** events (not Linear) to protoMaker's HTTP intake. protoMaker serves no `/a2a` endpoint. See [Related](#related).
+- **`linear-proto-bridge`** ([lib/plugins/linear-proto-bridge.ts](../../lib/plugins/linear-proto-bridge.ts)) — issues with the `proto-task` label dispatch `code.execute` to the in-process `proto` agent. Single global label gate; override via `LINEAR_PROTO_BRIDGE_LABEL` env. No per-team mapping — `proto` is one fleet-wide agent.
 
 ### How this differs from the mention/assignment path
 
@@ -155,6 +153,5 @@ The bridge holds **no state** for round-trip — `reply.topic` is the entire clo
 
 - [integrations/linear](../integrations/linear) — full Linear plugin contract, the `linear_agent_respond` mention/assignment gate, and actor=app OAuth posting.
 - [flow-inbound-message](flow-inbound-message.md) — what happens after the bridge publishes `agent.skill.request`.
-- [integrations/github](../integrations/github) — the GitHub-issue → protoMaker board forwarder (`protomaker-board-bridge.ts`), the path people sometimes confuse with a Linear bridge.
 - [flow-pr-review](flow-pr-review.md) — the analogous label-gated dispatch for GitHub PRs (no separate bridge, lives inside GitHubPlugin).
 - [flow-hitl](flow-hitl.md) — what happens if the dispatched agent escalates.

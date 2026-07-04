@@ -11,7 +11,6 @@ import { createRoutes as githubRoutes } from "./github.ts";
 import { createRoutes as incidentRoutes } from "./incidents.ts";
 import { createRoutes as operationRoutes } from "./operations.ts";
 import { createRoutes as avaToolRoutes } from "./ava-tools.ts";
-import { createRoutes as boardRoutes } from "./board.ts";
 import { createRoutes as mailboxRoutes } from "./mailbox.ts";
 import { createRoutes as discordRoutes } from "./discord.ts";
 import { createRoutes as a2aCallbackRoutes } from "./a2a-callback.ts";
@@ -46,7 +45,6 @@ export function createAllRoutes(ctx: ApiContext): Route[] {
     ...githubRoutes(ctx),
     ...incidentRoutes(ctx),
     ...avaToolRoutes(ctx),
-    ...boardRoutes(ctx),
     ...(ctx.mailbox ? mailboxRoutes(ctx.mailbox, ctx) : []),
     ...discordRoutes(ctx),
     ...(ctx.taskTracker ? a2aCallbackRoutes(ctx.taskTracker, ctx) : []),

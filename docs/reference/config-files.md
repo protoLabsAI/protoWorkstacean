@@ -22,7 +22,7 @@ _This is a reference doc. It covers all `workspace/*.yaml` schemas and environme
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AGENTS_YAML` | No | Path to external A2A agent registry (default: `/workspace/agents.yaml`) |
-| `AVA_API_KEY` | If using the protoMaker team | API key injected as `X-API-Key` header. Env var name kept for historical reasons — the logical agent slug is `protomaker`. |
+| `AVA_API_KEY` | If using a remote A2A agent | API key injected as the `X-API-Key` header for a remote A2A agent server. |
 | `AVA_APP_ID` | For chain comments | GitHub App ID — chain responses post as `@ava[bot]` |
 | `AVA_APP_PRIVATE_KEY` | For chain comments | GitHub App private key (PKCS#1 PEM) |
 
@@ -130,13 +130,13 @@ maxTurns: 15
 # Skills this agent handles — matched against agent.skill.request skillHint
 skills:
   - name: bug_triage
-    description: Triage a bug report — severity, root cause, board feature
+    description: Triage a bug report — severity, root cause, next action
   - name: pr_review
     description: Review a pull request diff
 ```
 
 **`role`** drives the agent profile and delegation rules:
-- `orchestrator` — protoMaker team pattern; can delegate to `canDelegate` agents
+- `orchestrator` — DeepAgent delegation pattern; can delegate to `canDelegate` agents
 - `qa`, `devops`, `content`, `research`, `general` — ReAct subagent; no delegation. Use `general` for conversational agents like the in-process `ava` chat agent.
 
 **`tools`** is a whitelist — the agent subprocess only sees the tools listed here, plus proto CLI built-ins (file, bash, search).
@@ -153,7 +153,6 @@ Maps abstract **roles** to concrete agents — the one file a fork edits to re-s
 roles:
   helm: ava          # default target for untargeted A2A requests + the OpenAI-compat chat alias
   reviewer: quinn    # runs PR review
-  remediator: roxy   # dispatched to unblock a blocked feature (feature.blocked)
 github:
   reviewerBotLogins: [protoquinn, "protoquinn[bot]"]   # reviewer's own GitHub identities (review-loop matching)
 ```
@@ -166,32 +165,24 @@ Source of truth for the **external A2A** agent registry. Used by `SkillBrokerPlu
 
 ```yaml
 agents:
-  # protoMaker team — multi-agent runtime for board ops, feature lifecycle,
-  # onboarding, and planning. Historical env var name AVA_* kept; the
-  # logical agent slug is `protomaker`.
-  - name: protomaker
-    team: dev
-    url: http://automaker-server:3008/a2a
-    apiKeyEnv: AVA_API_KEY       # env var holding the API key (not the key itself)
+  # protoPen — security / pentest / RF-recon agent, running remotely.
+  - name: protopen
+    team: security
+    url: http://steamdeck:7870/a2a
+    apiKeyEnv: PROTOPEN_API_KEY  # env var holding the API key (not the key itself)
     skills:
-      - sitrep
-      - manage_feature
-      - auto_mode
-      - board_health
-      - onboard_project
-      - plan
+      - security_triage
+      - pentest
+      - rf_recon
 
   - name: quinn
     team: dev
     url: http://quinn:7870/a2a
     skills:
       - qa_report
-      - board_audit
       - bug_triage
       - pr_review
       - security_triage
-    chain:
-      bug_triage: protomaker     # after bug_triage, call protomaker/manage_feature
 
   - name: frank
     team: dev
@@ -210,11 +201,11 @@ agents:
 
 ## Project metadata (no workspace file)
 
-There is no `workspace/projects.yaml`. The **protoMaker registry is the source of truth** for project metadata. workstacean pulls the canonical project list from protoMaker (`GET /api/settings/global`) via `ProjectRegistry` ([`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts)) and re-serves it at `GET /api/projects`. Each entry exposes `id`, `name`, derived `slug`, filesystem `path`, derived `github` (`{ owner, repo }`), and `defaultBranch`.
+There is no `workspace/projects.yaml`. The project registry is compiled from GitHub: every repo in the `protoLabsAI` org tagged with the `protoagent-plugin` topic (plus an explicit base set) is assembled by `scripts/sync-project-registry.sh` (in homelab-iac, cron every 15 min) into a static `projects.json`, served by the `workstacean-projects` nginx sidecar at `/api/settings/global`. workstacean's `ProjectRegistry` ([`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts)) polls that endpoint (URL from `PROJECT_REGISTRY_URL`) every 5 minutes and re-serves the list at `GET /api/projects`. Each entry exposes `id`, `name`, derived `slug`, filesystem `path`, derived `github` (`{ owner, repo }`), and `defaultBranch`.
 
 Discord channel bindings are **not** part of project metadata — they live in `workspace/channels.yaml` via the [ChannelRegistry](workspace-files), keyed by `(projectSlug, kind)` and resolved with `ChannelRegistry.getProjectChannel(slug, kind)`.
 
-To add a project, register it in protoMaker's UI; workstacean picks it up on the next registry refresh (5-min interval, or immediately on restart).
+To add a project, tag its repo with the `protoagent-plugin` GitHub topic; the 15-min sync cron compiles it into `projects.json` and workstacean picks it up on the next registry refresh (5-min interval, or immediately on restart).
 
 ---
 

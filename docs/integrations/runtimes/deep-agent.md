@@ -48,7 +48,6 @@ tools:
   - get_ceremonies
   - searxng_search
   # Write / Act
-  - manage_board
   - create_github_issue
   - report_incident
   - pr_inspector
@@ -122,7 +121,6 @@ The tables below are a representative selection. The canonical, complete tool li
 
 | Tool | API endpoint | Purpose |
 |------|-------------|---------|
-| `manage_board` | `POST /api/board/features/*` | Create or update board features |
 | `create_github_issue` | `POST /api/github/issues` | File GitHub issues on managed repos |
 | `report_incident` | `POST /api/incidents` | File a security/operational incident |
 
@@ -155,4 +153,4 @@ All LLM calls route through LiteLLM at `LLM_GATEWAY_URL` (or `OPENAI_BASE_URL`).
 
 Use `DeepAgentExecutor` for any agent that should run inside the workstacean process with direct access to bus tools. This is the right choice for most agents.
 
-Use [A2A](a2a) instead when the agent lives in a separate service (Quinn, protoMaker team, protoContent) or needs its own resource isolation.
+Use [A2A](a2a) instead when the agent lives in a separate service (protopen, protoContent) or needs its own resource isolation.

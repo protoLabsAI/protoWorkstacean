@@ -1,10 +1,8 @@
 /**
  * GitHub PR state helper — fetches PR state to check if a PR has merged.
  *
- * Used by FeatureRemediationPlugin to verify origin truth before escalating
- * a blocked feature. Prevents false pages when work has already shipped
- * (PR merged + feature done) but protoMaker's `feature.completed` event
- * hasn't arrived yet.
+ * Fetches a PR's state (open/closed, merged flag) so callers can verify
+ * whether work has already shipped before acting on it.
  *
  * `authGetter` and `fetchImpl` are injectable so unit tests never touch
  * the network or `process.env`.

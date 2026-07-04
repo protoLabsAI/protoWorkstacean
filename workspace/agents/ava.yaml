@@ -192,7 +192,6 @@ tools:
   - get_incidents
   - searxng_search
   # ── Write / Act ────────────────────────────────────────────────────
-  - manage_board
   - create_github_issue
   - report_incident
   # ── Google Workspace (pull-mode read / draft) ─────────────────────
@@ -231,7 +230,7 @@ discordBotTokenEnvKey: DISCORD_BOT_TOKEN_AVA
 
 skills:
   - name: chat
-    description: Operational helm — system health, agent delegation, board management, issue filing, schedule control. The user's single control interface.
+    description: Operational helm — system health, agent delegation, GitHub issue filing, schedule control. The user's single control interface.
     keywords: []
 
   - name: diagnose_pr_stuck
@@ -239,9 +238,7 @@ skills:
     keywords: [diagnose, conflict, stuck, merge, rebase, pr, dirty]
     # Structured output: after the analysis loop, a forced submit_diagnose_pr_stuck
     # tool call distills the verdict into this schema, validated + emitted as a
-    # typed DataPart (resultMime) a remediation consumer reads directly — no prose
-    # parsing. (PR-pipeline remediation now flows through feature.blocked →
-    # FeatureRemediationPlugin → Roxy unblock_feature; the old pr-remediator is gone.)
+    # typed DataPart (resultMime) an operator reads directly — no prose parsing.
     resultMime: application/vnd.protolabs.pr-diagnosis-v1+json
     outputSchema:
       type: object

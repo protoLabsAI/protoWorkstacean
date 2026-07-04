@@ -10,7 +10,7 @@ _This is a reference doc. It covers the OnboardingPlugin pipeline, request schem
 
 `OnboardingPlugin` (`lib/plugins/onboarding.ts`) runs the deterministic, idempotent side-effects of bringing a project online: registering its GitHub webhook, creating its Google Drive folder, and notifying downstream consumers.
 
-**Project registration itself is owned by protoMaker** — protoMaker's project registry is the source of truth for project metadata (see [config-files](config-files) and [`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts)). Operators register the project in protoMaker's UI _before_ triggering onboarding here; this plugin does not create or persist a project record of its own. workstacean reads the canonical project list from protoMaker via the `ProjectRegistry` (exposed at `GET /api/projects`).
+**Project registration itself lives in the GitHub-topic-driven project registry** — the registry is compiled from every `protoLabsAI` repo tagged with the `protoagent-plugin` topic (plus an explicit base set) into a static `projects.json` served by the `workstacean-projects` nginx sidecar (see [config-files](config-files) and [`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts)). A repo is tagged with the `protoagent-plugin` topic _before_ triggering onboarding here; this plugin does not create or persist a project record of its own. workstacean reads the canonical project list from the sidecar via the `ProjectRegistry` (exposed at `GET /api/projects`).
 
 ---
 
@@ -41,10 +41,10 @@ Sent as the `payload` of a `message.inbound.onboard` bus message (or the JSON bo
 | `github` | `string` | ✅ | — | Repository in `"owner/repo"` format |
 | `defaultBranch` | `string` | | `"main"` | Default git branch |
 | `team` | `string` | | `"dev"` | Team assignment: `"dev"`, `"gtm"`, etc. |
-| `agents` | `string[]` | | `["protomaker", "quinn"]` | Agent identifiers to associate |
+| `agents` | `string[]` | | `["quinn"]` | Agent identifiers to associate |
 | `discord` | `object` | | `{}` | Discord channel IDs (`general`, `updates`, `dev`, `alerts`, `releases`) |
 
-These fields are echoed back on `message.inbound.onboard.complete`; the plugin does not persist them. Channel→agent bindings live in `workspace/channels.yaml` ([ChannelRegistry](workspace-files)), and project metadata lives in the protoMaker registry — neither is written by this plugin.
+These fields are echoed back on `message.inbound.onboard.complete`; the plugin does not persist them. Channel→agent bindings live in `workspace/channels.yaml` ([ChannelRegistry](workspace-files)), and project metadata lives in the GitHub-topic-driven project registry — neither is written by this plugin.
 
 ---
 
@@ -120,6 +120,6 @@ When the GitHub org webhook is registered and a new repository is created under 
 ## References
 
 - [`lib/plugins/onboarding.ts`](../../lib/plugins/onboarding.ts) — plugin implementation
-- [`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts) — protoMaker-backed project registry (source of truth)
+- [`src/plugins/project-registry.ts`](../../src/plugins/project-registry.ts) — GitHub-topic-driven project registry (polls the nginx sidecar)
 - [`reference/bus-topics.md`](bus-topics) — full bus topic registry
 - [`reference/config-files.md`](config-files) — workspace config file reference

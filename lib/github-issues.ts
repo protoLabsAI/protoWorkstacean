@@ -4,10 +4,9 @@
  * optional comment, authenticating as the Quinn GitHub App (or GITHUB_TOKEN PAT)
  * via the shared `makeGitHubAuth`.
  *
- * Used by IssueCloserPlugin to close the originating GitHub issue when its
- * feature ships (the close-the-loop), and reusable by a future
- * `pr_inspector close_issue` action. `authGetter` / `fetchImpl` are injectable
- * so unit tests never touch the network or `process.env`.
+ * Closes a GitHub issue (optionally with a closing comment). `authGetter` /
+ * `fetchImpl` are injectable so unit tests never touch the network or
+ * `process.env`.
  */
 
 import { makeGitHubAuth } from "./github-auth.ts";
