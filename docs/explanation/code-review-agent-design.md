@@ -51,7 +51,8 @@ engine.** The tools that win run structural analysis as the *default* pass.
 [Cloudflare's production system](https://blog.cloudflare.com/ai-code-review/)
 (48,095 MRs / 30 days) runs **seven scoped reviewers** (security, performance, code
 quality, docs, release, compliance) + a coordinator, *"rather than relying on one model
-with a massive, generic prompt."* Quinn is one ReAct agent wearing all hats.
+with a massive, generic prompt."* Quinn is one ReAct agent wearing all hats. Whether to
+follow suit is settled below — see [Specialization decision (#892)](#specialization-decision-892-dont-fan-out-yet).
 
 ### Noise reduction — the #1 complaint
 
@@ -116,9 +117,15 @@ the raw material exists.
    `pr_review` run, force-emit a terminal **COMMENT** ("review incomplete — out of budget;
    partial findings below") instead of a hard error. Removes the ~1.6% of PRs that get no
    verdict and stall the merge loop.
-2. **Make clawpatch deterministic, not discretionary.** Trigger it on objective signals
-   (diff > N files / > N lines, or sensitive paths) rather than the model's "is this
-   non-trivial?" judgement, which is under-firing it (5%).
+2. **Make clawpatch deterministic, not discretionary.** ✅ *grounded-trigger half shipped
+   (#891).* `diff_summary` now computes the objective trigger (>3 files / >120 lines /
+   sensitive path) from authoritative GitHub metrics — PR-JSON totals + full-diff paths,
+   neither truncated — and emits an explicit `STRUCTURAL REVIEW REQUIRED` directive. This
+   fixes the root defect: the model previously had to eyeball the trigger from a diff
+   truncated at 200 lines, so on a large PR it was unevaluable and clawpatch under-fired.
+   **Remaining phase-2:** hard-enforce (block the verdict until clawpatch ran on a
+   REQUIRED diff) + measure the post-deploy firing rate via `scripts/quinn-review-eval.ts`
+   before enforcing (enforcement risks re-opening the recursion-thrash mode #863 fixed).
 
 **P1 — re-review memory** ✅ *shipped (prior-verdict recall)*
 3. Before a re-review, recall Quinn's own prior verdict + which findings are resolved
@@ -161,6 +168,50 @@ boundary the same way a function signature does. Review agents are the case wher
 the out-of-scope set is the single biggest signal-quality win, so Quinn's `pr_review`
 prompt carries an explicit out-of-scope list. This is a deliberate, scoped exception, not
 a repeal of the house rule.
+
+## Specialization decision (#892): don't fan out — yet
+
+Quinn is one ReAct agent wearing all hats; the production systems we benchmarked
+([Cloudflare](https://blog.cloudflare.com/ai-code-review/)'s 7 scoped reviewers + coordinator,
+Qodo 2.0's per-concern agents) fan out. The question this spike answers: is scoped
+specialization worth building **at our scale and for our failure profile?**
+
+**Decision: no fan-out now.** Build the cheaper levers first; revisit only if the eval
+harness proves a residual catch-rate/SNR gap after them. Reasoning:
+
+1. **Our measured failure was never "missed a bug for lack of specialization."** It was
+   recursion thrash from busy-waiting CI (#863, fixed) and structural review under-firing
+   (#891, now grounded). The one real quality gap — cross-file bugs — is a *context* gap,
+   not a *number-of-reviewers* gap. [Greptile's 82% vs CodeRabbit's 44%](https://www.greptile.com/benchmarks)
+   came from **whole-repo graph context**, not from multi-agent. Our own analog is
+   clawpatch (structural/whole-tree), which is far cheaper per catch than N specialized
+   LLM reviewers — so the catch-rate budget belongs there, not in fan-out.
+
+2. **Cloudflare's win was mostly the coordinator's *reasonableness filter*, not the seven
+   agents.** Their lift came from dropping *"speculative issues, nitpicks, false positives,
+   and convention-contradicted findings"* and *reading source to verify*. Quinn already has
+   the grounding half (the Step 2c EXISTS/MISSING rule) and the out-of-scope list. The
+   remaining noise win is a **single self-critique "reasonableness" pass before the
+   verdict** — one extra reasoning step in the existing agent, no fan-out, no new plumbing.
+
+3. **Fan-out re-opens the exact surface we hardened against.** The `pr_review` skill
+   deliberately *strips* delegation tools (`chat_with_agent` et al.) because they lured the
+   ReAct loop into thrash on simple PRs. A coordinator that fans out to sub-reviewers
+   contradicts that hard-won scoping unless done at the orchestration layer (a deterministic
+   coordinator skill + N sub-skills + a synthesis step) — real new plumbing that multiplies
+   per-review LLM cost by N and adds a synthesis round, for ~217 reviews/day.
+
+4. **Cost is not free at this volume.** N-way fan-out at 217/day is ~217·N extra agent runs
+   daily plus synthesis. That spend only earns out if it beats the cheaper levers on a
+   *measured* SNR/catch-rate delta — which we cannot claim without the eval harness (P2 #5).
+
+**So the ordered path is:** finish clawpatch (grounded → measured → enforced) · add a
+single reasonableness self-critique pass · stand up the eval harness · **then** re-measure.
+If a residual gap survives all of that, prefer **whole-repo context** (Greptile's lever,
+matched to our cross-file bug class) over **more agents** (Cloudflare's lever), because
+context addresses our actual failure and fan-out re-introduces the thrash risk. This is a
+deliberate deferral backed by our failure data, not a rejection of specialization in
+principle.
 
 ## Sources
 
