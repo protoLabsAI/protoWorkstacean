@@ -866,6 +866,19 @@ export class GitHubPlugin implements Plugin {
    */
   private readonly reviewedRepoCoords = new Set<string>();
 
+  /**
+   * PRs observed APPROVED + terminal-green + thread-clean but still OPEN,
+   * keyed `owner/repo#n@sha7` → first-seen ms. GitHub's native auto-merge can
+   * wedge on a phantom BLOCKED merge state (ws-5sc: #905 sat armed + approved
+   * + green for 40+ min while a direct REST merge succeeded instantly), so
+   * after a grace period the sweep completes the merge itself. Entries clear
+   * on completion and age out via TTL, so the map stays bounded.
+   */
+  private readonly mergeCompletionFirstSeen = new Map<string, number>();
+  /** Give native auto-merge one honest chance (normally fires in seconds). */
+  private static readonly MERGE_COMPLETION_GRACE_MS = 2 * 60_000;
+  private static readonly MERGE_COMPLETION_TTL_MS = 60 * 60_000;
+
   private _handleAutoReview(
     event: string,
     payload: Record<string, unknown>,
@@ -1140,7 +1153,7 @@ export class GitHubPlugin implements Plugin {
     pr: Record<string, unknown>,
     headSha: string,
     getToken: (owner: string, repo: string) => Promise<string>,
-  ): Promise<"approved" | "needs-review" | "skip"> {
+  ): Promise<"approved" | "merged" | "needs-review" | "skip"> {
     const number = pr.number as number;
     if (!prEligibleForCiReview(pr, headSha)) return "skip";
 
@@ -1153,10 +1166,30 @@ export class GitHubPlugin implements Plugin {
       return "skip";
     }
 
-    // Fail closed: an already-APPROVED PR, no prior Quinn review, or any
-    // non-green / unverifiable CI state returns "needs-review" (caller decides
-    // whether to re-dispatch the LLM).
+    // Fail closed: no prior Quinn review or any non-green / unverifiable CI
+    // state returns "needs-review" (caller decides whether to re-dispatch the
+    // LLM).
     const latestState = quinnLatestReviewState(reviews ?? undefined);
+
+    // ── Merge-completion backstop (ws-5sc) ──────────────────────────────────
+    // Already APPROVED + terminal-green + thread-clean but still OPEN means the
+    // approve path finished its job and GitHub's native auto-merge should have
+    // landed it. It can wedge on a phantom BLOCKED merge state, so after a
+    // grace period we complete the squash merge ourselves — same fail-closed
+    // gates as the approve, plus a head-SHA guard on the merge call so a
+    // post-approval push can never be merged sight-unseen. Anything ambiguous
+    // (red, unverifiable, unresolved threads, stacked base) falls through to
+    // the existing paths.
+    if (latestState === "APPROVED" && (await this._ciGreen(getToken, owner, repo, headSha))) {
+      const unresolved = await this._hasUnresolvedReviewThreads(getToken, owner, repo, number);
+      if (unresolved === false) {
+        const merged = await this._maybeCompleteWedgedMerge(source, owner, repo, pr, headSha, getToken);
+        return merged ? "merged" : "skip";
+      }
+      // Unresolved / unverifiable threads on an APPROVED PR: not mergeable by
+      // us, and re-dispatching the LLM on a formal APPROVE is noise — hold.
+      return "skip";
+    }
     let autoApprove = false;
     let isResolvedBlocker = false;
     if ((latestState === "COMMENTED" || latestState === "CHANGES_REQUESTED") && (await this._ciGreen(getToken, owner, repo, headSha))) {
@@ -1284,11 +1317,12 @@ export class GitHubPlugin implements Plugin {
    * walks every open PR across the monitored repos and re-runs the SAME approve
    * decision (`_evaluateApproveOnGreen`) with no change to the criteria.
    *
-   * It deliberately acts ONLY on the approve path. A "needs-review" result
-   * (eligible + terminal but not auto-approvable) is left alone — re-dispatching
-   * the LLM pr_review on every sweep would spam reviews. The idempotency is
-   * natural: once a PR is APPROVED, `quinnLatestReviewState` reads APPROVED and
-   * the decision declines on the next sweep.
+   * It deliberately acts ONLY on the approve and merge-completion paths. A
+   * "needs-review" result (eligible + terminal but not auto-approvable) is left
+   * alone — re-dispatching the LLM pr_review on every sweep would spam reviews.
+   * An APPROVED + green + thread-clean PR that is still open enters the
+   * merge-completion watch (ws-5sc) and is squash-merged by the next sweep if
+   * GitHub's native auto-merge stays wedged.
    */
   private async _reconcileApproveOnGreen(
     getToken: (owner: string, repo: string) => Promise<string>,
@@ -1300,6 +1334,7 @@ export class GitHubPlugin implements Plugin {
     const coords = new Set(this.projectRegistry.getGithubCoords());
     for (const c of this.reviewedRepoCoords) coords.add(c);
     let approved = 0;
+    let merged = 0;
     for (const coord of coords) {
       const slash = coord.indexOf("/");
       if (slash <= 0) continue;
@@ -1320,6 +1355,7 @@ export class GitHubPlugin implements Plugin {
         try {
           const decision = await this._evaluateApproveOnGreen("reconcile", owner, repo, pr, headSha, getToken);
           if (decision === "approved") approved++;
+          else if (decision === "merged") merged++;
         } catch (err) {
           log.error(
             `Reconcile approve-on-green failed for ${owner}/${repo}#${pr.number}`,
@@ -1328,8 +1364,11 @@ export class GitHubPlugin implements Plugin {
         }
       }
     }
-    if (approved > 0) {
-      log.info(`Approve-on-green reconciliation sweep: ${approved} stranded PR(s) approved`);
+    if (approved > 0 || merged > 0) {
+      log.info(
+        `Approve-on-green reconciliation sweep: ${approved} stranded PR(s) approved, ` +
+          `${merged} wedged merge(s) completed`,
+      );
     }
   }
 
@@ -1446,6 +1485,86 @@ export class GitHubPlugin implements Plugin {
    *
    * Best-effort: failure here must never block the approve-on-green flow.
    */
+  /**
+   * Merge-completion backstop (ws-5sc). Called only after the caller verified
+   * the full approve-on-green criteria on the current head: PR open + eligible,
+   * Quinn's latest review APPROVED, CI terminal-green, zero unresolved review
+   * threads. Completes the squash merge iff the PR is a one-off (base = main)
+   * and the wedge has outlived the grace period — native auto-merge normally
+   * lands in seconds, so an APPROVED+green PR still OPEN a sweep later is
+   * wedged, not slow. The merge call carries the expected head SHA, so a
+   * post-approval push 409s instead of merging commits nobody reviewed.
+   */
+  private async _maybeCompleteWedgedMerge(
+    source: string,
+    owner: string,
+    repo: string,
+    pr: Record<string, unknown>,
+    headSha: string,
+    getToken: (owner: string, repo: string) => Promise<string>,
+  ): Promise<boolean> {
+    const number = pr.number as number;
+    const baseRef = (pr.base as Record<string, unknown> | undefined)?.ref as string | undefined;
+    // Stacked PRs (base != main) are never squash-merged by machinery — same
+    // exclusion as the auto-merge arming path.
+    if (baseRef !== "main") return false;
+
+    const now = Date.now();
+    for (const [k, t] of this.mergeCompletionFirstSeen) {
+      if (now - t > GitHubPlugin.MERGE_COMPLETION_TTL_MS) this.mergeCompletionFirstSeen.delete(k);
+    }
+
+    const key = `${owner}/${repo}#${number}@${headSha.slice(0, 7)}`;
+    const firstSeen = this.mergeCompletionFirstSeen.get(key);
+    if (firstSeen === undefined) {
+      this.mergeCompletionFirstSeen.set(key, now);
+      log.info(
+        `merge-completion (${source}): ${key} approved+green but still open — ` +
+          `giving native auto-merge ${Math.round(GitHubPlugin.MERGE_COMPLETION_GRACE_MS / 1000)}s before completing`,
+      );
+      return false;
+    }
+    if (now - firstSeen < GitHubPlugin.MERGE_COMPLETION_GRACE_MS) return false;
+
+    try {
+      const token = await getToken(owner, repo);
+      const res = await withCircuitBreaker("github-api", () =>
+        fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}/merge`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Accept: "application/vnd.github+json",
+            "User-Agent": "protoWorkstacean/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ sha: headSha, merge_method: "squash" }),
+        }),
+      );
+      if (!res.ok) {
+        const body = await res.text();
+        // 409 = head moved since we started watching — the watch is stale,
+        // drop it (a fresh approve cycle re-evaluates the new SHA). Any other
+        // refusal (405 not-mergeable, 403) keeps the watch for the next sweep.
+        if (res.status === 409) this.mergeCompletionFirstSeen.delete(key);
+        log.warn(`merge-completion (${source}): PUT merge → ${res.status} for ${key}: ${body.slice(0, 200)}`);
+        return false;
+      }
+      this.mergeCompletionFirstSeen.delete(key);
+      log.info(`merge-completion (${source}): completed wedged merge ${key} (armed auto-merge never fired — ws-5sc)`);
+      // Visible on the timeline so the history explains itself (#887 spirit).
+      void this._postComment(
+        getToken,
+        { owner, repo, number },
+        `🔀 Approved and terminal-green, but GitHub's auto-merge never completed (phantom BLOCKED — ws-5sc); the reconciliation sweep completed the squash merge.`,
+      );
+      return true;
+    } catch (err) {
+      log.error(`merge-completion (${source}): merge failed for ${key}`, { err });
+      return false;
+    }
+  }
+
   private async _enableAutoMerge(
     getToken: (owner: string, repo: string) => Promise<string>,
     owner: string,
