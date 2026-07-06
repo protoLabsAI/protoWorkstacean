@@ -78,7 +78,7 @@ console.log(`  REQUEST_CHANGES  ${v.REQUEST_CHANGES} (${pct(v.REQUEST_CHANGES / 
 
 console.log("\nTOOL USE");
 console.log(`  reviews profiled:  ${s.toolUse.reviewsProfiled}`);
-console.log(`  clawpatch used in: ${s.toolUse.clawpatchReviews} (${pct(s.toolUse.clawpatchRate)})`);
+console.log(`  clawpatch used in: ${s.toolUse.clawpatchReviews} (${pct(s.toolUse.clawpatchRate)}), ${s.toolUse.clawpatchCalls} calls total`);
 if (s.toolUse.callsPerReview) {
   console.log(`  tool-calls/review: median ${s.toolUse.callsPerReview.median}  p90 ${s.toolUse.callsPerReview.p90}  max ${s.toolUse.callsPerReview.max}`);
 }
