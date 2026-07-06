@@ -268,13 +268,14 @@ interface ClawpatchExecResult {
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
-function runClawpatch(
+function runCommand(
+  bin: string,
   args: string[],
   cwd: string,
   timeoutMs: number,
 ): Promise<ClawpatchExecResult> {
   return new Promise((resolve) => {
-    const child = spawn("clawpatch", args, {
+    const child = spawn(bin, args, {
       cwd,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -311,6 +312,66 @@ interface CiJsonOutput {
   errors?: Array<{ feature?: string; message?: string; layer?: string }>;
   report?: string;
   items?: unknown[];
+}
+
+/** A finding as returned to the reviewing agent — the lean, foldable shape. */
+export interface ClawpatchFinding {
+  id: string;
+  title: string;
+  severity: string;
+  category: string;
+  confidence: string;
+  evidence: Array<{ path: string; startLine?: number; endLine?: number }>;
+  recommendation: string;
+}
+
+const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+const CONFIDENCE_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+
+/** Max findings returned per review — keeps the tool result inside a sane token budget. */
+export const PR_FINDINGS_CAP = 20;
+
+/**
+ * Select the findings the reviewing agent should actually see: open findings
+ * whose evidence touches a file this PR changed (state accumulates across
+ * PRs — unrelated findings are noise on this review), highest severity then
+ * confidence first, capped.
+ */
+export function selectPrFindings(
+  items: unknown[],
+  changedPaths: string[],
+  cap: number = PR_FINDINGS_CAP,
+): ClawpatchFinding[] {
+  const changed = new Set(changedPaths);
+  const findings: ClawpatchFinding[] = [];
+  for (const raw of items) {
+    const it = raw as Record<string, unknown>;
+    if (typeof it?.id !== "string" || typeof it?.title !== "string") continue;
+    const evidence = (Array.isArray(it.evidence) ? it.evidence : [])
+      .map((e) => e as Record<string, unknown>)
+      .filter((e) => typeof e?.path === "string")
+      .map((e) => ({
+        path: e.path as string,
+        ...(typeof e.startLine === "number" ? { startLine: e.startLine } : {}),
+        ...(typeof e.endLine === "number" ? { endLine: e.endLine } : {}),
+      }));
+    if (!evidence.some((e) => changed.has(e.path))) continue;
+    findings.push({
+      id: it.id,
+      title: it.title,
+      severity: typeof it.severity === "string" ? it.severity : "unknown",
+      category: typeof it.category === "string" ? it.category : "unknown",
+      confidence: typeof it.confidence === "string" ? it.confidence : "unknown",
+      evidence,
+      recommendation: typeof it.recommendation === "string" ? it.recommendation : "",
+    });
+  }
+  findings.sort(
+    (a, b) =>
+      (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9) ||
+      (CONFIDENCE_RANK[a.confidence] ?? 9) - (CONFIDENCE_RANK[b.confidence] ?? 9),
+  );
+  return findings.slice(0, cap);
 }
 
 export function createRoutes(ctx: ApiContext): Route[] {
@@ -409,7 +470,7 @@ export function createRoutes(ctx: ApiContext): Route[] {
           args.push("--limit", String(limit));
         if (model) args.push("--model", model);
 
-        const result = await runClawpatch(args, repoPath, DEFAULT_TIMEOUT_MS);
+        const result = await runCommand("clawpatch", args, repoPath, DEFAULT_TIMEOUT_MS);
         if (result.timedOut) {
           return Response.json(
             {
@@ -445,6 +506,39 @@ export function createRoutes(ctx: ApiContext): Route[] {
           );
         }
 
+        // The ci JSON carries COUNTS only — the finding bodies live in the
+        // state dir, so a reviewer calling this tool was told "findings: 3"
+        // and nothing else (ws-91a: 61% structural call rate, but only 20% of
+        // finding-bearing runs left any trace in the review — the pipe was
+        // broken, not the prompt). Attach the open findings scoped to the
+        // files this PR actually changed, so the agent can fold them.
+        let prFindings: ClawpatchFinding[] = [];
+        let findingsError: string | undefined;
+        try {
+          const diff = await runCommand(
+            "git",
+            ["diff", "--name-only", refs.baseSha, refs.headSha],
+            repoPath,
+            30_000,
+          );
+          if (diff.exitCode !== 0) throw new Error(`git diff exited ${diff.exitCode}: ${diff.stderr.slice(0, 200)}`);
+          const changedPaths = diff.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+          const rep = await runCommand(
+            "clawpatch",
+            ["report", "--state-dir", stateDir, "--status", "open", "--json"],
+            repoPath,
+            30_000,
+          );
+          if (rep.exitCode !== 0) throw new Error(`report exited ${rep.exitCode}: ${rep.stderr.slice(0, 200)}`);
+          const repParsed = JSON.parse(rep.stdout) as { items?: unknown[] };
+          prFindings = selectPrFindings(repParsed.items ?? [], changedPaths);
+        } catch (err) {
+          // Fail loud in the response (the agent records it as a Gap), but a
+          // findings-fetch failure must not fail a completed review run.
+          findingsError = err instanceof Error ? err.message : String(err);
+          log.warn(`PR-scoped findings fetch failed for ${repo}#${pr}`, { err });
+        }
+
         return Response.json({
           success: true,
           data: {
@@ -454,6 +548,8 @@ export function createRoutes(ctx: ApiContext): Route[] {
             base: refs.baseSha,
             repoPath,
             ...parsed,
+            prFindings,
+            ...(findingsError ? { findingsError } : {}),
           },
         });
       },

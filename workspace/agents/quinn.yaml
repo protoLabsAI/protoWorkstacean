@@ -269,10 +269,13 @@ skills:
       Pass the same `repo` and `pr` number you extracted in step 1 — the
       route resolves the PR's head and base from GitHub itself and scopes
       the review to exactly the features this PR changed.
-      Each finding has severity, category, file:line evidence, and a
-      recommendation. Fold the highest-impact findings into your
-      Observations section with the same SEVERITY tags you'd assign
-      yourself, and cite clawpatch as the source ("CLAWPATCH/HIGH: ...").
+      The result's `prFindings` array is the part that matters: the open
+      findings on files this PR touched, each with severity, category,
+      confidence, file:line evidence, and a recommendation. Fold the
+      highest-impact ones into your Observations section with the same
+      SEVERITY tags you'd assign yourself, and cite clawpatch as the source
+      ("CLAWPATCH/HIGH: ..."). A `findingsError` field means the findings
+      fetch failed — record it as a Gap.
 
       **Provider choice:**
 

@@ -500,7 +500,8 @@ export function createLangChainTools(toolNames: string[], http: HttpClient, corr
           "**Provider choice:**\n" +
           "- `gateway` (default) — stateless LLM call to the LiteLLM endpoint. Prompt has file contents pre-inlined. Fast, cheap, good for nearly every PR.\n" +
           "- `proto` — spawns protoCLI as a live ACP agent during review. Agent has tool access: read additional files, run LSP queries, run typecheck/lint. Slower + more tokens but deeper structural read. Use on non-trivial PRs that warrant active investigation (large diffs, suspicious test coverage, novel patterns).\n\n" +
-          "Pass the `repo` and the `pr` number — the route resolves the PR's head + base SHAs from GitHub, checks out the head, and scopes findings to exactly the features the PR changed vs its base. `repo` must be a managed project (in the project registry); other repos return a clear error.",
+          "Pass the `repo` and the `pr` number — the route resolves the PR's head + base SHAs from GitHub, checks out the head, and scopes findings to exactly the features the PR changed vs its base. `repo` must be a managed project (in the project registry); other repos return a clear error.\n\n" +
+          "The response's `prFindings` array carries the open findings scoped to this PR's changed files — each with severity, category, confidence, file:line evidence, and a recommendation. Fold the highest-impact ones into your review Observations with a CLAWPATCH source tag.",
         schema: z.object({
           repo: z.string().describe("Repository in owner/name format (e.g. protoLabsAI/protoWorkstacean)."),
           pr: z.number().int().describe("PR number to review. The route resolves head + base SHAs from GitHub and diffs head against base — no need to pass any SHA."),
