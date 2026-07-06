@@ -139,7 +139,7 @@ function stubFetch(opts: StubOpts): Captured {
       const nodes = u ? [{ isResolved: false }] : [{ isResolved: true }];
       return json({ data: { repository: { pullRequest: { reviewThreads: { nodes } } } } });
     }
-    // APPROVE submission (POST .../reviews) via GitHubReviewSubmitter
+    // APPROVE submission (POST .../reviews) via submitPrReview (lib/github-review.ts)
     if (url.includes(`/pulls/${PR}/reviews`) && method === "POST") {
       captured.approvePosts.push(JSON.parse(String(init?.body ?? "{}")));
       return json({ id: 999 });

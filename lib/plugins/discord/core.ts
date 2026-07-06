@@ -15,7 +15,7 @@ import {
 } from "discord.js";
 import type { EventBus } from "../../types.ts";
 import type { ChannelRegistry } from "../../channels/channel-registry.ts";
-import type { ProjectRegistry } from "../../../src/plugins/project-registry.ts";
+import type { ProjectDirectory } from "../../types/projects.ts";
 import { ConversationManager } from "../../conversation/conversation-manager.ts";
 import { ConversationTracer, type TurnData } from "../../conversation/conversation-tracer.ts";
 import { IdentityRegistry } from "../../identity/identity-registry.ts";
@@ -109,7 +109,7 @@ export interface DiscordContext {
   agentClients: Map<string, Client>;
   pendingAgents: Map<string, string>;
   channelRegistry?: ChannelRegistry;
-  projectRegistry?: ProjectRegistry;
+  projectRegistry?: ProjectDirectory;
   mailbox?: ContextMailbox;
   isExecutionActive?: (correlationId: string) => boolean;
   conversationManager: ConversationManager;
@@ -161,7 +161,7 @@ export function buildContext(opts: {
   workspaceDir: string;
   client: Client;
   channelRegistry?: ChannelRegistry;
-  projectRegistry?: ProjectRegistry;
+  projectRegistry?: ProjectDirectory;
   mailbox?: ContextMailbox;
   isExecutionActive?: (correlationId: string) => boolean;
   identityRegistry: IdentityRegistry | null;

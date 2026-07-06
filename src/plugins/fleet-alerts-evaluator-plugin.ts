@@ -13,7 +13,7 @@
  *
  * Re-wire: this plugin registers the `evaluate_fleet_thresholds` skill (a
  * FunctionExecutor) on the ExecutorRegistry. A new ceremony
- * (workspace/ceremonies/fleet-alerts.yaml) dispatches the skill every minute,
+ * (workspace/ceremonies/fleet-alerts.yaml) dispatches the skill every 5 minutes,
  * which triggers _evaluate() to:
  *
  *   1. Read AgentFleetHealthPlugin.getFleetHealth()
@@ -65,7 +65,7 @@ interface ThresholdViolation {
 export class FleetAlertsEvaluatorPlugin implements Plugin {
   readonly name = "fleet-alerts-evaluator";
   readonly description =
-    "Evaluates fleet-health thresholds every minute and dispatches alert.* skills on violation";
+    "Evaluates fleet-health thresholds on the fleet_alerts ceremony cadence (5 min) and dispatches alert.* skills on violation";
   readonly capabilities = ["fleet-alerts-evaluator", "executor-registrar"];
 
   private bus?: EventBus;

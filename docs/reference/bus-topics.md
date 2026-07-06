@@ -6,11 +6,11 @@ title: Bus Topics
 
 ## Summary
 
-- **85** distinct topics seen across the codebase
-- **23** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
-- **62** raw-string / template topics not in TOPICS (candidates to register)
-- **18** topics that couldn't be statically resolved (computed at runtime)
-- **100** publish call sites, **59** subscribe call sites
+- **88** distinct topics seen across the codebase
+- **31** declared in `src/event-bus/all-topics.ts` (TOPICS constant)
+- **57** raw-string / template topics not in TOPICS (candidates to register)
+- **19** topics that couldn't be statically resolved (computed at runtime)
+- **105** publish call sites, **61** subscribe call sites
 
 Each row links to the original call site as `path:line` so jumping from this index to the source is a click.
 
@@ -18,22 +18,27 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `#` | — | — | _(none)_ | `src/event-bus/history-recorder.ts:142`<br>`lib/plugins/event-viewer.ts:32`<br>`lib/plugins/logger.ts:50` |
+| `#` | — | — | _(none)_ | `src/event-bus/history-recorder.ts:145`<br>`lib/plugins/event-viewer.ts:39`<br>`lib/plugins/logger.ts:97` |
+
+## `?.*`
+
+| Topic | Declared | Payload | Publishers | Subscribers |
+|---|---|---|---|---|
+| `?.topic` | — | — | _(none)_ | `src/plugins/routes-plugin.ts:77`<br>`lib/plugins/event-viewer.ts:91` |
 
 ## `agent.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `agent.chat.inbound` | — | — | `src/api/ava-tools.ts:168` | _(none)_ |
-| `agent.chat.outbound` | — | — | `src/api/ava-tools.ts:109` | _(none)_ |
+| `agent.chat.inbound` | — | — | `src/api/ava-tools.ts:199` | _(none)_ |
+| `agent.chat.outbound` | — | — | `src/api/ava-tools.ts:119` | _(none)_ |
 | `agent.input.request` | ✅ `AGENT_INPUT_REQUEST_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
 | `agent.input.response` | ✅ `AGENT_INPUT_RESPONSE_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
-| `agent.skill.latency` | ✅ `AGENT_SKILL_LATENCY` (`ACTION_TOPICS`) | — | `src/executor/skill-dispatcher-plugin.ts:518` | _(none)_ |
+| `agent.skill.latency` | ✅ `AGENT_SKILL_LATENCY` (`ACTION_TOPICS`) | — | `src/executor/skill-dispatcher-plugin.ts:546` | _(none)_ |
 | `agent.skill.progress` | ✅ `AGENT_SKILL_PROGRESS_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
-| `agent.skill.toolframe.{correlationId}` | ✅ `AGENT_SKILL_TOOLFRAME_PREFIX` (`ACTION_TOPICS`) | `ToolCallArtifactData` (tool-call-v1) | `src/agent-runtime/agent-runtime-plugin.ts:394` | `src/api/a2a-server.ts:217` |
-| `agent.skill.request` | ✅ `AGENT_SKILL_REQUEST` (`ACTION_TOPICS`) | — | `src/router/router-plugin.ts:295`<br>`src/router/router-plugin.ts:342`<br>`src/executor/skill-dispatcher-plugin.ts:667`<br>`src/api/openai-compat.ts:171`<br>`src/api/ava-tools.ts:132`<br>`src/api/ava-tools.ts:323`<br>`src/api/a2a-server.ts:390`<br>`src/plugins/fleet-alerts-evaluator-plugin.ts:188`<br>`lib/plugins/linear-proto-bridge.ts:105`<br>`lib/plugins/discord/inbound.ts:45` | `src/executor/skill-dispatcher-plugin.ts:183` |
-| `agent.skill.response.{correlationId}` | — | — | _(none)_ | `src/api/ava-tools.ts:52` |
-| `agent.skill.response.#` | — | — | _(none)_ | `src/event-bus/skill-response-cache.ts:96` |
+| `agent.skill.request` | ✅ `AGENT_SKILL_REQUEST` (`ACTION_TOPICS`) | — | `src/router/router-plugin.ts:299`<br>`src/router/router-plugin.ts:346`<br>`src/executor/skill-dispatcher-plugin.ts:696`<br>`src/api/openai-compat.ts:173`<br>`src/api/ava-tools.ts:145`<br>`src/api/ava-tools.ts:354`<br>`src/api/a2a-server.ts:395`<br>`src/plugins/routes-plugin.ts:96`<br>`src/plugins/fleet-alerts-evaluator-plugin.ts:191`<br>`lib/plugins/linear-proto-bridge.ts:106`<br>`lib/plugins/discord/inbound.ts:48`<br>`lib/plugins/discord/inbound.ts:192` | `src/executor/skill-dispatcher-plugin.ts:191` |
+| `agent.skill.response.{correlationId}` | — | — | _(none)_ | `src/api/ava-tools.ts:51` |
+| `agent.skill.toolframe` | ✅ `AGENT_SKILL_TOOLFRAME_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
 
 **`agent.input.request`** — Prefix for human-input requests. Full topic is `agent.input.request.{correlationId}`. An in-process agent's `ask_human` tool (via POST /api/agent/ask-human) publishes here when it needs an answer from the A2A caller; BusAgentExecutor turns it into an `input-required` status-update on the caller's stream. See src/api/human-input.ts.
 
@@ -43,22 +48,22 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 **`agent.skill.progress`** — Prefix for skill-progress events. Full topic is `agent.skill.progress.{correlationId}`. Skill executors that want to stream intermediate progress to a long-running A2A caller publish to this topic; BusAgentExecutor translates each event into a `status-update` (state=working, final=false) on the A2A `message/stream` channel. Opt-in — executors that don't publish lose nothing. See AgentSkillProgressPayload in src/event-bus/payloads.ts.
 
-**`agent.skill.toolframe`** — Prefix for structured tool-call-v1 frames. Full topic is `agent.skill.toolframe.{correlationId}`. AgentRuntimePlugin publishes one frame per tool lifecycle event (started → completed/failed), sourced from DeepAgentExecutor's `onToolFrame` callback; the a2a-server subscribes and emits each frame as a streamed artifact-update DataPart for clients that render a structured tool timeline. Sibling to the plain-text narration on `agent.skill.progress.{correlationId}`. Opt-in.
-
 **`agent.skill.request`** — Published to invoke an agent skill (unified dispatch).
+
+**`agent.skill.toolframe`** — Prefix for structured tool-call-v1 frames. Full topic is `agent.skill.toolframe.{correlationId}`. The in-process runtime publishes one frame per tool lifecycle event (started → completed/failed); the a2a-server emits each as a streamed artifact-update DataPart for clients that render a structured tool timeline. Sibling to the plain-text narration on AGENT_SKILL_PROGRESS_PREFIX. Opt-in.
 
 ## `auth.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `auth.token_refresh_failed` | — | — | `lib/plugins/google/auth.ts:102` | _(none)_ |
+| `auth.token_refresh_failed` | — | — | `lib/plugins/google/auth.ts:105` | _(none)_ |
 
 ## `autonomous.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
 | `autonomous.outcome` | ✅ `AUTONOMOUS_OUTCOME_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
-| `autonomous.outcome.#` | — | — | _(none)_ | `src/plugins/agent-fleet-health-plugin.ts:206` |
+| `autonomous.outcome.#` | — | — | _(none)_ | `src/plugins/agent-fleet-health-plugin.ts:209` |
 
 **`autonomous.outcome`** — Published by SkillDispatcherPlugin after every task reaches terminal state. Full topic is `autonomous.outcome.{systemActor}.{skill}`.
 
@@ -72,33 +77,41 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `ceremony.#` | — | — | _(none)_ | `src/world/extensions/CeremonyStateExtension.ts:68`<br>`src/plugins/CeremonyPlugin.ts:127` |
+| `ceremony.#` | — | — | _(none)_ | `src/world/extensions/CeremonyStateExtension.ts:64`<br>`src/plugins/CeremonyPlugin.ts:130` |
 
 ## `command.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `command.a2a.remove` | ✅ `COMMAND_A2A_REMOVE` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/skill-broker-plugin.ts:140`<br>`src/plugins/control-plane-registrar-plugin.ts:44` |
-| `command.a2a.upsert` | ✅ `COMMAND_A2A_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/skill-broker-plugin.ts:136`<br>`src/plugins/control-plane-registrar-plugin.ts:43` |
-| `command.agent.remove` | ✅ `COMMAND_AGENT_REMOVE` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:42` |
-| `command.agent.upsert` | ✅ `COMMAND_AGENT_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:41` |
-| `command.schedule` | — | — | _(none)_ | `lib/plugins/scheduler.ts:73` |
+| `command.a2a.remove` | ✅ `COMMAND_A2A_REMOVE` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/skill-broker-plugin.ts:179`<br>`src/plugins/control-plane-registrar-plugin.ts:66` |
+| `command.a2a.upsert` | ✅ `COMMAND_A2A_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/skill-broker-plugin.ts:175`<br>`src/plugins/control-plane-registrar-plugin.ts:65` |
+| `command.agent.remove` | ✅ `COMMAND_AGENT_REMOVE` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:64` |
+| `command.agent.upsert` | ✅ `COMMAND_AGENT_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:63` |
+| `command.mcp.remove` | ✅ `COMMAND_MCP_REMOVE` (`ACTION_TOPICS`) | — | _(none)_ | `src/mcp/mcp-client-plugin.ts:66`<br>`src/plugins/control-plane-registrar-plugin.ts:68` |
+| `command.mcp.upsert` | ✅ `COMMAND_MCP_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/mcp/mcp-client-plugin.ts:62`<br>`src/plugins/control-plane-registrar-plugin.ts:67` |
+| `command.route.remove` | ✅ `COMMAND_ROUTE_REMOVE` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:70` |
+| `command.route.upsert` | ✅ `COMMAND_ROUTE_UPSERT` (`ACTION_TOPICS`) | — | _(none)_ | `src/plugins/control-plane-registrar-plugin.ts:69` |
+| `command.schedule` | — | — | _(none)_ | `lib/plugins/scheduler.ts:68` |
 
 **`command.a2a.upsert`** — A2A-endpoint mutations (ADR-0004 P3). The registrar persists the entry to workspace/agents.d/&lt;name&gt;.yaml; SkillBroker registers/unregisters the A2AExecutor live in the same turn (no restart). command.a2a.upsert — { name, file, yaml, entry } command.a2a.remove — { name, file }
 
 **`command.agent.upsert`** — Control-plane mutations (ADR-0004 P2). The write API publishes these; the ControlPlaneRegistrar is the sole subscriber + the only writer of the workspace config files. Auditable in bus-history. The file write triggers the agent-runtime hot-reload (P1), so the change goes live within ~5s. command.agent.upsert  — { name, file, yaml }  → atomic write command.agent.remove  — { name, file }        → delete
 
+**`command.mcp.upsert`** — MCP-server mutations (ADR-0005, ADR-0004 P4). The registrar persists the entry to workspace/mcp-servers.d/&lt;name&gt;.yaml; McpClientPlugin connects and registers/unregisters one McpExecutor per discovered tool live (no restart). command.mcp.upsert — { name, file, yaml, entry } command.mcp.remove — { name, file }
+
+**`command.route.upsert`** — Route (wiring) mutations (ADR-0008 P2). The registrar persists the route to workspace/routes.d/&lt;name&gt;.yaml; RoutesPlugin hot-reloads and (un)subscribes its trigger topic live (no restart). command.route.upsert — { name, file, yaml } command.route.remove — { name, file }
+
 ## `config.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `config.updated` | — | — | `lib/plugins/google.ts:129` | _(none)_ |
+| `config.updated` | — | — | `lib/plugins/google.ts:132` | _(none)_ |
 
 ## `cron.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `cron.#` | ✅ `CRON_ALL` (`ACTION_TOPICS`) | — | _(none)_ | `src/router/router-plugin.ts:111`<br>`lib/plugins/a2a-delivery.ts:79` |
+| `cron.#` | ✅ `CRON_ALL` (`ACTION_TOPICS`) | — | _(none)_ | `src/router/router-plugin.ts:115`<br>`lib/plugins/a2a-delivery.ts:82` |
 
 **`cron.#`** — Wildcard subscription pattern — matches all cron events from SchedulerPlugin.
 
@@ -106,14 +119,14 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `def.topic` | — | — | `lib/plugins/scheduler.ts:263` | _(none)_ |
+| `def.topic` | — | — | `lib/plugins/scheduler.ts:258` | _(none)_ |
 
 ## `dispatch.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
 | `dispatch.dropped` | ✅ `DISPATCH_DROPPED_PREFIX` (`ACTION_TOPICS`) | — | _(none)_ | _(none)_ |
-| `dispatch.dropped.#` | — | — | _(none)_ | `src/plugins/dispatch-drop-escalator-plugin.ts:68` |
+| `dispatch.dropped.#` | — | — | _(none)_ | `src/plugins/dispatch-drop-escalator-plugin.ts:71` |
 
 **`dispatch.dropped`** — Prefix for dispatcher drop events. Full topic is `dispatch.dropped.{reason}` where reason ∈ {no_skill, target_unresolved, cooldown}. Published by SkillDispatcherPlugin at each chokepoint drop site so subscribers (dashboard, drop-rate alerts) can count + filter by reason without scraping stdout. Payload shape: see `DispatchDroppedPayload` in src/event-bus/payloads.ts.
 
@@ -121,63 +134,57 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `flow.item.completed` | — | — | `lib/plugins/github.ts:509` | _(none)_ |
-| `flow.item.created` | — | `FlowItemPayload` | `lib/plugins/github.ts:484` | _(none)_ |
-| `flow.item.updated` | — | — | `lib/plugins/github.ts:499` | _(none)_ |
+| `flow.item.completed` | ✅ `FLOW_ITEM_COMPLETED` (`FLOW_TOPICS`) | — | `lib/plugins/github.ts:661` | _(none)_ |
+| `flow.item.created` | ✅ `FLOW_ITEM_CREATED` (`FLOW_TOPICS`) | `FlowItemPayload` | `lib/plugins/github.ts:636` | _(none)_ |
+| `flow.item.updated` | ✅ `FLOW_ITEM_UPDATED` (`FLOW_TOPICS`) | — | `lib/plugins/github.ts:651` | _(none)_ |
 
-## `github.*`
-
-| Topic | Declared | Payload | Publishers | Subscribers |
-|---|---|---|---|---|
-| `github.issue.opened` | ✅ `GITHUB_ISSUE_OPENED` (`GITHUB_TOPICS`) | `GithubIssueOpenedPayload` | `lib/plugins/github.ts:452` | _(none)_ |
-
-**`github.issue.opened`** — Published by the GitHub plugin for every opened/reopened issue the webhook covers — additive, independent of the @mention / auto-triage paths. Emitted for any subscriber that wants an issue-lifecycle signal. Payload shape: see `GithubIssueOpenedPayload`.
+**`flow.item.created`** — Flow-item lifecycle — published by SkillDispatcherPlugin for every dispatch (one item per correlationId, id = `skill-<correlationId>`). Consumed by the BusHistoryRecorder + FlowStorePlugin (the durable execution log behind `GET /api/flows` / the orchestration canvas, ADR-0008). Payload: FlowItemPayload.
 
 ## `google.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `google.gmail.reply.#` | — | — | _(none)_ | `lib/plugins/google/gmail.ts:242` |
+| `google.gmail.reply.#` | — | — | _(none)_ | `lib/plugins/google/gmail.ts:245` |
 
 ## `linear.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `linear.agent_activity.#` | — | — | _(none)_ | `lib/plugins/linear.ts:530` |
-| `linear.create.issue` | — | — | _(none)_ | `lib/plugins/linear.ts:788` |
-| `linear.reply.#` | — | — | _(none)_ | `lib/plugins/linear.ts:671` |
-| `linear.update.issue.#` | — | — | _(none)_ | `lib/plugins/linear.ts:735` |
+| `linear.agent_activity.#` | — | — | _(none)_ | `lib/plugins/linear.ts:529` |
+| `linear.create.issue` | — | — | _(none)_ | `lib/plugins/linear.ts:787` |
+| `linear.reply.#` | — | — | _(none)_ | `lib/plugins/linear.ts:670` |
+| `linear.update.issue.#` | — | — | _(none)_ | `lib/plugins/linear.ts:734` |
 
 ## `logger.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `logger.turn.query` | — | — | _(none)_ | `lib/plugins/logger.ts:55` |
+| `logger.turn.query` | — | — | _(none)_ | `lib/plugins/logger.ts:109` |
 
 ## `message.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `message.inbound.#` | ✅ `MESSAGE_INBOUND_ALL` (`MESSAGE_TOPICS`) | — | _(none)_ | `src/router/router-plugin.ts:104`<br>`lib/plugins/echo.ts:9` |
-| `message.inbound.discord.{channelId}` | — | — | `lib/plugins/discord/inbound.ts:130`<br>`lib/plugins/discord/inbound.ts:247`<br>`lib/plugins/discord/inbound.ts:283` | _(none)_ |
-| `message.inbound.discord.{topicSuffix}` | — | — | `lib/plugins/discord/slash-commands.ts:121`<br>`lib/plugins/discord/slash-commands.ts:140` | _(none)_ |
+| `message.inbound.#` | ✅ `MESSAGE_INBOUND_ALL` (`MESSAGE_TOPICS`) | — | _(none)_ | `src/router/router-plugin.ts:108`<br>`lib/plugins/echo.ts:9` |
+| `message.inbound.discord.{channelId}` | — | — | `lib/plugins/discord/inbound.ts:208`<br>`lib/plugins/discord/inbound.ts:354`<br>`lib/plugins/discord/inbound.ts:400` | _(none)_ |
+| `message.inbound.discord.{topicSuffix}` | — | — | `lib/plugins/discord/slash-commands.ts:124`<br>`lib/plugins/discord/slash-commands.ts:143` | _(none)_ |
 | `message.inbound.github.` | ✅ `MESSAGE_INBOUND_GITHUB_PREFIX` (`MESSAGE_TOPICS`) | — | _(none)_ | _(none)_ |
-| `message.inbound.google.calendar` | — | — | `lib/plugins/google/calendar.ts:71` | _(none)_ |
-| `message.inbound.linear.agent_session.#` | — | — | _(none)_ | `lib/plugins/linear.ts:515` |
-| `message.inbound.linear.agent_session.created` | — | — | `lib/plugins/linear-agent-session-poller.ts:143` | _(none)_ |
-| `message.inbound.linear.issue.created` | — | — | _(none)_ | `lib/plugins/linear-proto-bridge.ts:63` |
-| `message.inbound.onboard` | — | — | _(none)_ | `lib/plugins/onboarding.ts:142` |
+| `message.inbound.google.calendar` | — | — | `lib/plugins/google/calendar.ts:74` | _(none)_ |
+| `message.inbound.linear.agent_session.#` | — | — | _(none)_ | `lib/plugins/linear.ts:514` |
+| `message.inbound.linear.agent_session.created` | — | — | `lib/plugins/linear-agent-session-poller.ts:146` | _(none)_ |
+| `message.inbound.linear.issue.created` | — | — | _(none)_ | `lib/plugins/linear-proto-bridge.ts:66` |
+| `message.inbound.onboard` | — | — | _(none)_ | `lib/plugins/onboarding.ts:143` |
 | `message.outbound.cli` | — | — | _(none)_ | `lib/plugins/cli.ts:18` |
-| `message.outbound.discord.#` | — | — | _(none)_ | `lib/plugins/discord/outbound.ts:43` |
-| `message.outbound.discord.alert` | ✅ `MESSAGE_OUTBOUND_DISCORD_ALERT` (`MESSAGE_TOPICS`) | — | `src/plugins/quinn-review-notifier-plugin.ts:113`<br>`src/plugins/alert-skill-executor-plugin.ts:135` | _(none)_ |
-| `message.outbound.discord.dm.user.#` | — | — | _(none)_ | `lib/plugins/discord/outbound.ts:129` |
-| `message.outbound.discord.push.{AGENT_OPS_CHANNEL}` | — | — | `src/api/ava-tools.ts:117`<br>`src/api/ava-tools.ts:181` | _(none)_ |
-| `message.outbound.discord.push.{opsChannel}` | — | — | `src/plugins/skill-broker-plugin.ts:178` | _(none)_ |
-| `message.outbound.github.#` | — | — | _(none)_ | `lib/plugins/github.ts:318` |
-| `message.outbound.google.docs` | — | — | _(none)_ | `lib/plugins/google/docs.ts:60` |
-| `message.outbound.google.drive` | — | — | _(none)_ | `lib/plugins/google/drive.ts:61` |
+| `message.outbound.discord.#` | — | — | _(none)_ | `lib/plugins/discord/outbound.ts:46` |
+| `message.outbound.discord.alert` | ✅ `MESSAGE_OUTBOUND_DISCORD_ALERT` (`MESSAGE_TOPICS`) | — | `src/plugins/quinn-review-notifier-plugin.ts:116`<br>`src/plugins/alert-skill-executor-plugin.ts:138` | _(none)_ |
+| `message.outbound.discord.dm.user.#` | — | — | _(none)_ | `lib/plugins/discord/outbound.ts:132` |
+| `message.outbound.discord.push.{AGENT_OPS_CHANNEL}` | — | — | `src/api/ava-tools.ts:127`<br>`src/api/ava-tools.ts:212` | _(none)_ |
+| `message.outbound.discord.push.{opsChannel}` | — | — | `src/plugins/skill-broker-plugin.ts:217` | _(none)_ |
+| `message.outbound.github.#` | — | — | _(none)_ | `lib/plugins/github.ts:473` |
+| `message.outbound.google.docs` | — | — | _(none)_ | `lib/plugins/google/docs.ts:63` |
+| `message.outbound.google.drive` | — | — | _(none)_ | `lib/plugins/google/drive.ts:64` |
 | `message.outbound.signal` | ✅ `MESSAGE_OUTBOUND_SIGNAL` (`MESSAGE_TOPICS`) | — | _(none)_ | _(none)_ |
-| `message.outbound.signal.#` | — | — | _(none)_ | `lib/plugins/signal.ts:45` |
+| `message.outbound.signal.#` | — | — | _(none)_ | `lib/plugins/signal.ts:48` |
 
 **`message.inbound.#`** — Wildcard subscription pattern — matches all inbound surface messages.
 
@@ -191,20 +198,20 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `msg.topic` | — | — | `lib/plugins/cli.ts:180`<br>`lib/plugins/cli.ts:201`<br>`lib/plugins/signal.ts:103` | _(none)_ |
+| `msg.topic` | — | — | `lib/plugins/cli.ts:180`<br>`lib/plugins/cli.ts:201`<br>`lib/plugins/signal.ts:106` | _(none)_ |
 
 ## `operator.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `operator.message.failed.{correlationId}` | — | — | `lib/plugins/operator-routing.ts:90` | _(none)_ |
-| `operator.message.request` | — | — | `src/api/operator.ts:69`<br>`src/plugins/dispatch-drop-escalator-plugin.ts:144` | `lib/plugins/operator-routing.ts:76` |
+| `operator.message.failed.{correlationId}` | — | — | `lib/plugins/operator-routing.ts:91` | _(none)_ |
+| `operator.message.request` | — | — | `src/api/operator.ts:69`<br>`src/plugins/dispatch-drop-escalator-plugin.ts:158`<br>`lib/plugins/github.ts:1036` | `lib/plugins/operator-routing.ts:79` |
 
 ## `quinn.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `quinn.review.submitted` | ✅ `QUINN_REVIEW_SUBMITTED` (`REVIEW_TOPICS`) | — | `src/api/pr-inspector.ts:430` | `src/plugins/quinn-review-notifier-plugin.ts:53` |
+| `quinn.review.submitted` | ✅ `QUINN_REVIEW_SUBMITTED` (`REVIEW_TOPICS`) | — | `src/api/pr-inspector.ts:624` | `src/plugins/quinn-review-notifier-plugin.ts:56` |
 
 **`quinn.review.submitted`** — Published by `pr-inspector` after a `review_comment` / `review_approve` / `review_request_changes` action succeeds. Fire-and-forget signal for any notifier (Discord embed, dashboard activity feed, etc.) that wants to react to Quinn's review verdicts without subscribing to every github API response. See `quinn-review-notifier-plugin` for the Discord side. Payload shape: { owner, repo, prNumber, event, reviewId?, prUrl? }.
 
@@ -212,27 +219,43 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `release.published` | ✅ `RELEASE_PUBLISHED` (`RELEASE_TOPICS`) | `ReleasePublishedPayload` | `lib/plugins/github.ts:425` | _(none)_ |
+| `release.published` | ✅ `RELEASE_PUBLISHED` (`RELEASE_TOPICS`) | — | `lib/plugins/github.ts:593` | _(none)_ |
 
-**`release.published`** — Published by the GitHub plugin when a GitHub Release is published (native `release` webhook, action=published). Mechanism-agnostic — fires whether the release was cut by auto-release.yml `gh release create`, release-tools, or by hand. A general fleet lifecycle primitive: content surfacing, changelog aggregation, deploy verification, and announce subscribe here. Payload shape: see `ReleasePublishedPayload` in src/event-bus/payloads.ts.
+**`release.published`** — Published by the GitHub plugin when a GitHub Release is published (native `release` webhook, action=published). Mechanism-agnostic — fires whether the release was cut by auto-release.yml `gh release create`, release-tools, or by hand. A general fleet lifecycle primitive: content surfacing, changelog aggregation, deploy verification, and announce subscribe here. Payload shape: see `ReleasePublishedPayload` in lib/types/events.ts.
 
 ## `reply.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `reply.topic` | — | — | `lib/plugins/scheduler.ts:374`<br>`lib/plugins/echo.ts:35` | _(none)_ |
+| `reply.topic` | — | — | `lib/plugins/scheduler.ts:369`<br>`lib/plugins/echo.ts:35` | _(none)_ |
 
 ## `req.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `req.replyTopic` | — | — | `lib/plugins/logger.ts:59` | _(none)_ |
+| `req.replyTopic` | — | — | `lib/plugins/logger.ts:113` | _(none)_ |
+
+## `review.*`
+
+| Topic | Declared | Payload | Publishers | Subscribers |
+|---|---|---|---|---|
+| `review.comment.replied` | ✅ `REVIEW_COMMENT_REPLIED` (`REVIEW_TOPICS`) | — | `lib/plugins/github.ts:695` | `src/plugins/review-learning-plugin.ts:66` |
+| `review.pr.merged` | ✅ `REVIEW_PR_MERGED` (`REVIEW_TOPICS`) | — | `lib/plugins/github.ts:671` | `src/plugins/review-learning-plugin.ts:58` |
+| `review.verdict.dismissed` | ✅ `REVIEW_DISMISSED` (`REVIEW_TOPICS`) | — | `lib/plugins/github.ts:712` | `src/plugins/review-learning-plugin.ts:72` |
+
+**`review.pr.merged`** — Review-learning signals — published raw by the GitHub plugin, consumed by `ReviewLearningPlugin` (Qdrant indexing + dismissal tracking). Payload shapes: `ReviewPrMergedPayload` / `ReviewCommentRepliedPayload` / `ReviewDismissedPayload` in lib/types/events.ts.
+
+## `row.*`
+
+| Topic | Declared | Payload | Publishers | Subscribers |
+|---|---|---|---|---|
+| `row.replyTopic` | — | — | `src/executor/task-tracker.ts:178` | _(none)_ |
 
 ## `security.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `security.incident.reported` | ✅ `SECURITY_INCIDENT_REPORTED` (`SECURITY_TOPICS`) | `IncidentReportedPayload` | `src/api/incidents.ts:82`<br>`src/api/incidents.ts:119` | _(none)_ |
+| `security.incident.reported` | ✅ `SECURITY_INCIDENT_REPORTED` (`SECURITY_TOPICS`) | `IncidentReportedPayload` | `src/api/incidents.ts:84`<br>`src/api/incidents.ts:136` | _(none)_ |
 
 **`security.incident.reported`** — Published when a security incident is detected.
 
@@ -240,44 +263,46 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `skill.ab_test.register` | — | — | _(none)_ | `src/executor/skill-ab-test-plugin.ts:191` |
-| `skill.ab_test.resolved` | — | — | `src/executor/skill-ab-test-plugin.ts:281` | _(none)_ |
+| `skill.ab_test.register` | — | — | _(none)_ | `src/executor/skill-ab-test-plugin.ts:194` |
+| `skill.ab_test.resolved` | — | — | `src/executor/skill-ab-test-plugin.ts:284` | _(none)_ |
 
-## `step.*`
+## `system.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `step.topic` | — | — | `src/executor/executors/workflow-executor.ts:44` | _(none)_ |
+| `system.error` | ✅ `SYSTEM_ERROR` (`SYSTEM_TOPICS`) | — | _(none)_ | `lib/plugins/app-alert.ts:48` |
+
+**`system.error`** — App-self error — published by the bus when a subscriber handler throws (#800). Consumed by AppAlertPlugin, which posts a throttled message to the ops Discord webhook. Payload: { source, plugin?, pattern?, error }.
 
 ## `task.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `task.replyTopic` | — | — | `src/executor/task-tracker.ts:330` | _(none)_ |
+| `task.replyTopic` | — | — | `src/executor/task-tracker.ts:450` | _(none)_ |
 
 ## `{RESPONSE_TOPIC_WILDCARD}.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{RESPONSE_TOPIC_WILDCARD}` | — | — | _(none)_ | `src/event-bus/skill-response-cache.ts:114` |
+| `{RESPONSE_TOPIC_WILDCARD}` | — | — | _(none)_ | `src/event-bus/skill-response-cache.ts:117` |
 
 ## `{completedTopic}.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{completedTopic}` | — | — | `src/plugins/CeremonyPlugin.ts:453` | _(none)_ |
+| `{completedTopic}` | — | — | `src/plugins/CeremonyPlugin.ts:466` | _(none)_ |
 
 ## `{computed}.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{computed}` | — | — | `src/api/a2a-server.ts:133`<br>`src/api/a2a-server.ts:188`<br>`src/api/a2a-server.ts:212`<br>`src/api/a2a-server.ts:271`<br>`src/api/a2a-server.ts:303`<br>`src/api/a2a-server.ts:319`<br>`src/api/a2a-server.ts:341` | _(none)_ |
+| `{computed}` | — | — | `src/api/a2a-server.ts:159`<br>`src/api/a2a-server.ts:204`<br>`src/api/a2a-server.ts:226`<br>`src/api/a2a-server.ts:246`<br>`src/api/a2a-server.ts:309`<br>`src/api/a2a-server.ts:319`<br>`src/api/a2a-server.ts:344`<br>`src/api/a2a-server.ts:360`<br>`src/api/a2a-server.ts:382` | _(none)_ |
 
 ## `{executeTopic}.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{executeTopic}` | — | — | `src/plugins/ceremony-skill-executor-plugin.ts:123`<br>`src/plugins/CeremonyPlugin.ts:344` | _(none)_ |
+| `{executeTopic}` | — | — | `src/plugins/ceremony-skill-executor-plugin.ts:121`<br>`src/plugins/CeremonyPlugin.ts:353` | _(none)_ |
 
 ## `{failedTopic}.*`
 
@@ -289,19 +314,19 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{inputReqTopic}` | — | — | _(none)_ | `src/api/a2a-server.ts:209` |
+| `{inputReqTopic}` | — | — | _(none)_ | `src/api/a2a-server.ts:243` |
 
 ## `{progressTopic}.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{progressTopic}` | — | — | `src/api/discord.ts:338` | `src/api/a2a-server.ts:155` |
+| `{progressTopic}` | — | — | `src/agent-runtime/agent-runtime-plugin.ts:345`<br>`src/agent-runtime/agent-runtime-plugin.ts:373`<br>`src/api/discord.ts:341` | `src/api/a2a-server.ts:182` |
 
 ## `{replyTopic}.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{replyTopic}` | — | — | `src/executor/skill-dispatcher-plugin.ts:832`<br>`lib/plugins/onboarding.ts:375` | `src/api/openai-compat.ts:157`<br>`src/api/a2a-server.ts:235`<br>`src/plugins/CeremonyPlugin.ts:372` |
+| `{replyTopic}` | — | — | `src/executor/skill-dispatcher-plugin.ts:869`<br>`lib/plugins/onboarding.ts:376` | `src/api/openai-compat.ts:159`<br>`src/api/a2a-server.ts:263`<br>`src/plugins/CeremonyPlugin.ts:387` |
 
 ## `{requestTopic}.*`
 
@@ -319,13 +344,19 @@ Each row links to the original call site as `path:line` so jumping from this ind
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{skillRequestTopic}` | — | — | `src/plugins/CeremonyPlugin.ts:399` | _(none)_ |
+| `{skillRequestTopic}` | — | — | `src/plugins/CeremonyPlugin.ts:412` | _(none)_ |
+
+## `{toolFrameTopic}.*`
+
+| Topic | Declared | Payload | Publishers | Subscribers |
+|---|---|---|---|---|
+| `{toolFrameTopic}` | — | — | _(none)_ | `src/api/a2a-server.ts:222` |
 
 ## `{topic}.*`
 
 | Topic | Declared | Payload | Publishers | Subscribers |
 |---|---|---|---|---|
-| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:120`<br>`src/agent-runtime/agent-runtime-plugin.ts:200`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:282`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:713`<br>`src/executor/skill-dispatcher-plugin.ts:788`<br>`src/executor/skill-dispatcher-plugin.ts:812`<br>`src/executor/skill-dispatcher-plugin.ts:861`<br>`src/api/agents-crud.ts:55`<br>`src/api/operations.ts:80`<br>`src/api/operations.ts:115`<br>`src/api/operations.ts:133`<br>`lib/plugins/linear.ts:430`<br>`lib/plugins/linear.ts:477`<br>`lib/plugins/linear.ts:556`<br>`lib/plugins/linear.ts:603`<br>`lib/plugins/linear.ts:636`<br>`lib/plugins/linear.ts:853`<br>`lib/plugins/github.ts:393`<br>`lib/plugins/github.ts:635`<br>`lib/plugins/github.ts:715`<br>`lib/plugins/operator-routing.ts:128`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:152`<br>`lib/plugins/onboarding.ts:325` | `src/executor/executors/workflow-executor.ts:93`<br>`src/index.ts:754` |
+| `{topic}` | — | — | `src/world/extensions/CeremonyStateExtension.ts:116`<br>`src/agent-runtime/agent-runtime-plugin.ts:319`<br>`src/agent-runtime/agent-runtime-plugin.ts:399`<br>`src/executor/executors/proto-sdk-executor.ts:86`<br>`src/executor/task-tracker.ts:404`<br>`src/executor/extensions/effect-domain.ts:85`<br>`src/executor/extensions/cost.ts:210`<br>`src/executor/extensions/confidence.ts:166`<br>`src/executor/skill-dispatcher-plugin.ts:750`<br>`src/executor/skill-dispatcher-plugin.ts:825`<br>`src/executor/skill-dispatcher-plugin.ts:849`<br>`src/executor/skill-dispatcher-plugin.ts:898`<br>`src/api/agents-crud.ts:55`<br>`src/api/operations.ts:106`<br>`src/api/operations.ts:156`<br>`src/api/operations.ts:191`<br>`src/api/routes-crud.ts:34`<br>`src/api/mcp-crud.ts:113`<br>`lib/plugins/linear.ts:429`<br>`lib/plugins/linear.ts:476`<br>`lib/plugins/linear.ts:555`<br>`lib/plugins/linear.ts:602`<br>`lib/plugins/linear.ts:635`<br>`lib/plugins/linear.ts:852`<br>`lib/plugins/github.ts:561`<br>`lib/plugins/github.ts:836`<br>`lib/plugins/github.ts:926`<br>`lib/plugins/operator-routing.ts:129`<br>`lib/plugins/debug.ts:31`<br>`lib/plugins/google/gmail.ts:155`<br>`lib/plugins/onboarding.ts:326` | `src/index.ts:777`<br>`src/plugins/flow-store-plugin.ts:55` |
 
 ## Unresolved call sites
 
@@ -338,92 +369,102 @@ These sites pass a non-literal topic that the static scan couldn't resolve to a 
 | `lib/plugins/cli.ts:201` | publish | `msg.topic` |
 | `lib/plugins/debug.ts:31` | publish | `topic` |
 | `lib/plugins/echo.ts:35` | publish | `reply.topic` |
-| `lib/plugins/github.ts:393` | publish | `topic` |
-| `lib/plugins/github.ts:635` | publish | `topic` |
-| `lib/plugins/github.ts:715` | publish | `topic` |
-| `lib/plugins/google/gmail.ts:152` | publish | `topic` |
-| `lib/plugins/linear.ts:430` | publish | `topic` |
-| `lib/plugins/linear.ts:477` | publish | `topic` |
-| `lib/plugins/linear.ts:556` | publish | `topic` |
-| `lib/plugins/linear.ts:603` | publish | `topic` |
-| `lib/plugins/linear.ts:636` | publish | `topic` |
-| `lib/plugins/linear.ts:853` | publish | `topic` |
-| `lib/plugins/logger.ts:59` | publish | `req.replyTopic` |
-| `lib/plugins/onboarding.ts:325` | publish | `topic` |
-| `lib/plugins/onboarding.ts:375` | publish | `replyTopic` |
-| `lib/plugins/operator-routing.ts:128` | publish | `topic` |
-| `lib/plugins/scheduler.ts:263` | publish | `def.topic` |
-| `lib/plugins/scheduler.ts:374` | publish | `reply.topic` |
-| `lib/plugins/signal.ts:103` | publish | `msg.topic` |
-| `src/agent-runtime/agent-runtime-plugin.ts:200` | publish | `topic` |
-| `src/api/a2a-server.ts:133` | publish | `{
-      kind: "task",
+| `lib/plugins/event-viewer.ts:91` | subscribe | `ws.data.topic` |
+| `lib/plugins/github.ts:561` | publish | `topic` |
+| `lib/plugins/github.ts:836` | publish | `topic` |
+| `lib/plugins/github.ts:926` | publish | `topic` |
+| `lib/plugins/google/gmail.ts:155` | publish | `topic` |
+| `lib/plugins/linear.ts:429` | publish | `topic` |
+| `lib/plugins/linear.ts:476` | publish | `topic` |
+| `lib/plugins/linear.ts:555` | publish | `topic` |
+| `lib/plugins/linear.ts:602` | publish | `topic` |
+| `lib/plugins/linear.ts:635` | publish | `topic` |
+| `lib/plugins/linear.ts:852` | publish | `topic` |
+| `lib/plugins/logger.ts:113` | publish | `req.replyTopic` |
+| `lib/plugins/onboarding.ts:326` | publish | `topic` |
+| `lib/plugins/onboarding.ts:376` | publish | `replyTopic` |
+| `lib/plugins/operator-routing.ts:129` | publish | `topic` |
+| `lib/plugins/scheduler.ts:258` | publish | `def.topic` |
+| `lib/plugins/scheduler.ts:369` | publish | `reply.topic` |
+| `lib/plugins/signal.ts:106` | publish | `msg.topic` |
+| `src/agent-runtime/agent-runtime-plugin.ts:319` | publish | `topic` |
+| `src/agent-runtime/agent-runtime-plugin.ts:345` | publish | `progressTopic` |
+| `src/agent-runtime/agent-runtime-plugin.ts:373` | publish | `progressTopic` |
+| `src/agent-runtime/agent-runtime-plugin.ts:399` | publish | `topic` |
+| `src/api/a2a-server.ts:159` | publish | `AgentEvent.task({
       id: taskId,
       contextId,
       status: {
-       ` |
-| `src/api/a2a-server.ts:155` | subscribe | `progressTopic` |
-| `src/api/a2a-server.ts:188` | publish | `{
-          kind: "status-update",
+        sta` |
+| `src/api/a2a-server.ts:182` | subscribe | `progressTopic` |
+| `src/api/a2a-server.ts:204` | publish | `AgentEvent.statusUpdate({
           taskId,
           contextId,
-      ` |
-| `src/api/a2a-server.ts:209` | subscribe | `inputReqTopic` |
-| `src/api/a2a-server.ts:212` | publish | `{
-          kind: "status-update",
+          statu` |
+| `src/api/a2a-server.ts:222` | subscribe | `toolFrameTopic` |
+| `src/api/a2a-server.ts:226` | publish | `AgentEvent.artifactUpdate({
           taskId,
           contextId,
-      ` |
-| `src/api/a2a-server.ts:235` | subscribe | `replyTopic` |
-| `src/api/a2a-server.ts:271` | publish | `{
-          kind: "status-update",
+          art` |
+| `src/api/a2a-server.ts:243` | subscribe | `inputReqTopic` |
+| `src/api/a2a-server.ts:246` | publish | `AgentEvent.statusUpdate({
           taskId,
           contextId,
-      ` |
-| `src/api/a2a-server.ts:303` | publish | `{
-          kind: "status-update",
+          statu` |
+| `src/api/a2a-server.ts:263` | subscribe | `replyTopic` |
+| `src/api/a2a-server.ts:309` | publish | `AgentEvent.artifactUpdate({
+            taskId,
+            contextId,
+         ` |
+| `src/api/a2a-server.ts:319` | publish | `AgentEvent.statusUpdate({
           taskId,
           contextId,
-      ` |
-| `src/api/a2a-server.ts:319` | publish | `{
-      kind: "status-update",
+          statu` |
+| `src/api/a2a-server.ts:344` | publish | `AgentEvent.statusUpdate({
+          taskId,
+          contextId,
+          statu` |
+| `src/api/a2a-server.ts:360` | publish | `AgentEvent.statusUpdate({
       taskId,
       contextId,
       status: {
-  ` |
-| `src/api/a2a-server.ts:341` | publish | `{
-        kind: "status-update",
+       ` |
+| `src/api/a2a-server.ts:382` | publish | `AgentEvent.statusUpdate({
         taskId,
         contextId,
-        stat` |
+        status: {
+ ` |
 | `src/api/agents-crud.ts:55` | publish | `topic` |
-| `src/api/discord.ts:338` | publish | `progressTopic` |
+| `src/api/discord.ts:341` | publish | `progressTopic` |
 | `src/api/human-input.ts:82` | publish | `requestTopic` |
 | `src/api/human-input.ts:143` | publish | `responseTopic` |
-| `src/api/openai-compat.ts:157` | subscribe | `replyTopic` |
-| `src/api/operations.ts:80` | publish | `topic` |
-| `src/api/operations.ts:115` | publish | `topic` |
-| `src/api/operations.ts:133` | publish | `topic` |
+| `src/api/mcp-crud.ts:113` | publish | `topic` |
+| `src/api/openai-compat.ts:159` | subscribe | `replyTopic` |
+| `src/api/operations.ts:106` | publish | `topic` |
+| `src/api/operations.ts:156` | publish | `topic` |
+| `src/api/operations.ts:191` | publish | `topic` |
 | `src/api/operator.ts:61` | subscribe | `failedTopic` |
-| `src/event-bus/skill-response-cache.ts:114` | subscribe | `RESPONSE_TOPIC_WILDCARD` |
+| `src/api/routes-crud.ts:34` | publish | `topic` |
+| `src/event-bus/skill-response-cache.ts:117` | subscribe | `RESPONSE_TOPIC_WILDCARD` |
 | `src/executor/executors/proto-sdk-executor.ts:86` | publish | `topic` |
-| `src/executor/executors/workflow-executor.ts:44` | publish | `step.topic` |
-| `src/executor/executors/workflow-executor.ts:93` | subscribe | `topic` |
 | `src/executor/extensions/confidence.ts:166` | publish | `topic` |
 | `src/executor/extensions/cost.ts:210` | publish | `topic` |
 | `src/executor/extensions/effect-domain.ts:85` | publish | `topic` |
-| `src/executor/skill-dispatcher-plugin.ts:713` | publish | `topic` |
-| `src/executor/skill-dispatcher-plugin.ts:788` | publish | `topic` |
-| `src/executor/skill-dispatcher-plugin.ts:812` | publish | `topic` |
-| `src/executor/skill-dispatcher-plugin.ts:832` | publish | `replyTopic` |
-| `src/executor/skill-dispatcher-plugin.ts:861` | publish | `topic` |
-| `src/executor/task-tracker.ts:282` | publish | `topic` |
-| `src/executor/task-tracker.ts:330` | publish | `task.replyTopic` |
-| `src/index.ts:754` | subscribe | `topic` |
-| `src/plugins/ceremony-skill-executor-plugin.ts:123` | publish | `executeTopic` |
-| `src/plugins/CeremonyPlugin.ts:344` | publish | `executeTopic` |
-| `src/plugins/CeremonyPlugin.ts:372` | subscribe | `replyTopic` |
-| `src/plugins/CeremonyPlugin.ts:399` | publish | `skillRequestTopic` |
-| `src/plugins/CeremonyPlugin.ts:453` | publish | `completedTopic` |
-| `src/world/extensions/CeremonyStateExtension.ts:120` | publish | `topic` |
+| `src/executor/skill-dispatcher-plugin.ts:750` | publish | `topic` |
+| `src/executor/skill-dispatcher-plugin.ts:825` | publish | `topic` |
+| `src/executor/skill-dispatcher-plugin.ts:849` | publish | `topic` |
+| `src/executor/skill-dispatcher-plugin.ts:869` | publish | `replyTopic` |
+| `src/executor/skill-dispatcher-plugin.ts:898` | publish | `topic` |
+| `src/executor/task-tracker.ts:178` | publish | `row.replyTopic` |
+| `src/executor/task-tracker.ts:404` | publish | `topic` |
+| `src/executor/task-tracker.ts:450` | publish | `task.replyTopic` |
+| `src/index.ts:777` | subscribe | `topic` |
+| `src/plugins/ceremony-skill-executor-plugin.ts:121` | publish | `executeTopic` |
+| `src/plugins/CeremonyPlugin.ts:353` | publish | `executeTopic` |
+| `src/plugins/CeremonyPlugin.ts:387` | subscribe | `replyTopic` |
+| `src/plugins/CeremonyPlugin.ts:412` | publish | `skillRequestTopic` |
+| `src/plugins/CeremonyPlugin.ts:466` | publish | `completedTopic` |
+| `src/plugins/flow-store-plugin.ts:55` | subscribe | `topic` |
+| `src/plugins/routes-plugin.ts:77` | subscribe | `route.when.topic` |
+| `src/world/extensions/CeremonyStateExtension.ts:116` | publish | `topic` |
 

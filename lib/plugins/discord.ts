@@ -9,7 +9,7 @@ import { Events, type TextChannel } from "discord.js";
 import type { EventBus, Plugin } from "../types.ts";
 import type { ChannelRegistry } from "../channels/channel-registry.ts";
 import type { ContextMailbox } from "../dm/context-mailbox.ts";
-import type { ProjectRegistry } from "../../src/plugins/project-registry.ts";
+import type { ProjectDirectory } from "../types/projects.ts";
 import { ConversationManager } from "../conversation/conversation-manager.ts";
 import { ConversationTracer } from "../conversation/conversation-tracer.ts";
 import { IdentityRegistry } from "../identity/identity-registry.ts";
@@ -35,7 +35,7 @@ export interface DiscordPluginOptions {
   workspaceDir: string;
   dataDir?: string;
   channelRegistry?: ChannelRegistry;
-  projectRegistry?: ProjectRegistry;
+  projectRegistry?: ProjectDirectory;
   mailbox?: ContextMailbox;
   /** Check if an agent execution is in-flight for a given correlationId. */
   isExecutionActive?: (correlationId: string) => boolean;
@@ -54,7 +54,7 @@ export class DiscordPlugin implements Plugin {
   private workspaceDir: string;
   private dataDir: string | null;
   private channelRegistry?: ChannelRegistry;
-  private projectRegistry?: ProjectRegistry;
+  private projectRegistry?: ProjectDirectory;
   private mailbox?: ContextMailbox;
   private isExecutionActive?: (correlationId: string) => boolean;
 
