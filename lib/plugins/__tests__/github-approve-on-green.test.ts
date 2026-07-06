@@ -202,6 +202,24 @@ describe("_handleCiCompletion — deterministic approve-on-green", () => {
     expect(captured.commentPosts.length).toBe(0);
   });
 
+  test("(a3) terminal-green + prior COMMENTED + UNRESOLVED thread → no approve (open finding on a WARN must not auto-merge)", async () => {
+    const captured = await runCiCompletion({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+      checkRuns: [{ status: "completed", conclusion: "success" }],
+      threadsUnresolved: true,
+    });
+    expect(captured.approvePosts.length).toBe(0); // a CodeRabbit/Quinn finding thread is unresolved
+  });
+
+  test("(a4) terminal-green + prior COMMENTED + thread state unknown → no approve (fail-safe)", async () => {
+    const captured = await runCiCompletion({
+      reviews: [{ user: { login: "protoquinn[bot]" }, state: "COMMENTED" }],
+      checkRuns: [{ status: "completed", conclusion: "success" }],
+      threadsUnresolved: null,
+    });
+    expect(captured.approvePosts.length).toBe(0); // unknown → conservative, defer to re-review
+  });
+
   test("(b) terminal-green + prior CHANGES_REQUESTED + no unresolved threads → APPROVE (blocker resolved, #848/#858)", async () => {
     const captured = await runCiCompletion({
       reviews: [{ user: { login: "protoquinn[bot]" }, state: "CHANGES_REQUESTED" }],
