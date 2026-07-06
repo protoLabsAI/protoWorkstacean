@@ -31,6 +31,7 @@ import type { Route, ApiContext } from "./types.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
 import { loadFleetConfig } from "../../lib/fleet/fleet-config.ts";
 import { REVIEW_TOPICS } from "../event-bus/topics.ts";
+import { buildCodebaseContext } from "../services/reviews/review-pipeline.ts";
 import { logger } from "../../lib/log.ts";
 
 const log = logger("pr-inspector");
@@ -532,9 +533,15 @@ async function diffSummary(owner: string, name: string, pr: number): Promise<str
       `Run \`clawpatch_review\` before issuing your verdict; skipping the structural pass on a triggered diff is a Gap.`
     : `**Structural review optional** — small contained diff (${changedFiles} file(s), ${additions + deletions} line(s) changed); \`clawpatch_review\` not required.`;
 
+  // READ side of the review-learning flywheel: what past merges to these files
+  // taught (verdicts, flagged issues, similar symbol usages). Best-effort —
+  // Qdrant down or an empty store yields null and the summary ships diff-only.
+  const codebaseContext = await buildCodebaseContext(`${owner}/${name}`, diff);
+  const contextSection = codebaseContext ? `\n\n${codebaseContext}` : "";
+
   return (
     `**Diff for PR#${pr}** (${changedFiles} files, +${additions}/-${deletions}):\n\n` +
-    `${directive}\n\n\`\`\`diff\n${preview}\n\`\`\`${suffix}`
+    `${directive}\n\n\`\`\`diff\n${preview}\n\`\`\`${suffix}${contextSection}`
   );
 }
 
