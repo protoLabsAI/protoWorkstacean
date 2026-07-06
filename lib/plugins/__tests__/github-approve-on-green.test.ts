@@ -94,6 +94,7 @@ interface Captured {
   approvePosts: Array<Record<string, unknown>>;
   commentPosts: Array<Record<string, unknown>>;
   mergePuts: Array<Record<string, unknown>>;
+  updateBranchPuts: Array<Record<string, unknown>>;
 }
 
 function ciCompletionPayload(): Record<string, unknown> {
@@ -105,7 +106,7 @@ function ciCompletionPayload(): Record<string, unknown> {
 }
 
 function stubFetch(opts: StubOpts): Captured {
-  const captured: Captured = { approvePosts: [], commentPosts: [], mergePuts: [] };
+  const captured: Captured = { approvePosts: [], commentPosts: [], mergePuts: [], updateBranchPuts: [] };
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
@@ -360,11 +361,13 @@ interface SweepPr {
   mergeStatus?: number;
   /** ISO created_at for the pulls listing (default: undefined — reads as "too young" for rescue). */
   createdAt?: string;
+  /** mergeable_state for a single-PR GET (default "blocked"). */
+  mergeableState?: string;
 }
 
 /** Stub GitHub REST for a reconciliation sweep over one repo's open PRs. */
 function stubSweepFetch(prs: SweepPr[]): Captured {
-  const captured: Captured = { approvePosts: [], commentPosts: [], mergePuts: [] };
+  const captured: Captured = { approvePosts: [], commentPosts: [], mergePuts: [], updateBranchPuts: [] };
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   const byNum = new Map(prs.map((p) => [p.number, p]));
@@ -404,6 +407,16 @@ function stubSweepFetch(prs: SweepPr[]): Captured {
     if (url.match(/\/pulls\/\d+\/reviews/) && method === "POST") {
       captured.approvePosts.push(JSON.parse(String(init?.body ?? "{}")));
       return json({ id: 999 });
+    }
+    // update-behind (fifth stall mode): PUT /pulls/{n}/update-branch
+    if (url.match(/\/pulls\/\d+\/update-branch$/) && method === "PUT") {
+      captured.updateBranchPuts.push({ url, ...JSON.parse(String(init?.body ?? "{}")) });
+      return json({ message: "Updating pull request branch." }, 202);
+    }
+    // single-PR GET (mergeable_state probe on a 405 refusal)
+    if (url.match(/\/pulls\/\d+$/) && method === "GET") {
+      const p = byNumFromUrl(url);
+      return json({ number: p?.number, mergeable_state: p?.mergeableState ?? "blocked" });
     }
     // merge-completion backstop (ws-5sc): PUT /pulls/{n}/merge
     if (url.match(/\/pulls\/\d+\/merge$/) && method === "PUT") {
@@ -582,6 +595,16 @@ describe("_reconcileApproveOnGreen — level-triggered backstop (#879)", () => {
     };
     const { dispatched } = await runSweepWithPlugin([pending]);
     expect(dispatched.length).toBe(0);
+  });
+
+  test("405 on a BEHIND branch → sweep updates the branch (expected head SHA) and drops the watch", async () => {
+    const behind = { ...approvedGreenPr(913, "bhd0913", "main"), mergeStatus: 405, mergeableState: "behind" };
+    const { captured, plugin } = await runSweepWithPlugin([behind], { seedWatch: { key: `${OWNER}/${REPO}#913@bhd0913`, ageMs: 10 * 60_000 } });
+    expect(captured.mergePuts.length).toBe(1); // merge attempted first
+    expect(captured.updateBranchPuts.length).toBe(1);
+    expect(captured.updateBranchPuts[0]!.expected_head_sha).toBe("bhd0913");
+    const watch = (plugin as unknown as { mergeCompletionFirstSeen: Map<string, number> }).mergeCompletionFirstSeen;
+    expect(watch.size).toBe(0); // head will change — stale watch dropped
   });
 
   test("covers a reviewed-but-UNREGISTERED repo (the approve-on-green gap fix)", async () => {
