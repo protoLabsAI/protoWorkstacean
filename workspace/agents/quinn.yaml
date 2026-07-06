@@ -249,7 +249,7 @@ skills:
 
       Structural review is the default, not the exception. Run:
 
-      - `clawpatch_review(repo='owner/name', since='<pr-base>')`
+      - `clawpatch_review(repo='owner/name', pr=N)`
 
       **`diff_summary` computes the objective trigger for you** and states it
       at the top of its output. When it says **STRUCTURAL REVIEW REQUIRED**
@@ -266,8 +266,9 @@ skills:
       cross-file bugs slip through. A skipped structural pass on a diff marked
       REQUIRED is a Gap — note it.
 
-      Use the PR's base branch (typically `main` or `dev`) as the
-      `since` arg so clawpatch only reviews features touched by this PR.
+      Pass the same `repo` and `pr` number you extracted in step 1 — the
+      route resolves the PR's head and base from GitHub itself and scopes
+      the review to exactly the features this PR changed.
       Each finding has severity, category, file:line evidence, and a
       recommendation. Fold the highest-impact findings into your
       Observations section with the same SEVERITY tags you'd assign

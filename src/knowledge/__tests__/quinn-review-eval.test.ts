@@ -31,13 +31,32 @@ function toolCall(cid: string, toolNames: string[], ts = T0): EvalEvent {
   };
 }
 
-function submitted(owner: string, repo: string, event: string, ts = T0): EvalEvent {
+function submitted(
+  owner: string,
+  repo: string,
+  event: string,
+  ts = T0,
+  opts: { prNumber?: number; bodyPreview?: string } = {},
+): EvalEvent {
   return {
     topic: "quinn.review.submitted",
     ts,
     correlationId: crypto.randomUUID(),
-    body: { owner, repo, prNumber: 1, event, prUrl: "u", bodyPreview: "b" },
+    body: { owner, repo, prNumber: opts.prNumber ?? 1, event, prUrl: "u", bodyPreview: opts.bodyPreview ?? "b" },
   };
+}
+
+function clawpatchFrames(repo: string, pr: number, findings: number, callId = crypto.randomUUID()): EvalEvent[] {
+  const frame = (f: Record<string, unknown>): EvalEvent => ({
+    topic: `agent.skill.toolframe.${crypto.randomUUID()}`,
+    ts: T0,
+    correlationId: crypto.randomUUID(),
+    body: { frame: { toolCallId: callId, name: "clawpatch_review", ...f } },
+  });
+  return [
+    frame({ phase: "started", args: { repo, pr, provider: "gateway" } }),
+    frame({ phase: "completed", result: JSON.stringify({ success: true, data: { repo, pr, findings, reviewed: 1 } }) }),
+  ];
 }
 
 describe("classifyFailure", () => {
@@ -139,6 +158,40 @@ describe("computeQuinnReviewStats", () => {
     expect(byRepo["protoLabsAI/ORBIS"].failures).toBe(1);
     expect(byRepo["protoLabsAI/ORBIS"].reviews).toBe(1);
     expect(s.outcomes.failed).toBe(3);
+  });
+
+  test("finding-flow joins clawpatch frames to submitted reviews per repo#pr (ws-91a)", () => {
+    const events = [
+      // PR 10: 3 findings, review cites CLAWPATCH → cited
+      ...clawpatchFrames("protoLabsAI/ORBIS", 10, 3),
+      submitted("protoLabsAI", "ORBIS", "COMMENT", T0, { prNumber: 10, bodyPreview: "CLAWPATCH/HIGH: race in poller" }),
+      // PR 11: 2 findings, review does NOT cite → matched, not cited
+      ...clawpatchFrames("protoLabsAI/ORBIS", 11, 2),
+      submitted("protoLabsAI", "ORBIS", "COMMENT", T0, { prNumber: 11, bodyPreview: "looks fine overall" }),
+      // PR 12: clawpatch ran but 0 new findings (incremental dedup) → excluded from flow
+      ...clawpatchFrames("protoLabsAI/ORBIS", 12, 0),
+      submitted("protoLabsAI", "ORBIS", "APPROVE", T0, { prNumber: 12 }),
+      // PR 13: findings but no submitted review captured → unmatched
+      ...clawpatchFrames("protoLabsAI/ORBIS", 13, 1),
+    ];
+    const s = computeQuinnReviewStats(events);
+    expect(s.findingFlow.clawpatchRuns).toBe(4);
+    expect(s.findingFlow.runsWithFindings).toBe(3);
+    expect(s.findingFlow.totalFindings).toBe(6);
+    expect(s.findingFlow.matchedReviews).toBe(2);
+    expect(s.findingFlow.citedReviews).toBe(1);
+    expect(s.findingFlow.citeRate).toBeCloseTo(0.5, 5);
+  });
+
+  test("finding-flow ignores a completed frame with no matching start and unparseable results", () => {
+    const orphanCompleted: EvalEvent = {
+      topic: "agent.skill.toolframe.x",
+      ts: T0,
+      correlationId: "c",
+      body: { frame: { toolCallId: "no-start", name: "clawpatch_review", phase: "completed", result: "not json" } },
+    };
+    const s = computeQuinnReviewStats([orphanCompleted]);
+    expect(s.findingFlow.clawpatchRuns).toBe(0);
   });
 
   test("empty input degrades cleanly", () => {

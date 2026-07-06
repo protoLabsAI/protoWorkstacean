@@ -29,7 +29,8 @@ const rows = db
     `SELECT topic, payload, correlation_id, timestamp FROM events
      WHERE topic LIKE 'autonomous.outcome.%pr_review'
         OR topic = 'agent.runtime.activity.tool.call'
-        OR topic = 'quinn.review.submitted'`,
+        OR topic = 'quinn.review.submitted'
+        OR (topic LIKE 'agent.skill.toolframe.%' AND payload LIKE '%clawpatch_review%')`,
   )
   .all() as { topic: string; payload: string; correlation_id: string; timestamp: number }[];
 
@@ -85,6 +86,14 @@ if (s.toolUse.callsPerReview) {
 for (const [t, n] of Object.entries(s.toolUse.toolFrequency).sort((a, b) => b[1] - a[1]).slice(0, 8)) {
   console.log(`     ${t.padEnd(20)} ${n}`);
 }
+
+console.log("\nFINDING-FLOW (ws-91a — do structural findings reach the review?)");
+const ff = s.findingFlow;
+console.log(`  clawpatch runs parsed:      ${ff.clawpatchRuns}`);
+console.log(`  runs with new findings:     ${ff.runsWithFindings} (${ff.totalFindings} findings)`);
+console.log(`  matched submitted reviews:  ${ff.matchedReviews}`);
+console.log(`  reviews citing CLAWPATCH:   ${ff.citedReviews} (${pct(ff.citeRate)})`);
+console.log(`  note: cite detection reads the 600-char bodyPreview — treat as a floor`);
 
 if (s.perRepo.length) {
   console.log("\nPER-REPO (top 10)");
