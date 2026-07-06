@@ -1613,9 +1613,47 @@ export class GitHubPlugin implements Plugin {
       if (!res.ok) {
         const body = await res.text();
         // 409 = head moved since we started watching — the watch is stale,
-        // drop it (a fresh approve cycle re-evaluates the new SHA). Any other
-        // refusal (405 not-mergeable, 403) keeps the watch for the next sweep.
-        if (res.status === 409) this.mergeCompletionFirstSeen.delete(key);
+        // drop it (a fresh approve cycle re-evaluates the new SHA).
+        if (res.status === 409) {
+          this.mergeCompletionFirstSeen.delete(key);
+          log.warn(`merge-completion (${source}): PUT merge → 409 for ${key} (head moved): ${body.slice(0, 200)}`);
+          return false;
+        }
+        // 405 on a BEHIND branch = strict protection refusing an out-of-date
+        // head — the fifth stall mode: two PRs in flight, the first merge
+        // moves main under the second, and neither native auto-merge nor
+        // anything else updates the branch. Update it ourselves: the
+        // synchronize event runs CI + re-review on the fresh head and the
+        // normal promote→merge cycle converges. expected_head_sha guards the
+        // same push race as the merge call. Any other refusal keeps the
+        // watch for the next sweep.
+        if (res.status === 405) {
+          const detail = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/pulls/${number}`)) as
+            | { mergeable_state?: string }
+            | null;
+          if (detail?.mergeable_state === "behind") {
+            const upd = await withCircuitBreaker("github-api", () =>
+              fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}/update-branch`, {
+                method: "PUT",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                  Accept: "application/vnd.github+json",
+                  "User-Agent": "protoWorkstacean/1.0",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                },
+                body: JSON.stringify({ expected_head_sha: headSha }),
+              }),
+            );
+            this.mergeCompletionFirstSeen.delete(key); // head will change either way
+            if (upd.ok) {
+              log.info(`merge-completion (${source}): ${key} is behind main — branch updated, cycle re-runs on the fresh head`);
+            } else {
+              log.warn(`merge-completion (${source}): update-branch → ${upd.status} for ${key}: ${(await upd.text()).slice(0, 200)}`);
+            }
+            return false;
+          }
+        }
         log.warn(`merge-completion (${source}): PUT merge → ${res.status} for ${key}: ${body.slice(0, 200)}`);
         return false;
       }
