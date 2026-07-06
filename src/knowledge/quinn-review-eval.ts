@@ -56,9 +56,31 @@ export interface QuinnReviewStats {
     toolFrequency: Record<string, number>;
   };
   perRepo: Array<{ repo: string; reviews: number; approve: number; comment: number; requestChanges: number; failures: number }>;
+  /**
+   * Finding-flow (ws-91a): did the structural pass's findings reach the
+   * submitted review? Joined per repo#pr — clawpatch tool frames
+   * (`agent.skill.toolframe.*`, started args carry {repo, pr}; completed
+   * results carry the per-run `findings` count) against
+   * `quinn.review.submitted` bodies citing "CLAWPATCH" (the prompt's
+   * mandated source tag).
+   */
+  findingFlow: {
+    /** clawpatch runs whose completed result parsed cleanly */
+    clawpatchRuns: number;
+    /** runs that surfaced ≥1 new finding (incremental dedup makes 0 common) */
+    runsWithFindings: number;
+    /** total new findings across those runs */
+    totalFindings: number;
+    /** finding-bearing runs with a matching submitted review on the same repo#pr */
+    matchedReviews: number;
+    /** ...of which the review body cites CLAWPATCH (600-char preview — undercounts) */
+    citedReviews: number;
+    citeRate: number;
+  };
 }
 
 const PR_REVIEW_OUTCOME = /^autonomous\.outcome\..*\.pr_review$/;
+const TOOLFRAME_TOPIC = /^agent\.skill\.toolframe\./;
 
 /** Bucket a failure message into a stable, low-cardinality mode label. */
 export function classifyFailure(message: string | undefined): string {
@@ -105,6 +127,13 @@ export function computeQuinnReviewStats(events: EvalEvent[]): QuinnReviewStats {
   // ── failure attribution per repo (from the outcome's github coords) ────────
   const repoFailures = new Map<string, number>();
 
+  // ── finding-flow (ws-91a) ───────────────────────────────────────────────────
+  // clawpatch started frames carry {repo, pr}; the completed frame (same
+  // toolCallId) carries the result with the per-run new-`findings` count.
+  const clawpatchStarts = new Map<string, string>(); // toolCallId → "repo#pr"
+  const clawpatchByPr = new Map<string, { runs: number; findings: number }>();
+  const submittedCites = new Map<string, boolean>(); // "repo#pr" → any body cites clawpatch
+
   for (const e of events) {
     if (e.ts) {
       from = from === null ? e.ts : Math.min(from, e.ts);
@@ -147,6 +176,41 @@ export function computeQuinnReviewStats(events: EvalEvent[]): QuinnReviewStats {
       else if (event === "COMMENT") { verdicts.COMMENT++; r.comment++; }
       else if (event === "REQUEST_CHANGES") { verdicts.REQUEST_CHANGES++; r.requestChanges++; }
       repoMap.set(repo, r);
+
+      const prNumber = num(e.body.prNumber);
+      if (prNumber !== undefined) {
+        const key = `${repo}#${prNumber}`;
+        const cites = /clawpatch/i.test(str(e.body.bodyPreview) ?? "");
+        submittedCites.set(key, (submittedCites.get(key) ?? false) || cites);
+      }
+      continue;
+    }
+
+    if (TOOLFRAME_TOPIC.test(e.topic)) {
+      const frame = e.body.frame as { toolCallId?: unknown; name?: unknown; phase?: unknown; args?: unknown; result?: unknown } | undefined;
+      if (frame?.name !== "clawpatch_review") continue;
+      const id = str(frame.toolCallId);
+      if (!id) continue;
+      if (frame.phase === "started") {
+        const args = frame.args as { repo?: unknown; pr?: unknown } | undefined;
+        const repo = str(args?.repo);
+        const pr = num(args?.pr);
+        if (repo && pr !== undefined) clawpatchStarts.set(id, `${repo}#${pr}`);
+      } else if (frame.phase === "completed") {
+        const key = clawpatchStarts.get(id);
+        if (!key) continue;
+        try {
+          const result = JSON.parse(str(frame.result) ?? "") as { data?: { findings?: unknown } };
+          const findings = num(result.data?.findings);
+          if (findings === undefined) continue;
+          const agg = clawpatchByPr.get(key) ?? { runs: 0, findings: 0 };
+          agg.runs++;
+          agg.findings += findings;
+          clawpatchByPr.set(key, agg);
+        } catch {
+          // errored/unparseable run — not a completed structural pass
+        }
+      }
       continue;
     }
   }
@@ -210,5 +274,35 @@ export function computeQuinnReviewStats(events: EvalEvent[]): QuinnReviewStats {
         return { repo, reviews: r.reviews, approve: r.approve, comment: r.comment, requestChanges: r.requestChanges, failures: repoFailures.get(repo) ?? 0 };
       })
       .sort((a, b) => b.reviews + b.failures - (a.reviews + a.failures)),
+    findingFlow: computeFindingFlow(clawpatchByPr, submittedCites),
+  };
+}
+
+function computeFindingFlow(
+  clawpatchByPr: Map<string, { runs: number; findings: number }>,
+  submittedCites: Map<string, boolean>,
+): QuinnReviewStats["findingFlow"] {
+  let clawpatchRuns = 0;
+  let runsWithFindings = 0;
+  let totalFindings = 0;
+  let matchedReviews = 0;
+  let citedReviews = 0;
+  for (const [key, agg] of clawpatchByPr) {
+    clawpatchRuns += agg.runs;
+    if (agg.findings === 0) continue;
+    runsWithFindings++;
+    totalFindings += agg.findings;
+    const cites = submittedCites.get(key);
+    if (cites === undefined) continue; // no submitted review captured for this PR
+    matchedReviews++;
+    if (cites) citedReviews++;
+  }
+  return {
+    clawpatchRuns,
+    runsWithFindings,
+    totalFindings,
+    matchedReviews,
+    citedReviews,
+    citeRate: matchedReviews ? citedReviews / matchedReviews : 0,
   };
 }
