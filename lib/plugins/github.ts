@@ -885,6 +885,23 @@ export class GitHubPlugin implements Plugin {
    * dies, a restart or a new push retries. TTL-pruned alongside use.
    */
   private readonly reviewRescueDispatched = new Map<string, number>();
+
+  /**
+   * Claim the one rescue-review slot for a PR head. Lost opened-dispatch
+   * rescues (ws-22l) must dispatch once per head SHA per process — the
+   * dispatcher's 30s cooldown alone lets a 3-min sweep or a late CI re-run
+   * re-dispatch while the rescued review (~30-60s) is still in flight.
+   */
+  private _claimRescue(owner: string, repo: string, prNumber: number, headSha: string): boolean {
+    const now = Date.now();
+    for (const [k, t] of this.reviewRescueDispatched) {
+      if (now - t > GitHubPlugin.MERGE_COMPLETION_TTL_MS) this.reviewRescueDispatched.delete(k);
+    }
+    const key = `${owner}/${repo}#${prNumber}@${headSha.slice(0, 7)}`;
+    if (this.reviewRescueDispatched.has(key)) return false;
+    this.reviewRescueDispatched.set(key, now);
+    return true;
+  }
   /**
    * A PR younger than this can still have its opened-webhook review in
    * flight; rescuing it would double-review. Lost-dispatch PRs are minutes
@@ -1107,9 +1124,14 @@ export class GitHubPlugin implements Plugin {
       const decision = await this._evaluateApproveOnGreen(event, owner, repo, pr, headSha, getToken);
       // needs-review: eligible + terminal but not auto-approvable — upgrade the
       // provisional COMMENT to a formal verdict. unreviewed: the opened-webhook
-      // dispatch was lost (ws-22l) — same rescue, first review instead.
-      if (decision !== "needs-review" && decision !== "unreviewed") continue;
-      this._dispatchReviewFor(event, owner, repo, pr, headSha, bus, getToken);
+      // dispatch was lost (ws-22l) — same rescue, first review instead, once
+      // per head SHA (a CI re-run can outlive the dispatcher's 30s cooldown
+      // while the rescued review is still in flight).
+      if (decision === "needs-review") {
+        this._dispatchReviewFor(event, owner, repo, pr, headSha, bus, getToken);
+      } else if (decision === "unreviewed" && this._claimRescue(owner, repo, pr.number as number, headSha)) {
+        this._dispatchReviewFor(event, owner, repo, pr, headSha, bus, getToken);
+      }
     }
   }
 
@@ -1399,20 +1421,9 @@ export class GitHubPlugin implements Plugin {
           const decision = await this._evaluateApproveOnGreen("reconcile", owner, repo, pr, headSha, getToken);
           if (decision === "approved") approved++;
           else if (decision === "merged") merged++;
-          else if (decision === "unreviewed") {
-            // Lost opened-dispatch rescue (ws-22l): one review per head SHA
-            // per process — the dispatcher cooldown alone would let every
-            // 3-min sweep re-dispatch while a slow review is in flight.
-            const now = Date.now();
-            for (const [k, t] of this.reviewRescueDispatched) {
-              if (now - t > GitHubPlugin.MERGE_COMPLETION_TTL_MS) this.reviewRescueDispatched.delete(k);
-            }
-            const key = `${owner}/${repo}#${pr.number}@${headSha.slice(0, 7)}`;
-            if (!this.reviewRescueDispatched.has(key)) {
-              this.reviewRescueDispatched.set(key, now);
-              this._dispatchReviewFor("reconcile-rescue", owner, repo, pr, headSha, bus, getToken);
-              rescued++;
-            }
+          else if (decision === "unreviewed" && this._claimRescue(owner, repo, pr.number as number, headSha)) {
+            this._dispatchReviewFor("reconcile-rescue", owner, repo, pr, headSha, bus, getToken);
+            rescued++;
           }
         } catch (err) {
           log.error(
