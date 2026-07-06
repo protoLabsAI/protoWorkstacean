@@ -89,10 +89,11 @@ interface StubOpts {
   threadsUnresolved?: boolean | null;
 }
 
-/** Records every APPROVE review submission and every ack timeline comment. */
+/** Records every APPROVE review submission, ack timeline comment, and merge PUT. */
 interface Captured {
   approvePosts: Array<Record<string, unknown>>;
   commentPosts: Array<Record<string, unknown>>;
+  mergePuts: Array<Record<string, unknown>>;
 }
 
 function ciCompletionPayload(): Record<string, unknown> {
@@ -104,7 +105,7 @@ function ciCompletionPayload(): Record<string, unknown> {
 }
 
 function stubFetch(opts: StubOpts): Captured {
-  const captured: Captured = { approvePosts: [], commentPosts: [] };
+  const captured: Captured = { approvePosts: [], commentPosts: [], mergePuts: [] };
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
@@ -355,11 +356,13 @@ interface SweepPr {
   reviews: Array<Record<string, unknown>>;
   checkRuns: Array<Record<string, unknown>>;
   base?: string;
+  /** HTTP status for a PUT /pulls/{n}/merge (default 200). */
+  mergeStatus?: number;
 }
 
 /** Stub GitHub REST for a reconciliation sweep over one repo's open PRs. */
 function stubSweepFetch(prs: SweepPr[]): Captured {
-  const captured: Captured = { approvePosts: [], commentPosts: [] };
+  const captured: Captured = { approvePosts: [], commentPosts: [], mergePuts: [] };
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   const byNum = new Map(prs.map((p) => [p.number, p]));
@@ -400,6 +403,14 @@ function stubSweepFetch(prs: SweepPr[]): Captured {
       captured.approvePosts.push(JSON.parse(String(init?.body ?? "{}")));
       return json({ id: 999 });
     }
+    // merge-completion backstop (ws-5sc): PUT /pulls/{n}/merge
+    if (url.match(/\/pulls\/\d+\/merge$/) && method === "PUT") {
+      const p = byNumFromUrl(url);
+      const status = p?.mergeStatus ?? 200;
+      captured.mergePuts.push({ url, ...JSON.parse(String(init?.body ?? "{}")) });
+      if (status !== 200) return json({ message: "refused" }, status);
+      return json({ sha: "mergedsha", merged: true });
+    }
     throw new Error(`unexpected fetch in sweep test: ${method} ${url}`);
   }) as typeof fetch;
 
@@ -407,16 +418,43 @@ function stubSweepFetch(prs: SweepPr[]): Captured {
 }
 
 async function runSweep(prs: SweepPr[]): Promise<Captured> {
+  return (await runSweepWithPlugin(prs)).captured;
+}
+
+/** A one-off PR fixture in the wedged state: Quinn APPROVED, CI green, still open. */
+function approvedGreenPr(number: number, sha: string, base: string): SweepPr {
+  return {
+    number,
+    sha,
+    base,
+    reviews: [
+      { user: { login: "protoquinn[bot]" }, state: "COMMENTED" },
+      { user: { login: "protoquinn[bot]" }, state: "APPROVED" },
+    ],
+    checkRuns: [{ status: "completed", conclusion: "success" }],
+  };
+}
+
+async function runSweepWithPlugin(
+  prs: SweepPr[],
+  opts: { seedWatch?: { key: string; ageMs: number } } = {},
+): Promise<{ captured: Captured; plugin: GitHubPlugin }> {
   const captured = stubSweepFetch(prs);
   const registry = new ProjectRegistry();
   // Registry is populated from a remote fetch in prod; stub the one accessor the
   // sweep reads so it iterates our fixture repo.
   (registry as unknown as { getGithubCoords: () => string[] }).getGithubCoords = () => [`${OWNER}/${REPO}`];
   const plugin = new GitHubPlugin("/tmp/nonexistent-ws", registry);
+  if (opts.seedWatch) {
+    (plugin as unknown as { mergeCompletionFirstSeen: Map<string, number> }).mergeCompletionFirstSeen.set(
+      opts.seedWatch.key,
+      Date.now() - opts.seedWatch.ageMs,
+    );
+  }
   await (plugin as unknown as {
     _reconcileApproveOnGreen: (g: () => Promise<string>) => Promise<void>;
   })._reconcileApproveOnGreen(async () => "fake-token");
-  return captured;
+  return { captured, plugin };
 }
 
 describe("_reconcileApproveOnGreen — level-triggered backstop (#879)", () => {
@@ -459,6 +497,54 @@ describe("_reconcileApproveOnGreen — level-triggered backstop (#879)", () => {
     ]);
     expect(captured.approvePosts.length).toBe(1);
     expect(captured.approvePosts[0]!.commit_id).toBe("grn1111");
+  });
+
+  test("APPROVED + green + still open, first sweep → watch only, NO merge (grace for native auto-merge)", async () => {
+    const { captured, plugin } = await runSweepWithPlugin([approvedGreenPr(905, "abc9055", "main")]);
+    expect(captured.mergePuts.length).toBe(0);
+    expect(captured.approvePosts.length).toBe(0); // no duplicate approve either
+    const watch = (plugin as unknown as { mergeCompletionFirstSeen: Map<string, number> }).mergeCompletionFirstSeen;
+    expect(watch.size).toBe(1); // watching, will complete next sweep
+  });
+
+  test("APPROVED + green + open past grace → sweep completes the squash merge with head-SHA guard + timeline ack (ws-5sc)", async () => {
+    const { captured } = await runSweepWithPlugin(
+      [approvedGreenPr(905, "abc9055", "main")],
+      { seedWatch: { key: `${OWNER}/${REPO}#905@abc9055`, ageMs: 10 * 60_000 } },
+    );
+    expect(captured.mergePuts.length).toBe(1);
+    expect(captured.mergePuts[0]!.merge_method).toBe("squash");
+    expect(captured.mergePuts[0]!.sha).toBe("abc9055"); // post-approval push would 409, never merge blind
+    await flush();
+    expect(captured.commentPosts.length).toBe(1);
+    expect(String(captured.commentPosts[0]!.body)).toContain("ws-5sc");
+  });
+
+  test("stacked PR (base != main) APPROVED + green → never machine-merged, never watched", async () => {
+    const { captured, plugin } = await runSweepWithPlugin(
+      [approvedGreenPr(910, "stk0910", "feature/base-pr")],
+      { seedWatch: { key: `${OWNER}/${REPO}#910@stk0910`, ageMs: 10 * 60_000 } },
+    );
+    expect(captured.mergePuts.length).toBe(0);
+    // the seeded entry stays untouched but the stacked PR adds nothing new
+    const watch = (plugin as unknown as { mergeCompletionFirstSeen: Map<string, number> }).mergeCompletionFirstSeen;
+    expect(watch.size).toBe(1);
+  });
+
+  test("merge PUT 409 (head moved) → watch dropped, no ack, no crash; 405 keeps the watch for retry", async () => {
+    const conflicted = { ...approvedGreenPr(911, "mvd0911", "main"), mergeStatus: 409 };
+    const r1 = await runSweepWithPlugin([conflicted], { seedWatch: { key: `${OWNER}/${REPO}#911@mvd0911`, ageMs: 10 * 60_000 } });
+    expect(r1.captured.mergePuts.length).toBe(1); // attempted
+    await flush();
+    expect(r1.captured.commentPosts.length).toBe(0); // refused → no ack
+    const watch1 = (r1.plugin as unknown as { mergeCompletionFirstSeen: Map<string, number> }).mergeCompletionFirstSeen;
+    expect(watch1.size).toBe(0); // stale watch dropped
+
+    const blocked = { ...approvedGreenPr(912, "blk0912", "main"), mergeStatus: 405 };
+    const r2 = await runSweepWithPlugin([blocked], { seedWatch: { key: `${OWNER}/${REPO}#912@blk0912`, ageMs: 10 * 60_000 } });
+    expect(r2.captured.mergePuts.length).toBe(1);
+    const watch2 = (r2.plugin as unknown as { mergeCompletionFirstSeen: Map<string, number> }).mergeCompletionFirstSeen;
+    expect(watch2.size).toBe(1); // kept — retry next sweep
   });
 
   test("covers a reviewed-but-UNREGISTERED repo (the approve-on-green gap fix)", async () => {
