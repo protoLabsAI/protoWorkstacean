@@ -1,107 +1,74 @@
 /**
- * Quinn review pipeline — orchestrates the full Qdrant context retrieval and
- * prompt assembly pipeline.
+ * Quinn codebase-context retrieval — the READ side of the review-learning
+ * flywheel.
  *
- * Steps:
- *   1. Parse diff → extract symbols
- *   2. Retrieve past PR decisions for each changed file (from quinn-pr-history)
- *   3. Find similar code patterns for each changed symbol (from quinn-code-patterns)
- *   4. Format CODEBASE CONTEXT block
- *   5. Apply token budget
- *   6. Assemble review prompt
+ * Steps: parse diff → extract changed symbols → retrieve past PR decisions
+ * for the changed files (quinn-pr-history) + similar code patterns for the
+ * changed symbols (quinn-code-patterns) → format the CODEBASE CONTEXT block →
+ * token-budget it (context is capped at 20% of the review budget).
  *
- * If Qdrant is unavailable at any step, logs a warning and continues with
- * diff-only review (no CODEBASE CONTEXT block).
+ * Consumed by pr_inspector's `diff_summary` action, so every review that
+ * reads a diff also reads what past merges to those files taught. Best-effort
+ * end to end: Qdrant unavailable, embedding failure, or an empty store all
+ * return null and the review proceeds diff-only — never an error, never a
+ * stall.
  */
 
-import { parseDiff, } from "../diff/chunker.ts";
+import { parseDiff } from "../diff/chunker.ts";
 import { extractAllSymbols } from "../diff/symbol-extractor.ts";
 import { retrieveAllPastPRDecisions } from "../qdrant/past-pr-retriever.ts";
 import { findAllSimilarPatterns } from "../qdrant/pattern-searcher.ts";
-import { assembleReviewPrompt } from "./quinn-review-prompt.ts";
 import { checkHealth } from "../qdrant/client.ts";
-import type { AssembledPrompt } from "./quinn-review-prompt.ts";
-import type { CodebaseContext } from "./context-formatter.ts";
+import { formatCodebaseContext, type CodebaseContext } from "./context-formatter.ts";
+import { applyTokenBudget } from "./token-budgeter.ts";
 import { logger } from "../../../lib/log.ts";
 
 const log = logger("review-pipeline");
 
-export interface PipelineInput {
-  repo: string;
-  prNumber: number;
-  prUrl: string;
-  title: string;
-  diff: string;
-  promptBudget?: number;
-}
-
-export interface PipelineResult {
-  assembled: AssembledPrompt;
-  qdrantAvailable: boolean;
-  symbolCount: number;
-  fileCount: number;
-}
+/** Review-prompt budget the context is carved from (applyTokenBudget caps context at 20%). */
+const REVIEW_PROMPT_BUDGET = 8_000;
 
 /**
- * Run the full Quinn context retrieval and prompt assembly pipeline.
+ * Retrieval fan-out caps. Each file and each symbol costs one gateway embed
+ * call plus one Qdrant search on the diff_summary hot path, so a 40-file PR
+ * must not turn into 100+ network calls. The first files/symbols of the diff
+ * carry the bulk of the signal.
  */
-export async function runReviewPipeline(input: PipelineInput): Promise<PipelineResult> {
-  const { repo, prNumber, prUrl, title, diff } = input;
+const MAX_FILES = 6;
+const MAX_SYMBOLS = 8;
 
-  // Parse diff into files and symbols
-  const diffFiles = parseDiff(diff);
-  const symbols = extractAllSymbols(diffFiles);
-  const filePaths = [...new Set(diffFiles.map(f => f.path))];
-
-  // Check Qdrant availability
-  const qdrantAvailable = await checkHealth();
-
-  let context: CodebaseContext | undefined;
-
-  if (qdrantAvailable) {
-    try {
-      const [pastDecisions, similarPatterns] = await Promise.all([
-        retrieveAllPastPRDecisions(repo, filePaths),
-        findAllSimilarPatterns(symbols),
-      ]);
-
-      if (pastDecisions.size > 0 || similarPatterns.size > 0) {
-        context = { pastDecisions, similarPatterns };
-      }
-    } catch (err) {
-      log.warn("Qdrant context retrieval failed — proceeding with diff-only review", { err });
-    }
-  } else {
-    log.warn("Qdrant unavailable — proceeding with diff-only review");
+/**
+ * Build the CODEBASE CONTEXT block for a review, or null when there is
+ * nothing to say (Qdrant down, store empty, retrieval failed).
+ */
+export async function buildCodebaseContext(repo: string, diff: string): Promise<string | null> {
+  if (!(await checkHealth())) {
+    log.warn(`Qdrant unavailable — ${repo} reviews diff-only`);
+    return null;
   }
 
-  const assembled = assembleReviewPrompt({
-    diff,
-    repo,
-    prNumber,
-    prUrl,
-    title,
-    context,
-    promptBudget: input.promptBudget,
-  });
+  try {
+    const diffFiles = parseDiff(diff);
+    const filePaths = [...new Set(diffFiles.map((f) => f.path))].slice(0, MAX_FILES);
+    const symbols = extractAllSymbols(diffFiles).slice(0, MAX_SYMBOLS);
 
-  log.info(
-    `PR #${prNumber} ${repo}: ` +
-    `${filePaths.length} files, ${symbols.length} symbols, ` +
-    `context=${assembled.hasContext}, tokens=${assembled.totalTokens}`,
-  );
+    const [pastDecisions, similarPatterns] = await Promise.all([
+      retrieveAllPastPRDecisions(repo, filePaths),
+      findAllSimilarPatterns(symbols),
+    ]);
+    if (pastDecisions.size === 0 && similarPatterns.size === 0) return null;
 
-  return {
-    assembled,
-    qdrantAvailable,
-    symbolCount: symbols.length,
-    fileCount: filePaths.length,
-  };
+    const context: CodebaseContext = { pastDecisions, similarPatterns };
+    const block = formatCodebaseContext(applyTokenBudget(context, REVIEW_PROMPT_BUDGET));
+    if (!block) return null;
+
+    log.info(
+      `${repo}: context block built — ${pastDecisions.size} file(s) with history, ` +
+        `${similarPatterns.size} symbol(s) with patterns`,
+    );
+    return block;
+  } catch (err) {
+    log.warn(`context retrieval failed — ${repo} reviews diff-only`, { err });
+    return null;
+  }
 }
-
-/**
- * Index PR history after a merge (called from the merge webhook).
- * Extracted here to allow the review pipeline to also trigger indexing.
- */
-export { indexPRHistory } from "../qdrant/pr-history-indexer.ts";
-export { initializeCollections } from "../qdrant/collections.ts";

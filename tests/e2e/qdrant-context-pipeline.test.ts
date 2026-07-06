@@ -19,7 +19,7 @@ const samplePR = JSON.parse(readFileSync(join(fixtureDir, "sample-pr-diff.json")
 import { parseDiff, chunkDiff } from "../../src/services/diff/chunker.ts";
 import { extractAllSymbols } from "../../src/services/diff/symbol-extractor.ts";
 import { formatCodebaseContext } from "../../src/services/reviews/context-formatter.ts";
-import { assembleReviewPrompt } from "../../src/services/reviews/quinn-review-prompt.ts";
+import { buildCodebaseContext } from "../../src/services/reviews/review-pipeline.ts";
 import { applyTokenBudget, estimateTokens } from "../../src/services/reviews/token-budgeter.ts";
 import { isDismissalResponse } from "../../src/services/reviews/dismissal-tracker.ts";
 import { parsePRMergePayload } from "../../src/webhooks/github-pr-merge.ts";
@@ -182,56 +182,13 @@ describe("Token Budgeter", () => {
   });
 });
 
-describe("Review Prompt Assembler", () => {
-  test("assembles prompt with diff", () => {
-    const result = assembleReviewPrompt({
-      diff: samplePR.diff,
-      repo: samplePR.repo,
-      prNumber: samplePR.prNumber,
-      prUrl: samplePR.prUrl,
-      title: samplePR.title,
-    });
-
-    expect(result.prompt).toContain("src/middleware/auth.ts");
-    expect(result.prompt).toContain(`PR #${samplePR.prNumber}`);
-    expect(result.hasContext).toBe(false);
-    expect(result.diffTokens).toBeGreaterThan(0);
-  });
-
-  test("prepends CODEBASE CONTEXT block when context provided", () => {
-    const ctx = {
-      pastDecisions: new Map([
-        ["src/middleware/auth.ts", [
-          {
-            prNumber: 100,
-            prUrl: "https://github.com/test/repo/pull/100",
-            decision: "REQUEST_CHANGES",
-            mergedAt: "2026-03-01T10:00:00Z",
-            reviewIssues: "Missing error handling",
-            file: "src/middleware/auth.ts",
-            score: 0.91,
-          },
-        ]],
-      ]),
-      similarPatterns: new Map(),
-    };
-
-    const result = assembleReviewPrompt({
-      diff: samplePR.diff,
-      repo: samplePR.repo,
-      prNumber: samplePR.prNumber,
-      prUrl: samplePR.prUrl,
-      title: samplePR.title,
-      context: ctx,
-    });
-
-    expect(result.hasContext).toBe(true);
-    expect(result.prompt).toContain("CODEBASE CONTEXT:");
-    expect(result.contextTokens).toBeGreaterThan(0);
-    // Context should appear before the diff
-    const contextIdx = result.prompt.indexOf("CODEBASE CONTEXT:");
-    const diffIdx = result.prompt.indexOf("diff --git");
-    expect(contextIdx).toBeLessThan(diffIdx);
+describe("buildCodebaseContext — degradation", () => {
+  test("returns null (diff-only review) when Qdrant is unreachable", async () => {
+    // No Qdrant in the test environment: checkHealth fails and the builder
+    // must degrade to null without throwing — a review must never stall on
+    // the context lookup.
+    const block = await buildCodebaseContext(samplePR.repo, samplePR.diff);
+    expect(block).toBeNull();
   });
 });
 
