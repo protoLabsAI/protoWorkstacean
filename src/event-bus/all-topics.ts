@@ -165,7 +165,7 @@ export const RELEASE_TOPICS = {
    * the release was cut by auto-release.yml `gh release create`, release-tools,
    * or by hand. A general fleet lifecycle primitive: content surfacing,
    * changelog aggregation, deploy verification, and announce subscribe here.
-   * Payload shape: see `ReleasePublishedPayload` in src/event-bus/payloads.ts.
+   * Payload shape: see `ReleasePublishedPayload` in lib/types/events.ts.
    */
   RELEASE_PUBLISHED: "release.published",
 } as const;
@@ -181,6 +181,16 @@ export const REVIEW_TOPICS = {
    * Payload shape: { owner, repo, prNumber, event, reviewId?, prUrl? }.
    */
   QUINN_REVIEW_SUBMITTED: "quinn.review.submitted",
+
+  /**
+   * Review-learning signals — published raw by the GitHub plugin, consumed by
+   * `ReviewLearningPlugin` (Qdrant indexing + dismissal tracking). Payload
+   * shapes: `ReviewPrMergedPayload` / `ReviewCommentRepliedPayload` /
+   * `ReviewDismissedPayload` in lib/types/events.ts.
+   */
+  REVIEW_PR_MERGED: "review.pr.merged",
+  REVIEW_COMMENT_REPLIED: "review.comment.replied",
+  REVIEW_DISMISSED: "review.verdict.dismissed",
 } as const;
 
 export const SYSTEM_TOPICS = {

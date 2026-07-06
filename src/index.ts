@@ -152,13 +152,10 @@ const researchStore = new ResearchStore(`${dataDir}/knowledge.db`);
 researchStore.init();
 
 // Core plugins — always loaded, statically imported (no dynamic overhead needed)
-const debugPlugin = new DebugPlugin();
-debugPlugin.install(bus);
-
 const loggerPlugin = new LoggerPlugin(dataDir);
 
 const corePlugins: Plugin[] = [
-  debugPlugin,
+  new DebugPlugin(),
   loggerPlugin,
   new CLIPlugin(),
   new SignalPlugin(),
@@ -380,6 +377,18 @@ const pluginRegistry: PluginRegistryEntry[] = [
     factory: async () => {
       const { QuinnReviewNotifierPlugin } = await import("./plugins/quinn-review-notifier-plugin.js");
       return new QuinnReviewNotifierPlugin();
+    },
+  },
+  {
+    // Consumes the review-learning signals the GitHub plugin publishes
+    // (review.pr.merged / review.comment.replied / review.verdict.dismissed)
+    // and runs the Qdrant indexing + dismissal tracking. Same auth condition
+    // as the github plugin — without GitHub creds there is nothing to learn.
+    name: "review-learning",
+    condition: () => Boolean(process.env.GITHUB_TOKEN || process.env.GITHUB_APP_ID),
+    factory: async () => {
+      const { ReviewLearningPlugin } = await import("./plugins/review-learning-plugin.js");
+      return new ReviewLearningPlugin();
     },
   },
   {

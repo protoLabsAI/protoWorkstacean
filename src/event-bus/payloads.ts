@@ -257,32 +257,17 @@ export interface IncidentReportedPayload {
   };
 }
 
-// ── release.published ────────────────────────────────────────────────────────
+// ── release.published / review.* ─────────────────────────────────────────────
 
-/**
- * Payload for `release.published` — a GitHub Release was published. Sourced
- * from the native `release` webhook, so it fires regardless of how the release
- * was cut (auto-release.yml `gh release create`, release-tools, or by hand).
- * A general fleet lifecycle primitive: content surfacing, changelog
- * aggregation, deploy verification, and announce can all subscribe.
- */
-export interface ReleasePublishedPayload {
-  owner: string;
-  repo: string;
-  /** The release tag, e.g. "v1.4.0". */
-  version: string;
-  /** Release title; falls back to the version when GitHub leaves it null. */
-  name: string;
-  /** Release notes body (markdown). Empty string when none. */
-  body: string;
-  /** Canonical GitHub Release URL. */
-  url: string;
-  /** Login of the actor who published the release. */
-  author: string;
-  prerelease: boolean;
-  /** ISO timestamp from GitHub, or publish-handling time as a fallback. */
-  publishedAt: string;
-}
+// Published by the GitHub integration plugin, so the shapes live in
+// lib/types/events.ts (lib can't import src). Surfaced here so src consumers
+// keep one home for bus payload types.
+export type {
+  ReleasePublishedPayload,
+  ReviewPrMergedPayload,
+  ReviewCommentRepliedPayload,
+  ReviewDismissedPayload,
+} from "../../lib/types/events.ts";
 
 // ── ceremony.*.execute ───────────────────────────────────────────────────────
 

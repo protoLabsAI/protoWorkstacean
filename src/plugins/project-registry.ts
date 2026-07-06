@@ -29,26 +29,17 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { logger } from "../../lib/log.ts";
+import type { ProjectDirectory, RegistryProject } from "../../lib/types/projects.ts";
 
 const log = logger("project-registry");
 
 const DEFAULT_REGISTRY_URL = "http://workstacean-projects:8080";
 const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60_000;
 
-export interface RegistryProject {
-  /** Stable project id from the served registry. */
-  id: string;
-  /** Human-readable project name from the served registry. */
-  name: string;
-  /** Topic-safe slug derived from name (lowercase, non-alphanum → "-"). */
-  slug: string;
-  /** Absolute filesystem path to the project directory. */
-  path: string;
-  /** Native field, or derived from `<path>/.git/config` `[remote "origin"]` url. */
-  github?: { owner: string; repo: string };
-  /** Native field, or derived from `<path>/.git/refs/remotes/origin/HEAD` symref. */
-  defaultBranch?: string;
-}
+// The project shape + the surface the integration plugins consume live in
+// lib/types/projects.ts (lib can't import src). Re-exported for src consumers
+// that treat this module as the registry's home.
+export type { RegistryProject };
 
 /** A project as the sidecar serves it from `/api/settings/global`. `github` +
  *  `defaultBranch` are native fields — present for current entries, optional so
@@ -68,7 +59,7 @@ export interface ProjectRegistryOptions {
   refreshIntervalMs?: number;
 }
 
-export class ProjectRegistry {
+export class ProjectRegistry implements ProjectDirectory {
   private readonly apiBase: string;
   private readonly refreshIntervalMs: number;
 
