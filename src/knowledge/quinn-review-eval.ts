@@ -14,6 +14,8 @@
  * topic/ts/correlationId. Consumes three topics:
  *   - autonomous.outcome.*.pr_review        → completion / failure-mode / latency
  *   - agent.runtime.activity.tool.call       → tool profile + clawpatch usage
+ *     (one event per AI turn carrying only that turn's calls — a review's
+ *     profile is the concatenation across its turns, never a single event)
  *   - quinn.review.submitted                 → formal verdict mix + per-repo
  */
 
@@ -47,6 +49,8 @@ export interface QuinnReviewStats {
   toolUse: {
     reviewsProfiled: number;
     clawpatchReviews: number;
+    /** total clawpatch invocations — calls ≫ reviews means a retry loop, not coverage */
+    clawpatchCalls: number;
     clawpatchRate: number;
     callsPerReview: { median: number; p90: number; max: number } | null;
     toolFrequency: Record<string, number>;
@@ -90,8 +94,10 @@ export function computeQuinnReviewStats(events: EvalEvent[]): QuinnReviewStats {
   const failureModes: Record<string, number> = {};
   const latencies: number[] = [];
 
-  // ── tool use (final toolNames per correlationId wins — the array is cumulative)
-  const finalTools = new Map<string, string[]>();
+  // ── tool use (each tool.call event carries ONE AI turn's calls — see
+  // extractToolCallNarrations — so a review's profile is the concatenation of
+  // its turns, keyed by correlationId)
+  const reviewTools = new Map<string, string[]>();
 
   // ── verdicts / per-repo (from quinn.review.submitted) ──────────────────────
   const verdicts = { APPROVE: 0, COMMENT: 0, REQUEST_CHANGES: 0 };
@@ -126,8 +132,9 @@ export function computeQuinnReviewStats(events: EvalEvent[]): QuinnReviewStats {
 
     if (e.topic === "agent.runtime.activity.tool.call" && e.body.skill === "pr_review") {
       const tn = Array.isArray(e.body.toolNames) ? (e.body.toolNames as unknown[]).filter((x): x is string => typeof x === "string") : [];
-      const prev = finalTools.get(e.correlationId);
-      if (!prev || tn.length > prev.length) finalTools.set(e.correlationId, tn);
+      const acc = reviewTools.get(e.correlationId);
+      if (acc) acc.push(...tn);
+      else reviewTools.set(e.correlationId, [...tn]);
       continue;
     }
 
@@ -159,14 +166,20 @@ export function computeQuinnReviewStats(events: EvalEvent[]): QuinnReviewStats {
 
   const toolFrequency: Record<string, number> = {};
   const lens: number[] = [];
-  let clawpatch = 0;
-  for (const seq of finalTools.values()) {
-    lens.push(seq.length);
-    for (const t of seq) toolFrequency[t] = (toolFrequency[t] ?? 0) + 1;
-    if (seq.some((t) => t.includes("clawpatch"))) clawpatch++;
+  let clawpatchReviews = 0;
+  let clawpatchCalls = 0;
+  for (const calls of reviewTools.values()) {
+    lens.push(calls.length);
+    let claw = 0;
+    for (const t of calls) {
+      toolFrequency[t] = (toolFrequency[t] ?? 0) + 1;
+      if (t.includes("clawpatch")) claw++;
+    }
+    clawpatchCalls += claw;
+    if (claw > 0) clawpatchReviews++;
   }
   lens.sort((a, b) => a - b);
-  const reviewsProfiled = finalTools.size;
+  const reviewsProfiled = reviewTools.size;
 
   return {
     window: {
@@ -185,8 +198,9 @@ export function computeQuinnReviewStats(events: EvalEvent[]): QuinnReviewStats {
     latencyMs,
     toolUse: {
       reviewsProfiled,
-      clawpatchReviews: clawpatch,
-      clawpatchRate: reviewsProfiled ? clawpatch / reviewsProfiled : 0,
+      clawpatchReviews,
+      clawpatchCalls,
+      clawpatchRate: reviewsProfiled ? clawpatchReviews / reviewsProfiled : 0,
       callsPerReview: lens.length ? { median: pct(lens, 0.5), p90: pct(lens, 0.9), max: lens[lens.length - 1] } : null,
       toolFrequency,
     },

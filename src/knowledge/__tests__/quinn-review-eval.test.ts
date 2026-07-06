@@ -80,22 +80,31 @@ describe("computeQuinnReviewStats", () => {
     expect(s.latencyMs!.median).toBe(3000);
   });
 
-  test("clawpatch rate uses the longest (final) tool sequence per review", () => {
+  test("tool profile concatenates per-turn tool.call events per review", () => {
     const cidA = "a";
     const cidB = "b";
+    const cidC = "c";
     const events = [
-      // review A: cumulative frames, final includes clawpatch
+      // review A: three turns — clawpatch fires in its own single-call turn,
+      // which a longest-turn-wins scheme would drop entirely
+      toolCall(cidA, ["react", "pr_inspector"]),
+      toolCall(cidA, ["clawpatch_review"]),
       toolCall(cidA, ["pr_inspector"]),
-      toolCall(cidA, ["pr_inspector", "pr_inspector", "clawpatch_review"]),
       // review B: never uses clawpatch
       toolCall(cidB, ["pr_inspector", "pr_inspector", "pr_inspector"]),
+      // review C: retry loop — three clawpatch turns is still ONE review
+      toolCall(cidC, ["clawpatch_review"]),
+      toolCall(cidC, ["clawpatch_review"]),
+      toolCall(cidC, ["clawpatch_review"]),
     ];
     const s = computeQuinnReviewStats(events);
-    expect(s.toolUse.reviewsProfiled).toBe(2);
-    expect(s.toolUse.clawpatchReviews).toBe(1);
-    expect(s.toolUse.clawpatchRate).toBeCloseTo(0.5, 5);
-    expect(s.toolUse.toolFrequency.pr_inspector).toBe(5); // 2 from A's final + 3 from B
-    expect(s.toolUse.callsPerReview!.max).toBe(3);
+    expect(s.toolUse.reviewsProfiled).toBe(3);
+    expect(s.toolUse.clawpatchReviews).toBe(2);
+    expect(s.toolUse.clawpatchCalls).toBe(4); // 1 from A + 3 from C's retries
+    expect(s.toolUse.clawpatchRate).toBeCloseTo(2 / 3, 5);
+    expect(s.toolUse.toolFrequency.pr_inspector).toBe(5); // 2 across A's turns + 3 from B
+    expect(s.toolUse.toolFrequency.clawpatch_review).toBe(4);
+    expect(s.toolUse.callsPerReview!.max).toBe(4); // A: 4 calls across 3 turns
   });
 
   test("verdict mix and per-repo from quinn.review.submitted", () => {
