@@ -197,7 +197,6 @@ src/
       a2a-executor.ts
       deep-agent-executor.ts     # LangGraph — default in-process runtime
       function-executor.ts
-      workflow-executor.ts
     __tests__/
   plugins/
     CeremonyPlugin.ts

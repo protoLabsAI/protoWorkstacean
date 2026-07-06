@@ -50,11 +50,6 @@ export const CEREMONY_SKILLS: ReadonlyArray<{
     ceremonyId: "security-triage",
     description: "Open security incidents detected — trigger security-triage ceremony",
   },
-  {
-    skill: "ceremony.service_health_discord",
-    ceremonyId: "service-health",
-    description: "Discord bot disconnected — trigger service-health ceremony",
-  },
 ];
 
 export class CeremonySkillExecutorPlugin implements Plugin {

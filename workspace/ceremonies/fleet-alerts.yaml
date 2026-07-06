@@ -1,9 +1,15 @@
 id: fleet_alerts
 name: "Fleet Alerts Evaluator"
 description: >
-  Polls AgentFleetHealthPlugin.getFleetHealth() every minute and dispatches
+  Polls AgentFleetHealthPlugin.getFleetHealth() every 5 minutes and dispatches
   `alert.*` skills when fleet-health thresholds trip. Wired by
   FleetAlertsEvaluatorPlugin (src/plugins/fleet-alerts-evaluator-plugin.ts).
+
+  Cadence: 5 minutes, not 1 — at minute cadence this single ceremony was ~75%
+  of all bus/events.db volume for a fleet doing ~100 real runs/day, and every
+  wired alert evaluates 1h/1d rolling windows with a 15-min alert cooldown, so
+  sub-5-min sampling adds detection latency of at most minutes on signals that
+  move over hours.
 
   Replaces the GOAP threshold-evaluation layer that was ripped in #518 —
   re-uses the existing AlertSkillExecutorPlugin without re-introducing a
@@ -19,7 +25,7 @@ description: >
   outside fleet-health (GitHub branch protection, CI failure history,
   security state) and remain unwired for now.
 
-schedule: "* * * * *"  # every minute
+schedule: "*/5 * * * *"  # every 5 minutes
 skill: evaluate_fleet_thresholds
 # CeremonyPlugin's yaml schema requires `targets` to be a non-empty array
 # (ceremonyYamlLoader rejects empty ones). The dispatcher's ExecutorRegistry

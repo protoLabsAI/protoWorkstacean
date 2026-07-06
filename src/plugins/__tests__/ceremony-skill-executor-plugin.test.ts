@@ -40,14 +40,11 @@ describe("CeremonySkillExecutorPlugin", () => {
     plugin.install(bus as never);
   });
 
-  it("registers executors for every ceremony skill named in issue #430", () => {
-    const requiredFromIssue430 = [
-      "ceremony.security_triage",
-      "ceremony.service_health_discord",
-    ];
-    for (const skill of requiredFromIssue430) {
-      expect(registry.resolve(skill)).not.toBeNull();
+  it("registers an executor for every entry in CEREMONY_SKILLS", () => {
+    for (const entry of CEREMONY_SKILLS) {
+      expect(registry.resolve(entry.skill)).not.toBeNull();
     }
+    expect(registry.resolve("ceremony.security_triage")).not.toBeNull();
   });
 
   it("registry size matches CEREMONY_SKILLS length", () => {
@@ -78,26 +75,6 @@ describe("CeremonySkillExecutorPlugin", () => {
     expect(p.actionId).toBe("ceremony.security_triage");
     expect(p.goalId).toBe("security.no_open_incidents");
     expect(p.ceremonyId).toBe("security-triage");
-  });
-
-  it("publishes ceremony.service-health.execute when ceremony.service_health_discord dispatches", async () => {
-    const executor = registry.resolve("ceremony.service_health_discord")!;
-    const result = await executor.execute({
-      skill: "ceremony.service_health_discord",
-      correlationId: "corr-2",
-      replyTopic: "reply.test",
-      payload: {
-        skill: "ceremony.service_health_discord",
-        meta: { actionId: "ceremony.service_health_discord", goalId: "services.discord_connected" },
-      },
-    });
-
-    expect(result.isError).toBe(false);
-    const trigger = bus.published.find(m => m.topic === "ceremony.service-health.execute");
-    expect(trigger).toBeDefined();
-    const p = trigger!.payload as Record<string, unknown>;
-    expect(p.ceremonyId).toBe("service-health");
-    expect(p.goalId).toBe("services.discord_connected");
   });
 
   it("payload type is NOT 'ceremony.execute' so CeremonyPlugin treats it as an external trigger", async () => {

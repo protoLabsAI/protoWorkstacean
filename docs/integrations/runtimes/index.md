@@ -67,19 +67,6 @@ new FunctionExecutor(fn: SkillFn)
 
 Use for data transformations, in-process state mutations, or test stubs.
 
-### WorkflowExecutor
-
-Executes a sequence of skill steps, each resolved from the registry, with a shared `correlationId`.
-
-```typescript
-new WorkflowExecutor(
-  steps: Array<{ skill: string; targets?: string[] }>,
-  registry: ExecutorRegistry
-)
-```
-
-Use for multi-step workflows where output from one skill feeds the next.
-
 ## Writing a new executor
 
 ```typescript
