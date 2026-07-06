@@ -358,6 +358,8 @@ interface SweepPr {
   base?: string;
   /** HTTP status for a PUT /pulls/{n}/merge (default 200). */
   mergeStatus?: number;
+  /** ISO created_at for the pulls listing (default: undefined — reads as "too young" for rescue). */
+  createdAt?: string;
 }
 
 /** Stub GitHub REST for a reconciliation sweep over one repo's open PRs. */
@@ -386,7 +388,7 @@ function stubSweepFetch(prs: SweepPr[]): Captured {
       return json(prs.map((p) => ({
         number: p.number, state: "open", draft: false,
         head: { sha: p.sha }, base: { ref: p.base ?? "feature/x" },
-        title: "t", html_url: "u", user: { login: "dev" },
+        title: "t", html_url: "u", user: { login: "dev" }, created_at: p.createdAt,
       })));
     }
     if (url.match(/\/pulls\/\d+\/reviews/) && method === "GET") {
@@ -437,24 +439,27 @@ function approvedGreenPr(number: number, sha: string, base: string): SweepPr {
 
 async function runSweepWithPlugin(
   prs: SweepPr[],
-  opts: { seedWatch?: { key: string; ageMs: number } } = {},
-): Promise<{ captured: Captured; plugin: GitHubPlugin }> {
+  opts: { seedWatch?: { key: string; ageMs: number }; plugin?: GitHubPlugin } = {},
+): Promise<{ captured: Captured; plugin: GitHubPlugin; dispatched: string[] }> {
   const captured = stubSweepFetch(prs);
   const registry = new ProjectRegistry();
   // Registry is populated from a remote fetch in prod; stub the one accessor the
   // sweep reads so it iterates our fixture repo.
   (registry as unknown as { getGithubCoords: () => string[] }).getGithubCoords = () => [`${OWNER}/${REPO}`];
-  const plugin = new GitHubPlugin("/tmp/nonexistent-ws", registry);
+  const plugin = opts.plugin ?? new GitHubPlugin("/tmp/nonexistent-ws", registry);
   if (opts.seedWatch) {
     (plugin as unknown as { mergeCompletionFirstSeen: Map<string, number> }).mergeCompletionFirstSeen.set(
       opts.seedWatch.key,
       Date.now() - opts.seedWatch.ageMs,
     );
   }
+  const bus = new InMemoryEventBus();
+  const dispatched: string[] = [];
+  bus.subscribe("message.inbound.github.#", "t", (m) => { dispatched.push(m.topic); });
   await (plugin as unknown as {
-    _reconcileApproveOnGreen: (g: () => Promise<string>) => Promise<void>;
-  })._reconcileApproveOnGreen(async () => "fake-token");
-  return { captured, plugin };
+    _reconcileApproveOnGreen: (b: InMemoryEventBus, g: () => Promise<string>) => Promise<void>;
+  })._reconcileApproveOnGreen(bus, async () => "fake-token");
+  return { captured, plugin, dispatched };
 }
 
 describe("_reconcileApproveOnGreen — level-triggered backstop (#879)", () => {
@@ -547,6 +552,38 @@ describe("_reconcileApproveOnGreen — level-triggered backstop (#879)", () => {
     expect(watch2.size).toBe(1); // kept — retry next sweep
   });
 
+  test("rescues an old unreviewed terminal PR with ONE dispatched review; second sweep is silent (ws-22l)", async () => {
+    const stranded: SweepPr = {
+      number: 906, sha: "los0906", reviews: [], createdAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+      checkRuns: [{ status: "completed", conclusion: "success" }],
+    };
+    const r1 = await runSweepWithPlugin([stranded]);
+    expect(r1.dispatched.length).toBe(1); // rescue review dispatched
+    expect(r1.captured.approvePosts.length).toBe(0); // never a blind approve
+
+    // same plugin, next sweep — the rescue map holds, no duplicate
+    const r2 = await runSweepWithPlugin([stranded], { plugin: r1.plugin });
+    expect(r2.dispatched.length).toBe(0);
+  });
+
+  test("does NOT rescue a young unreviewed PR (opened-dispatch may still be in flight)", async () => {
+    const fresh: SweepPr = {
+      number: 909, sha: "yng0909", reviews: [], createdAt: new Date().toISOString(),
+      checkRuns: [{ status: "completed", conclusion: "success" }],
+    };
+    const { dispatched } = await runSweepWithPlugin([fresh]);
+    expect(dispatched.length).toBe(0);
+  });
+
+  test("does NOT rescue an unreviewed PR whose CI is still running", async () => {
+    const pending: SweepPr = {
+      number: 910, sha: "pnd0910", reviews: [], createdAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+      checkRuns: [{ status: "in_progress" }],
+    };
+    const { dispatched } = await runSweepWithPlugin([pending]);
+    expect(dispatched.length).toBe(0);
+  });
+
   test("covers a reviewed-but-UNREGISTERED repo (the approve-on-green gap fix)", async () => {
     // Registry is empty (repo not tagged / not in EXPLICIT), but Quinn reviewed
     // it this process → the sweep must still cover it via reviewedRepoCoords.
@@ -560,8 +597,8 @@ describe("_reconcileApproveOnGreen — level-triggered backstop (#879)", () => {
     const plugin = new GitHubPlugin("/tmp/nonexistent-ws", registry);
     (plugin as unknown as { reviewedRepoCoords: Set<string> }).reviewedRepoCoords.add(`${OWNER}/${REPO}`);
     await (plugin as unknown as {
-      _reconcileApproveOnGreen: (g: () => Promise<string>) => Promise<void>;
-    })._reconcileApproveOnGreen(async () => "fake-token");
+      _reconcileApproveOnGreen: (b: InMemoryEventBus, g: () => Promise<string>) => Promise<void>;
+    })._reconcileApproveOnGreen(new InMemoryEventBus(), async () => "fake-token");
     expect(captured.approvePosts.length).toBe(1);
     expect(captured.approvePosts[0]!.commit_id).toBe("por0038");
   });
