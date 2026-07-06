@@ -59,9 +59,11 @@ export class ReviewLearningPlugin implements Plugin {
     // pipeline's original sin was indexing into collections nothing ever
     // created (a 404 on every merge, swallowed as best-effort, forever).
     // Idempotent, and migration-guarded against vector-size changes.
-    void initializeCollections().then((ok) => {
-      if (!ok) log.warn("Qdrant collections not ready — review indexing no-ops until Qdrant is reachable");
-    });
+    void initializeCollections()
+      .then((ok) => {
+        if (!ok) log.warn("Qdrant collections not ready — review indexing no-ops until Qdrant is reachable");
+      })
+      .catch((err) => log.warn("initializeCollections failed — review indexing no-ops until Qdrant is reachable", { err }));
 
     this.subscriptionIds.push(
       bus.subscribe("review.pr.merged", this.name, (msg: BusMessage) => {
