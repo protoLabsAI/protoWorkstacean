@@ -1154,7 +1154,22 @@ export class GitHubPlugin implements Plugin {
           );
         }
       } else {
-        autoApprove = true;
+        // COMMENTED = Quinn's WARN / no-formal-blocker verdict. Green CI alone is NOT
+        // enough: CodeRabbit and reviewers post code findings as unresolved REVIEW
+        // THREADS, and a HIGH/MEDIUM note left as a thread must not auto-merge on green.
+        // Gate the COMMENTED path on unresolved threads too — the same rule the
+        // CHANGES_REQUESTED branch already applies (#858). Fail safe: unknown thread
+        // state → don't auto-approve; defer to re-review.
+        const unresolved = await this._hasUnresolvedReviewThreads(getToken, owner, repo, number);
+        if (unresolved === false) {
+          autoApprove = true;
+        } else {
+          log.info(
+            `CI-completion (${source}): ${owner}/${repo}#${number} COMMENTED + green but ` +
+              `${unresolved === null ? "review-thread state unverifiable" : "unresolved review threads remain"} ` +
+              `— not auto-approving on green, deferring to re-review`,
+          );
+        }
       }
     }
     if (!autoApprove) return "needs-review";
