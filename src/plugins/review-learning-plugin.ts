@@ -24,6 +24,7 @@ import type {
 } from "../../lib/types/events.ts";
 import { makeGitHubAuth } from "../../lib/github-auth.ts";
 import { logger } from "../../lib/log.ts";
+import { initializeCollections } from "../services/qdrant/collections.ts";
 import { handlePRMerge, parsePRMergePayload } from "../webhooks/github-pr-merge.ts";
 import {
   handleCommentResponse,
@@ -53,6 +54,14 @@ export class ReviewLearningPlugin implements Plugin {
       return;
     }
     this.bus = bus;
+
+    // The write side upserts into collections that must exist first — the
+    // pipeline's original sin was indexing into collections nothing ever
+    // created (a 404 on every merge, swallowed as best-effort, forever).
+    // Idempotent, and migration-guarded against vector-size changes.
+    void initializeCollections().then((ok) => {
+      if (!ok) log.warn("Qdrant collections not ready — review indexing no-ops until Qdrant is reachable");
+    });
 
     this.subscriptionIds.push(
       bus.subscribe("review.pr.merged", this.name, (msg: BusMessage) => {
