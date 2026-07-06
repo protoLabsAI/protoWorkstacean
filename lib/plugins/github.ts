@@ -522,7 +522,7 @@ export class GitHubPlugin implements Plugin {
     this.reconcileTimer = setInterval(() => {
       if (this.reconcileInFlight) return;
       this.reconcileInFlight = true;
-      void this._reconcileApproveOnGreen(getToken)
+      void this._reconcileApproveOnGreen(bus, getToken)
         .catch((err) => log.error("Approve-on-green reconciliation sweep failed", { err }))
         .finally(() => { this.reconcileInFlight = false; });
     }, GitHubPlugin.RECONCILE_INTERVAL_MS);
@@ -879,6 +879,19 @@ export class GitHubPlugin implements Plugin {
   private static readonly MERGE_COMPLETION_GRACE_MS = 2 * 60_000;
   private static readonly MERGE_COMPLETION_TTL_MS = 60 * 60_000;
 
+  /**
+   * PR@sha7 keys the sweep has already rescue-dispatched a review for
+   * (ws-22l). One rescue per head SHA per process — if the rescue run also
+   * dies, a restart or a new push retries. TTL-pruned alongside use.
+   */
+  private readonly reviewRescueDispatched = new Map<string, number>();
+  /**
+   * A PR younger than this can still have its opened-webhook review in
+   * flight; rescuing it would double-review. Lost-dispatch PRs are minutes
+   * old by the time CI is terminal, so the grace costs nothing real.
+   */
+  private static readonly RESCUE_MIN_AGE_MS = 10 * 60_000;
+
   private _handleAutoReview(
     event: string,
     payload: Record<string, unknown>,
@@ -1092,31 +1105,46 @@ export class GitHubPlugin implements Plugin {
 
     for (const pr of pulls) {
       const decision = await this._evaluateApproveOnGreen(event, owner, repo, pr, headSha, getToken);
-      if (decision !== "needs-review") continue;
-
-      // Eligible + terminal but not auto-approvable — re-dispatch Quinn's
-      // pr_review LLM pass to upgrade the provisional COMMENT to a formal verdict.
-      const number = pr.number as number;
-      const ctx: GitHubEventContext = {
-        owner,
-        repo,
-        number,
-        title: (pr.title as string | undefined) ?? "",
-        url: (pr.html_url as string | undefined) ?? "",
-        body: (pr.body as string | undefined) ?? "",
-        author: ((pr.user as Record<string, unknown> | undefined)?.login as string | undefined) ?? "",
-      };
-      // Synthesize the shape _handleAutoReview reads (pull_request.draft +
-      // pull_request.head.sha). skipDedup: the all-terminal gate already ensures
-      // a single meaningful dispatch; the dispatcher's @sha7 cooldown collapses
-      // any workflow_run+check_suite co-arrival.
-      const synthPayload: Record<string, unknown> = { action: "ci_completed", pull_request: pr };
-      log.info(`CI-completion (${event}): re-dispatching pr_review for ${owner}/${repo}#${number} @${headSha.slice(0, 7)}`);
-      // event="pull_request" so the published topic is byte-identical to a
-      // normal auto-review (the routed path is proven); the "ci_completed"
-      // action just suppresses the opened-only leading comment.
-      this._handleAutoReview("pull_request", synthPayload, ctx, bus, getToken, { skipDedup: true });
+      // needs-review: eligible + terminal but not auto-approvable — upgrade the
+      // provisional COMMENT to a formal verdict. unreviewed: the opened-webhook
+      // dispatch was lost (ws-22l) — same rescue, first review instead.
+      if (decision !== "needs-review" && decision !== "unreviewed") continue;
+      this._dispatchReviewFor(event, owner, repo, pr, headSha, bus, getToken);
     }
+  }
+
+  /**
+   * Re-dispatch Quinn's pr_review LLM pass for a PR (the CI-completion
+   * upgrade path and the ws-22l unreviewed rescue). Synthesizes the shape
+   * `_handleAutoReview` reads (pull_request.draft + pull_request.head.sha).
+   * skipDedup: callers gate on all-terminal CI / rescue maps; the
+   * dispatcher's @sha7 cooldown collapses webhook co-arrival.
+   */
+  private _dispatchReviewFor(
+    source: string,
+    owner: string,
+    repo: string,
+    pr: Record<string, unknown>,
+    headSha: string,
+    bus: EventBus,
+    getToken: (owner: string, repo: string) => Promise<string>,
+  ): void {
+    const number = pr.number as number;
+    const ctx: GitHubEventContext = {
+      owner,
+      repo,
+      number,
+      title: (pr.title as string | undefined) ?? "",
+      url: (pr.html_url as string | undefined) ?? "",
+      body: (pr.body as string | undefined) ?? "",
+      author: ((pr.user as Record<string, unknown> | undefined)?.login as string | undefined) ?? "",
+    };
+    const synthPayload: Record<string, unknown> = { action: "ci_completed", pull_request: pr };
+    log.info(`CI-completion (${source}): re-dispatching pr_review for ${owner}/${repo}#${number} @${headSha.slice(0, 7)}`);
+    // event="pull_request" so the published topic is byte-identical to a
+    // normal auto-review (the routed path is proven); the "ci_completed"
+    // action just suppresses the opened-only leading comment.
+    this._handleAutoReview("pull_request", synthPayload, ctx, bus, getToken, { skipDedup: true });
   }
 
   /**
@@ -1153,14 +1181,27 @@ export class GitHubPlugin implements Plugin {
     pr: Record<string, unknown>,
     headSha: string,
     getToken: (owner: string, repo: string) => Promise<string>,
-  ): Promise<"approved" | "merged" | "needs-review" | "skip"> {
+  ): Promise<"approved" | "merged" | "needs-review" | "unreviewed" | "skip"> {
     const number = pr.number as number;
     if (!prEligibleForCiReview(pr, headSha)) return "skip";
 
     const reviews = (await this._ghGet(getToken, owner, repo, `/repos/${owner}/${repo}/pulls/${number}/reviews`)) as
       | Array<Record<string, unknown>>
       | null;
-    if (!quinnHasReviewed(reviews ?? undefined)) return "skip";
+    if (!quinnHasReviewed(reviews ?? undefined)) {
+      // Never reviewed at all. The PR-opened webhook normally dispatched the
+      // review, but that in-process run dies with a container restart (the
+      // #906 strand, ws-22l) and nothing else re-triggers: the promote/merge
+      // machinery needs a prior review to act on. Signal "unreviewed" so the
+      // caller can dispatch a rescue review — only once CI is terminal (the
+      // meaningful review moment) and the PR is old enough that the original
+      // opened-dispatch can't still be in flight.
+      const createdAt = Date.parse((pr.created_at as string | undefined) ?? "");
+      const oldEnough = Number.isFinite(createdAt) && Date.now() - createdAt > GitHubPlugin.RESCUE_MIN_AGE_MS;
+      if (!oldEnough) return "skip";
+      if (!(await this._ciTerminal(getToken, owner, repo, headSha))) return "skip";
+      return "unreviewed";
+    }
     if (!(await this._ciTerminal(getToken, owner, repo, headSha))) {
       log.info(`CI-completion (${source}): ${owner}/${repo}#${number} — checks not all terminal yet, deferring`);
       return "skip";
@@ -1325,6 +1366,7 @@ export class GitHubPlugin implements Plugin {
    * GitHub's native auto-merge stays wedged.
    */
   private async _reconcileApproveOnGreen(
+    bus: EventBus,
     getToken: (owner: string, repo: string) => Promise<string>,
   ): Promise<void> {
     // Union the registry with repos Quinn has reviewed this process. A repo
@@ -1335,6 +1377,7 @@ export class GitHubPlugin implements Plugin {
     for (const c of this.reviewedRepoCoords) coords.add(c);
     let approved = 0;
     let merged = 0;
+    let rescued = 0;
     for (const coord of coords) {
       const slash = coord.indexOf("/");
       if (slash <= 0) continue;
@@ -1356,6 +1399,21 @@ export class GitHubPlugin implements Plugin {
           const decision = await this._evaluateApproveOnGreen("reconcile", owner, repo, pr, headSha, getToken);
           if (decision === "approved") approved++;
           else if (decision === "merged") merged++;
+          else if (decision === "unreviewed") {
+            // Lost opened-dispatch rescue (ws-22l): one review per head SHA
+            // per process — the dispatcher cooldown alone would let every
+            // 3-min sweep re-dispatch while a slow review is in flight.
+            const now = Date.now();
+            for (const [k, t] of this.reviewRescueDispatched) {
+              if (now - t > GitHubPlugin.MERGE_COMPLETION_TTL_MS) this.reviewRescueDispatched.delete(k);
+            }
+            const key = `${owner}/${repo}#${pr.number}@${headSha.slice(0, 7)}`;
+            if (!this.reviewRescueDispatched.has(key)) {
+              this.reviewRescueDispatched.set(key, now);
+              this._dispatchReviewFor("reconcile-rescue", owner, repo, pr, headSha, bus, getToken);
+              rescued++;
+            }
+          }
         } catch (err) {
           log.error(
             `Reconcile approve-on-green failed for ${owner}/${repo}#${pr.number}`,
@@ -1364,10 +1422,10 @@ export class GitHubPlugin implements Plugin {
         }
       }
     }
-    if (approved > 0 || merged > 0) {
+    if (approved > 0 || merged > 0 || rescued > 0) {
       log.info(
         `Approve-on-green reconciliation sweep: ${approved} stranded PR(s) approved, ` +
-          `${merged} wedged merge(s) completed`,
+          `${merged} wedged merge(s) completed, ${rescued} unreviewed PR(s) rescue-dispatched`,
       );
     }
   }
