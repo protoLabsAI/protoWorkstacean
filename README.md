@@ -1,5 +1,23 @@
 # protoWorkstacean
 
+> ## ⚰️ Retired — 2026-07-20
+>
+> **This project is shut down and this repository is archived.** Nothing runs it any
+> more: the container is removed, its 10 GitHub webhooks and both Linear webhooks are
+> deleted, its Cloudflare tunnel routes are gone, and its host crons are stripped.
+>
+> **PR review — the workload this existed to run — is now [Vera](https://github.com/protoLabsAI/qaEngineer),**
+> a standalone protoAgent that reviews as `protoreview[bot]` off a GitHub App rather
+> than per-repo webhooks. The rest of the fleet (Ava, Jon, Roxy, Frank, Matt) also runs
+> as standalone protoAgent containers now, each owning its own triggers. There is no
+> central routing hub, and that is deliberate — the hub's remaining job did not justify
+> the surface area it carried.
+>
+> Deployment config for the fleet that replaced it lives in `homelab-iac` (`stacks/*`);
+> see `docs/infrastructure/a2a-agent-fleet.md` there for the current topology.
+>
+> Everything below describes the system as it was, and is kept for history.
+
 **A switchboard for the protoLabs agent ecosystem.** It schedules things, receives events from the outside world (Discord, GitHub, Linear, Google), and routes both into the right agent — wherever that agent lives. Plugins extend its reach to new tools and infrastructure.
 
 That's the whole product. Trigger → router → dispatcher → executor, on a typed event bus.
